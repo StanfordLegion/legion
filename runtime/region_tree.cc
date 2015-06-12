@@ -1364,6 +1364,9 @@ namespace LegionRuntime {
         if (req.handle_type != SINGULAR)
           restrict_info.set_projection();
       }
+      // If we are projection requirement, we need to record extra info
+      if (req.handle_type != SINGULAR)
+        version_info.set_projection();
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -9826,7 +9829,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool VersionRecorder::visit_partition(void)
+    bool VersionRecorder::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = node->get_logical_state(ctx);
@@ -11197,6 +11200,8 @@ namespace LegionRuntime {
       RegionTreeNode *parent = node->get_parent();
       if (parent != NULL)
         parent->set_restricted_fields(ctx, restricted_fields);
+      // Everybody starts with version number zero
+      field_versions[0] = FieldMask(FIELD_ALL_ONES);
     }
 
     //--------------------------------------------------------------------------
@@ -11256,6 +11261,8 @@ namespace LegionRuntime {
       curr_epoch_users.clear();
       prev_epoch_users.clear();
       restricted_fields.clear();
+      field_versions.clear();
+      field_versions[0] = FieldMask(FIELD_ALL_ONES);
     } 
 
     //--------------------------------------------------------------------------
@@ -11574,6 +11581,7 @@ namespace LegionRuntime {
     void LogicalCloser::initialize_close_operations(RegionTreeNode *target, 
                                                    Operation *creator,
                                                    const ColorPoint &next_child,
+                                                   const VersionInfo &ver_info,
                                                    const RestrictInfo &res_info,
                                                    const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -11584,14 +11592,14 @@ namespace LegionRuntime {
       {
         LegionList<ClosingSet>::aligned leave_open;
         compute_close_sets(leave_open_children, leave_open);
-        create_close_operations(target, creator, next_child, res_info,
+        create_close_operations(target, creator, next_child, ver_info, res_info,
               trace_info, true/*leave open*/, leave_open, leave_open_closes);
       }
       if (!force_close_children.empty())
       {
         LegionList<ClosingSet>::aligned force_close;
         compute_close_sets(force_close_children, force_close);
-        create_close_operations(target, creator, next_child, res_info,
+        create_close_operations(target, creator, next_child, ver_info, res_info,
               trace_info, false/*leave open*/, force_close, force_close_closes);
       }
     }
@@ -11669,6 +11677,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LogicalCloser::create_close_operations(RegionTreeNode *target,
                             Operation *creator, const ColorPoint &next_child, 
+                            const VersionInfo &version_info,
                             const RestrictInfo &restrict_info, 
                             const TraceInfo &trace_info, bool leave_open,
                             const LegionList<ClosingSet>::aligned &close_sets,
@@ -11682,6 +11691,8 @@ namespace LegionRuntime {
                                                        it->closing_mask,
                                                        leave_open, it->children,
                                                        next_child, 
+                                                       close_versions,
+                                                       version_info,
                                                        restrict_info, 
                                                        trace_info);
         if (leave_open)
@@ -11808,6 +11819,15 @@ namespace LegionRuntime {
       {
         users.push_back(it->second);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::record_version_numbers(RegionTreeNode *node,
+                                               LogicalState &state,
+                                               const FieldMask &local_mask)
+    //--------------------------------------------------------------------------
+    {
+      node->record_version_numbers(state, local_mask, close_versions);
     }
 
     //--------------------------------------------------------------------------
@@ -12559,14 +12579,16 @@ namespace LegionRuntime {
         ColorPoint next_child;
         if (!arrived)
           next_child = path.get_child(depth); 
+        const FieldMask &closed_mask = closer.get_closed_mask();
+        // We need to record the version numbers for this node as well
+        closer.record_version_numbers(this, state, closed_mask);
         closer.initialize_close_operations(this, user.op, next_child, 
-                                           restrict_info, trace_info);
+                            version_info, restrict_info, trace_info);
         // Perform dependence analysis for all the close operations
         closer.perform_dependence_analysis(user,
                                            state.curr_epoch_users,
                                            state.prev_epoch_users);
         // Now we can flush out all the users dominated by closes
-        const FieldMask &closed_mask = closer.get_closed_mask();
         filter_prev_epoch_users(state, closed_mask);
         filter_curr_epoch_users(state, closed_mask);
         // We also need to update the version numbers because close
@@ -12601,6 +12623,14 @@ namespace LegionRuntime {
 
       if (arrived)
       {
+        // If this is a projection requirement, we also need to record any
+        // version numbers from farther down in the tree as well. 
+        // Do this before the version numbers can be updated.
+        if (version_info.is_projection())
+        {
+          VersionRecorder recorder(ctx, version_info, user.field_mask);
+          visit_node(&recorder);
+        }
         // If we dominated and this is our final destination then we 
         // can filter the operations since we actually do dominate them
         if (!!dominator_mask)
@@ -12648,14 +12678,7 @@ namespace LegionRuntime {
               restrict_info.add_restriction(local_this->handle, restricted);
             }
           }
-        }
-        // If this is a projection requirement, we also need to record any
-        // version numbers from farther down in the tree as well. 
-        if (version_info.is_projection())
-        {
-          VersionRecorder recorder(ctx, version_info, user.field_mask);
-          visit_node(&recorder);
-        }
+        } 
       }
       else // We're still not there, so keep going
       {
@@ -12687,16 +12710,17 @@ namespace LegionRuntime {
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
-        // If this is a write, then update our version numbers
-        if (IS_WRITE(user.usage))
-          update_version_numbers(state, user.field_mask);
         // If this is a projection then we do need to capture any 
         // child version information because it might change
-        if (version.is_projection())
+        // Do this before the version numbers are updated
+        if (version_info.is_projection())
         {
           VersionRecorder recorder(ctx, version_info, user.field_mask);
           visit_node(&recorder);
         }
+        // If this is a write, then update our version numbers
+        if (IS_WRITE(user.usage))
+          update_version_numbers(state, user.field_mask);
         // No need to record ourselves if we've already traced
         if (!already_traced)
         {
@@ -12785,6 +12809,8 @@ namespace LegionRuntime {
       }
       // Merge any new field states
       merge_new_field_states(state, new_states);
+      // Record the version numbers that we need
+      closer.record_version_numbers(this, state, closing_mask);
       // Finally update the version numbers for the closed fields
       update_version_numbers(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
@@ -13471,6 +13497,15 @@ namespace LegionRuntime {
             }
           }
         }
+      }
+      // Make sure each field appears in exactly one version number
+      FieldMask version_numbers;
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            state.field_versions.begin(); it != 
+            state.field_versions.end(); it++)
+      {
+        assert(version_numbers * it->second);
+        version_numbers |= it->second;
       }
     }
 
@@ -16490,6 +16525,8 @@ namespace LegionRuntime {
                                               bool leave_open,
                                             const std::set<ColorPoint> &targets,
                                               const ColorPoint &next_child,
+                                              const VersionInfo &close_info,
+                                              const VersionInfo &version_info,
                                               const RestrictInfo &restrict_info,
                                               const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -16506,7 +16543,8 @@ namespace LegionRuntime {
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
                      next_child, trace_info.trace, trace_info.req_idx, 
-                     restrict_info, closing_mask, creator);
+                     close_info, version_info, restrict_info, 
+                     closing_mask, creator);
       return op;
     }
 
@@ -18121,6 +18159,8 @@ namespace LegionRuntime {
                                                  bool leave_open,
                                             const std::set<ColorPoint> &targets,
                                                  const ColorPoint &next_child, 
+                                                 const VersionInfo &close_info,
+                                                 const VersionInfo &ver_info,
                                                  const RestrictInfo &res_info,
                                                  const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -18137,7 +18177,7 @@ namespace LegionRuntime {
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
                      next_child, trace_info.trace, trace_info.req_idx, 
-                     res_info, closing_mask, creator);
+                     close_info, ver_info, res_info, closing_mask, creator);
       return op;
     }
 

@@ -1458,7 +1458,7 @@ namespace LegionRuntime {
      */
     class VersionInfo {
     public:
-      typedef LegionMap<VerionsID,FieldMask>::aligned RegionVersions;
+      typedef LegionMap<VersionID,FieldMask>::aligned RegionVersions;
     public:
       VersionInfo(void)
         : projection(false) { }
@@ -1484,6 +1484,31 @@ namespace LegionRuntime {
       inline bool is_projection(void) const { return projection; }
       inline void clear(void)
         { region_versions.clear(); projection = false; }
+    public:
+      inline void merge(const VersionInfo &rhs, const FieldMask &mask)
+      {
+        for (std::map<RegionTreeNode*,RegionVersions>::const_iterator vit = 
+              rhs.region_versions.begin(); vit != 
+              rhs.region_versions.end(); vit++)
+        {
+          const RegionVersions &rhs_version = vit->second;
+          RegionVersions *entry = NULL;
+          for (RegionVersions::const_iterator it = rhs_version.begin();
+                it != rhs_version.end(); it++)
+          {
+            FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            if (entry == NULL)
+              entry = &(region_versions[vit->first]);
+            RegionVersions::iterator finder = entry->find(it->first);
+            if (finder == entry->end())
+              entry->insert(*it);
+            else
+              finder->second |= it->second;
+          }
+        }
+      }
     protected:
       std::map<RegionTreeNode*,RegionVersions> region_versions;
       bool projection;
@@ -1535,6 +1560,18 @@ namespace LegionRuntime {
         perform_check = false;
         projection = false;
         restrictions.clear();
+      }
+      inline void merge(const RestrictInfo &rhs, const FieldMask &mask)
+      {
+        perform_check = rhs.perform_check;
+        for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
+              rhs.restrictions.begin(); it != rhs.restrictions.end(); it++)
+        {
+          FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          restrictions[it->first] = overlap;
+        }
       }
     public:
       void pack_info(Serializer &rez);
@@ -1726,6 +1763,7 @@ namespace LegionRuntime {
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
                                        const ColorPoint &next_child, 
+                                       const VersionInfo &version_info,
                                        const RestrictInfo &restrict_info,
                                        const TraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
@@ -1733,12 +1771,15 @@ namespace LegionRuntime {
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
+      void record_version_numbers(RegionTreeNode *node, LogicalState &state,
+                                  const FieldMask &local_mask);
     protected:
       static void compute_close_sets(
                      const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
                      LegionList<ClosingSet>::aligned &close_sets);
       void create_close_operations(RegionTreeNode *target, 
                           Operation *creator, const ColorPoint &next_child,
+                          const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
                           const LegionList<ClosingSet>::aligned &close_sets,
@@ -1761,6 +1802,8 @@ namespace LegionRuntime {
     protected:
       LegionMap<InterCloseOp*,LogicalUser>::aligned leave_open_closes;
       LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
+    protected:
+      VersionInfo close_versions;
     }; 
 
     /**
@@ -2263,6 +2306,8 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
                                             const ColorPoint &next_child, 
+                                            const VersionInfo &close_info,
+                                            const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
@@ -2393,6 +2438,8 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
                                             const ColorPoint &next_child,
+                                            const VersionInfo &close_info,
+                                            const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
@@ -2550,6 +2597,8 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
                                             const ColorPoint &next_child,
+                                            const VersionInfo &close_info,
+                                            const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,

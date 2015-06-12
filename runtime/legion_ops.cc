@@ -4141,6 +4141,7 @@ namespace LegionRuntime {
                                   const std::set<ColorPoint> &targets,
                                   bool open, const ColorPoint &next, 
                                   LegionTrace *trace, int close, 
+                                  const VersionInfo &close_info,
                                   const VersionInfo &ver_info,
                                   const RestrictInfo &res_info,
                                   const FieldMask &close_m, Operation *create)
@@ -4157,8 +4158,10 @@ namespace LegionRuntime {
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
-      version_info = ver_info;
-      restrict_info = res_info;
+      // Merge in the two different version informations
+      version_info.merge(close_info, close_m);
+      version_info.merge(ver_info, close_m);
+      restrict_info.merge(res_info, close_m);
       target_children = targets;
       leave_open = open;
       next_child = next;

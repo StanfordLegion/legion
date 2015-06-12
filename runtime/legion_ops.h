@@ -716,6 +716,7 @@ namespace LegionRuntime {
                       const std::set<ColorPoint> &targets, 
                       bool leave_open, const ColorPoint &next_child, 
                       LegionTrace *trace, int close_idx, 
+                      const VersionInfo &close_info,
                       const VersionInfo &version_info,
                       const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
