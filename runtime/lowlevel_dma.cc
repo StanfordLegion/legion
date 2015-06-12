@@ -2690,7 +2690,7 @@ namespace LegionRuntime {
 #endif
           case Memory::Impl::MKIND_DISK:
           {
-            log_dma.info("create mem->disk xferdes");
+            log_dma.info("create mem->disk xferdes\n");
             int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
             XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), false,
                                           src_buf, dst_buf, src_mem_base, dst_fd,
@@ -2699,6 +2699,21 @@ namespace LegionRuntime {
             path.push_back(xd);
             break;
           }
+#ifdef USE_HDF
+          case Memory::Impl::MKIND_HDF:
+          {
+            ID id(dst_inst.impl()->me);
+            unsigned index = id.index_l();
+            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)dst_mem.impl())->hdf_metadata[index];
+            log_dma.info("create mem->hdf xferdes\n");
+            XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
+                                              src_buf, dst_buf, src_mem_base, hdf_metadata,
+                                              domain, oasvec, 100/*max_nr*/,
+                                              XferDes::DST_FIFO, XferDes::XFER_HDF_WRITE);
+            path.push_back(xd);
+            break;
+          }
+#endif
           case Memory::Impl::MKIND_GLOBAL:
             fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
             assert(0);
@@ -2732,6 +2747,9 @@ namespace LegionRuntime {
           }
           case Memory::Impl::MKIND_GPUFB:
           case Memory::Impl::MKIND_DISK:
+#ifdef USE_HDF
+          case Memory::Impl::MKIND_HDF:
+#endif
           case Memory::Impl::MKIND_GLOBAL:
           case Memory::Impl::MKIND_RDMA:
           case Memory::Impl::MKIND_REMOTE:
@@ -2850,8 +2868,14 @@ namespace LegionRuntime {
             path.push_back(xd2);
             break;
           }
+#ifdef USE_HDF
+          case Memory::Impl::MKIND_HDF:
+            fprintf(stderr, "[DMA] To be implemented:disk memory -> hdf memory\n");
+            assert(0);
+            break;
+#endif
           case Memory::Impl::MKIND_GLOBAL:
-            fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
+            fprintf(stderr, "[DMA] To be implemented: disk memory -> gasnet memory\n");
             assert(0);
             break;
           case Memory::Impl::MKIND_RDMA:
@@ -2865,6 +2889,53 @@ namespace LegionRuntime {
           }
           break;
         }
+#ifdef USE_HDF
+        case Memory::Impl::MKIND_HDF:
+        {
+          ID src_id(src_inst.impl()->me);
+          unsigned src_index = src_id.index_l();
+          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*)src_mem.impl())->hdf_metadata[src_index];
+          switch (dst_kind) {
+          case Memory::Impl::MKIND_SYSMEM:
+          case Memory::Impl::MKIND_ZEROCOPY:
+          {
+            printf("hdf->cpu XferDes\n");
+            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_read_channel(), false,
+                                              src_buf, dst_buf, dst_mem_base, src_hdf_metadata,
+                                              domain, oasvec,
+                                              100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_HDF_READ);
+            path.push_back(xd);
+            break;
+          }
+#ifdef USE_CUDA
+          case Memory::Impl::MKIND_GPUFB:
+            fprintf(stderr, "To be implemented: hdf memory -> gpu memory\n");
+            assert(0);
+            break;
+#endif
+          case Memory::Impl::MKIND_DISK:
+          case Memory::Impl::MKIND_HDF:
+            fprintf(stderr, "To be implemented: hdf memory -> hdf memory\n");
+            assert(0);
+            break;
+          case Memory::Impl::MKIND_GLOBAL:
+            fprintf(stderr, "To be implemented: hdf memory -> global memory\n");
+            assert(0);
+            break;
+          case Memory::Impl::MKIND_RDMA:
+          case Memory::Impl::MKIND_REMOTE:
+            fprintf(stderr, "To be implemented: hdf memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+
+        }
+#endif
         case Memory::Impl::MKIND_GLOBAL:
           fprintf(stderr, "[DMA] To be implemented: gasnet memory transfer\n");
           assert(0);

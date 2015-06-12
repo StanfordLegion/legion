@@ -700,6 +700,10 @@ namespace LegionRuntime{
         memcpy_channel = NULL;
         disk_read_channel = NULL;
         disk_write_channel = NULL;
+#ifdef USE_HDF
+        hdf_read_channel = NULL;
+        hdf_write_channel = NULL;
+#endif
       }
       ~ChannelManager(void) {
         if (memcpy_channel)

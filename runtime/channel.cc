@@ -780,6 +780,7 @@ namespace LegionRuntime {
                                   long max_nr, XferOrder _order, XferKind _kind)
       {
         kind = _kind;
+        channel = _channel;
         order = _order;
         bytes_read = bytes_write = 0;
         pre_XferDes = NULL;
@@ -818,7 +819,7 @@ namespace LegionRuntime {
               available_reqs.push(&hdf_read_reqs[i]);
             }
             requests = hdf_read_reqs;
-            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), dst_buf->linearization);
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
             assert(lsi->strides[0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
@@ -845,7 +846,7 @@ namespace LegionRuntime {
               available_reqs.push(&hdf_write_reqs[i]);
             }
             requests = hdf_write_reqs;
-            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), src_buf->linearization);
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
             assert(lsi->strides[0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
@@ -874,7 +875,6 @@ namespace LegionRuntime {
       {
         long ns = 0;
         while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
-          off_t src_start, dst_start;
           requests[ns] = available_reqs.front();
           available_reqs.pop();
           requests[ns]->is_read_done = false;
@@ -886,18 +886,21 @@ namespace LegionRuntime {
               // Recall that src_offset means the index of the involving dataset in hdf file
               off_t hdf_idx = fit->src_offset;
               size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
-              todo = min(pir->r.hi[0] - pir->p[0], dst_buf->block_size - lsi->mapping.image(pir->p) % dst_buf->block_size);
+              todo = min(pir->r.hi[0] - pir->p[0] + 1, dst_buf->block_size - lsi->mapping.image(pir->p) % dst_buf->block_size);
               HDFReadRequest* hdf_read_req = (HDFReadRequest*) requests[ns];
               hdf_read_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
               hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
-              int count[DIM];
-              for (int i = 0; i < DIM; i++) count[i] = 1;
+              hsize_t count[DIM], offset[DIM];
+              for (int i = 0; i < DIM; i++) {
+                count[i] = 1;
+                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+              }
               count[0] = todo;
               hdf_read_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
               // HDF dimension always start with zero, but Legion::Domain may start with any integer
               // We need to deal with the offset between them here
-              Point<DIM> offset(hdf_metadata->lo);
-              herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id, H5S_SELECT_SET, pir->p - offset, NULL, count, NULL);
+              herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+              assert(ret >= 0);
               hdf_read_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
               off_t dst_offset = calc_mem_loc(dst_buf->alloc_offset, fit->dst_offset, fit->size,
                                               dst_buf->elmt_size, dst_buf->block_size, lsi->mapping.image(pir->p));
@@ -910,18 +913,21 @@ namespace LegionRuntime {
               // Recall that src_offset means the index of the involving dataset in hdf file
               off_t hdf_idx = fit->dst_offset;
               size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
-              int todo = min(pir->r.hi[0] - pir->p[0], src_buf->block_size - lsi->mapping.image(pir->p) % src_buf->block_size);
+              todo = min(pir->r.hi[0] - pir->p[0] + 1, src_buf->block_size - lsi->mapping.image(pir->p) % src_buf->block_size);
               HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) requests[ns];
               hdf_write_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
               hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
-              int count[DIM];
-              for (int i = 0; i < DIM; i++) count[i] = 1;
+              hsize_t count[DIM], offset[DIM];
+              for (int i = 0; i < DIM; i++) {
+                count[i] = 1;
+                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+              }
               count[0] = todo;
               hdf_write_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
               // HDF dimension always start with zero, but Legion::Domain may start with any integer
               // We need to deal with the offset between them here
-              Point<DIM> offset(hdf_metadata->lo);
-              herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, pir->p - offset, NULL, count, NULL);
+              herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+              assert(ret >= 0);
               hdf_write_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
               off_t src_offset = calc_mem_loc(src_buf->alloc_offset, fit->src_offset, fit->size,
                                               src_buf->elmt_size, src_buf->block_size, lsi->mapping.image(pir->p));
@@ -932,11 +938,14 @@ namespace LegionRuntime {
             default:
               assert(0);
           }
-          while(todo > 0) pir++;
-          if(!pir) {
+          while(todo > 0) {
+            pir->step();
+            todo--;
+          }
+          if(!pir->any_left) {
             fit++;
             delete pir;
-            pir = GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
           }
           ns ++;
         }
@@ -952,17 +961,17 @@ namespace LegionRuntime {
         assert(!pre_XferDes);
         switch (kind) {
           case XferDes::XFER_HDF_READ:
+          {
             HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
             bytes_read += hdf_read_req->nbytes;
-            H5Sclose(hdf_read_req->mem_space_id);
-            H5Sclose(hdf_read_req->file_space_id);
             break;
+          }
           case XferDes::XFER_HDF_WRITE:
+          {
             HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
             bytes_read += hdf_write_req->nbytes;
-            H5Sclose(hdf_write_req->mem_space_id);
-            H5Sclose(hdf_write_req->file_space_id);
             break;
+          }
           default:
             assert(0);
         }
@@ -976,17 +985,21 @@ namespace LegionRuntime {
         assert(!next_XferDes);
         switch (kind) {
           case XferDes::XFER_HDF_READ:
+          {
             HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
             bytes_write += hdf_read_req->nbytes;
             H5Sclose(hdf_read_req->mem_space_id);
             H5Sclose(hdf_read_req->file_space_id);
             break;
+          }
           case XferDes::XFER_HDF_WRITE:
+          {
             HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
             bytes_write += hdf_write_req->nbytes;
             H5Sclose(hdf_write_req->mem_space_id);
             H5Sclose(hdf_write_req->file_space_id);
             break;
+          }
           default:
             assert(0);
         }
@@ -1452,6 +1465,11 @@ namespace LegionRuntime {
       template class GPUXferDes<1>;
       template class GPUXferDes<2>;
       template class GPUXferDes<3>;
+#endif
+#ifdef USE_HDF
+      template class HDFXferDes<1>;
+      template class HDFXferDes<2>;
+      template class HDFXferDes<3>;
 #endif
   } // namespace LowLevel
 } // namespace LegionRuntime
