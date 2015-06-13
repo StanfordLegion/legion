@@ -157,7 +157,9 @@ namespace LegionRuntime {
 #endif
       // memalign is faster than posix_memalign so use it if we have it
 #ifdef __MACH__
+#ifndef NDEBUG
         int error = 
+#endif
           posix_memalign(&result, ALIGNMENT, alloc_size);
         assert(error == 0);
 #else
