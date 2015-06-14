@@ -259,7 +259,9 @@ namespace LegionRuntime {
     class RestrictInfo;
 
     struct LogicalState;
-    class PhysicalVersion;
+    class PhysicalState;
+    class VersionState;
+    class VersionManager;
 
     class DistributedCollectable;
     class HierarchicalCollectable;

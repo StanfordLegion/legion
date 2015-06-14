@@ -11265,6 +11265,7 @@ namespace LegionRuntime {
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(void)
       : acquired_count(0), exclusive(false), ctx(0)
@@ -11354,6 +11355,7 @@ namespace LegionRuntime {
     {
       free(ptr);
     }
+#endif
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
@@ -12304,6 +12306,175 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // Physical State 
+    /////////////////////////////////////////////////////////////
+
+    /////////////////////////////////////////////////////////////
+    // Version State 
+    /////////////////////////////////////////////////////////////
+
+    /////////////////////////////////////////////////////////////
+    // Version Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VersionManager::VersionManager(void)
+      : version_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    } 
+
+    //--------------------------------------------------------------------------
+    VersionManager::VersionManager(const VersionManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionManager::~VersionManager(void)
+    //--------------------------------------------------------------------------
+    {
+      version_lock.destroy_reservation();
+      version_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionManager& VersionManager::operator=(const VersionManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* VersionManager::construct_state(
+                        const LegionMap<VersionID,FieldMask>::aligned &versions)
+    //--------------------------------------------------------------------------
+    {
+      // Create the result
+      PhysicalState *state = legion_new<PhysicalState>();
+      if (versions.empty())
+        return state;
+      // Before we take the lock in read-only mode, see if we need to 
+      // do some extra work for the special case of version 0
+      if ((versions.begin())->first == 0)
+      {
+        // Take the lock in exclusive mode and add the version state for 0
+        AutoLock v_lock(version_lock);
+        LegionMap<VersionID,StateInfo>::aligned::iterator finder = 
+            version_infos.find(0);
+        // If we don't already have it then make it
+        if (finder == version_infos.end())
+        {
+          StateInfo &info = version_infos[0];
+          info.state = legion_new<VersionState>(0);
+          info.valid_fields = (versions.begin())->second;
+        }
+        else
+          finder->second.valid_fields |= (versions.begin())->second; 
+      }
+      // Take the lock in read-only mode
+      AutoLock v_lock(version_lock, 1, false/*exclusive*/);
+      // Find all the version infos and merge them into the result 
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            versions.begin(); it != versions.end(); it++)
+      {
+        LegionMap<VersionID,StateInfo>::aligned::const_iterator finder = 
+          version_infos.find(it->first);
+#ifdef DEBUG_HIGH_LEVEL
+        // Better have the state info
+        assert(finder != version_infos.end());
+        // Sanity check that state info is valid for all expected fields
+        assert(!(it->second - finder->second));
+#endif
+        state->merge_version_state(finder->second.state, it->second);
+      }
+      return state;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::apply_updates(const FieldMask &update_mask,
+                                       PhysicalState *state, bool advance)
+    //--------------------------------------------------------------------------
+    {
+      // Take the lock in exclusive mode since we are applying updates
+      AutoLock v_lock(version_lock);
+      if (advance)
+      {
+        // Advance all the necessary fields and make any new states
+        // Always do this forwards to maximize version state reuse
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              state->version_states.begin(); it != 
+              state->version_states.end(); it++)
+        {
+          LegionMap<VersionID,StateInfo>::iterator low_finder = 
+            version_infos.find(it->first->version_number);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(low_finder != version_infos.end());
+          assert(low_finder->second.state == it->first);
+#endif
+          // See if there is already an entry for the next version number
+          VersionID next_version_number = it->first->version_number + 1;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(next_version_number > 0); // Crazy check for overflow
+#endif
+          LegionMap<VersionID,StateInfo>::iterator high_finder = 
+            version_infos.find(next_version_number);
+          if (high_finder == version_infos.end())
+          {
+            StateInfo &info = version_infos[next_version_number];
+            info.state = legion_new<VersionState>(next_version_number);
+            info.valid_fields = it->second;
+          }
+          else
+            high_finder->second.valid_fields |= it->second;
+          // Remove the fields from the old one and see if we should
+          // delete it from our list of version infos
+          low_finder->second.valid_fields -= it->second;
+          if (!low_finder->second.valid_fields)
+          {
+            if (low_finder->second.state->remove_reference())
+              legion_delete(low_finder->second.state);
+            version_infos.erase(low_finder);
+          }
+        }
+      }
+      // Now apply all the updates
+
+#ifdef DEBUG_HIGH_LEVEL
+      // This code is a sanity check that each field appears for at most
+      // one version number
+      FieldMask version_fields;
+      for (LegionMap<VersionID,StateInfo>::aligned::const_iterator it = 
+            version_infos.begin(); it != version_infos.end(); it++)
+      {
+        assert(!it->second.valid_fields);
+        assert(version_fields * it->second.valid_fields);
+        version_fields |= it->second.valid_fields;
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over all the version infos and remove our references
+      // No need to hold the lock because this happens in serial with everything
+      for (LegionMap<VersionID,StateInfo>::aligned::iterator it = 
+            version_infos.begin(); it != version_infos.end(); it++)
+      {
+        if (it->second.state->remove_reference())
+          legion_delete(it->second.state);
+      }
+      // Then clear the map
+      version_infos.clear();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Region Tree Node 
     /////////////////////////////////////////////////////////////
 
@@ -12346,6 +12517,28 @@ namespace LegionRuntime {
       LogicalState &state = get_logical_state(ctx);
       if (!!state.restricted_fields)
         child_restricted = state.restricted_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* RegionTreeNode::get_physical_state(ContextID ctx,
+                                                      VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if the version info already has a state
+      PhysicalState *result = version_info.find_physical_state(this);  
+      if (result != NULL)
+        return result;
+      // If it didn't have it then we need to make it
+      VersionManager *manager = physical_states.lookup_entry(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(manager != NULL);
+#endif
+      // Now have the version info create a physical state with the manager
+      result = version_info.create_physical_state(this, manager);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------

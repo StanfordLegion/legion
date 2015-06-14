@@ -1813,6 +1813,7 @@ namespace LegionRuntime {
      * which children are open, and the valid
      * reduction and instance views.
      */
+#if 0
     struct PhysicalState {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC; 
@@ -1851,8 +1852,7 @@ namespace LegionRuntime {
       RegionTreeNode *node;
 #endif
     }; 
-
-    typedef DynamicTableAllocator<PhysicalState, 10, 8> PhysicalStateAllocator;
+#endif
 
     struct CopyTracker {
     public:
@@ -2047,6 +2047,112 @@ namespace LegionRuntime {
       FieldMask set_mask;
       std::set<Event> preconditions;
     };
+    
+    /**
+     * \class PhysicalState
+     * A physical state is a temporary buffer for holding a merged
+     * group of version state objects which can then be used by 
+     * physical traversal routines. Physical state objects track
+     * the version state objects that they use and remove references
+     * to them when they are done.
+     */
+    class PhysicalState {
+    public:
+      static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
+    public:
+      PhysicalState(void);
+      PhysicalState(const PhysicalState &rhs);
+      ~PhysicalState(void);
+    public:
+      PhysicalState& operator=(const PhysicalState &rhs);
+      void* operator new(size_t count);
+      void* operator new[](size_t count);
+      void operator delete(void *ptr);
+      void operator delete[](void *ptr);
+    public:
+      void merge_version_state(VersionState *state, const FieldMask &mask);
+    public:
+      // Fields which have reductions
+      FieldMask reduction_mask;
+      // State of any child nodes
+      ChildState children;
+      // The valid instance views
+      LegionMap<InstanceView*, FieldMask,
+                VALID_VIEW_ALLOC>::track_aligned valid_views;
+      // The valid reduction veiws
+      LegionMap<ReductionView*, FieldMask,
+                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
+    public:
+      LegionMap<VersionState*,FieldMask>::aligned version_states;
+    };
+
+    /**
+     * \class VersionState
+     * This class tracks the physical state information
+     * for a particular version number from the persepective
+     * of a given logical region.
+     */
+    class VersionState : public Collectable {
+    public:
+      static const AllocationType alloc_type = VERSION_STATE_ALLOC;
+    public:
+      VersionState(VersionID vid);
+      VersionState(const VersionState &rhs);
+      ~VersionState(void);
+    public:
+      VersionState& operator=(const VersionState &rhs);
+      void* operator new(size_t count);
+      void* operator new[](size_t count);
+      void operator delete(void *ptr);
+      void operator delete[](void *ptr);
+    public:
+      const VersionID version_number;
+      // Fields which have reductions
+      FieldMask reduction_mask;
+      // State of any child nodes
+      ChildState children;
+      // The valid instance views
+      LegionMap<InstanceView*, FieldMask,
+                VALID_VIEW_ALLOC>::track_aligned valid_views;
+      // The valid reduction veiws
+      LegionMap<ReductionView*, FieldMask,
+                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
+    };
+
+    /**
+     * \class VersionManager
+     * This class tracks all the different versioned physical
+     * state objects from the perspective of a logical region.
+     * The version manager only keeps track of the most recent
+     * versions for each field. Once a version state is no longer
+     * valid for any fields then it releases its reference and
+     * the version state objection can be collected once no
+     * additional operations need to have access to it.
+     */
+    class VersionManager {
+    public:
+      struct StateInfo {
+        VersionState *state;
+        FieldMask valid_fields;
+      };
+    public:
+      VersionManager(void);
+      VersionManager(const VersionManager &rhs);
+      ~VersionManager(void);
+    public:
+      VersionManager& operator=(const VersionManager &rhs);
+    public:
+      PhysicalState* construct_state(
+          const LegionMap<VersionID,FieldMask>::aligned &versions);
+      void apply_updates(const FieldMask &update_mask, 
+                         PhysicalState *state, bool advance);
+      void clear(void);
+    protected:
+      Reservation version_lock;
+      LegionMap<VersionID,StateInfo>::aligned version_infos;
+    };
+
+    typedef DynamicTableAllocator<VersionManager, 10, 8> VersionManagerAllocator;
 
     /**
      * \class RegionTreeNode
@@ -2063,9 +2169,7 @@ namespace LegionRuntime {
     public:
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      PhysicalState* acquire_physical_state(ContextID ctx, bool exclusive);
-      void acquire_physical_state(PhysicalState *state, bool exclusive);
-      bool release_physical_state(PhysicalState *state);
+      PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info);
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
@@ -2378,7 +2482,7 @@ namespace LegionRuntime {
     protected:
       Reservation node_lock;
       DynamicTable<LogicalStateAllocator> logical_states;
-      DynamicTable<PhysicalStateAllocator> physical_states;
+      DynamicTable<VersionManagerAllocator> version_managers;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };

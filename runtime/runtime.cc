@@ -14860,6 +14860,8 @@ namespace LegionRuntime {
           return "Logical State";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
+        case VERSION_STATE_ALLOC:
+          return "Version State";
         default:
           assert(false); // should never get here
       }

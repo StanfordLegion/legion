@@ -133,6 +133,7 @@ namespace LegionRuntime {
       DENSE_INDEX_ALLOC,
       LOGICAL_STATE_ALLOC,
       PHYSICAL_STATE_ALLOC,
+      VERSION_STATE_ALLOC,
       LAST_ALLOC, // must be last
     };
 
