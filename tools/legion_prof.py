@@ -789,10 +789,14 @@ class Memory(object):
         elif self.kind == 5:
             title = "GPU Framebuffer "
         elif self.kind == 6:
-            title = "L3 Cache "
+            title = "Disk "
         elif self.kind == 7:
-            title = "L2 Cache "
+            title = "HDF "
         elif self.kind == 8:
+            title = "L3 Cache "
+        elif self.kind == 9:
+            title = "L2 Cache "
+        elif self.kind == 10:
             title = "L1 Cache "
         else:
             print "WARNING: Unsupported memory type in LegionProf: "+str(self.kind)
@@ -835,8 +839,8 @@ class Memory(object):
                         next_time = inst.create_time
                         creation = True
                         target_inst = inst
-            # Should have found something
-            assert next_time is not None
+            # wonchan: this assertion does not hold when instances are leaked
+            #assert next_time is not None
             self.time_points.append((next_time,creation,target_inst))
             if creation:
                 assert target_inst not in live_instances
@@ -1390,26 +1394,24 @@ class State(object):
         return unique_op.add_event(event, self.processors[proc_id])
 
     def create_instance(self, iid, mem, redop, bf, time):
-        pass
-        #if iid not in self.instances:
-        #    self.instances[iid] = [Instance(iid)]
-        #else:
-        #    self.instances[iid].append(Instance(iid))
-        #self.instances[iid][-1].set_create(self.memories[mem],
-        #                               redop, bf, time)
-        #assert mem in self.memories
-        #self.memories[mem].add_instance(self.instances[iid][-1])
+        if iid not in self.instances:
+            self.instances[iid] = [Instance(iid)]
+        else:
+            self.instances[iid].append(Instance(iid))
+        self.instances[iid][-1].set_create(self.memories[mem],
+                                       redop, bf, time)
+        assert mem in self.memories
+        self.memories[mem].add_instance(self.instances[iid][-1])
 
     def add_instance_field(self, iid, fid, size):
-        pass
-        #assert iid in self.instances
-        #self.instances[iid][-1].add_field(fid, size)
+        assert iid in self.instances
+        self.instances[iid][-1].add_field(fid, size)
 
     def destroy_instance(self, iid, time):
-        pass
+        assert iid in self.instances
         #if iid not in self.instances:
         #    self.instances[iid] = [Instance(iid)]
-        #self.instances[iid][-1].set_destroy(time)
+        self.instances[iid][-1].set_destroy(time)
 
     def build_time_ranges(self):
         assert self.last_time is not None
@@ -1420,8 +1422,8 @@ class State(object):
         # Now that we have all the time ranges added, sort themselves
         for proc in self.processors.itervalues():
             proc.sort_time_range()
-        #for mem in self.memories.itervalues():
-        #    mem.sort_time_range()
+        for mem in self.memories.itervalues():
+            mem.sort_time_range()
 
     def print_processor_stats(self):
         print '****************************************************'
