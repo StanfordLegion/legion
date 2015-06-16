@@ -1396,8 +1396,10 @@ class State(object):
     def create_instance(self, iid, mem, redop, bf, time):
         if iid not in self.instances:
             self.instances[iid] = [Instance(iid)]
-        else:
+        elif self.instances[iid][-1].destroy_time <> None and \
+                self.instances[iid][-1].create_time <> None:
             self.instances[iid].append(Instance(iid))
+
         self.instances[iid][-1].set_create(self.memories[mem],
                                        redop, bf, time)
         assert mem in self.memories
@@ -1408,9 +1410,10 @@ class State(object):
         self.instances[iid][-1].add_field(fid, size)
 
     def destroy_instance(self, iid, time):
-        assert iid in self.instances
-        #if iid not in self.instances:
-        #    self.instances[iid] = [Instance(iid)]
+        #assert iid in self.instances
+        if iid not in self.instances or \
+                self.instances[iid][-1].destroy_time <> None:
+            self.instances[iid] = [Instance(iid)]
         self.instances[iid][-1].set_destroy(time)
 
     def build_time_ranges(self):
