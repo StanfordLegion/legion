@@ -28,12 +28,94 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 
-#include <iostream>
-#include <fstream>
 #include <set>
 
 namespace Realm {
+
+  // abstract class for an output stream
+  class LoggerOutputStream {
+  public:
+    LoggerOutputStream(void) {}
+    virtual ~LoggerOutputStream(void) {}
+
+    virtual void write(const char *buffer, size_t len) = 0;
+    virtual void flush(void) = 0;
+  };
+
+  class LoggerFileStream : public LoggerOutputStream {
+  public:
+    LoggerFileStream(FILE *_f, bool _close_file)
+      : f(_f), close_file(_close_file)
+    {}
+
+    virtual ~LoggerFileStream(void)
+    {
+      if(close_file)
+	fclose(f);
+    }
+
+    virtual void write(const char *buffer, size_t len)
+    {
+      size_t amt = fwrite(buffer, 1, len, f);
+      assert(amt == len);
+    }
+
+    virtual void flush(void)
+    {
+      fflush(f);
+    }
+
+  protected:
+    FILE *f;
+    bool close_file;
+  };
+
+  // use a pthread mutex to prevent simultaneous writes to a stream
+  template <typename T>
+  class LoggerStreamSerialized : public LoggerOutputStream {
+  public:
+    LoggerStreamSerialized(T *_stream, bool _delete_inner)
+      : stream(_stream), delete_inner(_delete_inner)
+    {
+      int ret = pthread_mutex_init(&mutex, 0);
+      assert(ret == 0);
+    }
+
+    virtual ~LoggerStreamSerialized(void)
+    {
+      int ret = pthread_mutex_destroy(&mutex);
+      assert(ret == 0);
+      if(delete_inner)
+	delete stream;
+    }
+
+    virtual void write(const char *buffer, size_t len)
+    {
+      int ret;
+      ret = pthread_mutex_lock(&mutex);
+      assert(ret == 0);
+      stream->write(buffer, len);
+      ret = pthread_mutex_unlock(&mutex);
+      assert(ret == 0);
+    }
+
+    virtual void flush(void)
+    {
+      int ret;
+      ret = pthread_mutex_lock(&mutex);
+      assert(ret == 0);
+      stream->flush();
+      ret = pthread_mutex_unlock(&mutex);
+      assert(ret == 0);
+    }
+
+  protected:
+    LoggerOutputStream *stream;
+    bool delete_inner;
+    pthread_mutex_t mutex;
+  };
 
   class LoggerConfig {
   protected:
@@ -56,12 +138,11 @@ namespace Realm {
     Logger::LoggingLevel level;
     char *cats_enabled;
     std::set<Logger *> pending_configs;
-    bool delete_stream;
-    std::ostream *stream;  // everybody uses the same one right now
+    LoggerOutputStream *stream;
   };
 
   LoggerConfig::LoggerConfig(void)
-    : cmdline_read(false), level(Logger::LEVEL_PRINT), cats_enabled(0), delete_stream(false), stream(0)
+    : cmdline_read(false), level(Logger::LEVEL_PRINT), cats_enabled(0), stream(0)
   {}
 
   LoggerConfig::~LoggerConfig(void)
@@ -69,9 +150,7 @@ namespace Realm {
     if(cats_enabled)
       free(cats_enabled);
 
-    // only if we opened the file...
-    if(delete_stream)
-      delete stream;
+    delete stream;
   }
 
   /*static*/ LoggerConfig *LoggerConfig::get_config(void)
@@ -114,39 +193,52 @@ namespace Realm {
 
     // lots of choices for log output
     if(!logname || !strcmp(logname, "stdout")) {
-      stream = &std::cout;
-      delete_stream = false;
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
+							    true);
     } else if(!strcmp(logname, "stderr")) {
-      stream = &std::cerr;
-      delete_stream = false;
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
+							    true);
     } else {
       // we're going to open a file, but key off a + for appending and
       //  look for a % for node number insertion
-      std::ios_base::openmode mode = std::ios_base::out;
+      bool append = false;
 
       if(*logname == '+') {
-	mode |= std::ios_base::app;
+	append = true;
 	logname++;
       }
 
       const char *pos = strchr(logname, '%');
+      FILE *f = 0;
       if(pos == 0) {
 	// no node number - everybody uses the same file
 	if(gasnet_nodes() > 1) {
-	  if(gasnet_mynode() == 1)
-	    fprintf(stderr, "WARNING: all ranks are logging to the same output file - appending is forced and output may be jumbled\n");
-	  mode |= std::ios_base::app;
+	  if(!append) {
+	    if(gasnet_mynode() == 1)
+	      fprintf(stderr, "WARNING: all ranks are logging to the same output file - appending is forced and output may be jumbled\n");
+	    append = true;
+	  }
 	}
-	stream = new std::fstream(logname, mode);
+	f = fopen(logname, append ? "a" : "w");
+	if(!f) {
+	  fprintf(stderr, "could not open log file '%s': %s\n", logname, strerror(errno));
+	  exit(1);
+	}
       } else {
 	// replace % with node number
 	char filename[256];
 	sprintf(filename, "%.*s%d%s", (int)(pos - logname), logname, gasnet_mynode(), pos+1);
 
-	stream = new std::fstream(filename, mode);
+	f = fopen(filename, append ? "a" : "w");
+	if(!f) {
+	  fprintf(stderr, "could not open log file '%s': %s\n", filename, strerror(errno));
+	  exit(1);
+	}
       }
-      assert(stream->good());
-      delete_stream = true;
+      // TODO: consider buffering in some cases?
+      setbuf(f, 0); // disable output buffering
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(f, true),
+							    true);
     }
 
     atexit(LoggerConfig::flush_all_streams);
@@ -257,7 +349,7 @@ namespace Realm {
     }
   }
 
-  void Logger::add_stream(std::ostream *s, LoggingLevel min_level,
+  void Logger::add_stream(LoggerOutputStream *s, LoggingLevel min_level,
 			  bool delete_when_done, bool flush_each_write)
   {
     LogStream ls;

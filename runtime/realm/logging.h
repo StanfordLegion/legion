@@ -36,6 +36,7 @@ namespace Realm {
 
   class LoggerMessage;
   class LoggerConfig;
+  class LoggerOutputStream;
 
   class Logger {
   public:
@@ -85,11 +86,11 @@ namespace Realm {
 
     friend class LoggerConfig;
 
-    void add_stream(std::ostream *s, LoggingLevel min_level,
+    void add_stream(LoggerOutputStream *s, LoggingLevel min_level,
 		    bool delete_when_done, bool flush_each_write);
 
     struct LogStream {
-      std::ostream *s;
+      LoggerOutputStream *s;
       LoggingLevel min_level;
       bool delete_when_done;
       bool flush_each_write;
