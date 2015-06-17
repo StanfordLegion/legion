@@ -5330,8 +5330,8 @@ namespace LegionRuntime {
                                     done_event->get_event(), COPY_BEGIN);
 #endif
 #ifdef LEGION_PROF
-      LegionRuntime::HighLevel::LegionProf::register_copy_event(
-            LegionRuntime::HighLevel::PROF_BEGIN_COPY);
+      HighLevel::LegionProf::register_copy_event(
+            done_event->get_event().id, LegionRuntime::HighLevel::PROF_BEGIN_COPY);
 #endif
 
       if (redop_id == 0)
@@ -5381,8 +5381,8 @@ namespace LegionRuntime {
                                       done_event->get_event(), COPY_END);
 #endif
 #ifdef LEGION_PROF
-      LegionRuntime::HighLevel::LegionProf::register_copy_event(
-            LegionRuntime::HighLevel::PROF_END_COPY);
+      HighLevel::LegionProf::register_copy_event(
+            done_event->get_event().id, LegionRuntime::HighLevel::PROF_END_COPY);
 #endif
       // Trigger the event indicating that we are done
       done_event->trigger();
@@ -5631,6 +5631,9 @@ namespace LegionRuntime {
 
     void DMAQueue::start(void)
     {
+#ifdef LEGION_PROF
+      pthread_key_create(&HighLevel::LegionProf::copy_profiler_key, 0);
+#endif
       pthread_attr_t attr;
       PTHREAD_SAFE_CALL(pthread_attr_init(&attr));
       for (unsigned idx = 0; idx < num_dma_threads; idx++)

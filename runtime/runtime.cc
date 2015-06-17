@@ -4843,6 +4843,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_PROF
       {
+        LegionProf::init_timestamp();
         // See if we should disable profiling on this node
         if (Runtime::num_profiling_nodes == 0)
           LegionProf::disable_profiling();
@@ -4894,7 +4895,6 @@ namespace LegionRuntime {
           Memory::Kind kind = it->kind();
           LegionProf::initialize_memory(*it, kind);
         } 
-        LegionProf::initialize_copy_processor();
       }
 #endif
       // Construct a local utility processor group

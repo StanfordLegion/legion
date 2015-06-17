@@ -24,6 +24,7 @@
 
 #include <cassert>
 #include <deque>
+#include <algorithm>
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -153,7 +154,7 @@ namespace LegionRuntime {
 
       struct CopyProfiler {
       public:
-        CopyProfiler(void) : dumped(0), init_time(0) { }
+        CopyProfiler(void) { }
       public:
         inline void add_event(const ProfilingEvent &event)
         { proc_events.push_back(event); }
@@ -164,21 +165,44 @@ namespace LegionRuntime {
         CopyProfiler& operator=(const CopyProfiler& copy_from)
         { assert(false); return *this; }
       public:
-        int dumped;
-        unsigned long long init_time;
         std::deque<ProfilingEvent> proc_events;
       };
 
       extern Logger::Category log_prof;
       // Profiler table indexed by processor id
+      extern unsigned long long legion_prof_init_time;
       extern ProcessorProfiler *legion_prof_table;
-      extern CopyProfiler copy_prof;
+      extern pthread_key_t copy_profiler_key;
+      extern pthread_mutex_t copy_profiler_mutex;
+      extern std::list<CopyProfiler*> copy_prof_list;
+      extern int copy_profiler_dumped;
       // Indicator for when profiling is enabled and disabled
       extern bool profiling_enabled;
+
+      static inline void init_timestamp()
+      {
+        legion_prof_init_time = TimeStamp::get_current_time_in_micros();
+      }
 
       static inline ProcessorProfiler& get_profiler(Processor proc)
       {
         return legion_prof_table[proc.local_id()];
+      }
+
+      static inline CopyProfiler& get_copy_profiler()
+      {
+        CopyProfiler* copy_prof =
+          reinterpret_cast<CopyProfiler*>(
+              pthread_getspecific(copy_profiler_key));
+        if (!copy_prof)
+        {
+          copy_prof = new CopyProfiler();
+          pthread_setspecific(copy_profiler_key, copy_prof);
+          pthread_mutex_lock(&copy_profiler_mutex);
+          copy_prof_list.push_back(copy_prof);
+          pthread_mutex_unlock(&copy_profiler_mutex);
+        }
+        return *copy_prof;
       }
 
       static inline void register_task_variant(unsigned task_id, 
@@ -200,11 +224,6 @@ namespace LegionRuntime {
       {
         if (profiling_enabled)
           log_prof.info("Prof Memory " IDFMT " %u", mem.id, kind);
-      }
-
-      static inline void initialize_copy_processor()
-      {
-        copy_prof.init_time = TimeStamp::get_current_time_in_micros();
       }
 
       static inline void finalize_processor(Processor proc)
@@ -286,6 +305,13 @@ namespace LegionRuntime {
         prof.mem_events.clear();
       }
 
+      static bool compare_events(ProfilingEvent* ev1, ProfilingEvent* ev2)
+      {
+        if (ev1->kind < ev2->kind) return true;
+        else if (ev1->kind > ev2->kind) return false;
+        else return ev1->time < ev2->time;
+      }
+
       static inline void finalize_copy_profiler()
       {
         legion_lowlevel_id_t last_proc_id = 0;
@@ -297,29 +323,62 @@ namespace LegionRuntime {
         }
         last_proc_id += 1;
 
-        int perform_dump = __sync_fetch_and_add(&copy_prof.dumped, 1);
-        // Someone else has already dumped this processor
+        int perform_dump = __sync_fetch_and_add(&copy_profiler_dumped, 1);
         if (perform_dump > 0) return;
-        if (profiling_enabled)
-          log_prof.info("Prof Processor " IDFMT " 1 3",
-              last_proc_id);
 
-        for (unsigned idx = 0; idx < copy_prof.proc_events.size(); idx++)
+        if (profiling_enabled)
         {
-          ProfilingEvent &event = copy_prof.proc_events[idx];
-          assert(event.time >= copy_prof.init_time);
-          log_prof.info("Prof Event " IDFMT " %u %llu %llu",
-              last_proc_id, event.kind, event.unique_id,
-              event.time - copy_prof.init_time);
+          typedef std::map<UniqueID, std::deque<ProfilingEvent*> > event_map_t;
+          event_map_t copy_events;
+
+          for (std::list<CopyProfiler*>::iterator it = copy_prof_list.begin();
+              it != copy_prof_list.end(); ++it)
+          {
+            CopyProfiler* copy_prof = *it;
+            for (unsigned idx = 0; idx < copy_prof->proc_events.size(); idx++)
+            {
+              ProfilingEvent &event = copy_prof->proc_events[idx];
+              copy_events[event.unique_id].push_back(&event);
+            }
+          }
+
+          log_prof.info("Prof Processor " IDFMT " 1 3", last_proc_id);
+
+          for (event_map_t::iterator it = copy_events.begin();
+               it != copy_events.end(); ++it)
+          {
+            std::deque<ProfilingEvent*>& events = it->second;
+            assert(events.size() % 2 == 0);
+            std::sort(events.begin(), events.end(), compare_events);
+            int num_copies = events.size() / 2;
+            for (int idx = 0; idx < num_copies; ++idx)
+            {
+              ProfilingEvent &begin_event = *events[idx];
+              ProfilingEvent &end_event = *events[idx + num_copies];
+              log_prof.info("Prof Event " IDFMT " %u 0 %llu",
+                  last_proc_id, begin_event.kind,
+                  begin_event.time - legion_prof_init_time);
+              log_prof.info("Prof Event " IDFMT " %u 0 %llu",
+                  last_proc_id, end_event.kind,
+                  end_event.time - legion_prof_init_time);
+            }
+          }
+
+          for (std::list<CopyProfiler*>::iterator it = copy_prof_list.begin();
+              it != copy_prof_list.end(); ++it)
+          {
+            delete *it;
+          }
         }
       }
 
-      static inline void register_copy_event(ProfKind kind)
+      static inline void register_copy_event(UniqueID uid, ProfKind kind)
       {
         if (profiling_enabled)
         {
+          CopyProfiler &copy_prof = get_copy_profiler();
           unsigned long long time = TimeStamp::get_current_time_in_micros();
-          copy_prof.add_event(ProfilingEvent(kind, 0, time));
+          copy_prof.add_event(ProfilingEvent(kind, uid, time));
         }
       }
 

@@ -2748,7 +2748,7 @@ namespace LegionRuntime {
 
         virtual bool event_triggered(void)
         {
-          register_copy_event(PROF_END_COPY);
+          register_copy_event(event.id, PROF_END_COPY);
           return true;
         }
 
@@ -2774,8 +2774,8 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef BUGGY_LEGION_PROF
-      register_copy_event(PROF_BEGIN_COPY);
+#ifdef LEGION_PROF
+      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));
 #endif
@@ -3471,8 +3471,8 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef BUGGY_LEGION_PROF
-      register_copy_event(PROF_BEGIN_COPY);
+#ifdef LEGION_PROF
+      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));
 #endif
@@ -3757,6 +3757,9 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count)
     {
+#ifdef LEGION_PROF
+      CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
+#endif
       dma_queue = new DmaRequestQueue;
       num_threads = count;
 

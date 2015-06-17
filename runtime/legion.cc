@@ -62,10 +62,14 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
     namespace LegionProf {
       Logger::Category log_prof("legion_prof");
+      unsigned long long legion_prof_init_time;
       ProcessorProfiler *legion_prof_table = 
         new ProcessorProfiler[MAX_NUM_PROCS + 1];
       bool profiling_enabled;
-      CopyProfiler copy_prof;
+      pthread_key_t copy_profiler_key;
+      pthread_mutex_t copy_profiler_mutex = PTHREAD_MUTEX_INITIALIZER;
+      int copy_profiler_dumped = 0;
+      std::list<CopyProfiler*> copy_prof_list;
     };
 #endif
 
