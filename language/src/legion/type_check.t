@@ -615,6 +615,30 @@ function type_check.expr_raw_runtime(cx, node)
   }
 end
 
+function type_check.expr_raw_value(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+
+  local expr_type
+  if std.is_ispace(value_type) then
+    expr_type = std.c.legion_index_space_t
+  elseif std.is_region(value_type) then
+    expr_type = std.c.legion_logical_region_t
+  elseif std.is_partition(value_type) then
+    expr_type = std.c.legion_logical_partition_t
+  elseif std.is_cross_product(value_type) then
+    expr_type = std.c.legion_terra_index_cross_product_t
+  else
+    log.error(node, "raw expected an ispace, region, partition, or cross product, got " .. tostring(value_type))
+  end
+
+  return ast.typed.ExprRawValue {
+    value = value,
+    expr_type = expr_type,
+    span = node.span,
+  }
+end
+
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
@@ -991,6 +1015,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprRawRuntime) then
     return type_check.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawValue) then
+    return type_check.expr_raw_value(cx, node)
 
   elseif node:is(ast.specialized.ExprIsnull) then
     return type_check.expr_isnull(cx, node)

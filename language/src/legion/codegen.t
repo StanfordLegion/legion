@@ -2006,6 +2006,30 @@ function codegen.expr_raw_runtime(cx, node)
     value_type)
 end
 
+function codegen.expr_raw_value(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = value.actions
+  local result
+  if std.is_ispace(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_region(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_partition(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_cross_product(value_type) then
+    result = `([value.value].product)
+  else
+    assert(false)
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
   local expr_type = std.as_read(node.expr_type)
@@ -2782,6 +2806,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return codegen.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return codegen.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return codegen.expr_isnull(cx, node)

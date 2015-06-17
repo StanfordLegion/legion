@@ -171,6 +171,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.ExprRawRuntime) then
     return 1
 
+  elseif node:is(ast.unspecialized.ExprRawValue) then
+    return 1
+
   elseif node:is(ast.unspecialized.ExprIsnull) then
     if get_num_accessed_fields(node.pointer) > 1 then return false end
     return 1
@@ -450,6 +453,13 @@ function specialize.expr_raw_runtime(cx, node)
   }
 end
 
+function specialize.expr_raw_value(cx, node)
+  return ast.specialized.ExprRawValue {
+    value = specialize.expr(cx, node.value),
+    span = node.span,
+  }
+end
+
 function specialize.expr_isnull(cx, node)
   local pointer = specialize.expr(cx, node.pointer)
   return ast.specialized.ExprIsnull {
@@ -648,6 +658,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.ExprRawRuntime) then
     return specialize.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprRawValue) then
+    return specialize.expr_raw_value(cx, node)
 
   elseif node:is(ast.unspecialized.ExprIsnull) then
     return specialize.expr_isnull(cx, node)
