@@ -341,10 +341,7 @@ namespace LegionRuntime {
 	    //printf("in aos(%zd) converter\n", STRIDE);
 	    void *aos_base = 0;
 	    size_t aos_stride = STRIDE;
-#ifndef NDEBUG
-	    bool ok = 
-#endif
-              get_aos_parameters(aos_base, aos_stride);
+	    bool ok = get_aos_parameters(aos_base, aos_stride);
 	    return ok;
 	  }
 
