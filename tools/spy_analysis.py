@@ -1818,23 +1818,26 @@ class Close(object):
         self.logical_marked = False
 
     def print_physical_node(self, printer):
-        color = 'orangered'
-        if self.is_inter_close_op:
-            color = 'red'
-        printer.println(self.node_name+' [style=filled,label="'+\
-            'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+'",'+\
-            'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
-            'shape=record,penwidth=2];')
+        if self.state.verbose:
+            color = 'orangered'
+            if self.is_inter_close_op:
+                color = 'red'
+            printer.println(self.node_name+' [style=filled,label="'+\
+                'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+'",'+\
+                'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
+        if self.state.verbose:
+            self.start_event.print_prev_event_dependences(printer, self.node_name)
 
     def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
+        if self.state.verbose:
+            if later_name not in self.prev_event_deps:
+                printer.println(self.node_name+' -> '+later_name+
+                    ' [style=solid,color=black,penwidth=2];')
+                self.prev_event_deps.add(later_name)
+            self.start_event.print_prev_event_dependences(printer, later_name)
 
     def add_events(self, start, term):
         assert self.start_event == None
