@@ -8927,6 +8927,23 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
+#ifdef LEGION_PROF
+      {
+        std::map<FieldID,size_t> inst_fields;
+        for (std::set<FieldID>::const_iterator it =
+            create_fields.begin(); it != create_fields.end(); it++)
+        {
+          std::map<FieldID,FieldInfo>::const_iterator finder =
+            fields.find(*it);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != fields.end());
+#endif
+          inst_fields[*it] = finder->second.field_size;
+        }
+        LegionProf::register_instance_creation(inst.id, location.id,
+            0, blocking_factor, inst_fields);
+      }
+#endif
       return result;
     }
 
@@ -17018,6 +17035,9 @@ namespace LegionRuntime {
       // Detach any instance views from this node down
       PhysicalDetacher detacher(ctx, detach_mask, detach_target);
       visit_node(&detacher);
+#ifdef LEGION_PROF
+      LegionProf::register_instance_deletion(detach_target->get_instance().id);
+#endif
     }
 
     //--------------------------------------------------------------------------
