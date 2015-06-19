@@ -5997,7 +5997,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6018,7 +6018,7 @@ namespace LegionRuntime {
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6041,7 +6041,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6062,7 +6062,7 @@ namespace LegionRuntime {
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6082,7 +6082,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes = 
 #endif
@@ -6110,7 +6110,7 @@ namespace LegionRuntime {
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
       // TODO: trim subrect in HybridSOA case
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
