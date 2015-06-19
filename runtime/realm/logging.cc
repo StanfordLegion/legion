@@ -58,7 +58,10 @@ namespace Realm {
 
     virtual void write(const char *buffer, size_t len)
     {
-      size_t amt = fwrite(buffer, 1, len, f);
+#ifndef NDEBUG
+      size_t amt =
+#endif
+	fwrite(buffer, 1, len, f);
       assert(amt == len);
     }
 
@@ -79,13 +82,19 @@ namespace Realm {
     LoggerStreamSerialized(T *_stream, bool _delete_inner)
       : stream(_stream), delete_inner(_delete_inner)
     {
-      int ret = pthread_mutex_init(&mutex, 0);
+#ifndef NDEBUG
+      int ret =
+#endif
+	pthread_mutex_init(&mutex, 0);
       assert(ret == 0);
     }
 
     virtual ~LoggerStreamSerialized(void)
     {
-      int ret = pthread_mutex_destroy(&mutex);
+#ifndef NDEBUG
+      int ret =
+#endif
+	pthread_mutex_destroy(&mutex);
       assert(ret == 0);
       if(delete_inner)
 	delete stream;
@@ -93,21 +102,33 @@ namespace Realm {
 
     virtual void write(const char *buffer, size_t len)
     {
+#ifndef NDEBUG
       int ret;
-      ret = pthread_mutex_lock(&mutex);
+      ret =
+#endif
+	pthread_mutex_lock(&mutex);
       assert(ret == 0);
       stream->write(buffer, len);
-      ret = pthread_mutex_unlock(&mutex);
+#ifndef NDEBUG
+      ret =
+#endif
+	pthread_mutex_unlock(&mutex);
       assert(ret == 0);
     }
 
     virtual void flush(void)
     {
+#ifndef NDEBUG
       int ret;
-      ret = pthread_mutex_lock(&mutex);
+      ret =
+#endif
+	pthread_mutex_lock(&mutex);
       assert(ret == 0);
       stream->flush();
-      ret = pthread_mutex_unlock(&mutex);
+#ifndef NDEBUG
+      ret =
+#endif
+	pthread_mutex_unlock(&mutex);
       assert(ret == 0);
     }
 
