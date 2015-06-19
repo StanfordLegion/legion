@@ -57,6 +57,9 @@ namespace LegionRuntime {
       PROF_END_MESSAGE = 21,
       PROF_BEGIN_COPY = 22,
       PROF_END_COPY = 23,
+      // User-defined profiling events
+      PROF_BEGIN_USER_EVENT = 100,
+      PROF_END_USER_EVENT = 101,
     };
 
     namespace LegionProf {
@@ -451,6 +454,32 @@ namespace LegionRuntime {
           Processor proc = Processor::get_executing_processor();
           get_profiler(proc).add_event(MemoryEvent(inst_id, time));
         }
+      }
+
+      static inline void register_userevent(UniqueID uid, const char* name)
+      {
+#ifdef LEGION_PROF
+        if (profiling_enabled)
+        {
+          Processor proc = Processor::get_executing_processor();
+          log_prof.info("Prof User Event " IDFMT " %llu %s",
+              proc.id, uid, name);
+        }
+#endif
+      }
+
+      static inline void begin_userevent(UniqueID uid)
+      {
+#ifdef LEGION_PROF
+        register_event(uid, PROF_BEGIN_USER_EVENT);
+#endif
+      }
+
+      static inline void end_userevent(UniqueID uid)
+      {
+#ifdef LEGION_PROF
+        register_event(uid, PROF_END_USER_EVENT);
+#endif
       }
 
       static inline void enable_profiling(void)

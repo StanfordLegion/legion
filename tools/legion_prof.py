@@ -32,6 +32,7 @@ event_pat = re.compile(prefix + r'Prof Event (?P<proc>[a-f0-9]+) (?P<kind>[0-9]+
 create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[a-f0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
 field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[a-f0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
 destroy_pat = re.compile(prefix + r'Prof Destroy Instance (?P<iid>[a-f0-9]+) (?P<time>[0-9]+)')
+userevent_pat = re.compile(prefix + r'Prof User Event (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)')
 
 # List of event kinds from legion_profiling.h
 event_kind_ids = {
@@ -92,6 +93,7 @@ TRIGGER_RANGE = 9
 GC_RANGE = 10
 MESSAGE_RANGE = 11
 COPY_RANGE = 12
+USEREVENT_RANGE = 100
 
 # Helper functions for manipulating event kinds.
 def event_kind_is_begin(kind):
@@ -281,6 +283,10 @@ class UniqueOp(object):
                 time_range = EventRange(self, begin_event, event, COPY_RANGE)
                 self.messages.append(time_range)
                 proc.add_time_range(time_range)
+            elif event.kind_id == 101:
+                time_range = EventRange(self, begin_event, event, USEREVENT_RANGE)
+                self.messages.append(time_range)
+                proc.add_time_range(time_range)
             else:
                 assert False
         else:
@@ -397,6 +403,15 @@ class UniqueScheduler(UniqueOp):
 
     def get_variant(self):
         return repr(self)
+
+class UserEvent(UniqueOp):
+    def __init__(self, proc, uid, name):
+        UniqueOp.__init__(self, proc, uid, "#FF3300")
+        self.uid = uid
+        self.name = name
+
+    def __repr__(self):
+        return 'User Event %s %s' % (self.uid, self.name)
 
 class Event(object):
     def __init__(self, kind_id, unique_op, time):
@@ -599,6 +614,9 @@ class EventRange(TimeRange):
         elif self.range_kind == COPY_RANGE:
             color = "#8B0000" # Dark Red
             title = "Low-Level Copy "+repr(self)
+        elif self.range_kind == USEREVENT_RANGE:
+            color = "#003300"
+            title = repr(self.op)+" "+repr(self)
         else:
             assert False
         printer.emit_timing_range(color, level, self.start_event.abs_time, self.end_event.abs_time, title)
@@ -610,6 +628,8 @@ class EventRange(TimeRange):
             stat.update_scheduler(self.cumulative_time(), self.non_cumulative_time(), proc)
         elif self.range_kind == GC_RANGE:
             stat.update_gc(self.cumulative_time(), self.non_cumulative_time(), proc)
+        elif self.range_kind == USEREVENT_RANGE:
+            pass
         elif self.range_kind <> WAIT_RANGE:
             variant = self.op.get_variant()
             cum_time = self.cumulative_time()
@@ -1314,6 +1334,7 @@ class State(object):
         self.unique_ops = {}
         self.instances = {}
         self.last_time = None
+        self.userevents = {}
 
     def create_processor(self, proc_id, utility, kind):
         if proc_id not in self.processors:
@@ -1379,11 +1400,14 @@ class State(object):
 
     def create_event(self, proc_id, uid, kind_id, time):
         assert proc_id in self.processors
-        if uid <> 0 and uid not in self.unique_ops:
+        if uid <> 0 and not (uid in self.unique_ops or uid in self.userevents):
             return False
 
         if uid == 0:
             unique_op = self.processors[proc_id].scheduler_op
+        elif kind_id == 100 or kind_id == 101:
+            assert uid in self.userevents
+            unique_op = self.userevents[uid]
         else:
             unique_op = self.unique_ops[uid]
 
@@ -1415,6 +1439,11 @@ class State(object):
                 self.instances[iid][-1].destroy_time <> None:
             self.instances[iid] = [Instance(iid)]
         self.instances[iid][-1].set_destroy(time)
+
+    def create_userevent(self, proc, uid, name):
+        assert uid not in self.userevents
+        self.userevents[uid] = UserEvent(proc, uid, name)
+        assert uid in self.userevents
 
     def build_time_ranges(self):
         assert self.last_time is not None
@@ -1584,6 +1613,13 @@ def parse_log_file(file_name, state):
                 state.destroy_instance(
                       iid = int(m.group('iid'),16),
                       time = long(m.group('time')))
+                continue
+            m = userevent_pat.match(line)
+            if m is not None:
+                state.create_userevent(
+                    proc = int(m.group('proc'),16),
+                    uid = int(m.group('uid')),
+                    name = m.group('name'))
                 continue
             # If we made it here, then we failed to match.
             matches -= 1
