@@ -39,7 +39,6 @@ namespace LegionRuntime {
     extern Logger::Category log_garbage;
     extern Logger::Category log_leak;
     extern Logger::Category log_variant;
-    extern Logger::Category log_directory;
 
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
@@ -1623,6 +1622,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::premap_physical_region(RegionTreeContext ctx,
                                                   RegionTreePath &path,
                                                   RegionRequirement &req,
+                                                  VersionInfo &version_info,
                                                   Mappable *mappable,
                                                   SingleTask *parent_ctx,
                                                   Processor local_proc
@@ -1649,9 +1649,9 @@ namespace LegionRuntime {
       // Construct a premap traversal object
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
-      MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask); 
-      StateDirectory *directory = parent_ctx->get_directory();
-      PremapTraverser traverser(path, info, directory);
+      MappableInfo info(ctx.get_id(), mappable, local_proc, 
+                        req, version_info, user_mask); 
+      PremapTraverser traverser(path, info);
       // Mark that we are beginning the premapping
       UserEvent premap_event = 
         parent_ctx->begin_premapping(req.parent.tree_id, user_mask);
@@ -1686,6 +1686,7 @@ namespace LegionRuntime {
                                                      RegionTreePath &path,
                                                      RegionRequirement &req,
                                                      unsigned index,
+                                                     VersionInfo &version_info,
                                                      Mappable *mappable,
                                                      Processor local_proc,
                                                      Processor target_proc
@@ -1709,7 +1710,8 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
-      MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask);
+      MappableInfo info(ctx.get_id(), mappable, local_proc, 
+                        req, version_info, user_mask);
       // Get the start node
       RegionTreeNode *start_node = child_node;
       for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
@@ -1737,14 +1739,15 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappingRef RegionTreeForest::remap_physical_region(RegionTreeContext ctx,
-                                                       RegionRequirement &req,
-                                                       unsigned index,
-                                                       const InstanceRef &ref
+                                                      RegionRequirement &req,
+                                                      unsigned index,
+                                                      VersionInfo &version_info,
+                                                      const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
-                                                       , const char *log_name
-                                                       , UniqueID uid
+                                                      , const char *log_name
+                                                      , UniqueID uid
 #endif
-                                                       )
+                                                      )
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -1781,14 +1784,15 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
-                                                       RegionRequirement &req,
-                                                       unsigned index,
-                                                       Processor target_proc
+                                                      RegionRequirement &req,
+                                                      unsigned index,
+                                                      VersionInfo &version_info,
+                                                      Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
-                                                       , const char *log_name
-                                                       , UniqueID uid
+                                                      , const char *log_name
+                                                      , UniqueID uid
 #endif
-                                                       )
+                                                      )
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1805,7 +1809,8 @@ namespace LegionRuntime {
       RegionTreePath single_path;
       single_path.initialize(child_node->get_depth(), child_node->get_depth());
       // Construct a dummy mappable info
-      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, req, user_mask);
+      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
+                        req, version_info, user_mask);
       MappingTraverser<true/*restricted*/> traverser(single_path, info, 
                                                      RegionUsage(req), 
                                                      user_mask, 
@@ -1829,15 +1834,16 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
-                                                       RegionTreePath &path,
-                                                       RegionRequirement &req,
-                                                       unsigned index,
-                                                       Processor target_proc
+                                                      RegionTreePath &path,
+                                                      RegionRequirement &req,
+                                                      unsigned index,
+                                                      VersionInfo &version_info,
+                                                      Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
-                                                       , const char *log_name
-                                                       , UniqueID uid
+                                                      , const char *log_name
+                                                      , UniqueID uid
 #endif
-                                                       )
+                                                      )
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1851,7 +1857,8 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct a dummy mappable info
-      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, req, user_mask);
+      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
+                        req, version_info, user_mask);
       // Get the start node
       RegionTreeNode *start_node = child_node;
       for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
@@ -1879,19 +1886,20 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::register_physical_region(
-                                                        RegionTreeContext ctx,
-                                                        const MappingRef &ref,
-                                                        RegionRequirement &req,
-                                                        unsigned index,
-                                                        Mappable *mappable,
-                                                        Processor local_proc,
-                                                        Event term_event
+                                                      RegionTreeContext ctx,
+                                                      const MappingRef &ref,
+                                                      RegionRequirement &req,
+                                                      unsigned index,
+                                                      VersionInfo &version_info,
+                                                      Mappable *mappable,
+                                                      Processor local_proc,
+                                                      Event term_event
 #ifdef DEBUG_HIGH_LEVEL
-                                                        , const char *log_name
-                                                        , UniqueID uid
-                                                        , RegionTreePath &path
+                                                      , const char *log_name
+                                                      , UniqueID uid
+                                                      , RegionTreePath &path
 #endif
-                                                        ) 
+                                                      ) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -1906,7 +1914,8 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
-      MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask);
+      MappableInfo info(ctx.get_id(), mappable, local_proc, 
+                        req, version_info, user_mask);
       // Construct the user
       PhysicalUser user(RegionUsage(req), user_mask, term_event);
       LogicalView *view = ref.get_view();
@@ -2030,6 +2039,7 @@ namespace LegionRuntime {
                                                    const ColorPoint &next_child,
                                                    Event &closed,
                                                    const MappingRef &target,
+                                                   VersionInfo &version_info,
                                                    bool force_composite
 #ifdef DEBUG_HIGH_LEVEL
                                                    , unsigned index
@@ -2043,8 +2053,7 @@ namespace LegionRuntime {
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       MappableInfo info(ctx.get_id(), parent_ctx, 
-                        local_proc, req, closing_mask);
-      StateDirectory *directory = parent_ctx->get_directory();
+                        local_proc, req, version_info, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2061,7 +2070,7 @@ namespace LegionRuntime {
         result = close_node->perform_close_operation(info, closing_mask,
                                                      target_children,
                                                      target,
-                                                     directory,
+                                                     version_info,
                                                      leave_open, 
                                                      next_child,
                                                      closed,
@@ -2072,8 +2081,7 @@ namespace LegionRuntime {
       if (!result && create_composite)
       {
         close_node->create_composite_instance(info.ctx, target_children,
-                                    leave_open, next_child, 
-                                    closing_mask, directory);
+                                    leave_open, next_child, closing_mask);
         // Making a composite always succeeds
         result = true;
         closed = Event::NO_EVENT;
@@ -2091,6 +2099,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event RegionTreeForest::close_physical_context(RegionTreeContext ctx,
                                                   RegionRequirement &req,
+                                                  VersionInfo &version_info,
                                                   Mappable *mappable,
                                                   Processor local_proc,
                                                   const InstanceRef &ref 
@@ -2109,7 +2118,8 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       PhysicalUser user(RegionUsage(req), user_mask, Event::NO_EVENT);      
-      MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask);
+      MappableInfo info(ctx.get_id(), mappable, local_proc, 
+                        req, version_info, user_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2134,6 +2144,7 @@ namespace LegionRuntime {
                                         RegionTreeContext src_ctx,
                                         RegionTreeContext dst_ctx,
                                         RegionRequirement &src_req,
+                                        VersionInfo &src_version_info,
                                         const RegionRequirement &dst_req,
                                         const InstanceRef &dst_ref,
                                         Event pre)
@@ -2161,7 +2172,7 @@ namespace LegionRuntime {
       FieldMask dst_mask = 
         dst_node->column_source->get_field_mask(dst_req.privilege_fields);
       MappableInfo info(src_ctx.get_id(), mappable, 
-                        local_proc, src_req, src_mask);
+                        local_proc, src_req, src_version_info, src_mask);
       src_node->find_copy_across_instances(info, dst_view,
                                            src_instances, deferred_instances);
       // Now is where things get tricky, since we don't have any correspondence
@@ -2442,7 +2453,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::send_physical_state(RegionTreeContext ctx,
                                                const RegionRequirement &req,
-                                               StateDirectory *directory,
                                                AddressSpaceID target,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                  std::set<PhysicalManager*> &needed_managers)
@@ -2482,14 +2492,10 @@ namespace LegionRuntime {
       bool invalidate = (req.handle_type == SINGULAR) && IS_WRITE(req);
       // Construct a traverser to send the state
       FieldMask send_mask = field_node->get_field_mask(req.privilege_fields);
-      StateSender sender(ctx.get_id(), directory->get_owner_uid(), target, 
-          needed_views, needed_managers, send_mask, invalidate);
+      StateSender sender(ctx.get_id(), target, needed_views, 
+                         needed_managers, send_mask, invalidate);
       // Now we're ready to send the state
       top_node->visit_node(&sender);
-      // Update the directory state
-#ifndef S3D_STARTUP_HACK
-      directory->update_remote_state(target, top_node, send_mask);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2751,87 +2757,7 @@ namespace LegionRuntime {
       top_node->visit_node(&checker);
       return checker.is_valid();
     }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::validate_remote_state(Deserializer &derez,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // Packed by StateDirectory::update_remote_state
-      DerezCheck z(derez);
-      UniqueID remote_owner_uid;
-      derez.deserialize(remote_owner_uid);
-      RemoteTask *remote_task = 
-        runtime->find_or_init_remote_context(remote_owner_uid);
-      bool is_region;
-      derez.deserialize(is_region);
-      FieldSpaceNode *field_node;
-      RegionTreeNode *top_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionNode *reg_node = get_node(handle);
-        top_node = reg_node;
-        field_node = reg_node->column_source;
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        PartitionNode *part_node = get_node(handle);
-        top_node = part_node;
-        field_node = part_node->column_source;
-      }
-      FieldMask validate_mask;
-      derez.deserialize(validate_mask);
-      // Do the transformation of the field mask to the local node
-      field_node->transform_field_mask(validate_mask, source);
-      // Now we can traverse the tree
-      RemoteValidator validator(remote_task->get_context_id(), validate_mask);
-      top_node->visit_node(&validator);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_remote_state(Deserializer &derez,
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID remote_owner_uid;
-      derez.deserialize(remote_owner_uid);
-      RemoteTask *remote_task = 
-        runtime->find_or_init_remote_context(remote_owner_uid);
-      bool is_region;
-      derez.deserialize(is_region);
-      FieldSpaceNode *field_node;
-      RegionTreeNode *top_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionNode *reg_node = get_node(handle);
-        top_node = reg_node;
-        field_node = reg_node->column_source;
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        PartitionNode *part_node = get_node(handle);
-        top_node = part_node;
-        field_node = part_node->column_source;
-      }
-      FieldMask invalidate_mask;
-      derez.deserialize(invalidate_mask);
-      // Do the transformation of the field mask to the local node
-      field_node->transform_field_mask(invalidate_mask, source);
-      // Now we can traverse the tree
-      RemoteInvalidator invalidator(remote_task->get_context_id(), 
-                                    invalidate_mask);
-      top_node->visit_node(&invalidator);
-    }
-
+ 
     //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
     //--------------------------------------------------------------------------
@@ -4359,16 +4285,6 @@ namespace LegionRuntime {
               fprintf(stdout,"  Map Reduction Region Call:\n");
               break;
             }
-          case ACQUIRE_PHYSICAL_STATE_CALL:
-            {
-              fprintf(stdout,"  Acquire Physical State Call:\n");
-              break;
-            }
-          case RELEASE_PHYSICAL_STATE_CALL:
-            {
-              fprintf(stdout,"  Release Physical State Call:\n");
-              break;
-            }
           case REGISTER_LOGICAL_NODE_CALL:
             {
               fprintf(stdout,"  Register Logical Node Call:\n");
@@ -4709,605 +4625,7 @@ namespace LegionRuntime {
           assert(false);
       }
     }
-
-    /////////////////////////////////////////////////////////////
-    // State Directory 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    StateDirectory::StateDirectory(UniqueID remote_owner, RegionTreeForest *f,
-                                   SingleTask *ctx)
-      : remote_owner_uid(remote_owner), forest(f), context(ctx)
-    //--------------------------------------------------------------------------
-    {
-      state_lock = Reservation::create_reservation();
-    }
-
-    //--------------------------------------------------------------------------
-    StateDirectory::StateDirectory(const StateDirectory &rhs)
-      : remote_owner_uid(0), forest(NULL), context(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::SendRemoteFreeFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      runtime->send_free_remote_context(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    StateDirectory::~StateDirectory(void)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need to hold the lock since we are done
-      // Send messages to deactivate any remote contexts
-      if (!!remote_contexts)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_owner_uid);
-        }
-        SendRemoteFreeFunctor functor(context->runtime, rez);
-        remote_contexts.map(functor);
-      }
-      state_lock.destroy_reservation();
-      state_lock = Reservation::NO_RESERVATION;
-    }
-
-    //--------------------------------------------------------------------------
-    StateDirectory& StateDirectory::operator=(const StateDirectory &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* StateDirectory::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<StateDirectory,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::update_remote_state(AddressSpaceID target,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      if (target == forest->runtime->address_space)
-        return;
-      // Send the message first
-      Serializer rez;
-      {
-        // Unpacked by RegionTreeForest::validate_remote_state
-        RezCheck z(rez);
-        rez.serialize(remote_owner_uid);
-        bool is_region = node->is_region();
-        rez.serialize(is_region);
-        if (is_region)
-        {
-          RegionNode *region = node->as_region_node();
-          rez.serialize(region->handle);
-#ifdef DEBUG_HIGH_LEVEL
-          char *mask_str = mask.to_string();
-          log_directory.info("Remote owner %lld VALIDATING region "
-                                   "(" IDFMT ",%x,%d) on node %d for "
-                                   "fields %s", remote_owner_uid,
-                                   region->handle.get_index_space().id,
-                                   region->handle.get_field_space().get_id(),
-                                   region->handle.get_tree_id(),
-                                   target, mask_str);
-          free(mask_str);
-#endif
-        }
-        else
-        {
-          PartitionNode *partition = node->as_partition_node();
-          rez.serialize(partition->handle);
-#ifdef DEBUG_HIGH_LEVEL
-          char *mask_str = mask.to_string();
-          log_directory.info("Remote owner %lld VALIDATING partition "
-                                   "(%d,%x,%d) on node %d for fields %s",
-                                   remote_owner_uid,
-                                   partition->handle.get_index_partition().id,
-                                   partition->handle.get_field_space().get_id(),
-                                   partition->handle.get_tree_id(),
-                                   target, mask_str);
-          free(mask_str);
-#endif
-        }
-        rez.serialize(mask);
-      }
-      forest->runtime->send_validate_remote_state(target, rez);
-      RegionTreeID tid = node->get_tree_id();
-      AutoLock s_lock(state_lock);
-      // Update our remote contexts and remote fields
-      remote_contexts.add(target);
-      remote_fields |= mask;
-      RemoteForestState &state = remote_forest_states[tid];
-      update_remote_state(state, target, node, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::update_remote_state(RemoteForestState &state,
-                                             AddressSpaceID target,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      state.valid_fields |= mask;
-      RemoteTreeState &tree_state = state.remote_tree_states[node];
-      update_remote_state(tree_state, target, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::update_remote_state(RemoteTreeState &state,
-                                             AddressSpaceID target,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    { 
-      state.valid_fields |= mask;
-      // Iterate over all the states and compute the 
-      // new set of valid fields for the remote target
-      bool found = false;
-      FieldMask new_mask = mask;
-      for (std::list<RemoteNodeState>::iterator it = 
-            state.node_states.begin(); it !=
-            state.node_states.end(); /*nothing*/)
-      {
-        if (it->remote_nodes.contains(target))
-        {
-          // Check to see if the field sets are the same
-          // If we are then we are done
-          if (it->valid_fields == mask)
-          {
-            found = true;
-            break;
-          }
-          // Otherwise remove our bit and update the mask
-          new_mask |= it->valid_fields;
-          it->remote_nodes.remove(target);
-          if (!it->remote_nodes)
-            it = state.node_states.erase(it);
-          else
-            it++;
-        }
-        else
-          it++;
-      }
-      // If we haven't inserted our new information yet,
-      // do that now, iterate through and see if we find
-      // any masks that match ours
-      if (!found)
-        insert_node_state(target, new_mask, state.node_states);
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::issue_invalidations(RegionTreeNode *node,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(state_lock);
-      // If we don't have any remote copies of anything we are done
-      if (!remote_contexts)
-        return;
-      // If we don't have any intersecting fields we are done
-      if (remote_fields * mask)
-        return; 
-      RegionTreeID tid = node->get_tree_id();
-      std::map<RegionTreeID,RemoteForestState>::iterator finder = 
-        remote_forest_states.find(tid);
-      if (finder != remote_forest_states.end())
-      {
-        bool remove = issue_invalidations(finder->second, node, mask);
-        if (remove)
-          remote_forest_states.erase(finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::issue_invalidations(AddressSpaceID source, bool remote,
-                                             const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type != PART_PROJECTION); 
-#endif
-      RegionTreeNode *node = forest->get_node(req.region);
-      AutoLock s_lock(state_lock);
-      // If we don't have any remote copies then there is nothing to do
-      if (!remote && !remote_contexts)
-        return;
-      RegionTreeID tid = node->get_tree_id();
-      std::map<RegionTreeID,RemoteForestState>::iterator finder = 
-        remote_forest_states.find(tid);
-      if (finder != remote_forest_states.end())
-      {
-        // Construct the field mask
-        FieldMask mask = 
-                  node->column_source->get_field_mask(req.privilege_fields);
-        if (remote_fields * mask)
-          return;
-        bool remove;
-        if (!remote)
-          remove = issue_invalidations(finder->second, node, mask); 
-        else
-          remove = issue_invalidations(finder->second, node, mask, source);
-        if (remove)
-          remote_forest_states.erase(finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::issue_invalidations(AddressSpaceID source, bool remote,
-                                             const RegionRequirement &req,
-                                      const std::vector<LogicalRegion> &handles)
-    //--------------------------------------------------------------------------
-    {
-      // Do the invalidation for the upper bound, then update
-      // the remote state for each of the handles
-      RegionTreeNode *node;
-      if (req.handle_type != PART_PROJECTION)
-        node = forest->get_node(req.region);
-      else
-        node = forest->get_node(req.partition);
-      FieldMask mask = 
-                node->column_source->get_field_mask(req.privilege_fields);
-      do
-      {
-        AutoLock s_lock(state_lock);
-        // If we don't have any remote copies then there is nothing to do
-        if (!remote && !remote_contexts)
-          break;
-        if (remote_fields * mask)
-          break;
-        RegionTreeID tid = node->get_tree_id();
-        std::map<RegionTreeID,RemoteForestState>::iterator finder = 
-          remote_forest_states.find(tid);
-        if (finder != remote_forest_states.end())
-        {
-          bool remove = issue_invalidations(finder->second, node, mask);
-          if (remove)
-            remote_forest_states.erase(finder);
-        }
-      } while (0);
-      // If we aren't sending remotely, then we are done
-      if (source == forest->runtime->address_space)
-        return;
-      // Now update the remote state for each of the handles
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            handles.begin(); it != handles.end(); it++)
-      {
-        RegionTreeNode *child = forest->get_node(*it);
-        update_remote_state(source, child, mask);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool StateDirectory::issue_invalidations(RemoteForestState &state,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out in case we don't have any overlapping fields
-      if (state.valid_fields * mask)
-        return false;
-      LegionMap<RegionTreeNode*,RemoteTreeState>::aligned &remote_tree_states =
-        state.remote_tree_states;
-      std::vector<RegionTreeNode*> to_delete;
-      for (std::map<RegionTreeNode*,RemoteTreeState>::iterator it = 
-            remote_tree_states.begin(); it != remote_tree_states.end(); it++)
-      {
-        if ((node == it->first) || 
-              node->intersects_with(it->first), false/*compute*/)
-        {
-          // Check to see if we intersect with the tree in any way
-          bool remove = issue_invalidations(it->second, node, mask);
-          if (remove)
-            to_delete.push_back(it->first);
-        }
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<RegionTreeNode*>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          remote_tree_states.erase(*it);
-      }
-      return remote_tree_states.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    bool StateDirectory::issue_invalidations(RemoteForestState &state,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      if (state.valid_fields * mask)
-        return false;
-      LegionMap<RegionTreeNode*,RemoteTreeState>::aligned &remote_tree_states =
-        state.remote_tree_states;
-      std::vector<RegionTreeNode*> to_delete;
-      for (std::map<RegionTreeNode*,RemoteTreeState>::iterator it = 
-            remote_tree_states.begin(); it != remote_tree_states.end(); it++)
-      {
-        // Check to see if we intersect with the tree in any way
-        if ((node == it->first) || 
-              node->intersects_with(it->first), false/*compute*/)
-        {
-          bool remove = issue_invalidations(it->second, node, mask, source);
-          if (remove)
-            to_delete.push_back(it->first);
-        }
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<RegionTreeNode*>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          remote_tree_states.erase(*it);
-      }
-      return remote_tree_states.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::InvalidateRemoteStateFunctor::apply(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Because of potential aliasing, always make sure
-      // we send the remote tree shape first
-      node->get_row_source()->send_node(target, 
-                                        true/*up*/, false/*down*/);
-      node->column_source->send_node(target);
-      node->send_node(target);
-      runtime->send_invalidate_remote_state(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    bool StateDirectory::issue_invalidations(RemoteTreeState &state,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      if (state.valid_fields * mask)
-        return false;
-      LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned
-        &remote_node_states = state.node_states;
-      for (std::list<RemoteNodeState>::iterator it = 
-            remote_node_states.begin(); it != 
-            remote_node_states.end(); /*nothing*/)
-      {
-        // See if there are any overlap fields
-        FieldMask overlap = it->valid_fields & mask;
-        if (!overlap)
-        {
-          it++;
-          continue;
-        }
-        // Send invalidations to all the nodes
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_owner_uid);
-          bool is_region = node->is_region();
-          rez.serialize<bool>(is_region);
-          if (is_region)
-          {
-            RegionNode *reg_node = node->as_region_node();
-            rez.serialize(reg_node->handle);
-#ifdef DEBUG_HIGH_LEVEL
-            char *mask_str = overlap.to_string();
-            log_directory.info("Remote owner %lld INVALIDATING region "
-                                   "(" IDFMT ",%x,%d) for fields %s", 
-                                   remote_owner_uid,
-                                   reg_node->handle.get_index_space().id,
-                                   reg_node->handle.get_field_space().get_id(),
-                                   reg_node->handle.get_tree_id(),
-                                   mask_str);
-            free(mask_str);
-#endif
-          }
-          else
-          {
-            PartitionNode *part_node = node->as_partition_node();
-            rez.serialize(part_node->handle);
-#ifdef DEBUG_HIGH_LEVEL
-            char *mask_str = overlap.to_string();
-            log_directory.info("Remote owner %lld INVALIDATING partition "
-                                   "(%d,%x,%d) for fields %s",
-                                   remote_owner_uid,
-                                   part_node->handle.get_index_partition().id,
-                                   part_node->handle.get_field_space().get_id(),
-                                   part_node->handle.get_tree_id(),
-                                   mask_str);
-            free(mask_str);
-#endif
-          }
-          rez.serialize(overlap);
-        }
-        // Send the invalidations to anyone that needs them
-        InvalidateRemoteStateFunctor functor(context->runtime, node, rez);
-        it->remote_nodes.map(functor);
-        it->valid_fields -= overlap;
-        if (!it->valid_fields)
-          it = remote_node_states.erase(it);
-        else
-          it++;
-      }
-      return remote_node_states.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    bool StateDirectory::issue_invalidations(RemoteTreeState &state,
-                                             RegionTreeNode *node,
-                                             const FieldMask &mask,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      if (state.valid_fields * mask)
-        return false;
-      LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned
-        &remote_node_states = state.node_states;
-      FieldMask source_mask;
-      for (std::list<RemoteNodeState>::iterator it = 
-            remote_node_states.begin(); it != 
-            remote_node_states.end(); /*nothing*/)
-      {
-        // See if the fields overlap
-        if (it->valid_fields * mask)
-        {
-          it++;
-          continue;
-        }
-        // Send invalidations to all the nodes
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_owner_uid);
-          bool is_region = node->is_region();
-          rez.serialize<bool>(is_region);
-          if (is_region)
-          {
-            RegionNode *reg_node = node->as_region_node();
-            rez.serialize(reg_node->handle);
-          }
-          else
-          {
-            PartitionNode *part_node = node->as_partition_node();
-            rez.serialize(part_node->handle);
-          }
-          rez.serialize(mask);
-        }
-        // Send the invalidations to anyone that needs them
-        InvalidateRemoteStateFunctor functor(context->runtime, node, rez);
-        it->remote_nodes.map(functor);
-        if (it->remote_nodes.contains(source))
-          source_mask |= it->valid_fields;
-        it->valid_fields -= mask;
-        if (!it->valid_fields)
-          it = remote_node_states.erase(it);
-        else
-        {
-          // Also unset the source bit if necessary
-          if (it->remote_nodes.contains(source))
-          {
-            it->remote_nodes.remove(source);
-            if (!it->remote_nodes)
-              it = remote_node_states.erase(it);
-            else
-              it++;
-          }
-          else
-            it++;
-        }
-      }
-      if (!!source_mask)
-        insert_node_state(source, source_mask, remote_node_states);
-      return remote_node_states.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void StateDirectory::insert_node_state(AddressSpaceID node,
-                                           const FieldMask &node_mask,
-        LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned &node_states)
-    //--------------------------------------------------------------------------
-    {
-      // Here is where we maintain the important invariant of keeping at 
-      // most one valid field per entry in the list of node states. There
-      // is a trade-off between precision and data structure size.  We can
-      // have lots of entries for different fields with more precise node
-      // information, or we can have fewer entries with less precise node
-      // information. The first case results in larger data structure size,
-      // while the second one results in unnecessary messages. We implement
-      // both approaches and switch based on the maximum size of the directory
-      // allowed by the user, the default maximum size is 64.
-      if (node_states.size() >= context->max_directory_size)
-      {
-        // Resort to less precise approach
-        FieldMask remaining = node_mask;
-        for (std::list<RemoteNodeState>::iterator it = node_states.begin();
-              it != node_states.end(); it++)
-        {
-          if (remaining * it->valid_fields)
-            continue;
-          it->remote_nodes.add(node);
-          remaining -= it->valid_fields;
-          if (!remaining)
-            break;
-        }
-        if (!!remaining)
-          node_states.push_back(RemoteNodeState(remaining, node));
-      }
-      else
-      {
-        // Maintain precise information for fields
-        FieldMask remaining = node_mask;
-        std::deque<RemoteNodeState> to_add;
-        for (std::list<RemoteNodeState>::iterator it = node_states.begin();
-              it != node_states.end(); it++)
-        {
-          // First test for disjointness
-          if (it->valid_fields * remaining)
-            continue;
-          // Then test for equality
-          if (it->valid_fields == remaining)
-          {
-            it->remote_nodes.add(node);
-            remaining.clear();
-            break;
-          }
-          // Now see who dominate who
-          FieldMask overlap_left = it->valid_fields - remaining;
-          if (!overlap_left)
-          {
-            // Remaining dominates
-            it->remote_nodes.add(node);   
-            remaining -= it->valid_fields;
-            continue;
-          }
-          FieldMask overlap_right = remaining - it->valid_fields;
-          if (!overlap_right)
-          {
-            // Valid fields dominates
-            RemoteNodeState new_state(remaining, node);
-            new_state.remote_nodes |= it->remote_nodes;
-            to_add.push_back(new_state);
-            it->valid_fields = overlap_left;
-            remaining.clear();
-            break;
-          }
-          // Last case, no domination, break into three cases
-          RemoteNodeState new_state(it->valid_fields & remaining, node);
-          new_state.remote_nodes |= it->remote_nodes;
-          to_add.push_back(new_state);
-          it->valid_fields = overlap_left;
-          remaining = overlap_right;
-        }
-        // Add any of the new states that we computed
-        for (std::deque<RemoteNodeState>::const_iterator it = 
-              to_add.begin(); it != to_add.end(); it++)
-        {
-          node_states.push_back(*it);
-        }
-        if (!!remaining)
-          node_states.push_back(RemoteNodeState(remaining, node));
-      }
-    }
-
+ 
     /////////////////////////////////////////////////////////////
     // Index Tree Node 
     /////////////////////////////////////////////////////////////
@@ -9351,8 +8669,10 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappableInfo::MappableInfo(ContextID c, Mappable *m, Processor p,
-                               RegionRequirement &r, const FieldMask &k)
-      : ctx(c), mappable(m), local_proc(p), req(r), traversal_mask(k)
+                               RegionRequirement &r, VersionInfo &info,
+                               const FieldMask &k)
+      : ctx(c), mappable(m), local_proc(p), req(r), 
+        version_info(info), traversal_mask(k)
     //--------------------------------------------------------------------------
     {
     }
@@ -10055,8 +9375,7 @@ namespace LegionRuntime {
     {
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
       {
-        PhysicalState *state = 
-          node->acquire_physical_state(ctx, true/*exclusive*/);
+        PhysicalState *state = node->get_physical_state(ctx, version_info); 
         for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
               state->reduction_views.begin(); it != 
               state->reduction_views.end(); it++)
@@ -10070,7 +9389,6 @@ namespace LegionRuntime {
         }
         if (!valid_reductions.empty())
           node->invalidate_reduction_views(state, close_mask);
-        node->release_physical_state(state);
       }
       if (!valid_reductions.empty())
       {
@@ -10130,17 +9448,15 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PremapTraverser::PremapTraverser(RegionTreePath &p, const MappableInfo &i,
-                                     StateDirectory *dir)
-      : PathTraverser(p), info(i), directory(dir), last_node(NULL)
+    PremapTraverser::PremapTraverser(RegionTreePath &p, const MappableInfo &i)
+      : PathTraverser(p), info(i), last_node(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PremapTraverser::PremapTraverser(const PremapTraverser &rhs)
-      : PathTraverser(rhs.path), info(rhs.info), 
-        directory(NULL), last_node(NULL)
+      : PathTraverser(rhs.path), info(rhs.info), last_node(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10193,11 +9509,6 @@ namespace LegionRuntime {
       // if any were flushed and therefore need to be invalidated
       FieldMask invalidate_mask = node->flush_reductions(info.traversal_mask,
                                                         info.req.redop, info);
-      // If we had any invalidated fields, tell the directory
-      // so it can issue the appropriate invalidation messages
-      // to any remote nodes
-      if (!!invalidate_mask)
-        directory->issue_invalidations(node, invalidate_mask);
       PhysicalState *state = 
         node->acquire_physical_state(info.ctx, true/*exclusive*/);
       // Update our physical state to indicate which child
@@ -12542,114 +11853,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* RegionTreeNode::acquire_physical_state(ContextID ctx,
-                                                          bool exclusive)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      PhysicalState *result = physical_states.lookup_entry(ctx, ctx, this);
-#else
-      PhysicalState *result = physical_states.lookup_entry(ctx, ctx);
-#endif
-      acquire_physical_state(result, exclusive);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::acquire_physical_state(PhysicalState *state,
-                                                 bool exclusive)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ACQUIRE_PHYSICAL_STATE_CALL);
-#endif
-      Event wait_event = Event::NO_EVENT;
-      {
-        AutoLock n_lock(node_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(state->node == this);
-#endif
-        // Check to see if it has already been acquired
-        if (state->acquired_count > 0)
-        {
-          // If they are both not exclusive and there
-          // is nobody in the queue ahead of us, then we can share
-          // otherwise we need to wait
-          if (state->requests.empty() && !exclusive && !state->exclusive)
-          {
-            // Update the acquisition count
-            state->acquired_count++;
-          }
-          else
-          {
-            // Otherwise we ne need to wait 
-            // Make a user event, put it on the list of pending
-            // requests and then wait.  When we get woken up
-            // we will have already been added to the list of 
-            // acquistions by the thread who woke us up.
-            UserEvent ready_event = UserEvent::create_user_event();
-            state->requests.push_back(
-                std::pair<UserEvent,bool>(ready_event, exclusive));
-            // Can't go to sleep holding the lock so
-            // set the wait_event then release the lock
-            wait_event = ready_event;
-          }
-        }
-        else
-        {
-          // Mark that we've acquired it in our mode
-          state->acquired_count++;
-          state->exclusive = exclusive;
-        }
-      }
-      // See if we need to wait
-      if (wait_event.exists())
-        wait_event.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeNode::release_physical_state(PhysicalState *state)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, RELEASE_PHYSICAL_STATE_CALL);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state->node == this);
-#endif
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state->acquired_count > 0);
-#endif
-      state->acquired_count--;
-      // Get the old exlusivity state
-      bool result = state->exclusive;
-      // Now see if we can wake any body up
-      if ((state->acquired_count == 0) && !state->requests.empty())
-      {
-        // Set the new state, update the acquisition
-        // count and then trigger the event
-        state->exclusive = state->requests.front().second;
-        state->acquired_count = 1;
-        state->requests.front().first.trigger();
-        state->requests.pop_front();
-        // If it is not exclusive see how many other people
-        // we can wake up
-        if (!state->exclusive)
-        {
-          while (!state->requests.empty() &&
-                 !state->requests.front().second)
-          {
-            state->acquired_count++;
-            state->requests.front().first.trigger();
-            state->requests.pop_front();
-          }
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::attach_semantic_information(SemanticTag tag,
                                                      const NodeSet &mask,
                                                      const void *buffer,
@@ -14314,8 +13517,7 @@ namespace LegionRuntime {
                                             const std::set<ColorPoint> &targets,
                                                bool leave_open, 
                                                const ColorPoint &next_child,
-                                               const FieldMask &closing_mask,
-                                               StateDirectory *directory)
+                                               const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = acquire_physical_state(ctx_id, true/*exclusive*/);
@@ -14378,7 +13580,6 @@ namespace LegionRuntime {
                                    closer, dirty_mask, complete_mask);
       closer.update_valid_views(state, root, dirty_mask);
       release_physical_state(state);
-      directory->issue_invalidations(this, closing_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -16746,7 +15947,6 @@ namespace LegionRuntime {
                                              const FieldMask &closing_mask,
                                             const std::set<ColorPoint> &targets,
                                              const MappingRef &target_region,
-                                             StateDirectory *directory,
                                              bool leave_open, 
                                              const ColorPoint &next_child,
                                              Event &closed,
@@ -16788,8 +15988,6 @@ namespace LegionRuntime {
       {
         closer.update_node_views(this, state);
         closed = closer.get_termination_event();
-
-        directory->issue_invalidations(this, closing_mask);
       }
       release_physical_state(state);
       return success;
@@ -17216,7 +16414,8 @@ namespace LegionRuntime {
       {
         ReductionView *target_view = view->as_reduction_view();
         ReductionCloser closer(info.ctx, target_view, 
-                               user.field_mask, info.local_proc);
+                               user.field_mask, 
+                               info.version_info, info.local_proc);
         visit_node(&closer);
         InstanceRef result = target_view->add_user(user);
 #ifdef DEBUG_HIGH_LEVEL
@@ -18379,7 +17578,6 @@ namespace LegionRuntime {
                                                 const FieldMask &closing_mask,
                                             const std::set<ColorPoint> &targets,
                                                 const MappingRef &target_reg,
-                                                StateDirectory *directory,
                                                 bool leave_open, 
                                                 const ColorPoint &next_child,
                                                 Event &closed,
@@ -18468,8 +17666,6 @@ namespace LegionRuntime {
         }
         release_physical_state(state);
       }
-      if (success)
-        directory->issue_invalidations(this, closing_mask);
       return success;
     }
 

@@ -15115,8 +15115,6 @@ namespace LegionRuntime {
                                       DEFAULT_TASK_WINDOW_HYSTERESIS;
     /*static*/ unsigned Runtime::initial_tasks_to_schedule = 
                                       DEFAULT_MIN_TASKS_TO_SCHEDULE;
-    /*static*/ unsigned Runtime::initial_directory_size = 
-                                      DEFAULT_MAX_DIRECTORY_SIZE;
     /*static*/ unsigned Runtime::superscalar_width = 
                                       DEFAULT_SUPERSCALAR_WIDTH;
     /*static*/ unsigned Runtime::max_message_size = 
@@ -15246,7 +15244,6 @@ namespace LegionRuntime {
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
-        initial_directory_size = DEFAULT_MAX_DIRECTORY_SIZE;
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         max_filter_size = DEFAULT_MAX_FILTER_SIZE;
@@ -15281,7 +15278,6 @@ namespace LegionRuntime {
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
-          INT_ARG("-hl:directory", initial_directory_size);
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
           INT_ARG("-hl:filter", max_filter_size);

@@ -2188,7 +2188,6 @@ namespace LegionRuntime {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
-      static unsigned initial_directory_size;
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;

@@ -47,7 +47,6 @@ namespace LegionRuntime {
     extern Logger::Category log_garbage;
     extern Logger::Category log_leak;
     extern Logger::Category log_variant; 
-    extern Logger::Category log_directory;
 
     /////////////////////////////////////////////////////////////
     // Task Operation 
@@ -544,6 +543,15 @@ namespace LegionRuntime {
       assert(idx < parent_req_indexes.size());
 #endif
       return parent_req_indexes[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& TaskOp::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called
+      assert(false);
+      return (*(new VersionInfo()));
     }
 
     //--------------------------------------------------------------------------
@@ -1593,7 +1601,9 @@ namespace LegionRuntime {
             mapping_refs[idx] = runtime->forest->map_physical_region(
                                        enclosing_physical_contexts[idx],
                                                       mapping_path,
-                                                      req, idx, this,
+                                                      req, idx, 
+                                                      get_version_info(idx), 
+                                                      this,
                                                       current_proc,
                                                       current_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -1638,8 +1648,9 @@ namespace LegionRuntime {
                 runtime->forest->register_physical_region(
                                            enclosing_physical_contexts[idx],
                                                           mapping_refs[idx],
-                                                          req, idx, this,
-                                                          current_proc,
+                                                          req, idx, 
+                                                          get_version_info(idx),
+                                                          this, current_proc,
                                                           term_event
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
@@ -1649,15 +1660,6 @@ namespace LegionRuntime {
                                                           );
 #ifdef DEBUG_HIGH_LEVEL
               assert(early_mapped_regions[idx].has_ref());
-#endif
-#ifndef S3D_STARTUP_HACK
-              if (IS_WRITE(regions[idx]))
-              {
-                // Issue an invalidation if this was a write
-                StateDirectory *directory = parent_ctx->get_directory();
-                directory->issue_invalidations(runtime->address_space,
-                                               false/*remote*/, regions[idx]);
-              }
 #endif
               if (notify)
               {
@@ -1992,7 +1994,6 @@ namespace LegionRuntime {
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
-      directory = NULL;
       executed = false;
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
@@ -2007,7 +2008,6 @@ namespace LegionRuntime {
       max_outstanding_frames = -1;
       min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
       min_frames_to_schedule = 0;
-      max_directory_size = Runtime::initial_directory_size;
     }
 
     //--------------------------------------------------------------------------
@@ -2067,11 +2067,6 @@ namespace LegionRuntime {
 #endif
       if (context.exists())
         runtime->free_context(this);
-      if (directory != NULL)
-      {
-        delete directory;
-        directory = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4191,7 +4186,8 @@ namespace LegionRuntime {
                                       enclosing_physical_contexts[idx],
                                                     mapping_paths[idx],
                                                     regions[idx],
-                                                    idx, target
+                                                    idx, get_version_info(idx),
+                                                    target
 #ifdef DEBUG_HIGH_LEVEL
                                                     , get_logging_name()
                                                     , unique_op_id
@@ -4205,7 +4201,7 @@ namespace LegionRuntime {
                                       enclosing_physical_contexts[idx],
                                                     mapping_paths[idx],
                                                     regions[idx],
-                                                    idx,
+                                                    idx, get_version_info(idx),
                                                     this,
                                                     current_proc,
                                                     target
@@ -4294,6 +4290,7 @@ namespace LegionRuntime {
                                                           mapping_refs[idx],
                                                           regions[idx],
                                                           idx,
+                                                          get_version_info(idx),
                                                           this,
                                                           current_proc,
                                                           user_event
@@ -4679,13 +4676,6 @@ namespace LegionRuntime {
           assert(context.exists());
           runtime->forest->check_context_state(context);
 #endif
-          // Create a state directory in case any of
-          // the sub-tasks that are launched get sent remotely
-#ifdef DEBUG_HIGH_LEVEL
-          assert(directory == NULL);
-#endif
-          directory = 
-            new StateDirectory(get_unique_task_id(), runtime->forest, this);
           // If we're going to do the inner task optimization
           // then when we initialize the contexts also pass in the
           // start condition so we can add a user off of which
@@ -5616,6 +5606,16 @@ namespace LegionRuntime {
         free(const_cast<void*>(result));
     } 
 
+    //--------------------------------------------------------------------------
+    VersionInfo& MultiTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
+    }
+
     /////////////////////////////////////////////////////////////
     // Individual Task 
     /////////////////////////////////////////////////////////////
@@ -6065,7 +6065,7 @@ namespace LegionRuntime {
           if (!runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
-                                       this, parent_ctx, 
+                                       version_infos[idx], this, parent_ctx,
                                        parent_ctx->get_executing_processor()
 #ifdef DEBUG_HIGH_LEVEL
                                        , idx, get_logging_name(), unique_op_id
@@ -6236,8 +6236,6 @@ namespace LegionRuntime {
           pack_remote_mapped(rez);
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
-        else
-          issue_invalidations(runtime->address_space, false/*remote*/);
         // Mark that we have completed mapping
         complete_mapping();
       }
@@ -6274,6 +6272,16 @@ namespace LegionRuntime {
       need_completion_trigger = false;
       chain_event = completion_event;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& IndividualTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -6632,7 +6640,6 @@ namespace LegionRuntime {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      issue_invalidations(source, true/*remote*/);
       // Nothing more to unpack, we know everything is mapped
       // so tell everyone that we are mapped
       if (!is_locally_mapped())
@@ -6751,13 +6758,12 @@ namespace LegionRuntime {
       {
         runtime->forest->send_tree_shape(regions[*it], target);
       }
-      StateDirectory *directory = parent_ctx->get_directory();
       for (std::vector<unsigned>::const_iterator it = invalid.begin();
             it != invalid.end(); it++)
       {
         runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
                                              regions[*it],
-                                             directory, target,
+                                             target,
                                              needed_views,
                                              needed_managers); 
       }
@@ -6765,38 +6771,7 @@ namespace LegionRuntime {
         runtime->forest->send_remote_references(needed_views,
                                                 needed_managers, target);
     }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::issue_invalidations(AddressSpaceID source, bool remote)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_remote());
-#endif
-#ifndef S3D_STARTUP_HACK
-      StateDirectory *directory = parent_ctx->get_directory();
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Skip anything that is not a write
-        if (!IS_WRITE(regions[idx]))
-          continue;
-        // Skip any regions that were early mapped because we
-        // already issued those invalidations
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          continue;
-        log_directory.info("Issuing invalidations for region %d "
-                                "(" IDFMT ",%x,%d) of task %s",
-                                idx, regions[idx].region.get_index_space().id,
-                                regions[idx].region.get_field_space().get_id(),
-                                regions[idx].region.get_tree_id(), 
-                                variants->name);
-#ifndef S3D_STARTUP_HACK
-        directory->issue_invalidations(source, remote, regions[idx]);
-#endif
-      }
-    }
-
+ 
     //--------------------------------------------------------------------------
     /*static*/ void IndividualTask::handle_individual_request(Runtime *runtime,
                                                           Deserializer &derez,
@@ -7032,6 +7007,13 @@ namespace LegionRuntime {
     {
       chain_event = point_termination;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& PointTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_version_info(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -8436,7 +8418,7 @@ namespace LegionRuntime {
           if (!runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
-                                       this, parent_ctx,
+                                       version_infos[idx], this, parent_ctx,
                                        parent_ctx->get_executing_processor()
 #ifdef DEBUG_HIGH_LEVEL
                                        , idx, get_logging_name(), unique_op_id
@@ -8924,10 +8906,6 @@ namespace LegionRuntime {
       derez.deserialize(points);
       long long denom;
       derez.deserialize(denom);
-      // Send any invalidation messages for things that have now mapped
-#ifndef S3D_STARTUP_HACK
-      StateDirectory *directory = parent_ctx->get_directory();
-#endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -8937,10 +8915,6 @@ namespace LegionRuntime {
           std::vector<LogicalRegion> handles(points); 
           for (unsigned pidx = 0; pidx < points; pidx++)
             derez.deserialize(handles[pidx]);
-#ifndef S3D_STARTUP_HACK
-          directory->issue_invalidations(source, true/*remote*/,
-                                         regions[idx], handles);
-#endif
         }
         // otherwise it was locally mapped so we are already done
       }
@@ -9051,16 +9025,13 @@ namespace LegionRuntime {
       {
         runtime->forest->send_tree_shape(regions[*it], target);
       }
-      StateDirectory *directory = parent_ctx->get_directory();
       for (std::vector<unsigned>::const_iterator it = invalid.begin();
             it != invalid.end(); it++)
       {
         // Otherwise we need to send the state
         runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
-                                             regions[*it],
-                                             directory, target,
-                                             needed_views,
-                                             needed_managers);
+                                             regions[*it], target,
+                                             needed_views, needed_managers);
       }
       // If we had any needed views or needed managers send 
       // their remote references
@@ -9953,10 +9924,6 @@ namespace LegionRuntime {
       }
       else
       {
-        // Issue any invalidations that we have
-#ifndef S3D_STARTUP_HACK
-        StateDirectory *directory = index_owner->parent_ctx->get_directory();
-#endif
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!IS_WRITE(regions[idx]))
@@ -9967,11 +9934,6 @@ namespace LegionRuntime {
             std::vector<LogicalRegion> handles(points.size());
             for (unsigned pidx = 0; pidx < points.size(); pidx++)
               handles[pidx] = points[pidx]->regions[idx].region;
-#ifndef S3D_STARTUP_HACK
-            directory->issue_invalidations(runtime->address_space, 
-                                           false/*remote*/,
-                                           regions[idx], handles);
-#endif
           }
           // otherwise it was locally mapped so we are already done
         }

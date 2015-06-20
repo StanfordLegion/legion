@@ -89,6 +89,7 @@ namespace LegionRuntime {
       virtual void resolve_false(void) = 0;
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
@@ -279,8 +280,6 @@ namespace LegionRuntime {
         { return executing_processor; }
       inline void set_executing_processor(Processor p)
         { executing_processor = p; }
-      inline StateDirectory* get_directory(void) const
-        { return directory; }
     public:
       // These two functions are only safe to call after
       // the task has had its variant selected
@@ -498,8 +497,6 @@ namespace LegionRuntime {
                                                    inline_regions;
       // Context for this task
       RegionTreeContext context; 
-      // Directory for tracking remote state
-      StateDirectory *directory;
     protected:
       // Track whether this task has finished executing
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
@@ -584,6 +581,7 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool map_and_launch(void) = 0;
+      virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual Event defer_mapping(void) = 0;
       virtual void check_state(UserEvent ready_event) = 0;
@@ -679,6 +677,7 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual Event defer_mapping(void);
       virtual void check_state(UserEvent ready_event);
@@ -710,7 +709,6 @@ namespace LegionRuntime {
                              const std::vector<unsigned> &index_shapes,
                              const std::vector<unsigned> &region_shapes,
                              const std::vector<unsigned> &invalid);
-      void issue_invalidations(AddressSpaceID source, bool remote);
       static void handle_individual_request(Runtime *rt, Deserializer &derez,
                                             AddressSpaceID source);
       static void handle_individual_return(Runtime *rt, Deserializer &derez);
@@ -776,6 +774,7 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual Event defer_mapping(void);
       virtual void check_state(UserEvent ready_event);

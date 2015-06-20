@@ -76,10 +76,6 @@
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
 #endif
-// Default number of leaf directory entries for precise information
-#ifndef DEFAULT_MAX_DIRECTORY_SIZE
-#define DEFAULT_MAX_DIRECTORY_SIZE      64
-#endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline
 #ifndef DEFAULT_SUPERSCALAR_WIDTH

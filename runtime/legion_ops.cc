@@ -1804,7 +1804,7 @@ namespace LegionRuntime {
       if (!requirement.premapped)
       {
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, 
+                  physical_ctx, privilege_path, requirement, version_info, 
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -1822,6 +1822,7 @@ namespace LegionRuntime {
         map_ref = runtime->forest->map_restricted_region(physical_ctx,
                                                          requirement,
                                                          0/*idx*/,
+                                                         version_info,
                                                          local_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                          , get_logging_name()
@@ -1841,6 +1842,7 @@ namespace LegionRuntime {
         map_ref = runtime->forest->remap_physical_region(physical_ctx,
                                                          requirement,
                                                          0/*idx*/,
+                                                         version_info,
                                                          target
 #ifdef DEBUG_HIGH_LEVEL
                                                          , get_logging_name()
@@ -1861,6 +1863,7 @@ namespace LegionRuntime {
                                                        mapping_path,
                                                        requirement,
                                                        0/*idx*/,
+                                                       version_info,
                                                        this,
                                                        local_proc,
                                                        local_proc
@@ -1883,6 +1886,7 @@ namespace LegionRuntime {
                                                                 map_ref,
                                                                 requirement,
                                                                 0/*idx*/,
+                                                                version_info,
                                                                 this,
                                                                 local_proc,
                                                             termination_event
@@ -2688,7 +2692,7 @@ namespace LegionRuntime {
           src_requirements[idx].premapped = 
             runtime->forest->premap_physical_region(
                   src_contexts[idx],src_privilege_paths[idx],
-                  src_requirements[idx], 
+                  src_requirements[idx], src_versions[idx],
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , idx, get_logging_name(), unique_op_id
@@ -2707,7 +2711,7 @@ namespace LegionRuntime {
           dst_requirements[idx].premapped = 
             runtime->forest->premap_physical_region(
                   dst_contexts[idx],dst_privilege_paths[idx],
-                  dst_requirements[idx], 
+                  dst_requirements[idx], dst_versions[idx],
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , src_requirements.size()+idx
@@ -2740,7 +2744,9 @@ namespace LegionRuntime {
           src_mapping_refs[idx] = runtime->forest->map_restricted_region(
                                                         src_contexts[idx],
                                                         src_requirements[idx],
-                                                        idx, local_proc
+                                                        idx, 
+                                                        src_versions[idx],
+                                                        local_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
                                                         , unique_op_id
@@ -2756,6 +2762,7 @@ namespace LegionRuntime {
                                                         src_mapping_paths[idx],
                                                         src_requirements[idx],
                                                         idx,
+                                                        src_versions[idx],
                                                         this,
                                                         local_proc,
                                                         local_proc
@@ -2785,6 +2792,7 @@ namespace LegionRuntime {
                                                     dst_contexts[idx],
                                                     dst_requirements[idx],
                                                     src_requirements.size()+idx,
+                                                    dst_versions[idx],
                                                     local_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                     , get_logging_name()
@@ -2801,6 +2809,7 @@ namespace LegionRuntime {
                                                     dst_mapping_paths[idx],
                                                     dst_requirements[idx],
                                                     src_requirements.size()+idx,
+                                                    dst_versions[idx],
                                                     this,
                                                     local_proc,
                                                     local_proc
@@ -2874,6 +2883,7 @@ namespace LegionRuntime {
                                                         dst_mapping_refs[idx],
                                                         dst_requirements[idx],
                                                         idx,
+                                                        dst_versions[idx],
                                                         this,
                                                         local_proc,
                                                         completion_event
@@ -2905,6 +2915,7 @@ namespace LegionRuntime {
                                                    src_contexts[idx],
                                                    dst_contexts[idx],
                                                    src_requirements[idx],
+                                                   src_versions[idx],
                                                    dst_requirements[idx],
                                                    dst_ref, sync_precondition));
           }
@@ -2915,6 +2926,7 @@ namespace LegionRuntime {
                                                         src_mapping_refs[idx],
                                                         src_requirements[idx],
                                                         idx,
+                                                        src_versions[idx],
                                                         this,
                                                         local_proc,
                                                         completion_event
@@ -4265,7 +4277,7 @@ namespace LegionRuntime {
       if (!requirement.premapped)
       {
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, 
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -4285,6 +4297,7 @@ namespace LegionRuntime {
         target = runtime->forest->map_restricted_region(physical_ctx,
                                                         requirement,
                                                         0/*idx*/,
+                                                        version_info,
                                                         local_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
@@ -4302,7 +4315,7 @@ namespace LegionRuntime {
                                               local_proc, target_children,
                                               leave_open, next_child, 
                                               close_event, target,
-                                              force_composite
+                                              version_info, force_composite
 #ifdef DEBUG_HIGH_LEVEL
                                               , 0 /*idx*/ 
                                               , get_logging_name()
@@ -4500,7 +4513,7 @@ namespace LegionRuntime {
       if (!requirement.premapped)
       {
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, 
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -4515,8 +4528,8 @@ namespace LegionRuntime {
       // to a specific physical instance, so we can issue that without
       // worrying about failing.
       Event close_event = runtime->forest->close_physical_context(physical_ctx,
-                                            requirement, parent_ctx, 
-                                            local_proc, reference
+                                            requirement, version_info, 
+                                            parent_ctx, local_proc, reference
 #ifdef DEBUG_HIGH_LEVEL
                                             , 0 /*idx*/ 
                                             , get_logging_name()
@@ -4821,7 +4834,7 @@ namespace LegionRuntime {
         // we aren't a mappable.  Technically this shouldn't do anything
         // because we've marked ourselves as being restricted.
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, 
+                  physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -4836,6 +4849,7 @@ namespace LegionRuntime {
       MappingRef map_ref = runtime->forest->map_restricted_region(physical_ctx,
                                                                   requirement,
                                                                   0/*idx*/,
+                                                                  version_info,
                                                                   local_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
@@ -4850,6 +4864,7 @@ namespace LegionRuntime {
                                                           map_ref,
                                                           requirement,
                                                           0/*idx*/,
+                                                          version_info,
                                                           this,
                                                           local_proc,
                                                           completion_event
@@ -5383,7 +5398,7 @@ namespace LegionRuntime {
         // we aren't a mappable.  Technically this shouldn't do anything
         // because we've marked ourselves as being restricted.
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, 
+                  physical_ctx, privilege_path, requirement, version_info, 
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -5406,6 +5421,7 @@ namespace LegionRuntime {
       MappingRef map_ref = runtime->forest->remap_physical_region(physical_ctx,
                                                                   requirement,
                                                                   0/*idx*/,
+                                                                  version_info,
                                                   region.impl->get_reference()
 #ifdef DEBUG_HIGH_LEVEL
                                                             , get_logging_name()
@@ -5420,6 +5436,7 @@ namespace LegionRuntime {
                                                             map_ref,
                                                             requirement,
                                                             0/*idx*/,
+                                                            version_info,
                                                             this,
                                                             local_proc,
                                                             completion_event
@@ -7852,7 +7869,7 @@ namespace LegionRuntime {
       if (!requirement.premapped)
       {
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement,
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -8184,7 +8201,7 @@ namespace LegionRuntime {
       {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement,
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -8544,7 +8561,7 @@ namespace LegionRuntime {
       {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement,
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
@@ -8873,7 +8890,7 @@ namespace LegionRuntime {
       {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement,
+                  physical_ctx, privilege_path, requirement, version_info,
                   parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id

@@ -265,6 +265,7 @@ namespace LegionRuntime {
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   RegionRequirement &req,
+                                  VersionInfo &version_info,
                                   Mappable *mappable,
                                   SingleTask *parent_ctx,
                                   Processor local_proc
@@ -278,6 +279,7 @@ namespace LegionRuntime {
                                      RegionTreePath &path,
                                      RegionRequirement &req,
                                      unsigned idx,
+                                     VersionInfo &version_info,
                                      Mappable *mappable,
                                      Processor local_proc,
                                      Processor target_proc
@@ -292,6 +294,7 @@ namespace LegionRuntime {
       MappingRef remap_physical_region(RegionTreeContext ctx,
                                        RegionRequirement &req,
                                        unsigned index,
+                                       VersionInfo &version_info,
                                        const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
@@ -304,6 +307,7 @@ namespace LegionRuntime {
       MappingRef map_restricted_region(RegionTreeContext ctx,
                                        RegionRequirement &req,
                                        unsigned index,
+                                       VersionInfo &version_info,
                                        Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
@@ -315,6 +319,7 @@ namespace LegionRuntime {
                                        RegionTreePath &path,
                                        RegionRequirement &req,
                                        unsigned index,
+                                       VersionInfo &version_info,
                                        Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
@@ -325,6 +330,7 @@ namespace LegionRuntime {
                                            const MappingRef &ref,
                                            RegionRequirement &req,
                                            unsigned idx,
+                                           VersionInfo &version_info,
                                            Mappable *mappable,
                                            Processor local_proc,
                                            Event term_event
@@ -349,6 +355,7 @@ namespace LegionRuntime {
                                    const ColorPoint &next_child,
                                    Event &closed,
                                    const MappingRef &target,
+                                   VersionInfo &version_info,
                                    bool force_composite
 #ifdef DEBUG_HIGH_LEVEL
                                    , unsigned index
@@ -360,6 +367,7 @@ namespace LegionRuntime {
 
       Event close_physical_context(RegionTreeContext ctx,
                                    RegionRequirement &req,
+                                   VersionInfo &version_info,
                                    Mappable *mappable,
                                    Processor local_proc,
                                    const InstanceRef &ref
@@ -374,6 +382,7 @@ namespace LegionRuntime {
                         RegionTreeContext src_ctx,
                         RegionTreeContext dst_ctx,
                         RegionRequirement &src_req,
+                        VersionInfo &src_version_info,
                         const RegionRequirement &dst_req,
                         const InstanceRef &dst_ref,
                         Event precondition);
@@ -398,7 +407,6 @@ namespace LegionRuntime {
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
                                const RegionRequirement &req,
-                               StateDirectory *directory,
                                AddressSpaceID target,
                    LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
@@ -429,9 +437,6 @@ namespace LegionRuntime {
       bool check_remote_shape(const RegionRequirement &req);
       bool check_remote_state(const RegionRequirement &req,
                               RegionTreeContext ctx);
-    public:
-      void validate_remote_state(Deserializer &derez, AddressSpaceID source);
-      void invalidate_remote_state(Deserializer &derez, AddressSpaceID source);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -653,8 +658,6 @@ namespace LegionRuntime {
       MAPPING_TRAVERSE_CALL,
       MAP_PHYSICAL_REGION_CALL,
       MAP_REDUCTION_REGION_CALL,
-      ACQUIRE_PHYSICAL_STATE_CALL,
-      RELEASE_PHYSICAL_STATE_CALL,
       REGISTER_LOGICAL_NODE_CALL,
       OPEN_LOGICAL_NODE_CALL,
       CLOSE_LOGICAL_NODE_CALL,
@@ -770,148 +773,7 @@ namespace LegionRuntime {
     private:
       Runtime *runtime;
       Serializer &rez;
-    };
-
-    /**
-     * \class StateDirectory
-     * A state directory object is created for each dynamic
-     * context for tracking which other nodes in the system
-     * have up to date physical region tree state information
-     * for particular fields and region trees. It operates
-     * similar to a directory in a directory based cache-coherence
-     * scheme by tracking all of this information and sending
-     * invalidate messages when necessary.  When it is destructed
-     * it also sends messages to free up the contexts on the 
-     * remote nodes where state was stored.
-     */
-    class StateDirectory {
-    public:
-      struct RemoteNodeState {
-      public:
-        RemoteNodeState(void) { }
-        RemoteNodeState(const FieldMask &m, AddressSpaceID target)
-          : valid_fields(m) { remote_nodes.add(target); }
-      public:
-        NodeSet  remote_nodes;
-        FieldMask valid_fields;
-      };
-      struct RemoteTreeState {
-      public:
-        FieldMask valid_fields;
-        // Each field should be set in exactly one of these entries
-        LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned node_states;
-      };
-      struct RemoteForestState {
-      public:
-        FieldMask valid_fields;
-        LegionMap<RegionTreeNode*,RemoteTreeState>::aligned remote_tree_states;
-      };
-      struct SendRemoteFreeFunctor {
-      public:
-        SendRemoteFreeFunctor(Runtime *rt, Serializer &r)
-          : runtime(rt), rez(r) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        Runtime *runtime;
-        Serializer &rez;
-      };
-      struct InvalidateRemoteStateFunctor {
-      public:
-        InvalidateRemoteStateFunctor(Runtime *rt, RegionTreeNode *n, 
-                                     Serializer &r)
-          : runtime(rt), node(n), rez(r) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        Runtime *runtime;
-        RegionTreeNode *node;
-        Serializer &rez;
-      };
-    public:
-      StateDirectory(UniqueID remote_owner_uid, RegionTreeForest *forest,
-                     SingleTask *context);
-      StateDirectory(const StateDirectory &rhs);
-      ~StateDirectory(void);
-    public:
-      StateDirectory& operator=(const StateDirectory &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
-    public:
-      inline UniqueID get_owner_uid(void) const { return remote_owner_uid; }
-    public:
-      // Call this whenever we send some region tree state to a remote node
-      void update_remote_state(AddressSpaceID target, 
-                               RegionTreeNode *node,
-                               const FieldMask &mask);
-    protected:
-      // For operating on RemoteForestStates
-      void update_remote_state(RemoteForestState &state, AddressSpaceID target,
-                               RegionTreeNode *node, const FieldMask &mask);
-      // For operating on RemoteTreeStates
-      void update_remote_state(RemoteTreeState &state, AddressSpaceID target,
-                               const FieldMask &mask);
-    public:
-      // Called whenever we perform a close operation which invalidates all
-      // the state for the given fields for an entire tree rooted at 'node'
-      void issue_invalidations(RegionTreeNode *node, const FieldMask &mask);
-      // Call this whenever we finish mapping a region with write privileges to
-      // invalidate all versions of the tree except the one from the source node
-      void issue_invalidations(AddressSpaceID source, bool remote,
-                               const RegionRequirement &req);
-      // Same thing as the previous one but for projection requirements
-      void issue_invalidations(AddressSpaceID source, bool remote,
-                               const RegionRequirement &req,
-                               const std::vector<LogicalRegion> &handles);
-    protected:
-      // Methods for operating on RemoteForestStates
-      bool issue_invalidations(RemoteForestState &state, 
-                               RegionTreeNode *node, const FieldMask &mask);
-      bool issue_invalidations(RemoteForestState &state, RegionTreeNode *node,
-                               const FieldMask &mask, AddressSpaceID source);
-    protected:
-      // Methods for operation on RemoteTreeStates
-      bool issue_invalidations(RemoteTreeState &state, 
-                               RegionTreeNode *node, const FieldMask &mask);
-      bool issue_invalidations(RemoteTreeState &state, RegionTreeNode *node,
-                               const FieldMask &mask, AddressSpaceID source);
-    protected:
-      void insert_node_state(AddressSpaceID node,
-                             const FieldMask &node_mask,
-       LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned &node_states);
-    private:
-      UniqueID remote_owner_uid;
-      RegionTreeForest *const forest;
-      SingleTask *const context;
-    private:
-      Reservation state_lock;
-      // Set of nodes that have some remote state, these are
-      // monotonically increasing over execution and are only
-      // an approximation for detecting quick outs.
-      NodeSet remote_contexts;
-      FieldMask remote_fields;
-      // There are several trade-offs going on in this data structure.
-      // Ideally we would like to track exactly which fields are valid
-      // on which nodes for every single node in the region tree forest.
-      // That is impractical, so we instead track it for whole sub-trees
-      // in the forest.  This may result in duplicate sending sometimes,
-      // but should otherwise be efficient.
-      //
-      // The other large trade-off that is occurring is that we are 
-      // storing sets of nodes for which all have the same valid fields
-      // for specific sub-trees (RemoteTreeSets).  This may require
-      // additional iterating for both updates and invalidations, but
-      // it is precise. The worst-case scenario is that each node gets
-      // a different field (or set of fields), but that seems to be
-      // an uncommon case for most Legion programs.
-      //
-      // The crucial invariant to maintain is that for each 
-      // RegionTreeNode and remote node ID, a bit is set for the
-      // remote node in at most one RemoteNodeState for the
-      // corresponding RegionTreeNode. This guarantees that our
-      // information about fields on remote nodes is precise.
-      LegionMap<RegionTreeID,RemoteForestState>::aligned remote_forest_states;
-    };
+    }; 
 
     /**
      * \class IndexTreeNode
@@ -1626,12 +1488,14 @@ namespace LegionRuntime {
     public:
       MappableInfo(ContextID ctx, Mappable *mappable,
                    Processor local_proc, RegionRequirement &req,
+                   VersionInfo &version_info,
                    const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
       Mappable *const mappable;
       const Processor local_proc;
       RegionRequirement &req;
+      VersionInfo &version_info;
       const FieldMask traversal_mask;
     };
 
@@ -2255,8 +2119,7 @@ namespace LegionRuntime {
                                      const std::set<ColorPoint> &targets,
                                      bool leave_open, 
                                      const ColorPoint &next_child,
-                                     const FieldMask &closing_mask,
-                                     StateDirectory *directory); 
+                                     const FieldMask &closing_mask); 
       void close_physical_node(CompositeCloser &closer,
                                CompositeNode *node,
                                const FieldMask &closing_mask,
@@ -2418,7 +2281,7 @@ namespace LegionRuntime {
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
                                            const MappingRef &target_region,
-                                           StateDirectory *directory,
+                                           VersionInfo &version_info,
                                            bool leave_open,
                                            const ColorPoint &next_child,
                                            Event &closed,
@@ -2550,7 +2413,6 @@ namespace LegionRuntime {
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
                                            const MappingRef &target_region,
-                                           StateDirectory *directory,
                                            bool leave_open,
                                            const ColorPoint &next_child,
                                            Event &closed,
@@ -2709,7 +2571,6 @@ namespace LegionRuntime {
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
                                            const MappingRef &target_region,
-                                           StateDirectory *directory,
                                            bool leave_open,
                                            const ColorPoint &next_child,
                                            Event &closed,
@@ -3049,7 +2910,8 @@ namespace LegionRuntime {
     class ReductionCloser : public NodeTraverser {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
-                      const FieldMask &reduc_mask,
+                      const FieldMask &reduc_mask, 
+                      VersionInfo &version_info,
                       Processor local_proc);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
@@ -3063,6 +2925,7 @@ namespace LegionRuntime {
       const ContextID ctx;
       ReductionView *const target;
       const FieldMask close_mask;
+      VersionInfo &version_info;
       const Processor local_proc;
     };
 
@@ -3074,8 +2937,7 @@ namespace LegionRuntime {
      */
     class PremapTraverser : public PathTraverser {
     public:
-      PremapTraverser(RegionTreePath &path, const MappableInfo &info,
-                      StateDirectory *directory);  
+      PremapTraverser(RegionTreePath &path, const MappableInfo &info);  
       PremapTraverser(const PremapTraverser &rhs); 
       ~PremapTraverser(void);
     public:
@@ -3090,7 +2952,6 @@ namespace LegionRuntime {
                                     LogicalRegion closing_handle);
     protected:
       const MappableInfo &info;
-      StateDirectory *const directory;
       RegionTreeNode *last_node;
     }; 
 

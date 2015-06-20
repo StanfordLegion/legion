@@ -4930,9 +4930,6 @@ namespace LegionRuntime {
        *              has been compiled with the macro INORDER_EXECUTION.
        *              By default when compiling with INORDER_EXECUTION
        *              all applications will run in program order.
-       * -hl:directory <int> Control the maximum number of leaf entries
-       *              for the runtime should maintain precise information
-       *              for remote region tree contexts. The default is 64.
        * -------------
        *  Messaging
        * -------------

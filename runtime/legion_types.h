@@ -239,7 +239,6 @@ namespace LegionRuntime {
 
     // region_tree.h
     class RegionTreeForest;
-    class StateDirectory;
     class IndexTreeNode;
     class IndexSpaceNode;
     class IndexPartNode;
@@ -570,8 +569,7 @@ namespace LegionRuntime {
     friend class FoldReductionManager;            \
     friend class TreeStateLogger;                 \
     friend class BindingLib::Utility;             \
-    friend class CObjectWrapper;                  \
-    friend class StateDirectory;
+    friend class CObjectWrapper;                  
 
     // Timing events
     enum {
