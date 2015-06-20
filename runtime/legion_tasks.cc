@@ -4587,6 +4587,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(regions[idx].handle_type == SINGULAR);
 #endif
+          // Convert any WRITE_ONLY or WRITE_DISCARD privleges to READ_WRITE
+          // This is necessary for any sub-operations which may need to rely
+          // on our privileges for determining their own privileges such
+          // as inline mappings or acquire and release operations
+          if (regions[idx].privilege == WRITE_DISCARD)
+            regions[idx].privilege = READ_WRITE;
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx])
           {
