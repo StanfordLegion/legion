@@ -3869,12 +3869,22 @@ namespace LegionRuntime {
       size_t bytes = find_field(get_field_sizes(), fill_offset, fill_size,
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
-      for (Domain::DomainPointIterator itr(domain); itr; itr++)
-      {
-        int index = linearization.get_image(itr.p);
-        void *raw_addr = get_address(index, field_start,
-                                     field_size, within_field);
-        memcpy(raw_addr, fill_value, fill_value_size);
+      if (domain.get_dim() == 0) {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          int index = itr.p.get_index();
+          void *raw_addr = get_address(index, field_start,
+                                       field_size, within_field);
+          memcpy(raw_addr, fill_value, fill_value_size);
+        }
+      } else {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          int index = linearization.get_image(itr.p);
+          void *raw_addr = get_address(index, field_start,
+                                       field_size, within_field);
+          memcpy(raw_addr, fill_value, fill_value_size);
+        }
       }
     }
 
