@@ -129,20 +129,23 @@ namespace LegionRuntime {
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
-                                      Event term_event);
+                                      Event term_event,
+                                      VersionInfo &version_info);
       Event create_partition_by_image(RegionTreeContext ctx,
                                       Processor local_proc,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
-                                      Event term_event);
+                                      Event term_event,
+                                      VersionInfo &version_info);
       Event create_partition_by_preimage(RegionTreeContext ctx,
                                       Processor local_proc,
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
                                       const Domain &color_space,
-                                      Event term_event);
+                                      Event term_event,
+                                      VersionInfo &version_info);
     public:
       IndexSpace find_pending_space(IndexPartition parent,
                                     const DomainPoint &color,
@@ -1737,7 +1740,8 @@ namespace LegionRuntime {
      */
     struct CompositeCloser {
     public:
-      CompositeCloser(ContextID ctx, bool permit_leave_open);
+      CompositeCloser(ContextID ctx, VersionInfo &version_info,
+                      bool permit_leave_open);
       CompositeCloser(const CompositeCloser &rhs);
       ~CompositeCloser(void);
     public:
@@ -1753,6 +1757,7 @@ namespace LegionRuntime {
     public:
       const ContextID ctx;
       const bool permit_leave_open;
+      VersionInfo &version_info;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<CompositeNode*,FieldMask>::aligned collapsed_nodes;
@@ -1892,6 +1897,9 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
       PhysicalState(void);
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalState(RegionTreeNode *node);
+#endif
       PhysicalState(const PhysicalState &rhs);
       ~PhysicalState(void);
     public:
@@ -1917,6 +1925,10 @@ namespace LegionRuntime {
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     public:
       LegionMap<VersionState*,FieldMask>::aligned version_states;
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      RegionTreeNode *node;
+#endif
     };
 
     /**
@@ -1977,7 +1989,7 @@ namespace LegionRuntime {
     public:
       VersionManager& operator=(const VersionManager &rhs);
     public:
-      PhysicalState* construct_state(
+      PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions);
       void apply_updates(const FieldMask &update_mask, 
                          PhysicalState *state, bool advance);
@@ -2091,7 +2103,8 @@ namespace LegionRuntime {
                                      const std::set<ColorPoint> &targets,
                                      bool leave_open, 
                                      const ColorPoint &next_child,
-                                     const FieldMask &closing_mask); 
+                                     const FieldMask &closing_mask,
+                                     VersionInfo &version_info); 
       void close_physical_node(CompositeCloser &closer,
                                CompositeNode *node,
                                const FieldMask &closing_mask,
@@ -2113,23 +2126,29 @@ namespace LegionRuntime {
                                 FieldMask &complete_mask);
       void open_physical_child(ContextID ctx_id,
                                const ColorPoint &child_color,
-                               const FieldMask &open_mask);
+                               const FieldMask &open_mask,
+                               VersionInfo &version_info);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
-      void find_valid_instance_views(PhysicalState *state,
+      void find_valid_instance_views(ContextID ctx,
+                                     PhysicalState *state,
                                      const FieldMask &valid_mask,
                                      const FieldMask &space_mask, 
+                                     VersionInfo &version_info,
                                      bool needs_space,
                    LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
       static void remove_valid_references(
              const LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
-      void find_valid_reduction_views(PhysicalState *state, ReductionOpID redop,
+      void find_valid_reduction_views(ContextID ctx, PhysicalState *state, 
+                                      ReductionOpID redop,
                                       const FieldMask &valid_mask,
+                                      VersionInfo &version_info,
                                       std::set<ReductionView*> &valid_views);
       static void remove_valid_references(
                                 const std::set<ReductionView*> &valid_views);
-      void pull_valid_instance_views(PhysicalState *state,
-                                     const FieldMask &mask);
+      void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
+                                     const FieldMask &mask, 
+                                     VersionInfo &version_info);
       void find_pending_updates(PhysicalState *state, 
                                 MaterializedView *target,
                                 FieldMask &needed_fields,
@@ -2448,7 +2467,8 @@ namespace LegionRuntime {
       void find_field_descriptors(ContextID ctx, PhysicalUser &user,
                                   unsigned fid_idx, Processor proc, 
                                   std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<Event> &preconditions);
+                                  std::set<Event> &preconditions,
+                                  VersionInfo &version_info);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,

@@ -7891,7 +7891,8 @@ namespace LegionRuntime {
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
-                                                         completion_event);
+                                                         completion_event,
+                                                         version_info);
             break;
           }
         case BY_IMAGE:
@@ -7902,7 +7903,8 @@ namespace LegionRuntime {
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
-                                                         completion_event);
+                                                         completion_event,
+                                                         version_info);
             break;
           }
         case BY_PREIMAGE:
@@ -7914,7 +7916,8 @@ namespace LegionRuntime {
                                                             projection,
                                                             partition_handle,
                                                             color_space,
-                                                            completion_event);
+                                                            completion_event,
+                                                            version_info);
             break;
           }
         default:

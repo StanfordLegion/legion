@@ -572,7 +572,8 @@ namespace LegionRuntime {
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
-                                                  Event term_event)
+                                                  Event term_event,
+                                                  VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -594,7 +595,7 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         PhysicalUser user(RegionUsage(req), user_mask, term_event);
         top_node->find_field_descriptors(ctx.get_id(), user, fid_idx, proc,
-                                         field_data, preconditions);
+                                       field_data, preconditions, version_info);
       }
       // Enumerate the color space so we can get back a different index
       // for each color in the color space
@@ -623,7 +624,8 @@ namespace LegionRuntime {
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
-                                                  Event term_event)
+                                                  Event term_event,
+                                                  VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -648,13 +650,13 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         ColorPoint child_color(itr.p);
         // Open up the child on the partition node
-        projection_node->open_physical_child(ctx.get_id(),
-                                             child_color, user_mask);
+        projection_node->open_physical_child(ctx.get_id(), child_color, 
+                                             user_mask, version_info);
         RegionNode *child_node = projection_node->get_child(child_color);
         // Get the field data on this child node
         PhysicalUser user(RegionUsage(req), user_mask, term_event);
         child_node->find_field_descriptors(ctx.get_id(), user, fid_idx, proc,
-                                           field_data, preconditions);
+                                       field_data, preconditions, version_info);
         Event child_pre;
         const Domain &child_dom = 
                         child_node->row_source->get_domain(child_pre);
@@ -686,7 +688,8 @@ namespace LegionRuntime {
                                                   IndexPartition projection,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
-                                                  Event term_event)
+                                                  Event term_event,
+                                                  VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -709,7 +712,7 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         PhysicalUser user(RegionUsage(req), user_mask, term_event);
         top_node->find_field_descriptors(ctx.get_id(), user, fid_idx, proc,
-                                         field_data, preconditions);
+                                       field_data, preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
       std::map<LowLevel::IndexSpace,LowLevel::IndexSpace> subspaces;
@@ -2081,7 +2084,7 @@ namespace LegionRuntime {
       if (!result && create_composite)
       {
         close_node->create_composite_instance(info.ctx, target_children,
-                                    leave_open, next_child, closing_mask);
+                          leave_open, next_child, closing_mask, version_info);
         // Making a composite always succeeds
         result = true;
         closed = Event::NO_EVENT;
@@ -8747,7 +8750,7 @@ namespace LegionRuntime {
 #endif
       // Ask the manager to make the physical state
       PhysicalState *result = 
-                      manager->construct_state(finder->second.version_numbers);
+                manager->construct_state(node, finder->second.version_numbers);
       // Save the resulting physical state
       finder->second.physical_state = result;
       return result;
@@ -9637,7 +9640,8 @@ namespace LegionRuntime {
         // If we're not doing a reduction, pull down all the valid views
         // and then record the valid physical instances unless we're
         // doing a reductions in which case it doesn't matter
-        node->pull_valid_instance_views(state, info.traversal_mask);
+        node->pull_valid_instance_views(info.ctx, state, 
+                                        info.traversal_mask, info.version_info);
         // Find the memories for all the instances and report
         // which memories have full instances and which ones
         // only have partial instances
@@ -9797,8 +9801,7 @@ namespace LegionRuntime {
       else
         finder->second |= info.traversal_mask;
       // Flush any outstanding reduction operations
-      node->flush_reductions(user_mask, 
-                             info.req.redop, info);
+      node->flush_reductions(user_mask, info.req.redop, info);
     }
 
     //--------------------------------------------------------------------------
@@ -9861,15 +9864,15 @@ namespace LegionRuntime {
                                additional_fields.end());
           FieldMask additional_mask = 
             node->column_source->get_field_mask(new_fields);
-          node->find_valid_instance_views(state, additional_mask,
-                                          additional_mask, true/*space*/,
-                                          valid_instances);
+          node->find_valid_instance_views(info.ctx, state, additional_mask,
+                                          additional_mask, info.version_info,
+                                          true/*space*/, valid_instances);
         }
         else
         {
-          node->find_valid_instance_views(state, user_mask,
-                                          user_mask, true/*space*/,
-                                          valid_instances);
+          node->find_valid_instance_views(info.ctx, state, user_mask,
+                                          user_mask, info.version_info,
+                                          true/*space*/, valid_instances);
         }
       }
       // Compute the set of valid memories and filter out instance which
@@ -10076,8 +10079,8 @@ namespace LegionRuntime {
       {
         PhysicalState *state = node->get_physical_state(info.ctx,
                                                         info.version_info);
-        node->find_valid_reduction_views(state, usage.redop,
-                                         user_mask, valid_views);
+        node->find_valid_reduction_views(info.ctx, state, usage.redop, 
+                                user_mask, info.version_info, valid_views);
       }
 
       // Compute the set of valid memories
@@ -10143,9 +10146,9 @@ namespace LegionRuntime {
       LegionMap<InstanceView*,FieldMask>::aligned valid_instances;
       PhysicalState *state = node->get_physical_state(info.ctx,
                                                       info.version_info);
-      node->find_valid_instance_views(state, user_mask,
-                                      user_mask, false/*space*/,
-                                      valid_instances);
+      node->find_valid_instance_views(info.ctx, state, user_mask,
+                                      user_mask, info.version_info,
+                                      false/*space*/, valid_instances);
       InstanceView *chosen_inst = NULL;
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             valid_instances.begin(); it != valid_instances.end(); it++)
@@ -11156,15 +11159,15 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    CompositeCloser::CompositeCloser(ContextID c, bool open)
-      : ctx(c), permit_leave_open(open)
+    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info, bool open)
+      : ctx(c), permit_leave_open(open), version_info(info)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeCloser::CompositeCloser(const CompositeCloser &rhs)
-      : ctx(0), permit_leave_open(false)
+      : ctx(0), permit_leave_open(false), version_info(rhs.version_info)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11549,12 +11552,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* VersionManager::construct_state(
+    PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions)
     //--------------------------------------------------------------------------
     {
       // Create the result
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalState *state = legion_new<PhysicalState>(node);
+#else
       PhysicalState *state = legion_new<PhysicalState>();
+#endif
       if (versions.empty())
         return state;
       // Before we take the lock in read-only mode, see if we need to 
@@ -13025,12 +13032,13 @@ namespace LegionRuntime {
         if (!!dirty_fields)
         {
           // Pull down instance views so we don't issue unnecessary copies
-          pull_valid_instance_views(state, closing_mask);
+          pull_valid_instance_views(ctx, state, 
+                                    closing_mask, closer.info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!state->valid_views.empty());
 #endif
-          find_valid_instance_views(state, closing_mask, closing_mask, 
-                                    false/*needs space*/, valid_instances);
+          find_valid_instance_views(ctx, state, closing_mask, closing_mask, 
+              closer.info.version_info, false/*needs space*/, valid_instances);
         }
         if (!!reduc_fields)
         {
@@ -13371,8 +13379,10 @@ namespace LegionRuntime {
         // if he fails to make them. When making close targets pick
         // them for the full traversal mask so that other close
         // operations can reuse the same physical instances.
-        find_valid_instance_views(state, closer.info.traversal_mask, 
+        find_valid_instance_views(closer.info.ctx, state, 
+                                  closer.info.traversal_mask, 
                                   closer.info.traversal_mask,
+                                  closer.info.version_info,
                                   true/*needs space*/, space_views);
         // This doesn't matter so always mark it false for now
         if (!select_close_targets(closer, closer.info.traversal_mask, 
@@ -13386,8 +13396,10 @@ namespace LegionRuntime {
         {
           // We succeeded, so get the set of valid views
           // for issuing update copies
-          find_valid_instance_views(state, closer.info.traversal_mask,
+          find_valid_instance_views(closer.info.ctx, state, 
                                     closer.info.traversal_mask,
+                                    closer.info.traversal_mask,
+                                    closer.info.version_info,
                                     false/*needs space*/, valid_views);
         }
       }
@@ -13404,7 +13416,6 @@ namespace LegionRuntime {
           state->children.open_children.erase(finder);
       }
       // Release our lock on the current state before going down
-      bool was_exclusive = release_physical_state(state);
       if (!update_views.empty())
       {
         // Issue any update copies, and then release any
@@ -13423,7 +13434,6 @@ namespace LegionRuntime {
       // Now we're ready to perform the close operation
       closer.close_tree_node(child_node, close_mask);
       // Reacquire our lock on the state upon returning
-      acquire_physical_state(state, was_exclusive);
       return true;
     }
 
@@ -13432,16 +13442,17 @@ namespace LegionRuntime {
                                             const std::set<ColorPoint> &targets,
                                                bool leave_open, 
                                                const ColorPoint &next_child,
-                                               const FieldMask &closing_mask)
+                                               const FieldMask &closing_mask,
+                                               VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = acquire_physical_state(ctx_id, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx_id, version_info);
       CompositeNode *root = 
              legion_new<CompositeNode>(this, ((CompositeNode*)NULL/*parent*/));
       FieldMask dirty_mask, complete_mask; 
       const bool capture_children = !is_region();
       LegionMap<ColorPoint,FieldMask>::aligned complete_children;
-      CompositeCloser closer(ctx_id, leave_open);
+      CompositeCloser closer(ctx_id, version_info, leave_open);
       for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
             it != targets.end(); it++)
       {
@@ -13494,7 +13505,6 @@ namespace LegionRuntime {
       root->capture_physical_state(this, state, capture_mask, 
                                    closer, dirty_mask, complete_mask);
       closer.update_valid_views(state, root, dirty_mask);
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
@@ -13514,8 +13524,7 @@ namespace LegionRuntime {
       // Tell the node to update its parent
       node->update_parent_info(closing_mask);
       // Acquire the state and save any pertinent information in the node
-      PhysicalState *state = 
-                acquire_physical_state(closer.ctx, true/*exlusive*/);
+      PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
       // First close up any children below and see if we are flushing
       // back any dirty data which is complete
       FieldMask dirty_below, complete_below;
@@ -13544,7 +13553,6 @@ namespace LegionRuntime {
       }
       // No matter what invalidate the reduction views
       invalidate_reduction_views(state, closing_mask);
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
@@ -13656,22 +13664,20 @@ namespace LegionRuntime {
           state->children.open_children.erase(finder);
       }
       // Release our lock on the current state before going down
-      bool was_exclusive = release_physical_state(state);
       CompositeNode *child_composite = 
                                 closer.get_composite_node(child_node, node);
       child_node->close_physical_node(closer, child_composite, 
                                       close_mask, dirty_mask, complete_mask);
-      // Reacquire our lock on the state upon returning
-      acquire_physical_state(state, was_exclusive);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::open_physical_child(ContextID ctx_id,
                                              const ColorPoint &child_color,
-                                             const FieldMask &open_mask)
+                                             const FieldMask &open_mask,
+                                             VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = acquire_physical_state(ctx_id, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx_id, version_info);
       state->children.valid_fields |= open_mask;
       LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
                           state->children.open_children.find(child_color);
@@ -13679,13 +13685,14 @@ namespace LegionRuntime {
         state->children.open_children[child_color] = open_mask;
       else
         finder->second |= open_mask;
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_valid_instance_views(PhysicalState *state,
+    void RegionTreeNode::find_valid_instance_views(ContextID ctx,
+                                                   PhysicalState *state,
                                                    const FieldMask &valid_mask,
                                                    const FieldMask &space_mask,
+                                                   VersionInfo &version_info,
                                                    bool needs_space,
                        LegionMap<InstanceView*,FieldMask>::aligned &valid_views)
     //--------------------------------------------------------------------------
@@ -13702,12 +13709,10 @@ namespace LegionRuntime {
       {
         // Acquire the parent nodes physical state in read-only mode
         PhysicalState *parent_state = 
-          parent->acquire_physical_state(state->ctx, false/*exclusive*/);
+          parent->get_physical_state(ctx, version_info);
         LegionMap<InstanceView*,FieldMask>::aligned local_valid;
-        parent->find_valid_instance_views(parent_state, up_mask, space_mask, 
-                                          needs_space, local_valid);
-        // Release our hold on the parent state
-        parent->release_physical_state(parent_state);
+        parent->find_valid_instance_views(ctx, parent_state, up_mask, 
+                  space_mask, version_info, needs_space, local_valid);
         // Get the subview for this level
         for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
               local_valid.begin(); it != local_valid.end(); it++)
@@ -13791,9 +13796,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_valid_reduction_views(PhysicalState *state,
+    void RegionTreeNode::find_valid_reduction_views(ContextID ctx,
+                                                    PhysicalState *state,
                                                     ReductionOpID redop,
                                                     const FieldMask &valid_mask,
+                                                    VersionInfo &version_info,
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
     {
@@ -13811,11 +13818,9 @@ namespace LegionRuntime {
         {
           // Acquire the parent state in non-exclusive mode
           PhysicalState *parent_state = 
-            parent->acquire_physical_state(state->ctx, false/*exclusive*/);
-          parent->find_valid_reduction_views(parent_state, redop,
-                                             valid_mask, valid_views);
-          // Release the parent state
-          parent->release_physical_state(parent_state);
+            parent->get_physical_state(ctx, version_info);
+          parent->find_valid_reduction_views(ctx, parent_state, redop, 
+                                  valid_mask, version_info, valid_views);
         }
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
@@ -13847,8 +13852,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::pull_valid_instance_views(PhysicalState *state,
-                                                   const FieldMask &mask)
+    void RegionTreeNode::pull_valid_instance_views(ContextID ctx,
+                                                   PhysicalState *state,
+                                                   const FieldMask &mask,
+                                                   VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13858,7 +13865,7 @@ namespace LegionRuntime {
       assert(state->node == this);
 #endif
       LegionMap<InstanceView*,FieldMask>::aligned new_valid_views;
-      find_valid_instance_views(state, mask, mask, 
+      find_valid_instance_views(ctx, state, mask, mask, version_info,
                                 false/*needs space*/, new_valid_views);
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             new_valid_views.begin(); it != new_valid_views.end(); it++)
@@ -13942,11 +13949,10 @@ namespace LegionRuntime {
 #endif
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;
       PhysicalState *state = 
-        acquire_physical_state(info.ctx, false/*exclusive*/);
+        acquire_physical_state(info.ctx, info.version_info);
       find_valid_instance_views(state, info.traversal_mask,
-                                info.traversal_mask, false/*needs space*/,
-                                valid_views);
-      release_physical_state(state);
+                                info.traversal_mask, info.version_info,
+                                false/*needs space*/, valid_views);
       // Now tease them apart into src and composite views and sort
       // them based on the target memory
       FieldMask copy_mask = info.traversal_mask;
@@ -14825,7 +14831,7 @@ namespace LegionRuntime {
         if (!!flush_mask)
         {
           find_valid_instance_views(state, flush_mask, flush_mask, 
-                                    false/*needs space*/, valid_views);
+                  info.version_info, false/*needs space*/, valid_views);
         }
         release_physical_state(state);
       }
@@ -16163,7 +16169,8 @@ namespace LegionRuntime {
                                                           actually_needed;
               LegionMap<InstanceView*,FieldMask>::aligned valid_views;
               find_valid_instance_views(state, actually_needed, 
-                  actually_needed, false/*needs space*/, valid_views);
+                              actually_needed, info.version_info,
+                              false/*needs space*/, valid_views);
               release_physical_state(state);
               issue_update_copies(info, new_view, 
                                   actually_needed, valid_views);
@@ -16202,7 +16209,7 @@ namespace LegionRuntime {
               acquire_physical_state(info.ctx, false/*exclusive*/);
             LegionMap<InstanceView*,FieldMask>::aligned valid_views;
             find_valid_instance_views(state, needed_fields, needed_fields, 
-                                      false/*needs space*/, valid_views);
+                    info.version_info, false/*needs space*/, valid_views);
             release_physical_state(state);
             issue_update_copies(info, new_view, needed_fields, valid_views);
             remove_valid_references(valid_views);
@@ -16357,7 +16364,7 @@ namespace LegionRuntime {
             update_mask -= finder->second;
           LegionMap<InstanceView*,FieldMask>::aligned valid_views;
           find_valid_instance_views(state, update_mask, update_mask,
-                                    false/*needs space*/, valid_views);
+                      info.version_info, false/*needs space*/, valid_views);
           release_physical_state(state);
           issue_update_copies(info, target_view, update_mask, valid_views);
           remove_valid_references(valid_views);
@@ -16396,12 +16403,13 @@ namespace LegionRuntime {
     void RegionNode::find_field_descriptors(ContextID ctx, PhysicalUser &user,
                                             unsigned fid_idx, Processor proc,
                                   std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<Event> &preconditions)
+                                            std::set<Event> &preconditions,
+                                            VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx, version_info);
       // First pull down any valid instance views
-      pull_valid_instance_views(state, user.field_mask);
+      pull_valid_instance_views(ctx, state, user.field_mask);
       // Now go through the list of valid instances and see if we can find
       // one that satisfies the field that we need.
       DeferredView *deferred_view = NULL;
@@ -16442,13 +16450,12 @@ namespace LegionRuntime {
       if (deferred_view != NULL)
       {
         deferred_view->add_valid_reference();
-        release_physical_state(state);
         // If this is a fill view, we either need to make a new physical
         // instance or apply it to all the existing physical instances
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
         deferred_view->find_field_descriptors(user, fid_idx, proc, 
-                                               field_data, preconditions);
+                                              field_data, preconditions);
         if (deferred_view->remove_valid_reference())
         {
           if (deferred_view->is_composite_view())
@@ -16457,8 +16464,6 @@ namespace LegionRuntime {
             legion_delete(deferred_view->as_fill_view());
         }
       }
-      else
-        release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
@@ -23764,7 +23769,7 @@ namespace LegionRuntime {
       // capture valid views for everyone above in the tree
       LegionMap<InstanceView*,FieldMask>::aligned instances;
       tree_node->find_valid_instance_views(state, capture_mask, capture_mask,
-                                           false/*needs space*/, instances);
+                       closer.version_info, false/*needs space*/, instances);
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
