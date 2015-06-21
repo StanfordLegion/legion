@@ -6154,7 +6154,8 @@ namespace LegionRuntime {
         // If we were either didn't have the shape or the state
         // is not valid then we need to update it
         if (!valid || runtime->forest->check_remote_state(regions[idx],
-                                              enclosing_physical_contexts[idx]))
+                                              enclosing_physical_contexts[idx],
+                                                          version_infos[idx]))
           invalid.push_back(idx);
       }
       if (!index_shapes.empty() || !region_shapes.empty() || !invalid.empty())
@@ -6763,7 +6764,7 @@ namespace LegionRuntime {
       {
         runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
                                              regions[*it],
-                                             target,
+                                             target, remote_owner_uid,
                                              needed_views,
                                              needed_managers); 
       }
@@ -9030,7 +9031,8 @@ namespace LegionRuntime {
       {
         // Otherwise we need to send the state
         runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
-                                             regions[*it], target,
+                                             regions[*it], target, 
+                                             parent_ctx->get_unique_task_id(),
                                              needed_views, needed_managers);
       }
       // If we had any needed views or needed managers send 
@@ -9237,7 +9239,8 @@ namespace LegionRuntime {
         // If we didn't have a valid shape or we don't have valid state
         // then also mark that we need the state
         if (!valid || runtime->forest->check_remote_state(regions[idx],
-                                              enclosing_physical_contexts[idx]))
+                                              enclosing_physical_contexts[idx],
+                                                          version_infos[idx]))
           invalid.push_back(idx);
       }
       if (!index_shapes.empty() || !region_shapes.empty() || !invalid.empty())

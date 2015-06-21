@@ -2454,6 +2454,7 @@ namespace LegionRuntime {
     void RegionTreeForest::send_physical_state(RegionTreeContext ctx,
                                                const RegionRequirement &req,
                                                AddressSpaceID target,
+                                               UniqueID remote_unique_id,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                  std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
@@ -2492,7 +2493,7 @@ namespace LegionRuntime {
       bool invalidate = (req.handle_type == SINGULAR) && IS_WRITE(req);
       // Construct a traverser to send the state
       FieldMask send_mask = field_node->get_field_mask(req.privilege_fields);
-      StateSender sender(ctx.get_id(), target, needed_views, 
+      StateSender sender(ctx.get_id(), remote_unique_id, target, needed_views,
                          needed_managers, send_mask, invalidate);
       // Now we're ready to send the state
       top_node->visit_node(&sender);
@@ -2727,36 +2728,7 @@ namespace LegionRuntime {
     {
       // Easy, check to see if we have a tree with right ID
       return has_tree(req.parent.get_tree_id());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::check_remote_state(const RegionRequirement &req,
-                                              RegionTreeContext ctx)
-    //--------------------------------------------------------------------------
-    {
-      // This one is a little bit harder, see if all the states for the 
-      // various sub-nodes are valid.  If not then we are not valid.
-      RegionTreeNode *top_node;
-      FieldSpaceNode *field_node;
-      if (req.handle_type == PART_PROJECTION)
-      {
-        // Handling partition projection
-        PartitionNode *part_node = get_node(req.partition);
-        top_node = part_node;
-        field_node = part_node->column_source;
-      }
-      else
-      {
-        // We're dealing with region nodes
-        RegionNode *reg_node = get_node(req.region);
-        top_node = reg_node; 
-        field_node = reg_node->column_source;
-      }
-      FieldMask check_mask = field_node->get_field_mask(req.privilege_fields);
-      RemoteChecker checker(ctx.get_id(), check_mask);
-      top_node->visit_node(&checker);
-      return checker.is_valid();
-    }
+    } 
  
     //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
@@ -8678,8 +8650,143 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // VersionInfo 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VersionInfo::VersionInfo(void)
+      : projection(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo::VersionInfo(const VersionInfo &rhs)
+      : node_infos(rhs.node_infos), projection(rhs.projection)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo::~VersionInfo(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(node_infos.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& VersionInfo::operator=(const VersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      node_infos = rhs.node_infos;
+      projection = rhs.projection;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::merge(const VersionInfo &rhs, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator vit = 
+            rhs.node_infos.begin(); vit != 
+            rhs.node_infos.end(); vit++)
+      {
+        const RegionVersions &rhs_version = vit->second.version_numbers;
+        RegionVersions *entry = NULL;
+        for (RegionVersions::const_iterator it = rhs_version.begin();
+              it != rhs_version.end(); it++)
+        {
+          FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          if (entry == NULL)
+            entry = &(node_infos[vit->first].version_numbers);
+          RegionVersions::iterator finder = entry->find(it->first);
+          if (finder == entry->end())
+            entry->insert(*it);
+          else
+            finder->second |= it->second;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::clear(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(node_infos.empty()); // should already have cleared these
+#endif
+      projection = false;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+        node_infos.find(node);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != node_infos.end());
+#endif
+      return finder->second.physical_state;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node,
+                                                      VersionManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
+        node_infos.find(node);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != node_infos.end());
+      assert(finder->second.physical_state == NULL);
+#endif
+      // Ask the manager to make the physical state
+      PhysicalState *result = 
+                      manager->construct_state(finder->second.version_numbers);
+      // Save the resulting physical state
+      finder->second.physical_state = result;
+      return result;
+    }
+    
+    /////////////////////////////////////////////////////////////
     // RestrictInfo 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RestrictInfo::RestrictInfo(void)
+      : perform_check(false), projection(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictInfo::RestrictInfo(const RestrictInfo &rhs)
+      : perform_check(rhs.perform_check), projection(rhs.projection),
+        restrictions(rhs.restrictions)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictInfo::~RestrictInfo(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictInfo& RestrictInfo::operator=(const RestrictInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to copy over perform_check and restrictions
+      perform_check = rhs.perform_check;
+      restrictions = rhs.restrictions;
+      return *this;
+    }
 
     //--------------------------------------------------------------------------
     bool RestrictInfo::has_restrictions(LogicalRegion handle, RegionNode *node,
@@ -9331,8 +9438,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
-                                     const FieldMask &m, Processor local)
-      : ctx(c), target(t), close_mask(m), local_proc(local)
+                                     const FieldMask &m, 
+                                     VersionInfo &info, Processor local)
+      : ctx(c), target(t), close_mask(m), version_info(info), local_proc(local)
     //--------------------------------------------------------------------------
     {
     }
@@ -9340,7 +9448,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(const ReductionCloser &rhs)
       : ctx(0), target(NULL), close_mask(FieldMask()), 
-        local_proc(Processor::NO_PROC)
+        version_info(rhs.version_info), local_proc(Processor::NO_PROC)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9411,8 +9519,7 @@ namespace LegionRuntime {
     {
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
       {
-        PhysicalState *state = 
-          node->acquire_physical_state(ctx, true/*exclusive*/);
+        PhysicalState *state = node->get_physical_state(ctx, version_info); 
         for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
               state->reduction_views.begin(); it != 
               state->reduction_views.end(); it++)
@@ -9426,7 +9533,6 @@ namespace LegionRuntime {
         }
         if (!valid_reductions.empty())
           node->invalidate_reduction_views(state, close_mask);
-        node->release_physical_state(state);
       }
       if (!valid_reductions.empty())
       {
@@ -9509,8 +9615,8 @@ namespace LegionRuntime {
       // if any were flushed and therefore need to be invalidated
       FieldMask invalidate_mask = node->flush_reductions(info.traversal_mask,
                                                         info.req.redop, info);
-      PhysicalState *state = 
-        node->acquire_physical_state(info.ctx, true/*exclusive*/);
+      PhysicalState *state = node->get_physical_state(info.ctx, 
+                                                      info.version_info); 
       // Update our physical state to indicate which child
       // we are opening and in which fields
       if (has_child)
@@ -9565,8 +9671,6 @@ namespace LegionRuntime {
         else
           info.req.max_blocking_factor = node_domain.get_volume();
       }
-      // Release the state
-      node->release_physical_state(state); 
       return true;
     }
 
@@ -9683,8 +9787,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(has_child);
 #endif
-      PhysicalState *state = 
-        node->acquire_physical_state(info.ctx, true/*exclusive*/);
+      PhysicalState *state = node->get_physical_state(info.ctx,
+                                                      info.version_info);
       state->children.valid_fields |= info.traversal_mask;
       LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
                               state->children.open_children.find(next_child);
@@ -9692,7 +9796,6 @@ namespace LegionRuntime {
         state->children.open_children[next_child] = info.traversal_mask;
       else
         finder->second |= info.traversal_mask;
-      node->release_physical_state(state);
       // Flush any outstanding reduction operations
       node->flush_reductions(user_mask, 
                              info.req.redop, info);
@@ -9750,8 +9853,8 @@ namespace LegionRuntime {
       // of valid instances with the right set of fields
       std::set<FieldID> new_fields = info.req.privilege_fields;
       {
-        PhysicalState *state = 
-          node->acquire_physical_state(info.ctx, false/*exclusive*/);
+        PhysicalState *state = node->get_physical_state(info.ctx,
+                                                        info.version_info);
         if (!additional_fields.empty())
         {
           new_fields.insert(additional_fields.begin(),
@@ -9768,7 +9871,6 @@ namespace LegionRuntime {
                                           user_mask, true/*space*/,
                                           valid_instances);
         }
-        node->release_physical_state(state);
       }
       // Compute the set of valid memories and filter out instance which
       // do not have the proper blocking factor in the process
@@ -9972,11 +10074,10 @@ namespace LegionRuntime {
 
       std::set<ReductionView*> valid_views;
       {
-        PhysicalState *state = 
-          node->acquire_physical_state(info.ctx, false/*exclusive*/);
+        PhysicalState *state = node->get_physical_state(info.ctx,
+                                                        info.version_info);
         node->find_valid_reduction_views(state, usage.redop,
                                          user_mask, valid_views);
-        node->release_physical_state(state);
       }
 
       // Compute the set of valid memories
@@ -10040,12 +10141,11 @@ namespace LegionRuntime {
       // Grab the set of valid instances, we should find exactly one
       // that matches all the fields, if not that is very bad
       LegionMap<InstanceView*,FieldMask>::aligned valid_instances;
-      PhysicalState *state = 
-          node->acquire_physical_state(info.ctx, false/*exclusive*/);
+      PhysicalState *state = node->get_physical_state(info.ctx,
+                                                      info.version_info);
       node->find_valid_instance_views(state, user_mask,
                                       user_mask, false/*space*/,
                                       valid_instances);
-      node->release_physical_state(state);
       InstanceView *chosen_inst = NULL;
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             valid_instances.begin(); it != valid_instances.end(); it++)
@@ -10284,220 +10384,7 @@ namespace LegionRuntime {
       return node->send_back_state(ctx, remote_ctx,
                  target, invalidate, return_mask, needed_managers);
     }
-
-    /////////////////////////////////////////////////////////////
-    // RemoteChecker
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RemoteChecker::RemoteChecker(ContextID c, const FieldMask &mask)
-      : ctx(c), check_mask(mask), valid(true)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteChecker::RemoteChecker(const RemoteChecker &rhs)
-      : ctx(0), check_mask(FieldMask())
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteChecker::~RemoteChecker(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteChecker& RemoteChecker::operator=(const RemoteChecker &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteChecker::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteChecker::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      return check_validity(node);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteChecker::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      return check_validity(node);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteChecker::check_validity(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(valid); // if we are here we should be valid to begin with
-#endif
-      PhysicalState *state = 
-        node->acquire_physical_state(ctx, false/*exclusive*/);  
-      // See if all the remote fields are still valid
-      valid = !(check_mask - state->remote_mask);   
-      node->release_physical_state(state);
-      // Only continue the traversal if we are still valid
-      return valid;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // RemoteValidator 
-    /////////////////////////////////////////////////////////////
-    
-    //--------------------------------------------------------------------------
-    RemoteValidator::RemoteValidator(ContextID c, const FieldMask &mask)
-      : ctx(c), validate_mask(mask)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    RemoteValidator::RemoteValidator(const RemoteValidator &rhs)
-      : ctx(0), validate_mask(FieldMask())
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteValidator::~RemoteValidator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteValidator& RemoteValidator::operator=(const RemoteValidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteValidator::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteValidator::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      validate_node(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteValidator::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      validate_node(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteValidator::validate_node(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      // Make sure we instantiate all the children
-      node->instantiate_children();
-      PhysicalState *state = 
-        node->acquire_physical_state(ctx, true/*exclusive*/);
-      state->remote_mask |= validate_mask;
-      node->release_physical_state(state);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // RemoteInvalidator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RemoteInvalidator::RemoteInvalidator(ContextID c, const FieldMask &mask)
-      : ctx(c), invalidate_mask(mask)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    RemoteInvalidator::RemoteInvalidator(const RemoteInvalidator &rhs)
-      : ctx(0), invalidate_mask(FieldMask())
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteInvalidator::~RemoteInvalidator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteInvalidator& RemoteInvalidator::operator=(
-                                                   const RemoteInvalidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteInvalidator::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteInvalidator::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      invalidate_node(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteInvalidator::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      invalidate_node(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteInvalidator::invalidate_node(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalState *state = 
-        node->acquire_physical_state(ctx, true/*exclusive*/);
-      node->invalidate_physical_state(state, invalidate_mask, false/*force*/);
-      // clear out the remote fields which are no longer valid
-      state->remote_mask -= invalidate_mask;
-      node->release_physical_state(state);
-    }
-
+ 
     /////////////////////////////////////////////////////////////
     // States 
     /////////////////////////////////////////////////////////////
@@ -10572,6 +10459,7 @@ namespace LegionRuntime {
       curr_epoch_users.clear();
       prev_epoch_users.clear();
       restricted_fields.clear();
+      dirty_below.clear();
       field_versions.clear();
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
     } 
@@ -11699,7 +11587,7 @@ namespace LegionRuntime {
         // Better have the state info
         assert(finder != version_infos.end());
         // Sanity check that state info is valid for all expected fields
-        assert(!(it->second - finder->second));
+        assert(!(it->second - finder->second.valid_fields));
 #endif
         state->merge_version_state(finder->second.state, it->second);
       }
@@ -11721,7 +11609,7 @@ namespace LegionRuntime {
               state->version_states.begin(); it != 
               state->version_states.end(); it++)
         {
-          LegionMap<VersionID,StateInfo>::iterator low_finder = 
+          LegionMap<VersionID,StateInfo>::aligned::iterator low_finder = 
             version_infos.find(it->first->version_number);
 #ifdef DEBUG_HIGH_LEVEL
           assert(low_finder != version_infos.end());
@@ -11732,7 +11620,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(next_version_number > 0); // Crazy check for overflow
 #endif
-          LegionMap<VersionID,StateInfo>::iterator high_finder = 
+          LegionMap<VersionID,StateInfo>::aligned::iterator high_finder = 
             version_infos.find(next_version_number);
           if (high_finder == version_infos.end())
           {
@@ -11840,7 +11728,7 @@ namespace LegionRuntime {
       if (result != NULL)
         return result;
       // If it didn't have it then we need to make it
-      VersionManager *manager = physical_states.lookup_entry(ctx);
+      VersionManager *manager = version_managers.lookup_entry(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
 #endif
@@ -11987,9 +11875,11 @@ namespace LegionRuntime {
         // Now we can flush out all the users dominated by closes
         filter_prev_epoch_users(state, closed_mask);
         filter_curr_epoch_users(state, closed_mask);
-        // We also need to update the version numbers because close
-        // operations definitely write to a logical region
-        update_version_numbers(state, closed_mask);
+        // Note we don't need to update the version numbers because
+        // that happened when we recorded dirty fields below. 
+        // However, we do need to mark that there is no longer any
+        // dirty data below this node for all the closed fields
+        state.dirty_below -= closed_mask;
         // Now we can add the close operations to the current epoch
         closer.register_close_operations(state.curr_epoch_users);
       }
@@ -12045,7 +11935,7 @@ namespace LegionRuntime {
           // is another writer already registered which has already updated the 
           // version number for us. Don't count reductions as writes here.
           if (IS_WRITE(user.usage))
-            update_version_numbers(state, dominator_mask);
+            advance_version_numbers(state, dominator_mask);
         }
         // Here is the only difference with tracing.  If we already
         // traced then we don't need to register ourselves as a user
@@ -12078,6 +11968,11 @@ namespace LegionRuntime {
       }
       else // We're still not there, so keep going
       {
+        // If we are doing a write or a reduce below then we need to advance
+        // the version number so that we avoid later operations thinking 
+        // that is safe to use the existing version number
+        if (HAS_WRITE(user.usage))
+          advance_dirty_below(state, user.field_mask);
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
           child->open_logical_node(ctx, user, path, version_info,
@@ -12116,7 +12011,7 @@ namespace LegionRuntime {
         }
         // If this is a write, then update our version numbers
         if (IS_WRITE(user.usage))
-          update_version_numbers(state, user.field_mask);
+          advance_version_numbers(state, user.field_mask);
         // No need to record ourselves if we've already traced
         if (!already_traced)
         {
@@ -12154,6 +12049,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         sanity_check_logical_state(state);
 #endif
+        if (HAS_WRITE(user.usage))
+          advance_dirty_below(state, user.field_mask);
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
         child_node->open_logical_node(ctx, user, path, version_info, 
@@ -12207,8 +12104,12 @@ namespace LegionRuntime {
       merge_new_field_states(state, new_states);
       // Record the version numbers that we need
       closer.record_version_numbers(this, state, closing_mask);
-      // Finally update the version numbers for the closed fields
-      update_version_numbers(state, closing_mask);
+      // If we're doing a close operation, that means someone is
+      // going to be writing to a region that aliases with this one
+      // so we need to advance the field version.
+      advance_version_numbers(state, closing_mask);
+      // We can also mark that there is no longer any dirty data below
+      state.dirty_below -= closing_mask;
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -12269,14 +12170,16 @@ namespace LegionRuntime {
                 // we want to go down, make a new state to be added
                 // containing the fields that are still open and mark
                 // that we need an upgrade from read-only to some
-                // kind of write operation. We only allow
+                // kind of write operation. Note that we don't need to
+                // actually perform close operations here because closing
+                // read-only children requires no work.
                 const bool needs_upgrade = HAS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, *it, next_child,
                                          (it->open_children.size() == 1),
                                          needs_upgrade, 
                                          false/*permit leave open*/,
-                                         record_close_operations,
+                                         false/*record_close_operations*/,
                                          new_states, already_open);
                 // Update the open mask
                 open_mask -= already_open;
@@ -12755,7 +12658,9 @@ namespace LegionRuntime {
     {
       // Capture the version information for this logical region  
       VersionInfo::RegionVersions &versions = version_info.find_region(this);
-      bool found = false;
+#ifdef DEBUG_HIGH_LEVEL
+      FieldMask unversioned = mask;
+#endif
       LegionMap<VersionID,FieldMask,
                VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
@@ -12765,15 +12670,18 @@ namespace LegionRuntime {
         if (!overlap)
           continue;
         versions.insert(*it);
-        found = true;
+#ifdef DEBUG_HIGH_LEVEL
+        unversioned -= overlap;
+#endif
       }
-      if (!found)
-        version_info.remove_region(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!unversioned); // all the fields should have a version number
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_version_numbers(LogicalState &state,
-                                                const FieldMask &mask)
+    void RegionTreeNode::advance_version_numbers(LogicalState &state,
+                                                 const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       std::set<VersionID> to_delete;
@@ -12822,6 +12730,19 @@ namespace LegionRuntime {
         assert(current.find(it->first) == current.end());
 #endif
         current.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::advance_dirty_below(LogicalState &state, 
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask new_dirty_below = mask - state.dirty_below; 
+      if (!!new_dirty_below)
+      {
+        advance_version_numbers(state, new_dirty_below);
+        state.dirty_below |= new_dirty_below;
       }
     }
 
@@ -13093,45 +13014,42 @@ namespace LegionRuntime {
       // actually regions since they are the only ones that store
       // actual instances.
       
-      FieldMask dirty_fields, reduc_fields;
       LegionMap<InstanceView*,FieldMask>::aligned valid_instances;
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
+      PhysicalState *state = 
+        get_physical_state(ctx, closer.info.version_info);
+      FieldMask dirty_fields = state->dirty_mask & closing_mask;
+      FieldMask reduc_fields = state->reduction_mask & closing_mask;
+      if (is_region())
       {
-        PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
-        dirty_fields = state->dirty_mask & closing_mask;
-        reduc_fields = state->reduction_mask & closing_mask;
-        if (is_region())
+        if (!!dirty_fields)
         {
-          if (!!dirty_fields)
-          {
-            // Pull down instance views so we don't issue unnecessary copies
-            pull_valid_instance_views(state, closing_mask);
+          // Pull down instance views so we don't issue unnecessary copies
+          pull_valid_instance_views(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!state->valid_views.empty());
+          assert(!state->valid_views.empty());
 #endif
-            find_valid_instance_views(state, closing_mask, closing_mask, 
-                                      false/*needs space*/, valid_instances);
-          }
-          if (!!reduc_fields)
+          find_valid_instance_views(state, closing_mask, closing_mask, 
+                                    false/*needs space*/, valid_instances);
+        }
+        if (!!reduc_fields)
+        {
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator
+                it = state->reduction_views.begin(); it != 
+                state->reduction_views.end(); it++)
           {
-            for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator
-                  it = state->reduction_views.begin(); it != 
-                  state->reduction_views.end(); it++)
+            FieldMask overlap = it->second & closing_mask;
+            if (!!overlap)
             {
-              FieldMask overlap = it->second & closing_mask;
-              if (!!overlap)
-              {
-                valid_reductions[it->first] = overlap;
-                it->first->add_valid_reference();
-              }
+              valid_reductions[it->first] = overlap;
+              it->first->add_valid_reference();
             }
           }
         }
-        // Invalidate any reduction views we are going to reduce back
-        if (!!reduc_fields)
-          invalidate_reduction_views(state, reduc_fields);
-        release_physical_state(state);
       }
+      // Invalidate any reduction views we are going to reduce back
+      if (!!reduc_fields)
+        invalidate_reduction_views(state, reduc_fields);
       if (is_region() && !!dirty_fields)
       {
         const std::vector<MaterializedView*> &targets = 
@@ -13164,7 +13082,6 @@ namespace LegionRuntime {
 #endif
       {
         PhysicalCloser next_closer(closer);
-        PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
         bool create_composite = false;
 #ifdef DEBUG_HIGH_LEVEL
         bool result = 
@@ -13192,8 +13109,6 @@ namespace LegionRuntime {
                                       true/*clean*/, false/*force*/);
           state->dirty_mask -= closing_mask;
         }
-        // Finally release our hold on the state
-        release_physical_state(state);
       }
       // Apply any reductions that we might have for the closing
       // fields back to the target instances
@@ -15947,6 +15862,7 @@ namespace LegionRuntime {
                                              const FieldMask &closing_mask,
                                             const std::set<ColorPoint> &targets,
                                              const MappingRef &target_region,
+                                             VersionInfo &version_info,
                                              bool leave_open, 
                                              const ColorPoint &next_child,
                                              Event &closed,
@@ -17578,6 +17494,7 @@ namespace LegionRuntime {
                                                 const FieldMask &closing_mask,
                                             const std::set<ColorPoint> &targets,
                                                 const MappingRef &target_reg,
+                                                VersionInfo &version_info,
                                                 bool leave_open, 
                                                 const ColorPoint &next_child,
                                                 Event &closed,

@@ -408,6 +408,7 @@ namespace LegionRuntime {
       void send_physical_state(RegionTreeContext ctx,
                                const RegionRequirement &req,
                                AddressSpaceID target,
+                               UniqueID remote_unique_id,
                    LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void send_tree_shape(const IndexSpaceRequirement &req,
@@ -436,7 +437,7 @@ namespace LegionRuntime {
       bool check_remote_shape(const IndexSpaceRequirement &req);
       bool check_remote_shape(const RegionRequirement &req);
       bool check_remote_state(const RegionRequirement &req,
-                              RegionTreeContext ctx);
+                              RegionTreeContext ctx, VersionInfo &version_info);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -1321,58 +1322,34 @@ namespace LegionRuntime {
     class VersionInfo {
     public:
       typedef LegionMap<VersionID,FieldMask>::aligned RegionVersions;
+      struct NodeInfo {
+      public:
+        NodeInfo(void)
+          : physical_state(NULL) { }
+      public:
+        PhysicalState *physical_state;
+        RegionVersions version_numbers;
+      };
     public:
-      VersionInfo(void)
-        : projection(false) { }
-      VersionInfo(const VersionInfo &rhs)
-      {
-        region_versions = rhs.region_versions;
-        projection = rhs.projection;
-      }
-      ~VersionInfo(void) { }
+      VersionInfo(void);
+      VersionInfo(const VersionInfo &rhs);
+      ~VersionInfo(void);
     public:
-      VersionInfo& operator=(const VersionInfo &rhs)
-      {
-        region_versions = rhs.region_versions;
-        projection = rhs.projection;
-        return *this;
-      }
+      VersionInfo& operator=(const VersionInfo &rhs);
     public:
       inline RegionVersions& find_region(RegionTreeNode *node)
-        { return region_versions[node]; }
-      inline void remove_region(RegionTreeNode *node)
-        { region_versions.erase(node); }
+        { return node_infos[node].version_numbers; }
       inline void set_projection(void) { projection = true; }
       inline bool is_projection(void) const { return projection; }
-      inline void clear(void)
-        { region_versions.clear(); projection = false; }
     public:
-      inline void merge(const VersionInfo &rhs, const FieldMask &mask)
-      {
-        for (std::map<RegionTreeNode*,RegionVersions>::const_iterator vit = 
-              rhs.region_versions.begin(); vit != 
-              rhs.region_versions.end(); vit++)
-        {
-          const RegionVersions &rhs_version = vit->second;
-          RegionVersions *entry = NULL;
-          for (RegionVersions::const_iterator it = rhs_version.begin();
-                it != rhs_version.end(); it++)
-          {
-            FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            if (entry == NULL)
-              entry = &(region_versions[vit->first]);
-            RegionVersions::iterator finder = entry->find(it->first);
-            if (finder == entry->end())
-              entry->insert(*it);
-            else
-              finder->second |= it->second;
-          }
-        }
-      }
+      void merge(const VersionInfo &rhs, const FieldMask &mask);
+      void clear(void);
+    public:
+      PhysicalState* find_physical_state(RegionTreeNode *node); 
+      PhysicalState* create_physical_state(RegionTreeNode *node,
+                                           VersionManager *manager);
     protected:
-      std::map<RegionTreeNode*,RegionVersions> region_versions;
+      std::map<RegionTreeNode*,NodeInfo> node_infos;
       bool projection;
     };
 
@@ -1383,23 +1360,11 @@ namespace LegionRuntime {
      */
     class RestrictInfo {
     public:
-      RestrictInfo(void)
-        : perform_check(false), projection(false) { }
-      RestrictInfo(const RestrictInfo &rhs) 
-      {
-        perform_check = rhs.perform_check;
-        projection = rhs.projection;
-        restrictions = rhs.restrictions;
-      }
-      ~RestrictInfo(void) { }
+      RestrictInfo(void);
+      RestrictInfo(const RestrictInfo &rhs); 
+      ~RestrictInfo(void);
     public:
-      RestrictInfo& operator=(const RestrictInfo &rhs)
-      {
-        // Only need to copy over perform_check and restrictions
-        perform_check = rhs.perform_check;
-        restrictions = rhs.restrictions;
-        return *this;
-      }
+      RestrictInfo& operator=(const RestrictInfo &rhs);
     public:
       inline bool needs_check(void) const { return perform_check; }
       inline void set_check(void) { perform_check = true; } 
@@ -1581,6 +1546,8 @@ namespace LegionRuntime {
                                                             prev_epoch_users;
       LegionMap<VersionID,FieldMask,VERSION_ID_ALLOC>::track_aligned
                                                             field_versions;
+      // Fields which we know have been mutated below in the region tree
+      FieldMask dirty_below;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask restricted_fields;
@@ -1936,6 +1903,8 @@ namespace LegionRuntime {
     public:
       void merge_version_state(VersionState *state, const FieldMask &mask);
     public:
+      // Fields which have dirty data
+      FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
       // State of any child nodes
@@ -1971,6 +1940,8 @@ namespace LegionRuntime {
       void operator delete[](void *ptr);
     public:
       const VersionID version_number;
+      // Fields which have been directly written to
+      FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
       // State of any child nodes
@@ -2082,7 +2053,8 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info);
-      void update_version_numbers(LogicalState &state, const FieldMask &mask);
+      void advance_version_numbers(LogicalState &state, const FieldMask &mask);
+      void advance_dirty_below(LogicalState &state, const FieldMask &mask);
       void sanity_check_logical_state(LogicalState &state);
       void initialize_logical_state(ContextID ctx);
       void invalidate_logical_state(ContextID ctx);
@@ -2413,6 +2385,7 @@ namespace LegionRuntime {
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
                                            const MappingRef &target_region,
+                                           VersionInfo &version_info,
                                            bool leave_open,
                                            const ColorPoint &next_child,
                                            Event &closed,
@@ -2571,6 +2544,7 @@ namespace LegionRuntime {
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
                                            const MappingRef &target_region,
+                                           VersionInfo &version_info,
                                            bool leave_open,
                                            const ColorPoint &next_child,
                                            Event &closed,
@@ -3040,87 +3014,7 @@ namespace LegionRuntime {
       const FieldMask return_mask;
       std::set<PhysicalManager*> &needed_managers;
     };
-
-    /**
-     * \class RemoteChecker
-     * This class checks to see if all the states in a given
-     * region tree are up to date for a given set of fields
-     * on a remote node.
-     */
-    class RemoteChecker : public NodeTraverser {
-    public:
-      RemoteChecker(ContextID ctx, const FieldMask &mask);
-      RemoteChecker(const RemoteChecker &rhs);
-      ~RemoteChecker(void);
-    public:
-      RemoteChecker& operator=(const RemoteChecker &rhs);
-    public:
-      virtual bool break_early(void) const { return true; }
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      inline bool is_valid(void) const { return valid; }
-      bool check_validity(RegionTreeNode *node);
-    public:
-      const ContextID ctx;
-      const FieldMask check_mask;
-    private:
-      bool valid;
-    };
-
-    /**
-     * \class RemoteValidator
-     * This class traverses a subtree and marks the configured
-     * number of fields as valid remote copies on the local
-     * node.  It also has the side-effect of eagerly instantiating
-     * the entire sub-tree which is necessary for correctness.
-     */
-    class RemoteValidator : public NodeTraverser {
-    public:
-      RemoteValidator(ContextID ctx, const FieldMask &mask);
-      RemoteValidator(const RemoteValidator &rhs);
-      ~RemoteValidator(void);
-    public:
-      RemoteValidator& operator=(const RemoteValidator &rhs);
-    public:
-      virtual bool break_early(void) const { return true; }
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      void validate_node(RegionTreeNode *node);
-    public:
-      const ContextID ctx;
-      const FieldMask validate_mask;
-    };
-
-    /**
-     * \class RemoteInvalidator
-     * This class does the opposite of the previous class.
-     * It traverses a region tree for a particular context
-     * and set of fields and invalidates the state while
-     * also marking that the fields are no longer valid
-     * remotely.
-     */
-    class RemoteInvalidator : public NodeTraverser {
-    public:
-      RemoteInvalidator(ContextID ctx, const FieldMask &mask);
-      RemoteInvalidator(const RemoteInvalidator &rhs);
-      ~RemoteInvalidator(void);
-    public:
-      RemoteInvalidator& operator=(const RemoteInvalidator &rhs);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      void invalidate_node(RegionTreeNode *node);
-    public:
-      const ContextID ctx;
-      const FieldMask invalidate_mask;
-    };
-
+ 
     /**
      * \class LayoutDescription
      * This class is for deduplicating the meta-data
