@@ -2141,15 +2141,11 @@ namespace LegionRuntime {
                                      VersionInfo &version_info,
                                      bool needs_space,
                    LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
-      static void remove_valid_references(
-             const LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
       void find_valid_reduction_views(ContextID ctx, PhysicalState *state, 
                                       ReductionOpID redop,
                                       const FieldMask &valid_mask,
                                       VersionInfo &version_info,
                                       std::set<ReductionView*> &valid_views);
-      static void remove_valid_references(
-                                const std::set<ReductionView*> &valid_views);
       void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
                                      const FieldMask &mask, 
                                      VersionInfo &version_info);

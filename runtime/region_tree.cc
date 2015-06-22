@@ -9876,14 +9876,6 @@ namespace LegionRuntime {
           if (it->first->is_deferred_view())
           {
             to_erase.push_back(it->first);
-            if (it->first->remove_valid_reference())
-            {
-              DeferredView *def_view = it->first->as_deferred_view();
-              if (def_view->is_composite_view())
-                legion_delete(def_view->as_composite_view());
-              else
-                legion_delete(def_view->as_fill_view());
-            }
             continue;
           }
           MaterializedView *current_view = it->first->as_materialized_view();
@@ -9903,8 +9895,6 @@ namespace LegionRuntime {
           else
           {
             to_erase.push_back(it->first);
-            if (it->first->remove_valid_reference())
-              legion_delete(it->first->as_materialized_view());
           }
         }
         for (std::vector<InstanceView*>::const_iterator it = to_erase.begin();
@@ -10018,11 +10008,6 @@ namespace LegionRuntime {
       // reference and then return if we have an instance
       if (chosen_inst != NULL)
         result = MappingRef(chosen_inst, needed_fields);
-      // Remove any valid references we are still holding
-      // This has to go after we create the mapping reference to 
-      // guarantee we hold a valid reference to the chosen instance
-      // at all times
-      RegionTreeNode::remove_valid_references(valid_instances);
       return (chosen_inst != NULL);
     }
 
@@ -10120,8 +10105,6 @@ namespace LegionRuntime {
       }
       if (chosen_inst != NULL)
         result = MappingRef(chosen_inst,FieldMask());
-      // Remove our valid references before we return
-      RegionTreeNode::remove_valid_references(valid_views);
       return (chosen_inst != NULL);
     }
 
@@ -10517,34 +10500,6 @@ namespace LegionRuntime {
       node = rhs.node;
 #endif
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* PhysicalState::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void* PhysicalState::operator new[](size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::operator delete[](void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 #endif
 
@@ -11500,9 +11455,168 @@ namespace LegionRuntime {
     // Physical State 
     /////////////////////////////////////////////////////////////
 
+    //--------------------------------------------------------------------------
+    PhysicalState::PhysicalState(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false); // shouldn't be calling this constructor in debug mode
+#endif
+    }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    PhysicalState::PhysicalState(RegionTreeNode *n)
+      : node(n)
+    //--------------------------------------------------------------------------
+    {
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    PhysicalState::PhysicalState(const PhysicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState::~PhysicalState(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove references to our version states and delete them if necessary
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            version_states.begin(); it != version_states.end(); it++)
+      {
+        if (it->first->remove_reference()) 
+          legion_delete(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState& PhysicalState::operator=(const PhysicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+    
+    //--------------------------------------------------------------------------
+    void* PhysicalState::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void* PhysicalState::operator new[](size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::operator delete[](void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
     /////////////////////////////////////////////////////////////
     // Version State 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VersionState::VersionState(VersionID vid)
+      : version_number(vid)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState::VersionState(const VersionState &rhs)
+      : version_number(rhs.version_number)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState::~VersionState(void)
+    //--------------------------------------------------------------------------
+    {
+      // When we get deleted, remove all references to instance views
+      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        if (it->first->remove_valid_reference())
+        {
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *def_view = it->first->as_deferred_view();
+            if (def_view->is_composite_view())
+              legion_delete(def_view->as_composite_view());
+            else
+              legion_delete(def_view->as_fill_view());
+          }
+          else
+            legion_delete(it->first->as_materialized_view());
+        }
+      }
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        if (it->first->remove_valid_reference())
+          legion_delete(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState& VersionState::operator=(const VersionState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void* VersionState::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<VersionState,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void* VersionState::operator new[](size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<VersionState,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::operator delete[](void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
 
     /////////////////////////////////////////////////////////////
     // Version Manager 
@@ -13123,8 +13237,6 @@ namespace LegionRuntime {
                                   valid_reductions, &closer);
         }
       }
-      // Remove any valid references we added to views
-      remove_valid_references(valid_instances);
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             valid_reductions.begin(); it != valid_reductions.end(); it++)
       {
@@ -13377,7 +13489,6 @@ namespace LegionRuntime {
         if (!select_close_targets(closer, closer.info.traversal_mask, 
                           space_views, update_views, create_composite))
         {
-          remove_valid_references(space_views);
           // We failed to close, time to return
           return false;
         }
@@ -13417,9 +13528,6 @@ namespace LegionRuntime {
         }
         update_views.clear();
       }
-      // Now remove any valid references that we have
-      remove_valid_references(space_views);
-      remove_valid_references(valid_views);
       // Now we're ready to perform the close operation
       closer.close_tree_node(child_node, close_mask);
       // Reacquire our lock on the state upon returning
@@ -13708,22 +13816,6 @@ namespace LegionRuntime {
         {
           InstanceView *local_view = it->first->get_subview(get_color());
           valid_views[local_view] = it->second;
-          // Add a valid reference
-          local_view->add_valid_reference();
-          // Then remove the valid reference from the parent view
-          if (it->first->remove_valid_reference())
-          {
-            if (it->first->is_deferred_view())
-            {
-              DeferredView *def_view = it->first->as_deferred_view();
-              if (def_view->is_composite_view())
-                legion_delete(def_view->as_composite_view());
-              else
-                legion_delete(def_view->as_fill_view());
-            }
-            else
-              legion_delete(it->first->as_materialized_view());
-          }
         }
       }
       // Now figure out which of our valid views we can add
@@ -13751,36 +13843,9 @@ namespace LegionRuntime {
         LegionMap<InstanceView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(it->first);
         if (finder == valid_views.end())
-        {
           valid_views[it->first] = overlap;
-          it->first->add_valid_reference();
-        }
         else
           finder->second |= overlap;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::remove_valid_references(
-                 const LegionMap<InstanceView*,FieldMask>::aligned &valid_views)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-        {
-          if (it->first->is_deferred_view())
-          {
-            DeferredView *def_view = it->first->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(it->first->as_materialized_view());
-        }
       }
     }
 
@@ -13822,21 +13887,7 @@ namespace LegionRuntime {
         if (!uncovered && (valid_views.find(it->first) == valid_views.end()))
         {
           valid_views.insert(it->first);
-          it->first->add_valid_reference();
         }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::remove_valid_references(
-                                    const std::set<ReductionView*> &valid_views)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
-            it != valid_views.end(); it++)
-      {
-        if ((*it)->remove_valid_reference())
-          legion_delete(*it);
       }
     }
 
@@ -13861,8 +13912,6 @@ namespace LegionRuntime {
       {
         update_valid_views(state, it->second, false/*dirty*/, it->first);
       }
-      // Remove the added valid references
-      remove_valid_references(new_valid_views);
     }
     
     //--------------------------------------------------------------------------
@@ -14798,8 +14847,6 @@ namespace LegionRuntime {
         state->dirty_mask |= flush_mask;
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
-        // Release any valid view references we are holding
-        remove_valid_references(valid_views);
       }
       return flush_mask;
     }
@@ -15954,7 +16001,6 @@ namespace LegionRuntime {
           find_valid_instance_views(info.ctx, state, needed_fields, 
            needed_fields, info.version_info, false/*needs space*/, valid_views);
           issue_update_copies(info, new_view, needed_fields, valid_views);
-          remove_valid_references(valid_views);
         }
 
         // If we mapped the region close up any partitions
@@ -16092,7 +16138,6 @@ namespace LegionRuntime {
           find_valid_instance_views(info.ctx, state, update_mask, update_mask,
                       info.version_info, false/*needs space*/, valid_views);
           issue_update_copies(info, target_view, update_mask, valid_views);
-          remove_valid_references(valid_views);
         }
         // Now do the close to this physical instance
         PhysicalCloser closer(info, false/*leave open*/, handle);
