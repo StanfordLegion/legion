@@ -1002,7 +1002,7 @@ namespace LegionRuntime {
       if (node->parent == NULL)
       {
         log_run.error("Parent index partition requested for "
-                            "index space " IDFMT " with no parent. Use "
+                            "index space %x with no parent. Use "
                             "has_parent_index_partition to check "
                             "before requesting a parent.", handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1301,7 +1301,7 @@ namespace LegionRuntime {
       if (node->parent == NULL)
       {
         log_run.error("Parent logical partition requested for "
-                            "logical region (" IDFMT ",%x,%d) with no parent. "
+                            "logical region (%x,%x,%d) with no parent. "
                             "Use has_parent_logical_partition to check "
                             "before requesting a parent.", 
                             handle.index_space.id,
@@ -3189,7 +3189,7 @@ namespace LegionRuntime {
           index_nodes.find(space);
       if (finder == index_nodes.end())
       {
-        log_index.error("Unable to find entry for index space " IDFMT "."
+        log_index.error("Unable to find entry for index space %x."
                               "This is either a runtime bug, or requires "
                               "Legion fences if index space names are being "
                               "returned out of the context in which they are "
@@ -3305,7 +3305,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!has_node(handle.index_space))
       {
-        log_region.error("Unable to find index space entry " IDFMT " for "
+        log_region.error("Unable to find index space entry %x for "
                                "logical region. This is either a runtime bug "
                                "or requires Legion fences if names are being "
                                "returned out of the context in which they are "
@@ -4801,7 +4801,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           char *mask_str = mask.to_string();
           log_directory.info("Remote owner %lld VALIDATING region "
-                                   "(" IDFMT ",%x,%d) on node %d for "
+                                   "(%x,%x,%d) on node %d for "
                                    "fields %s", remote_owner_uid,
                                    region->handle.get_index_space().id,
                                    region->handle.get_field_space().get_id(),
@@ -5108,7 +5108,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             char *mask_str = overlap.to_string();
             log_directory.info("Remote owner %lld INVALIDATING region "
-                                   "(" IDFMT ",%x,%d) for fields %s", 
+                                   "(%x,%x,%d) for fields %s", 
                                    remote_owner_uid,
                                    reg_node->handle.get_index_space().id,
                                    reg_node->handle.get_field_space().get_id(),
@@ -17187,21 +17187,21 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color.get_index(), logger->get_depth());
             break;
           }
         case 1:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], logger->get_depth());
             break;
           }
         case 2:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
@@ -17210,7 +17210,7 @@ namespace LegionRuntime {
           }
         case 3:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
@@ -17256,21 +17256,21 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color.get_index(), logger->get_depth());
             break;
           }
         case 1:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], logger->get_depth());
             break;
           }
         case 2:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
@@ -17279,7 +17279,7 @@ namespace LegionRuntime {
           }
         case 3:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
@@ -17487,7 +17487,7 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at "
+            logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color.get_index(), logger->get_depth(), this);
@@ -17495,7 +17495,7 @@ namespace LegionRuntime {
           }
         case 1:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at "
+            logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], logger->get_depth(), this);
@@ -17503,7 +17503,7 @@ namespace LegionRuntime {
           }
         case 2:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
@@ -17512,7 +17512,7 @@ namespace LegionRuntime {
           }
         case 3:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
@@ -17554,7 +17554,7 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at "
+            logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color.get_index(), logger->get_depth(), this);
@@ -17562,7 +17562,7 @@ namespace LegionRuntime {
           }
         case 1:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color %d at "
+            logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], logger->get_depth(), this);
@@ -17570,7 +17570,7 @@ namespace LegionRuntime {
           }
         case 2:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
@@ -17579,7 +17579,7 @@ namespace LegionRuntime {
           }
         case 3:
           {
-            logger->log("Region Node (" IDFMT ",%d,%d) Color (%d,%d,%d) at "
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],

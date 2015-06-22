@@ -1110,7 +1110,7 @@ namespace LegionRuntime {
               log_index.error("Parent task %s (ID %lld) of task %s "
                                     "(ID %lld) "
                                     "does not have an index requirement for "
-                                    "index space " IDFMT " as a parent of "
+                                    "index space %x as a parent of "
                                     "child task's index requirement index %d",
                                     parent_ctx->variants->name, 
                                     parent_ctx->get_unique_task_id(),
@@ -1123,8 +1123,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PATH:
             {
-              log_index.error("Index space " IDFMT " is not a sub-space "
-                                    "of parent index space " IDFMT " for index "
+              log_index.error("Index space %x is not a sub-space "
+                                    "of parent index space %x for index "
                                     "requirement %d of task %s (ID %lld)",
                                     indexes[idx].handle.id, 
                                     indexes[idx].parent.id, idx,
@@ -1136,7 +1136,7 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
-              log_index.error("Privileges %x for index space " IDFMT 
+              log_index.error("Privileges %x for index space %x "
                                     " are not a subset of privileges of parent "
                                     "task's privileges for index space "
                                     "requirement %d of task %s (ID %lld)",
@@ -1172,7 +1172,7 @@ namespace LegionRuntime {
             break;
           case ERROR_INVALID_REGION_HANDLE:
             {
-              log_region.error("Invalid region handle (" IDFMT ",%d,%d)"
+              log_region.error("Invalid region handle (%x,%d,%d)"
                                     " for region requirement %d of task %s "
                                     "(ID %lld)",
                                     regions[idx].region.index_space.id, 
@@ -1264,8 +1264,8 @@ namespace LegionRuntime {
             {
               log_region.error("Parent task %s (ID %lld) of task %s "
                                       "(ID %lld) does not have a region "
-                                      "requirement for region (" IDFMT 
-                                      ",%x,%x) as a parent of child task's "
+                                      "requirement for region " 
+                                      "(%x,%x,%x) as a parent of child task's "
                                       "region requirement index %d",
                                       parent_ctx->variants->name, 
                                       parent_ctx->get_unique_task_id(),
@@ -1281,9 +1281,9 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PATH:
             {
-              log_region.error("Region (" IDFMT ",%x,%x) is not a "
-                                      "sub-region of parent region (" IDFMT 
-                                      ",%x,%x) for region requirement %d of "
+              log_region.error("Region (%x,%x,%x) is not a "
+                                      "sub-region of parent region "
+                                      "(%x,%x,%x) for region requirement %d of "
                                       "task %s (ID %lld)",
                                       regions[idx].region.index_space.id,
                                       regions[idx].region.field_space.id, 
@@ -1300,7 +1300,7 @@ namespace LegionRuntime {
             {
               log_region.error("Partition (%x,%x,%x) is not a "
                                      "sub-partition of parent region "
-                                     "(" IDFMT ",%x,%x) for region "
+                                     "(%x,%x,%x) for region "
                                      "requirement %d task %s (ID %lld)",
                                      regions[idx].partition.index_partition.id,
                                      regions[idx].partition.field_space.id, 
@@ -1328,8 +1328,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PRIVILEGES:
             {
-              log_region.error("Privileges %x for region (" IDFMT 
-                                     ",%x,%x) are not a subset of privileges " 
+              log_region.error("Privileges %x for region " 
+                                     "(%x,%x,%x) are not a subset of privileges " 
                                      "of parent task's privileges for "
                                      "region requirement %d of task %s "
                                      "(ID %lld)",
@@ -1693,8 +1693,8 @@ namespace LegionRuntime {
         {
           log_region.error("Parent task %s (ID %lld) of task %s "
                                  "(ID %lld) does not have a region "
-                                 "requirement for region (" IDFMT 
-                                 ",%x,%x) as a parent of child task's "
+                                 "requirement for region "
+                                 "(%x,%x,%x) as a parent of child task's "
                                  "region requirement index %d",
                                  parent_ctx->variants->name, 
                                  parent_ctx->get_unique_task_id(),
@@ -3708,7 +3708,7 @@ namespace LegionRuntime {
       }
       log_region.error("Parent task %s (ID %lld) of inline task %s "
                               "(ID %lld) does not have a region "
-                              "requirement for region (" IDFMT ",%x,%x) "
+                              "requirement for region (%x,%x,%x) "
                               "as a parent of child task's region "
                               "requirement index %d",
                               variants->name, 
@@ -3741,7 +3741,7 @@ namespace LegionRuntime {
       }
       log_index.error("Parent task %s (ID %lld) of inline task %s "
                             "(ID %lld) does not have an index space "
-                            "requirement for index space " IDFMT " "
+                            "requirement for index space %x "
                             "as a parent of chlid task's index requirement "
                             "index %d",
                             variants->name,
@@ -4265,7 +4265,7 @@ namespace LegionRuntime {
 	      if (visible_memories.find(premap_memory) == visible_memories.end())
               {
 		log_region.error("Illegal premapped region for logical "
-			               "region (" IDFMT ",%d,%d) index %d of "
+			               "region (%x,%d,%d) index %d of "
 			               "task %s (UID %lld)!  Memory " IDFMT 
                                        " is not visible from processor " IDFMT 
                                        "!", 
@@ -6788,7 +6788,7 @@ namespace LegionRuntime {
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
           continue;
         log_directory.info("Issuing invalidations for region %d "
-                                "(" IDFMT ",%x,%d) of task %s",
+                                "(%x,%x,%d) of task %s",
                                 idx, regions[idx].region.get_index_space().id,
                                 regions[idx].region.get_field_space().get_id(),
                                 regions[idx].region.get_tree_id(), 

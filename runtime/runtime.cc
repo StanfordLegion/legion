@@ -5588,7 +5588,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Creating index space " IDFMT " in task %s "
+      log_index.debug("Creating index space %x in task %s "
                             "(ID %lld) with %ld maximum elements", handle.id, 
                             ctx->variants->name, ctx->get_unique_task_id(), 
                             max_num_elmts); 
@@ -5631,7 +5631,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
@@ -5746,7 +5746,7 @@ namespace LegionRuntime {
           assert(false);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      log_index.debug("Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
@@ -5777,7 +5777,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Destroying index space " IDFMT " in task %s "
+      log_index.debug("Destroying index space %x in task %s "
                              "(ID %lld)", 
                       handle.id, ctx->variants->name, 
                       ctx->get_unique_task_id());
@@ -5833,7 +5833,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -5900,7 +5900,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6045,7 +6045,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6086,7 +6086,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6161,7 +6161,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6212,7 +6212,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6291,7 +6291,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6714,7 +6714,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating equal partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6769,7 +6769,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating weighted partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6824,7 +6824,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating union partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6901,7 +6901,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating intersection partition %d with parent "
-                            "index space " IDFMT " in task %s (ID %lld)", 
+                            "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6978,7 +6978,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating difference partition %d with parent "
-                            "index space " IDFMT " in task %s (ID %lld)", 
+                            "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -7766,7 +7766,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index.error("Invalid handle " IDFMT " for get index space "
+        log_index.error("Invalid handle %x for get index space "
                                "domain", 
                                 handle.id);
         assert(false);
@@ -8083,7 +8083,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_region.debug("Creating logical region in task %s (ID %lld) "
-                              "with index space " IDFMT " and field space %x "
+                              "with index space %x and field space %x "
                               "in new tree %d",
                               ctx->variants->name,ctx->get_unique_task_id(), 
                               index_space.id, field_space.id, tid);
@@ -8121,7 +8121,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_region.debug("Deleting logical region (" IDFMT ",%x) in "
+      log_region.debug("Deleting logical region (%x,%x) in "
                               "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
                               ctx->variants->name,ctx->get_unique_task_id());
@@ -8925,8 +8925,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
-      log_run.debug("Registering a map operation for region (" IDFMT 
-                           ",%x,%x) in task %s (ID %lld)",
+      log_run.debug("Registering a map operation for region "
+                           "(%x,%x,%x) in task %s (ID %lld)",
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
                            launcher.requirement.region.tree_id, 
@@ -8940,9 +8940,9 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" IDFMT 
-                            ",%x,%x) that conflicts with mapped region (" 
-                            IDFMT ",%x,%x) at index %d of parent task %s "
+        log_run.error("Attempted an inline mapping of region "
+                            "(%x,%x,%x) that conflicts with mapped region " 
+                            "(%x,%x,%x) at index %d of parent task %s "
                             "(ID %lld) that would ultimately result in "
                             "deadlock. Instead you receive this error "
                             "message.",
@@ -8961,8 +8961,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -8997,8 +8997,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
-      log_run.debug("Registering a map operation for region (" 
-                            IDFMT ",%x,%x) "
+      log_run.debug("Registering a map operation for region " 
+                           "(%x,%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id, 
                            req.region.tree_id, ctx->variants->name, 
@@ -9012,10 +9012,10 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
-                            "that conflicts with mapped region (" 
-                            IDFMT ",%x,%x) at "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
+                            "that conflicts with mapped region " 
+		            "(%x,%x,%x) at "
                             "index %d of parent task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
                             "receive this error message.",
@@ -9034,8 +9034,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -9382,9 +9382,9 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region (" 
-                      IDFMT ",%x,%x) that conflicts with mapped region (" 
-                      IDFMT ",%x,%x) at index %d of parent task %s (ID %lld) "
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
                       "before invoking attach_hdf5 on file %s",
@@ -9401,8 +9401,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region (" 
-                      IDFMT ",%x,%x) that conflicts with previous inline "
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
