@@ -806,8 +806,6 @@ namespace LegionRuntime {
         SEND_LOGICAL_REGION_SEMANTIC_INFO,
         SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
         SEND_FREE_REMOTE_CONTEXT,
-        SEND_VALIDATE_REMOTE_STATE,
-        SEND_INVALIDATE_REMOTE_STATE,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -898,8 +896,6 @@ namespace LegionRuntime {
       void send_logical_region_semantic_info(Serializer &rez, bool flush);
       void send_logical_partition_semantic_info(Serializer &rez, bool flush);
       void send_free_remote_context(Serializer &rez, bool flush);
-      void send_validate_remote_state(Serializer &rez, bool flush);
-      void send_invalidate_remote_state(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -1586,8 +1582,6 @@ namespace LegionRuntime {
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
       void send_free_remote_context(AddressSpaceID target, Serializer &rez);
-      void send_validate_remote_state(AddressSpaceID target, Serializer &rez);
-      void send_invalidate_remote_state(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1689,10 +1683,6 @@ namespace LegionRuntime {
       void handle_logical_region_semantic_info(Deserializer &derez);
       void handle_logical_partition_semantic_info(Deserializer &derez);
       void handle_free_remote_context(Deserializer &derez);
-      void handle_validate_remote_state(Deserializer &derez, 
-                                        AddressSpaceID source);
-      void handle_invalidate_remote_state(Deserializer &derez,
-                                          AddressSpaceID source);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
