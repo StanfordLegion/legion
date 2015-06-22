@@ -4059,21 +4059,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_validate_remote_state(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_VALIDATE_REMOTE_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_invalidate_remote_state(Serializer &rez, 
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INVALIDATE_REMOTE_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::package_message(Serializer &rez, MessageKind k,
                                          bool flush)
     //--------------------------------------------------------------------------
@@ -4604,18 +4589,6 @@ namespace LegionRuntime {
           case SEND_FREE_REMOTE_CONTEXT:
             {
               runtime->handle_free_remote_context(derez);
-              break;
-            }
-          case SEND_VALIDATE_REMOTE_STATE:
-            {
-              runtime->handle_validate_remote_state(derez, 
-                                                    remote_address_space);
-              break;
-            }
-          case SEND_INVALIDATE_REMOTE_STATE:
-            {
-              runtime->handle_invalidate_remote_state(derez,
-                                                      remote_address_space);
               break;
             }
           default:
@@ -11852,22 +11825,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_validate_remote_state(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_validate_remote_state(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_invalidate_remote_state(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_invalidate_remote_state(rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -12489,22 +12446,6 @@ namespace LegionRuntime {
       }
       // Now we can deactivate it
       remote_task->deactivate();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_validate_remote_state(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->validate_remote_state(derez, source); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_invalidate_remote_state(Deserializer &derez,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->invalidate_remote_state(derez, source);
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS

@@ -8216,7 +8216,7 @@ namespace LegionRuntime {
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       runtime->forest->fill_fields(physical_ctx, requirement,
-                                   value, value_size);
+                                   value, value_size, version_info);
       // Clear value and value size since the forest ended up 
       // taking ownership of them
       value = NULL;
@@ -8574,7 +8574,8 @@ namespace LegionRuntime {
       if (!requirement.premapped)
         return false;
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
-                                                        requirement, this);
+                                                        requirement, this,
+                                                        version_info);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done

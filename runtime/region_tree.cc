@@ -1778,7 +1778,8 @@ namespace LegionRuntime {
       MaterializedView *view = 
         ref.get_handle().get_view()->as_instance_view()->as_materialized_view();
       FieldMask needed_mask;
-      target_node->remap_region(ctx.get_id(), view, user_mask, needed_mask);
+      target_node->remap_region(ctx.get_id(), view, user_mask, 
+                                version_info, needed_mask);
 #ifdef DEBUG_PERF
       end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
@@ -2403,7 +2404,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
                                        const RegionRequirement &req,
-                                       const void *value, size_t value_size)
+                                       const void *value, size_t value_size,
+                                       VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2413,13 +2415,15 @@ namespace LegionRuntime {
       FieldMask fill_mask = 
         fill_node->column_source->get_field_mask(req.privilege_fields);
       // Fill in these fields on this node
-      fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size); 
+      fill_node->fill_fields(ctx.get_id(), fill_mask, 
+                             value, value_size, version_info); 
     }
 
     //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::attach_file(RegionTreeContext ctx,
                                               const RegionRequirement &req,
-                                              AttachOp *attach_op)
+                                              AttachOp *attach_op,
+                                              VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2430,7 +2434,7 @@ namespace LegionRuntime {
         attach_node->column_source->get_field_mask(req.privilege_fields);
       // Perform the attachment
       return attach_node->attach_file(ctx.get_id(), attach_mask,
-                                      req, attach_op);
+                                      req, attach_op, version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -9332,23 +9336,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalInvalidator::PhysicalInvalidator(ContextID c)
-      : ctx(c), total(true), force(true), 
-        invalid_mask(FieldMask(FIELD_ALL_ONES))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInvalidator::PhysicalInvalidator(ContextID c, const FieldMask &m,
-                                             const bool f)
-      : ctx(c), total(false), force(f), invalid_mask(m)
+      : ctx(c)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalInvalidator::PhysicalInvalidator(const PhysicalInvalidator &rhs)
-      : ctx(0), total(false), force(false), invalid_mask(FieldMask())
+      : ctx(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9382,10 +9377,7 @@ namespace LegionRuntime {
     bool PhysicalInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      if (total)
-        node->invalidate_physical_state(ctx);
-      else
-        node->invalidate_physical_state(ctx, invalid_mask, force);
+      node->invalidate_physical_state(ctx);
       return true;
     }
 
@@ -9393,10 +9385,7 @@ namespace LegionRuntime {
     bool PhysicalInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      if (total)
-        node->invalidate_physical_state(ctx);
-      else
-        node->invalidate_physical_state(ctx, invalid_mask, force);
+      node->invalidate_physical_state(ctx);
       return true;
     }
 
@@ -13875,68 +13864,7 @@ namespace LegionRuntime {
       // Remove the added valid references
       remove_valid_references(new_valid_views);
     }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::find_pending_updates(PhysicalState *state,
-                                              MaterializedView *target,
-                                              FieldMask &needed_fields,
-                                              std::set<Event> &pending_events) 
-    //--------------------------------------------------------------------------
-    {
-      // Check out our fields first
-      {
-        LegionMap<InstanceView*,FieldMask>::aligned::const_iterator finder = 
-          state->valid_views.find(target);
-        if (finder != state->valid_views.end())
-          needed_fields -= finder->second;
-      }
-      if (!!needed_fields)
-      {
-        // Go through and see if we have any pending updates at this level
-        std::map<MaterializedView*,
-          LegionMap<Event,FieldMask>::aligned >::iterator finder = 
-                                        state->pending_updates.find(target);
-        if (finder != state->pending_updates.end())
-        {
-          LegionMap<Event,FieldMask>::aligned &pending = finder->second;
-          if (!pending.empty())
-          {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                  pending.begin(); it != pending.end(); it++)
-            {
-              if (needed_fields * it->second)
-                continue;
-              needed_fields -= it->second;
-              pending_events.insert(it->first);
-              if (!needed_fields)
-                break;
-            }
-          }
-        }
-        // See if we still have any needed fields, if not, check the parent
-        // excluding any dirty fields which we can't count going up
-        RegionTreeNode *parent = get_parent();
-        if (!!needed_fields && (parent != NULL) && target->has_parent_view())
-        {
-          FieldMask up_mask = needed_fields - state->dirty_mask;
-          if (!!up_mask)
-          {
-            MaterializedView *parent_view = 
-                                     target->get_materialized_parent_view();
-            FieldMask copy_up = up_mask;
-            PhysicalState *parent_state = 
-              parent->acquire_physical_state(state->ctx, false/*exclusive*/);
-            parent->find_pending_updates(parent_state, parent_view,
-                                         copy_up, pending_events);
-            parent->release_physical_state(parent_state);
-            // Now remove any fields that were removed from the copy_up
-            // mask from the set of needed fields
-            needed_fields -= (up_mask - copy_up);
-          }
-        }
-      }
-    }
-
+    
     //--------------------------------------------------------------------------
     void RegionTreeNode::find_copy_across_instances(const MappableInfo &info,
                                                     MaterializedView *target,
@@ -13948,9 +13876,8 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_COPY_ACROSS_INSTANCES_CALL);
 #endif
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;
-      PhysicalState *state = 
-        acquire_physical_state(info.ctx, info.version_info);
-      find_valid_instance_views(state, info.traversal_mask,
+      PhysicalState *state = get_physical_state(info.ctx, info.version_info); 
+      find_valid_instance_views(info.ctx, state, info.traversal_mask,
                                 info.traversal_mask, info.version_info,
                                 false/*needs space*/, valid_views);
       // Now tease them apart into src and composite views and sort
@@ -14811,29 +14738,25 @@ namespace LegionRuntime {
       FieldMask flush_mask;
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+      PhysicalState *state = get_physical_state(info.ctx, info.version_info); 
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
-        PhysicalState *state = 
-          acquire_physical_state(info.ctx, false/*exclusive*/);
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          // Skip reductions that have the same reduction op ID
-          if (it->first->get_redop() == redop)
-            continue;
-          FieldMask overlap = valid_mask & it->second;
-          if (!overlap)
-            continue;
-          flush_mask |= overlap; 
-          reduction_views.insert(*it);
-        }
-        // Now get any physical instances to flush to
-        if (!!flush_mask)
-        {
-          find_valid_instance_views(state, flush_mask, flush_mask, 
-                  info.version_info, false/*needs space*/, valid_views);
-        }
-        release_physical_state(state);
+        // Skip reductions that have the same reduction op ID
+        if (it->first->get_redop() == redop)
+          continue;
+        FieldMask overlap = valid_mask & it->second;
+        if (!overlap)
+          continue;
+        flush_mask |= overlap; 
+        reduction_views.insert(*it);
+      }
+      // Now get any physical instances to flush to
+      if (!!flush_mask)
+      {
+        find_valid_instance_views(info.ctx, state, flush_mask, flush_mask, 
+                    info.version_info, false/*needs space*/, valid_views);
       }
       if (!!flush_mask)
       {
@@ -14860,8 +14783,6 @@ namespace LegionRuntime {
         assert(update_mask == flush_mask);
 #endif
         // Now update our physical state
-        PhysicalState *state = 
-          acquire_physical_state(info.ctx, true/*exclusive*/);
         // Update the valid views.  Don't mark them dirty since we
         // don't want to accidentally invalidate some of our other
         // instances which get updated later in the loop.  Note this
@@ -14877,7 +14798,6 @@ namespace LegionRuntime {
         state->dirty_mask |= flush_mask;
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
-        release_physical_state(state);
         // Release any valid view references we are holding
         remove_valid_references(valid_views);
       }
@@ -14891,27 +14811,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INITIALIZE_PHYSICAL_STATE_CALL);
 #endif
-      if (!physical_states.has_entry(ctx))
+      if (!version_managers.has_entry(ctx))
         return;
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!state->dirty_mask);
-      assert(!state->reduction_mask);
-      assert(!state->remote_mask);
-      assert(!state->children.valid_fields);
-      assert(state->children.open_children.empty());
-      assert(state->valid_views.empty());
-      assert(state->reduction_views.empty());
-      // Should be one since we're using it
-      assert(state->acquired_count == 1);
-#endif
-      state->dirty_mask.clear();
-      state->reduction_mask.clear();
-      state->remote_mask.clear();
-      state->children = ChildState();
-      state->valid_views.clear();
-      state->reduction_views.clear();
-      release_physical_state(state);
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+      manager->check_init();
     }
 
     //--------------------------------------------------------------------------
@@ -14921,81 +14824,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
 #endif
-      if (!physical_states.has_entry(ctx))
+      if (!version_managers.has_entry(ctx))
         return;
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
-
-      state->dirty_mask.clear();
-      state->reduction_mask.clear();
-      state->remote_mask.clear();
-      state->children = ChildState();
-      state->pending_updates.clear();
-
-      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
-            state->valid_views.begin(); it != state->valid_views.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-        {
-          if (it->first->is_deferred_view())
-          {
-            DeferredView *def_view = it->first->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(it->first->as_materialized_view());
-        }
-      }
-      state->valid_views.clear();
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            state->reduction_views.begin(); it != 
-            state->reduction_views.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-          legion_delete(it->first);
-      }
-      state->reduction_views.clear();
-      release_physical_state(state);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_physical_state(ContextID ctx,
-                                                  const FieldMask &invalid_mask,
-                                                  bool force)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
-#endif
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
-      invalidate_physical_state(state, invalid_mask, force);
-      release_physical_state(state);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_physical_state(PhysicalState *state,
-                                                  const FieldMask &invalid_mask,
-                                                  bool force)
-    //--------------------------------------------------------------------------
-    {
-      invalidate_instance_views(state, invalid_mask, true/*clean*/, force);
-      invalidate_reduction_views(state, invalid_mask);
-      // Don't invalidate the remote_mask here since that is only
-      // set by messages coming from other nodes
-      state->children.valid_fields -= invalid_mask;
-      std::vector<ColorPoint> to_delete;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-            state->children.open_children.begin(); it !=
-            state->children.open_children.end(); it++)
-      {
-        it->second -= invalid_mask;
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (unsigned idx = 0; idx < to_delete.size(); idx++)
-        state->children.open_children.erase(to_delete[idx]);
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+      manager->clear(); 
     }
 
     //--------------------------------------------------------------------------
@@ -15004,39 +14836,13 @@ namespace LegionRuntime {
                                                PhysicalManager *target)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
-      std::vector<InstanceView*> to_delete;
-      for (LegionMap<InstanceView*,FieldMask>::aligned::iterator it = 
-            state->valid_views.begin(); it != state->valid_views.end(); it++)
-      {
-        if (it->first->get_manager() == target)
-        {
-          it->second -= detach_mask;
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-      }
-      for (std::vector<InstanceView*>::const_iterator it = to_delete.begin();
-            it != to_delete.end(); it++)
-      {
-        if ((*it)->remove_valid_reference())
-        {
-          if ((*it)->is_deferred_view())
-          {
-            DeferredView *def_view = (*it)->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete((*it)->as_materialized_view());
-        }
-        state->valid_views.erase(*it);
-      }
-      release_physical_state(state);
+      if (!version_managers.has_entry(ctx))
+        return;
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+      manager->detach_instance(detach_mask, target);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool RegionTreeNode::pack_send_state(ContextID ctx, Serializer &rez,
                              AddressSpaceID target, const FieldMask &send_mask,
@@ -15244,6 +15050,7 @@ namespace LegionRuntime {
       // Release our hold on the physical state
       release_physical_state(state);
     }
+#endif
 
     //--------------------------------------------------------------------------
     template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP>
@@ -15892,7 +15699,7 @@ namespace LegionRuntime {
         closer.add_target(inst_view->as_materialized_view());
       }
       bool success = true;
-      PhysicalState *state = acquire_physical_state(info.ctx,true/*exclusive*/);
+      PhysicalState *state = get_physical_state(info.ctx, version_info);
       for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
             it != targets.end(); it++)
       {
@@ -15911,7 +15718,6 @@ namespace LegionRuntime {
         closer.update_node_views(this, state);
         closed = closer.get_termination_event();
       }
-      release_physical_state(state);
       return success;
     }
 
@@ -16090,6 +15896,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionNode::remap_region(ContextID ctx, MaterializedView *view,
                                   const FieldMask &user_mask, 
+                                  VersionInfo &version_info, 
                                   FieldMask &needed_mask)
     //--------------------------------------------------------------------------
     {
@@ -16099,7 +15906,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx, version_info); 
       // We've already pre-mapped so we've pulled down
       // all the valid instance views.  Check to see if we
       // the target views is already there with the right
@@ -16110,7 +15917,6 @@ namespace LegionRuntime {
         needed_mask = user_mask;
       else
         needed_mask = user_mask - finder->second;
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
@@ -16141,79 +15947,14 @@ namespace LegionRuntime {
         // to date with the current versions of those fields
         // (assuming we are not write discard)
         bool needs_update_views = true;
+        PhysicalState *state = get_physical_state(info.ctx, info.version_info);
         if (!IS_WRITE_ONLY(info.req) && !!needed_fields) 
         {
-          if (IS_READ_ONLY(info.req))
-          {
-            // Here we need to handle a special case for read-only
-            // updates.  We know that multiple tasks can be mapping
-            // in parallel and we don't want to issue duplicate
-            // copies to the same target physical instance, so we
-            // maintain a set of pending updates to physical instances.
-            // We then check to see if our needed_fields set can be
-            // reduced and only issue copies for the difference.
-            std::set<Event> pending_events;
-            FieldMask actually_needed = needed_fields;
-            PhysicalState *state = 
-              acquire_physical_state(info.ctx, true/*exclusive*/);
-            // Find any pending updates to this instance view
-            find_pending_updates(state, new_view, 
-                                 actually_needed, pending_events);
-            // If we still have some fields to update, mark
-            // that we are updating them and get the valid
-            // views with which to perform the updates
-            if (!!actually_needed)
-            {
-              UserEvent our_pending_event = UserEvent::create_user_event();
-              state->pending_updates[new_view][our_pending_event] = 
-                                                          actually_needed;
-              LegionMap<InstanceView*,FieldMask>::aligned valid_views;
-              find_valid_instance_views(state, actually_needed, 
-                              actually_needed, info.version_info,
-                              false/*needs space*/, valid_views);
-              release_physical_state(state);
-              issue_update_copies(info, new_view, 
-                                  actually_needed, valid_views);
-              remove_valid_references(valid_views);
-              // Reacquire the state so we can update the
-              // valid views and remove our pending event 
-              state = acquire_physical_state(info.ctx, true/*exclusive*/);
-              // Update our valid views so we don't duplicately issue copies
-              update_valid_views(state, actually_needed, 
-                                 false/*dirty*/, new_view);
-              // Then trigger our pending event and remove it 
-              our_pending_event.trigger();
-              LegionMap<Event,FieldMask>::aligned &pending = 
-                                            state->pending_updates[new_view];
-              pending.erase(our_pending_event);
-              if (pending.empty())
-                state->pending_updates.erase(new_view);
-            }
-            // Now we're done so we can release the state
-            release_physical_state(state);
-            // Mark that we no longer need to update views
-            // since they will be all up-to-date by the time
-            // we return from waiting.
-            needs_update_views = false;
-            // If we have anything to wait for, do that now
-            if (!pending_events.empty())
-            {
-              Event wait_for = Event::merge_events(pending_events);
-              wait_for.wait();
-            }
-          }
-          else
-          {
-            // This is the normal non-read-only case
-            PhysicalState *state = 
-              acquire_physical_state(info.ctx, false/*exclusive*/);
-            LegionMap<InstanceView*,FieldMask>::aligned valid_views;
-            find_valid_instance_views(state, needed_fields, needed_fields, 
-                    info.version_info, false/*needs space*/, valid_views);
-            release_physical_state(state);
-            issue_update_copies(info, new_view, needed_fields, valid_views);
-            remove_valid_references(valid_views);
-          }
+          LegionMap<InstanceView*,FieldMask>::aligned valid_views;
+          find_valid_instance_views(info.ctx, state, needed_fields, 
+           needed_fields, info.version_info, false/*needs space*/, valid_views);
+          issue_update_copies(info, new_view, needed_fields, valid_views);
+          remove_valid_references(valid_views);
         }
 
         // If we mapped the region close up any partitions
@@ -16221,28 +15962,9 @@ namespace LegionRuntime {
         // this instance.  We only need to do this for 
         // non-read-only tasks, since the read-only close
         // operations happened during the pre-mapping step.
-        PhysicalState *state = 
-          acquire_physical_state(info.ctx, true/*exclusive*/);
         if (!IS_READ_ONLY(info.req))
         {
-          if (IS_WRITE_ONLY(info.req))
-          {
-            // If we're write only then we can just
-            // invalidate everything below and update
-            // the valid instance views.  Note we
-            // can't be holding the physical state lock
-            // when going down the tree so release it 
-            // and then reacquire it
-            release_physical_state(state);
-            PhysicalInvalidator invalidator(info.ctx, user.field_mask,
-                                            false/*force invalidate*/);
-            visit_node(&invalidator);
-            // Re-acquire the physical state
-            acquire_physical_state(state, true/*exclusive*/);
-            update_valid_views(state, user.field_mask, 
-                               true/*dirty*/, new_view);
-          }
-          else
+          if (!IS_WRITE_ONLY(info.req))
           {
             PhysicalCloser closer(info, false/*leave open*/, handle);
             closer.add_target(new_view);
@@ -16263,6 +15985,13 @@ namespace LegionRuntime {
             // Now update the valid views and the dirty mask
             closer.update_node_views(this, state);
           }
+          else
+          {
+            // This is write-only so update the valid views on the
+            // state with the new instance view
+            update_valid_views(state, user.field_mask, 
+                               true/*dirty*/, new_view);
+          }
         }
         else if (needs_update_views)
         {
@@ -16270,8 +15999,6 @@ namespace LegionRuntime {
           update_valid_views(state, user.field_mask,
                              false/*dirty*/, new_view);
         }
-        // Release our hold on the state
-        release_physical_state(state);
         // Flush any reductions that need to be flushed
         flush_reductions(user.field_mask,
                          info.req.redop, info);
@@ -16288,18 +16015,17 @@ namespace LegionRuntime {
         // Flush any reductions that need to be flushed
         flush_reductions(user.field_mask,
                          info.req.redop, info);
-        PhysicalState *state = 
-          acquire_physical_state(info.ctx, true/*exclusive*/);
+        PhysicalState *state = get_physical_state(info.ctx,
+                                                  info.version_info);
         // If there was a needed close for this reduction then
         // it was performed as part of the premapping operation
         update_reduction_views(state, user.field_mask, new_view);
-        // Release our hold on the state
-        release_physical_state(state);
         // Now we can add ourselves as a user of this region
         return new_view->add_user(user);
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::seed_state(ContextID ctx, PhysicalUser &user,
                                        LogicalView *new_view,
@@ -16323,6 +16049,7 @@ namespace LegionRuntime {
       release_physical_state(state);
       return InstanceRef(Event::NO_EVENT, new_view);
     } 
+#endif
 
     //--------------------------------------------------------------------------
     Event RegionNode::close_state(const MappableInfo &info, PhysicalUser &user,
@@ -16350,8 +16077,7 @@ namespace LegionRuntime {
       {
         MaterializedView *target_view = 
                           view->as_instance_view()->as_materialized_view();
-        PhysicalState *state = 
-          acquire_physical_state(info.ctx, true/*exclusive*/);
+        PhysicalState *state = get_physical_state(info.ctx, info.version_info);
         // First check to see if we are in the set of valid views, if
         // not then we need to issue updates for all of our fields
         LegionMap<InstanceView*,FieldMask>::aligned::const_iterator finder = 
@@ -16363,12 +16089,10 @@ namespace LegionRuntime {
           if (finder != state->valid_views.end())
             update_mask -= finder->second;
           LegionMap<InstanceView*,FieldMask>::aligned valid_views;
-          find_valid_instance_views(state, update_mask, update_mask,
+          find_valid_instance_views(info.ctx, state, update_mask, update_mask,
                       info.version_info, false/*needs space*/, valid_views);
-          release_physical_state(state);
           issue_update_copies(info, target_view, update_mask, valid_views);
           remove_valid_references(valid_views);
-          acquire_physical_state(state, true/*exclusive*/); 
         }
         // Now do the close to this physical instance
         PhysicalCloser closer(info, false/*leave open*/, handle);
@@ -16386,8 +16110,6 @@ namespace LegionRuntime {
 #endif
         // Now update the valid views
         closer.update_node_views(this, state);
-        // Release our hold on the physical state
-        release_physical_state(state);
         flush_reductions(user.field_mask,
                          info.req.redop, info);
         // Get the resulting instance reference
@@ -16409,7 +16131,7 @@ namespace LegionRuntime {
     {
       PhysicalState *state = get_physical_state(ctx, version_info);
       // First pull down any valid instance views
-      pull_valid_instance_views(ctx, state, user.field_mask);
+      pull_valid_instance_views(ctx, state, user.field_mask, version_info);
       // Now go through the list of valid instances and see if we can find
       // one that satisfies the field that we need.
       DeferredView *deferred_view = NULL;
@@ -16468,37 +16190,28 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
-                                 const void *value, size_t value_size)
+                                 const void *value, size_t value_size,
+                                 VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      // First do any invalidations from this node for the fields that
-      // are being written to
-      PhysicalInvalidator invalidator(ctx, fill_mask,
-                                      false/*force invalidate*/);
-      visit_node(&invalidator);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id();
       FillView *fill_view = 
         legion_new<FillView>(context, did, context->runtime->address_space,
                              did, this, value, value_size);
       // Now update the physical state
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx, version_info);
       update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::attach_file(ContextID ctx, 
                                         const FieldMask &attach_mask,
                                         const RegionRequirement &req,
-                                        AttachOp *attach_op)
+                                        AttachOp *attach_op,
+                                        VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      // First do any invalidations from this node for the fields that 
-      // are being written to because this is the new version
-      PhysicalInvalidator invalidator(ctx, attach_mask,
-                                      false/*force invalidate*/);
-      visit_node(&invalidator);
       // Create a new instance view based on the file
       InstanceManager *manager = 
         column_source->create_file_instance(req.privilege_fields,
@@ -16509,9 +16222,8 @@ namespace LegionRuntime {
       assert(view != NULL);
 #endif
       // Update the physical state with the new instance
-      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = get_physical_state(ctx, version_info);
       update_valid_views(state, attach_mask, false/*dirty*/, view);
-      release_physical_state(state);
       // Return the resulting instance
       return InstanceRef(Event::NO_EVENT, ViewHandle(view));
     }
@@ -16526,6 +16238,7 @@ namespace LegionRuntime {
       visit_node(&detacher);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool RegionNode::send_state(ContextID ctx, UniqueID remote_owner_uid, 
                                 AddressSpaceID target,
@@ -16620,6 +16333,7 @@ namespace LegionRuntime {
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::send_semantic_info(const NodeSet &targets,
@@ -16777,11 +16491,10 @@ namespace LegionRuntime {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (physical_states.has_entry(ctx))
+      if (version_managers.has_entry(ctx))
       {
-        PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
-        print_physical_state(state, capture_mask, to_traverse, logger);
-        release_physical_state(state);
+        VersionManager *manager = version_managers.lookup_entry(ctx);
+        print_physical_state(manager, capture_mask, to_traverse, logger);
       }
       else
       {
@@ -16837,6 +16550,7 @@ namespace LegionRuntime {
       }
     }
     
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::print_physical_state(PhysicalState *state,
                                          const FieldMask &capture_mask,
@@ -16961,6 +16675,7 @@ namespace LegionRuntime {
         logger->up();
       }
     }
+#endif
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
@@ -17077,9 +16792,11 @@ namespace LegionRuntime {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (physical_states.has_entry(ctx))
-        print_physical_state(physical_states.lookup_entry(ctx), capture_mask,
-                             to_traverse, logger);
+      if (version_managers.has_entry(ctx))
+      {
+        VersionManager *manager = version_managers.lookup_entry(ctx);
+        print_physical_state(manager, capture_mask, to_traverse, logger);
+      }
       else
         logger->log("No state");
       logger->log("");
@@ -17539,7 +17256,7 @@ namespace LegionRuntime {
           if (target_view != NULL)
             child_closer.add_target(target_view->get_materialized_subview(*it));
           PhysicalState *child_state = 
-            child_node->acquire_physical_state(info.ctx, true/*exclusive*/);
+            child_node->get_physical_state(info.ctx, version_info);
           bool result = child_node->siphon_physical_children(child_closer,
                                              child_state, closing_mask,
                                              ColorPoint()/*next child*/,
@@ -17548,7 +17265,6 @@ namespace LegionRuntime {
           if (!result || create_composite)
           {
             success = false;
-            child_node->release_physical_state(child_state);
             break;
           }
           else
@@ -17556,7 +17272,6 @@ namespace LegionRuntime {
             child_closer.update_node_views(child_node, child_state);
             closed = child_closer.get_termination_event();
           }
-          child_node->release_physical_state(child_state);
         }
       }
       else
@@ -17566,8 +17281,7 @@ namespace LegionRuntime {
         PhysicalCloser closer(info, leave_open, parent->handle);
         if (target_view != NULL)
           closer.add_target(target_view);
-        PhysicalState *state = 
-            acquire_physical_state(info.ctx, true/*exclusive*/);
+        PhysicalState *state = get_physical_state(info.ctx, version_info); 
         for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
               it != targets.end(); it++)
         {
@@ -17586,7 +17300,6 @@ namespace LegionRuntime {
           closer.update_node_views(this, state);
           closed = closer.get_termination_event();
         }
-        release_physical_state(state);
       }
       return success;
     }
@@ -17675,6 +17388,7 @@ namespace LegionRuntime {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool PartitionNode::send_state(ContextID ctx, UniqueID remote_owner_uid,
                                  AddressSpaceID target,
@@ -17769,6 +17483,7 @@ namespace LegionRuntime {
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::send_semantic_info(const NodeSet &targets,
@@ -17939,11 +17654,10 @@ namespace LegionRuntime {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (physical_states.has_entry(ctx))
+      if (version_managers.has_entry(ctx))
       {
-        PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
-        print_physical_state(state, capture_mask, to_traverse, logger);
-        release_physical_state(state);    
+        VersionManager *manager = version_managers.lookup_entry(ctx);
+        print_physical_state(manager, capture_mask, to_traverse, logger);
       }
       else
       {
@@ -17999,8 +17713,9 @@ namespace LegionRuntime {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    void PartitionNode::print_physical_state(PhysicalState *state,
+    void PartitionNode::print_physical_state(VersionManager *manager,
                                          const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                          TreeStateLogger *logger)
@@ -18123,6 +17838,7 @@ namespace LegionRuntime {
         logger->up();
       }
     }
+#endif
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
@@ -18251,10 +17967,10 @@ namespace LegionRuntime {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (physical_states.has_entry(ctx))
+      if (version_managers.has_entry(ctx))
       {
-        PhysicalState *state = physical_states.lookup_entry(ctx);
-        print_physical_state(state, capture_mask, to_traverse, logger);
+        VersionManager *manager = version_managers.lookup_entry(ctx);
+        print_physical_state(manager, capture_mask, to_traverse, logger);
       }
       else
       {
@@ -23768,8 +23484,8 @@ namespace LegionRuntime {
       // Don't just capture the valid views we have here, we need to
       // capture valid views for everyone above in the tree
       LegionMap<InstanceView*,FieldMask>::aligned instances;
-      tree_node->find_valid_instance_views(state, capture_mask, capture_mask,
-                       closer.version_info, false/*needs space*/, instances);
+      tree_node->find_valid_instance_views(closer.ctx, state, capture_mask,
+          capture_mask, closer.version_info, false/*needs space*/, instances);
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {

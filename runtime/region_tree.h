@@ -399,10 +399,12 @@ namespace LegionRuntime {
       // This takes ownership of the value buffer
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
-                       const void *value, size_t value_size);
+                       const void *value, size_t value_size,
+                       VersionInfo &version_info);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
-                              AttachOp *attach_op);
+                              AttachOp *attach_op,
+                              VersionInfo &version_info);
       void detach_file(RegionTreeContext ctx, 
                        const RegionRequirement &req,
                        const InstanceRef &ref);
@@ -1993,13 +1995,15 @@ namespace LegionRuntime {
           const LegionMap<VersionID,FieldMask>::aligned &versions);
       void apply_updates(const FieldMask &update_mask, 
                          PhysicalState *state, bool advance);
+      void check_init(void);
       void clear(void);
+      void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       Reservation version_lock;
       LegionMap<VersionID,StateInfo>::aligned version_infos;
     };
 
-    typedef DynamicTableAllocator<VersionManager, 10, 8> VersionManagerAllocator;
+    typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
 
     /**
      * \class RegionTreeNode
@@ -2149,10 +2153,6 @@ namespace LegionRuntime {
       void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
                                      const FieldMask &mask, 
                                      VersionInfo &version_info);
-      void find_pending_updates(PhysicalState *state, 
-                                MaterializedView *target,
-                                FieldMask &needed_fields,
-                                std::set<Event> &pending_events);
       void find_copy_across_instances(const MappableInfo &info,
                                       MaterializedView *target,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -2217,13 +2217,6 @@ namespace LegionRuntime {
       void initialize_physical_state(ContextID ctx);
       // Entry
       void invalidate_physical_state(ContextID ctx);
-      // Entry
-      void invalidate_physical_state(ContextID ctx, 
-                                     const FieldMask &invalid_mask,
-                                     bool force);
-      void invalidate_physical_state(PhysicalState *state,
-                                     const FieldMask &invalid_mask,
-                                     bool force);
       // Entry
       void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
                                  PhysicalManager *target);
@@ -2438,7 +2431,7 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(PhysicalState *state,
+      void print_physical_state(VersionManager *manager,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
@@ -2454,7 +2447,8 @@ namespace LegionRuntime {
 #endif
     public:
       void remap_region(ContextID ctx, MaterializedView *view, 
-                        const FieldMask &user_mask, FieldMask &needed_mask);
+                        const FieldMask &user_mask, 
+                        VersionInfo &version_info, FieldMask &needed_mask);
       InstanceRef register_region(const MappableInfo &info, 
                                   PhysicalUser &user,
                                   LogicalView *view,
@@ -2470,9 +2464,11 @@ namespace LegionRuntime {
                                   std::set<Event> &preconditions,
                                   VersionInfo &version_info);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
-                       const void *value, size_t value_size);
+                       const void *value, size_t value_size, 
+                       VersionInfo &version_info);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
-                             const RegionRequirement &req, AttachOp *attach_op);
+                             const RegionRequirement &req, AttachOp *attach_op,
+                             VersionInfo &version_info);
       void detach_file(ContextID ctx, const FieldMask &detach_mask,
                        PhysicalManager *detach_target);
     public:
@@ -2596,7 +2592,7 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(PhysicalState *state,
+      void print_physical_state(VersionManager *manager,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
@@ -2861,8 +2857,6 @@ namespace LegionRuntime {
     class PhysicalInvalidator : public NodeTraverser {
     public:
       PhysicalInvalidator(ContextID ctx);
-      PhysicalInvalidator(ContextID ctx, const FieldMask &invalid_mask,
-                          const bool force);
       PhysicalInvalidator(const PhysicalInvalidator &rhs);
       ~PhysicalInvalidator(void);
     public:
@@ -2873,9 +2867,6 @@ namespace LegionRuntime {
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
-      const bool total;
-      const bool force;
-      const FieldMask invalid_mask;
     };
 
     /**
