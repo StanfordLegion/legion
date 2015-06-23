@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -209,8 +209,6 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.ExprCrossProduct) then
-    if get_num_accessed_fields(node.lhs_type_expr) > 1 then return false end
-    if get_num_accessed_fields(node.rhs_type_expr) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.ExprUnary) then
@@ -567,20 +565,24 @@ function specialize.expr_partition(cx, node)
 end
 
 function specialize.expr_cross_product(cx, node)
-  local lhs_type = node.lhs_type_expr(cx.env:env())
-  local rhs_type = node.rhs_type_expr(cx.env:env())
-  local expr_type = std.cross_product(lhs_type, rhs_type)
-  local lhs = ast.specialized.ExprID {
-    value = expr_type.lhs_partition_symbol,
-    span = node.span,
-  }
-  local rhs = ast.specialized.ExprID {
-    value = expr_type.rhs_partition_symbol,
-    span = node.span,
-  }
+  local arg_types = node.arg_type_exprs:map(
+    function(arg_type_expr) return arg_type_expr(cx.env:env()) end)
+  -- Hack: Need to do this type checking early because otherwise we
+  -- can't construct a type here.
+  if #arg_types < 2 then
+    log.error(node, "cross product expected at least 2 arguments, got " ..
+                tostring(#arg_types))
+  end
+  local expr_type = std.cross_product(unpack(arg_types))
+  local args = expr_type.partition_symbols:map(
+    function(partition)
+      return ast.specialized.ExprID {
+        value = partition,
+        span = node.span,
+      }
+  end)
   return ast.specialized.ExprCrossProduct {
-    lhs = lhs,
-    rhs = rhs,
+    args = args,
     expr_type = expr_type,
     span = node.span,
   }

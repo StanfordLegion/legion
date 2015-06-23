@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -373,13 +373,13 @@ function parser.expr_simple(p)
 
   elseif p:nextif("cross_product") then
     p:expect("(")
-    local lhs_type_expr = p:luaexpr()
-    p:expect(",")
-    local rhs_type_expr = p:luaexpr()
+    local arg_type_exprs = terralib.newlist()
+    repeat
+      arg_type_exprs:insert(p:luaexpr())
+    until not p:nextif(",")
     p:expect(")")
     return ast.unspecialized.ExprCrossProduct {
-      lhs_type_expr = lhs_type_expr,
-      rhs_type_expr = rhs_type_expr,
+      arg_type_exprs = arg_type_exprs,
       span = ast.span(start, p),
     }
 

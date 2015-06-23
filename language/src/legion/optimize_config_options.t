@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -424,9 +424,8 @@ function analyze_inner.expr_partition(cx, node)
 end
 
 function analyze_inner.expr_cross_product(cx, node)
-  return
-    analyze_inner.expr(cx, node.lhs) and
-    analyze_inner.expr(cx, node.rhs)
+  return std.all(
+    node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
 function analyze_inner.expr_unary(cx, node)

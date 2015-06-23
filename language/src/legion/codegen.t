@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2338,12 +2338,10 @@ function codegen.expr_partition(cx, node)
 end
 
 function codegen.expr_cross_product(cx, node)
-  local lhs = codegen.expr(cx, node.lhs):read(cx)
-  local rhs = codegen.expr(cx, node.rhs):read(cx)
+  local args = node.args:map(function(arg) return codegen.expr(cx, arg):read(cx) end)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
-    [lhs.actions];
-    [rhs.actions];
+    [args:map(function(arg) return arg.actions end)]
     [emit_debuginfo(node)]
   end
 
@@ -2355,8 +2353,8 @@ function codegen.expr_cross_product(cx, node)
     [actions]
     var [product] = c.legion_terra_index_cross_product_create(
       [cx.runtime], [cx.context],
-      [lhs.value].impl.index_partition,
-      [rhs.value].impl.index_partition)
+      [args[1].value].impl.index_partition,
+      [args[2].value].impl.index_partition)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
