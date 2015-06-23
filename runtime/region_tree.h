@@ -2030,7 +2030,7 @@ namespace LegionRuntime {
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       const PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info);
-      DeltaState* get_delta_state(ContextID ctx, VersionInfo &info);
+      PhysicalState* get_delta_state(ContextID ctx, VersionInfo &info);
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
