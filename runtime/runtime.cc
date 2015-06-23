@@ -9244,6 +9244,108 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_field(Context ctx, LogicalRegion handle,
+                             LogicalRegion parent, FieldID fid,
+                             Future f, const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fid, f,
+                          pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fid, f,
+                          pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::fill_fields(Context ctx, LogicalRegion handle,
                               LogicalRegion parent,
                               const std::set<FieldID> &fields,
@@ -9275,6 +9377,109 @@ namespace LegionRuntime {
 #else
       fill_op->initialize(ctx, handle, parent, fields,
                           value, value_size, pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
+                              LogicalRegion parent,
+                              const std::set<FieldID> &fields,
+                              Future f, const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fields, f, 
+                          pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fields, f,
+                          pred, false/*check privileges*/);
 #endif
       Processor proc = ctx->get_executing_processor();
       // Check to see if we need to do any unmappings and remappings

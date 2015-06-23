@@ -2939,6 +2939,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::fill_field(Context ctx, LogicalRegion handle,
+                                      LogicalRegion parent, FieldID fid,
+                                      Future f, Predicate pred)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_field(ctx, handle, parent, fid, f, pred);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::fill_fields(Context ctx, LogicalRegion handle,
                                        LogicalRegion parent,
                                        const std::set<FieldID> &fields,
@@ -2947,6 +2956,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->fill_fields(ctx, handle, parent, fields, value, size, pred);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::fill_fields(Context ctx, LogicalRegion handle,
+                                       LogicalRegion parent, 
+                                       const std::set<FieldID> &fields,
+                                       Future f, Predicate pred)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, handle, parent, fields, f, pred);
     }
 
     //--------------------------------------------------------------------------

@@ -4149,6 +4149,22 @@ namespace LegionRuntime {
                       Predicate pred = Predicate::TRUE_PRED);
 
       /**
+       * This version of fill field is exactly the same as the one above,
+       * but uses a future value. This operation requires read-write privileges 
+       * on the field.
+       * @param ctx enclosing task context
+       * @param handle the logical region on which to fill the field
+       * @param parent the parent region from which privileges are derived
+       * @param fid the field to fill 
+       * @param value pointer to the buffer containing the value to be used
+       * @param value_size size of the buffer in bytes
+       * @param pred the predicate for this operation
+       */
+      void fill_field(Context ctx, LogicalRegion handle, LogicalRegion parent,
+                      FieldID fid, Future f, 
+                      Predicate pred = Predicate::TRUE_PRED);
+
+      /**
        * Fill multiple fields of a logical region with the same value.
        * This operation requires read-write privileges on the fields.
        * @param ctx enclosing task context
@@ -4179,6 +4195,20 @@ namespace LegionRuntime {
                        const std::set<FieldID> &fields, 
                        const void *value, size_t value_size,
                        Predicate pred = Predicate::TRUE_PRED);
+
+      /**
+       * Fill multiple fields of a logical region with the same future value.
+       * This operation requires read-write privileges on the fields.
+       * @param ctx enclosing task context
+       * @param handle the logical region on which to fill the field
+       * @param parent the parent region from which privileges are derived
+       * @param fields the set of fields to fill
+       * @param future the future value to use for filling the fields
+       * @param pred the predicate for this operation
+       */
+      void fill_fields(Context ctx, LogicalRegion handle, LogicalRegion parent,
+                       const std::set<FieldID> &fields,
+                       Future f, Predicate pred = Predicate::TRUE_PRED);
     public:
       //------------------------------------------------------------------------
       // File Operations

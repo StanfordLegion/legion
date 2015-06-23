@@ -8035,6 +8035,23 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+                            LogicalRegion parent, FieldID fid, const Future &f,
+                            const Predicate &pred, bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
+      requirement.privilege_fields.insert(fid);
+      future = f;
+      if (check_privileges)
+        check_fill_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+      initialize_mapping_path(mapping_path, requirement, requirement.region);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
                             LogicalRegion parent,
                             const std::set<FieldID> &fields,
                             const void *ptr, size_t size,
@@ -8048,6 +8065,24 @@ namespace LegionRuntime {
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, size);
+      if (check_privileges)
+        check_fill_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+      initialize_mapping_path(mapping_path, requirement, requirement.region);
+    }
+
+      //--------------------------------------------------------------------------
+    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+                            LogicalRegion parent,
+                            const std::set<FieldID> &fields, const Future &f,
+                            const Predicate &pred, bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
+      requirement.privilege_fields = fields;
+      future = f;
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -8075,6 +8110,7 @@ namespace LegionRuntime {
         free(value);
         value = NULL;
       }
+      future = Future();
       restrict_info.clear();
       runtime->free_fill_op(this);
     }
@@ -8102,6 +8138,9 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      // If we are waiting on a future register a dependence
+      if (future.impl != NULL)
+        future.impl->register_dependence(this);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
@@ -8165,16 +8204,60 @@ namespace LegionRuntime {
         return false;
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
-      runtime->forest->fill_fields(physical_ctx, requirement,
-                                   value, value_size);
-      // Clear value and value size since the forest ended up 
-      // taking ownership of them
-      value = NULL;
-      value_size = 0;
-      complete_mapping();
-      complete_execution();
+      if (future.impl == NULL)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(value != NULL);
+#endif
+        runtime->forest->fill_fields(physical_ctx, requirement,
+                                     value, value_size);
+        // Clear value and value size since the forest ended up 
+        // taking ownership of them
+        value = NULL;
+        value_size = 0;
+        complete_mapping();
+        complete_execution();
+      }
+      else
+      {
+        complete_mapping();
+        // If we have a future value see if its event has triggered
+        Event future_ready_event = future.impl->get_ready_event();
+        if (!future_ready_event.has_triggered())
+        {
+          // Launch a task to handle the deferred complete
+#ifdef SPECIALIZED_UTIL_PROCS
+          Processor util = runtime->get_cleanup_proc(local_proc);
+#else
+          Processor util = runtime->find_utility_group();
+#endif
+          DeferredCompleteArgs deferred_complete_args;
+          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+          deferred_complete_args.proxy_this = this;
+          util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                     sizeof(deferred_complete_args), future_ready_event);
+        }
+        else
+          deferred_complete(); // can do the completion now
+      }
       // This should never fail
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Make a copy of the future value since the region tree
+      // will want to take ownership of the buffer
+      size_t result_size = future.impl->get_untyped_size();
+      void *result = malloc(result_size);
+      memcpy(result, future.impl->get_untyped_result(), result_size);
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(parent_req_index);
+      runtime->forest->fill_fields(physical_ctx, requirement, 
+                                   result, result_size);
+      complete_execution();
     }
     
     //--------------------------------------------------------------------------

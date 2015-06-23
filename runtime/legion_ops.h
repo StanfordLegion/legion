@@ -1507,9 +1507,16 @@ namespace LegionRuntime {
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid, const Future &f,
+                      const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields,
                       const void *ptr, size_t size,
+                      const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, 
+                      const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
@@ -1520,6 +1527,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
@@ -1535,6 +1543,7 @@ namespace LegionRuntime {
       unsigned parent_req_index;
       void *value;
       size_t value_size;
+      Future future;
     };
 
     /**

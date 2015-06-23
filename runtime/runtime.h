@@ -1351,11 +1351,18 @@ namespace LegionRuntime {
                       LogicalRegion parent, FieldID fid,
                       const void *value, size_t value_size,
                       const Predicate &pred);
+      void fill_field(Context ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid,
+                      Future f, const Predicate &pred);
       void fill_fields(Context ctx, LogicalRegion handle,
                        LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        const void *value, size_t value_size,
                        const Predicate &pred);
+      void fill_fields(Context ctx, LogicalRegion handle,
+                       LogicalRegion parent,
+                       const std::set<FieldID> &fields,
+                       Future f, const Predicate &pred);
     public:
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
