@@ -136,16 +136,16 @@ local function get_num_accessed_fields(node)
 
   elseif node:is(ast.unspecialized.ExprMethodCall) then
     if get_num_accessed_fields(node.value) > 1 then return false end
-    node.args:map(function(arg)
+    for _, arg in pairs(node.args) do
       if get_num_accessed_fields(arg) > 1 then return false end
-    end)
+    end
     return 1
 
   elseif node:is(ast.unspecialized.ExprCall) then
     if get_num_accessed_fields(node.fn) > 1 then return false end
-    node.args:map(function(arg)
+    for _, arg in pairs(node.args) do
       if get_num_accessed_fields(arg) > 1 then return false end
-    end)
+    end
     return 1
 
   elseif node:is(ast.unspecialized.ExprCtor) then
