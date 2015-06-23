@@ -1330,9 +1330,10 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : physical_state(NULL) { }
+          : physical_state(NULL), delta_state(NULL) { }
       public:
         PhysicalState *physical_state;
+        PhysicalState *delta_state;
         RegionVersions version_numbers;
       };
     public:
@@ -1350,9 +1351,12 @@ namespace LegionRuntime {
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void clear(void);
     public:
-      PhysicalState* find_physical_state(RegionTreeNode *node); 
-      PhysicalState* create_physical_state(RegionTreeNode *node,
-                                           VersionManager *manager);
+      const PhysicalState* find_physical_state(RegionTreeNode *node); 
+      const PhysicalState* create_physical_state(RegionTreeNode *node,
+                                                 VersionManager *manager);
+      PhysicalState *find_delta_state(RegionTreeNode *node);
+      PhysicalState *create_delta_state(RegionTreeNode *node,
+                                        VersionManager *manager, bool mutate);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       bool projection;
@@ -1911,6 +1915,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
+      void merge_version_state(VersionState *state);
       void merge_version_state(VersionState *state, const FieldMask &mask);
     public:
       // Fields which have dirty data
@@ -1992,11 +1997,15 @@ namespace LegionRuntime {
       VersionManager& operator=(const VersionManager &rhs);
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
-          const LegionMap<VersionID,FieldMask>::aligned &versions);
+          const LegionMap<VersionID,FieldMask>::aligned &versions, 
+                                     bool apply = true);
+      PhysicalState* construct_delta(RegionTreeNode *node,
+        const LegionMap<VersionID,FieldMask>::aligned &versions, bool advance);
       void apply_updates(const FieldMask &update_mask, 
-                         PhysicalState *state, bool advance);
+                         const PhysicalState *state);
       void check_init(void);
       void clear(void);
+      void sanity_check(void);
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       Reservation version_lock;
@@ -2020,7 +2029,8 @@ namespace LegionRuntime {
     public:
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info);
+      const PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info);
+      DeltaState* get_delta_state(ContextID ctx, VersionInfo &info);
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);

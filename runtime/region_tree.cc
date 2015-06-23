@@ -8730,7 +8730,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
+    const PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
       std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
@@ -8742,8 +8742,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node,
-                                                      VersionManager *manager)
+    const PhysicalState* VersionInfo::create_physical_state(
+                                  RegionTreeNode *node, VersionManager *manager)
     //--------------------------------------------------------------------------
     {
       std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
@@ -8757,6 +8757,37 @@ namespace LegionRuntime {
                 manager->construct_state(node, finder->second.version_numbers);
       // Save the resulting physical state
       finder->second.physical_state = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* VersionInfo::find_delta_state(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+        node_infos.find(node);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != node_infos.end());
+#endif
+      return finder->second.delta_state;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* VersionInfo::create_delta_state(RegionTreeNode *node,
+                                                   VersionManager *manager,
+                                                   bool advance)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
+        node_infos.find(node);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != node_infos.end());
+      assert(finder->second.delta_state == NULL);
+#endif
+      PhysicalState *result = 
+        manager->construct_delta(node, finder->second.version_numbers, advance);
+      // Save the resulting delta state
+      finder->second.delta_state = result;
       return result;
     }
     
@@ -9482,10 +9513,7 @@ namespace LegionRuntime {
         {
           FieldMask overlap = it->second & close_mask;
           if (!!overlap)
-          {
             valid_reductions[it->first] = overlap;
-            it->first->add_valid_reference();
-          }
         }
         if (!valid_reductions.empty())
           node->invalidate_reduction_views(state, close_mask);
@@ -9518,10 +9546,7 @@ namespace LegionRuntime {
         {
           FieldMask overlap = it->second & close_mask;
           if (!!overlap)
-          {
             valid_reductions[it->first] = overlap;
-            it->first->add_valid_reference();
-          }
         }
         if (!valid_reductions.empty())
           node->invalidate_reduction_views(state, close_mask);
@@ -10994,27 +11019,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       targets_selected = !upper_targets.empty(); 
-      if (targets_selected)
-      {
-        for (std::vector<MaterializedView*>::const_iterator it = 
-              upper_targets.begin(); it != upper_targets.end(); it++)
-        {
-          (*it)->add_valid_reference();
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
     PhysicalCloser::~PhysicalCloser(void)
     //--------------------------------------------------------------------------
     {
-      // Remove any valid references that we have from physical regions
-      for (std::vector<MaterializedView*>::const_iterator it = 
-            upper_targets.begin(); it != upper_targets.end(); it++)
-      {
-        if ((*it)->remove_valid_reference())
-          legion_delete(*it);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -11040,7 +11050,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target != NULL);
 #endif
-      target->add_valid_reference();
       upper_targets.push_back(target);
       targets_selected = true;
     }
@@ -11157,10 +11166,7 @@ namespace LegionRuntime {
       if (finder != reduction_views.end())
         finder->second |= valid_fields;
       else
-      {
         reduction_views[view] = valid_fields;
-        view->add_valid_reference();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -11186,13 +11192,6 @@ namespace LegionRuntime {
       }
       // Now update the state of the node
       node->update_valid_views(state,closed_mask,true/*dirty*/,composite_view);
-      // Now we can remove the valid references that we hold on the reductions
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-          legion_delete(it->first);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -11656,7 +11655,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
-                        const LegionMap<VersionID,FieldMask>::aligned &versions)
+                        const LegionMap<VersionID,FieldMask>::aligned &versions,
+                                                   bool apply /* = true*/)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -11687,46 +11687,73 @@ namespace LegionRuntime {
       }
       // Take the lock in read-only mode
       AutoLock v_lock(version_lock, 1, false/*exclusive*/);
-      // Find all the version infos and merge them into the result 
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            versions.begin(); it != versions.end(); it++)
+      if (apply)
       {
-        LegionMap<VersionID,StateInfo>::aligned::const_iterator finder = 
-          version_infos.find(it->first);
+        // Find all the version infos and merge them into the result 
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              versions.begin(); it != versions.end(); it++)
+        {
+          LegionMap<VersionID,StateInfo>::aligned::const_iterator finder = 
+            version_infos.find(it->first);
 #ifdef DEBUG_HIGH_LEVEL
-        // Better have the state info
-        assert(finder != version_infos.end());
-        // Sanity check that state info is valid for all expected fields
-        assert(!(it->second - finder->second.valid_fields));
+          // Better have the state info
+          assert(finder != version_infos.end());
+          // Sanity check that state info is valid for all expected fields
+          assert(!(it->second - finder->second.valid_fields));
 #endif
-        state->merge_version_state(finder->second.state, it->second);
+          state->merge_version_state(finder->second.state, it->second);
+        }
       }
+      else
+      {
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              versions.begin(); it != versions.end(); it++)
+        {
+          LegionMap<VersionID,StateInfo>::aligned::const_iterator finder = 
+            version_infos.find(it->first);
+#ifdef DEBUG_HIGH_LEVEL
+          // Better have the state info
+          assert(finder != version_infos.end());
+          // Sanity check that state info is valid for all expected fields
+          assert(!(it->second - finder->second.valid_fields));
+#endif
+          state->merge_version_state(finder->second.state);
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check();      
+#endif
       return state;
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::apply_updates(const FieldMask &update_mask,
-                                       PhysicalState *state, bool advance)
+    PhysicalState* VersionManager::construct_delta(RegionTreeNode *node,
+          const LegionMap<VersionID,FieldMask>::aligned &versions, bool advance)
     //--------------------------------------------------------------------------
     {
-      // Take the lock in exclusive mode since we are applying updates
-      AutoLock v_lock(version_lock);
       if (advance)
       {
+#ifdef DEBUG_HIGH_LEVEL
+        PhysicalState *state = legion_new<PhysicalState>(node);
+#else
+        PhysicalState *state = legion_new<PhysicalState>();
+#endif
+        if (versions.empty())
+          return state;
+        // Take the lock in exclusive mode to advance the version numbers
+        AutoLock v_lock(version_lock);
         // Advance all the necessary fields and make any new states
         // Always do this forwards to maximize version state reuse
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              state->version_states.begin(); it != 
-              state->version_states.end(); it++)
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              versions.begin(); it != versions.end(); it++)
         {
           LegionMap<VersionID,StateInfo>::aligned::iterator low_finder = 
-            version_infos.find(it->first->version_number);
+            version_infos.find(it->first);
 #ifdef DEBUG_HIGH_LEVEL
           assert(low_finder != version_infos.end());
-          assert(low_finder->second.state == it->first);
 #endif
           // See if there is already an entry for the next version number
-          VersionID next_version_number = it->first->version_number + 1;
+          VersionID next_version_number = it->first + 1;
 #ifdef DEBUG_HIGH_LEVEL
           assert(next_version_number > 0); // Crazy check for overflow
 #endif
@@ -11736,10 +11763,16 @@ namespace LegionRuntime {
           {
             StateInfo &info = version_infos[next_version_number];
             info.state = legion_new<VersionState>(next_version_number);
+            info.state->add_reference(); // Add a valid reference
             info.valid_fields = it->second;
+            // Merge the new state into the state
+            state->merge_version_state(info.state);
           }
           else
+          {
             high_finder->second.valid_fields |= it->second;
+            state->merge_version_state(info.state);
+          }
           // Remove the fields from the old one and see if we should
           // delete it from our list of version infos
           low_finder->second.valid_fields -= it->second;
@@ -11750,21 +11783,28 @@ namespace LegionRuntime {
             version_infos.erase(low_finder);
           }
         }
-      }
-      // Now apply all the updates
-
 #ifdef DEBUG_HIGH_LEVEL
-      // This code is a sanity check that each field appears for at most
-      // one version number
-      FieldMask version_fields;
-      for (LegionMap<VersionID,StateInfo>::aligned::const_iterator it = 
-            version_infos.begin(); it != version_infos.end(); it++)
-      {
-        assert(!it->second.valid_fields);
-        assert(version_fields * it->second.valid_fields);
-        version_fields |= it->second.valid_fields;
-      }
+        sanity_check();      
 #endif
+        return state;
+      }
+      else
+      {
+        // If we're not advancing, we can just do the normal state
+        // construction without needing to apply any updates
+        return construct_state(node, versions, false/*apply*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::apply_updates(const FieldMask &update_mask,
+                                       const PhysicalState *state)
+    //--------------------------------------------------------------------------
+    {
+      // Take the lock in exclusive mode since we are applying updates
+      AutoLock v_lock(version_lock);
+      // Now apply all the updates
+      
     }
 
     //--------------------------------------------------------------------------
@@ -11781,6 +11821,22 @@ namespace LegionRuntime {
       }
       // Then clear the map
       version_infos.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::sanity_check(void)
+    //--------------------------------------------------------------------------
+    {
+      // This code is a sanity check that each field appears for at most
+      // one version number
+      FieldMask version_fields;
+      for (LegionMap<VersionID,StateInfo>::aligned::const_iterator it = 
+            version_infos.begin(); it != version_infos.end(); it++)
+      {
+        assert(!it->second.valid_fields);
+        assert(version_fields * it->second.valid_fields);
+        version_fields |= it->second.valid_fields;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -11829,12 +11885,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* RegionTreeNode::get_physical_state(ContextID ctx,
+    const PhysicalState* RegionTreeNode::get_physical_state(ContextID ctx,
                                                       VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       // First check to see if the version info already has a state
-      PhysicalState *result = version_info.find_physical_state(this);  
+      const PhysicalState *result = version_info.find_physical_state(this);  
       if (result != NULL)
         return result;
       // If it didn't have it then we need to make it
@@ -11844,6 +11900,26 @@ namespace LegionRuntime {
 #endif
       // Now have the version info create a physical state with the manager
       result = version_info.create_physical_state(this, manager);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* RegionTreeNode::get_delta_state(ContextID ctx, 
+                                                   VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalState *result = version_info.find_delta_state(this);
+      if (result != NULL)
+        return result;
+      // If it didn't have it then we need to make it
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(manager != NULL);
+#endif
+      result = version_info.create_delta_state(this, manager);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -13151,10 +13227,7 @@ namespace LegionRuntime {
           {
             FieldMask overlap = it->second & closing_mask;
             if (!!overlap)
-            {
               valid_reductions[it->first] = overlap;
-              it->first->add_valid_reference();
-            }
           }
         }
       }
@@ -13236,12 +13309,6 @@ namespace LegionRuntime {
                                   closer.info.local_proc, 
                                   valid_reductions, &closer);
         }
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-          legion_delete(it->first);
       }
     }
 
