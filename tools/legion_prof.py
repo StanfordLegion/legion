@@ -32,7 +32,7 @@ event_pat = re.compile(prefix + r'Prof Event (?P<proc>[a-f0-9]+) (?P<kind>[0-9]+
 create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[a-f0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
 field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[a-f0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
 destroy_pat = re.compile(prefix + r'Prof Destroy Instance (?P<iid>[a-f0-9]+) (?P<time>[0-9]+)')
-userevent_pat = re.compile(prefix + r'Prof User Event (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)')
+userevent_pat = re.compile(prefix + r'Prof User Event (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<name>[\w_\-]+)')
 
 # List of event kinds from legion_profiling.h
 event_kind_ids = {
