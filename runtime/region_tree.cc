@@ -9505,31 +9505,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
+      const PhysicalState *state = node->get_physical_state(ctx, version_info);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
-        PhysicalState *state = node->get_physical_state(ctx, version_info); 
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          FieldMask overlap = it->second & close_mask;
-          if (!!overlap)
-            valid_reductions[it->first] = overlap;
-        }
-        if (!valid_reductions.empty())
-          node->invalidate_reduction_views(state, close_mask);
+        FieldMask overlap = it->second & close_mask;
+        if (!!overlap)
+          valid_reductions[it->first] = overlap;
       }
       if (!valid_reductions.empty())
-      {
         node->issue_update_reductions(target, close_mask, 
                                       local_proc, valid_reductions);
-        // Remove our valid references
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              valid_reductions.begin(); it != valid_reductions.end(); it++)
-        {
-          if (it->first->remove_valid_reference())
-            legion_delete(it->first);
-        }
-      }
       return true;
     }
 
@@ -9538,31 +9525,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
+      const PhysicalState *state = node->get_physical_state(ctx, version_info); 
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
-        PhysicalState *state = node->get_physical_state(ctx, version_info); 
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          FieldMask overlap = it->second & close_mask;
-          if (!!overlap)
-            valid_reductions[it->first] = overlap;
-        }
-        if (!valid_reductions.empty())
-          node->invalidate_reduction_views(state, close_mask);
+        FieldMask overlap = it->second & close_mask;
+        if (!!overlap)
+          valid_reductions[it->first] = overlap;
       }
       if (!valid_reductions.empty())
-      {
         node->issue_update_reductions(target, close_mask, 
                                       local_proc, valid_reductions);
-        // Remove our valid references
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              valid_reductions.begin(); it != valid_reductions.end(); it++)
-        {
-          if (it->first->remove_valid_reference())
-            legion_delete(it->first);
-        }
-      }
       return true;
     }
 
@@ -9632,8 +9606,8 @@ namespace LegionRuntime {
       // if any were flushed and therefore need to be invalidated
       FieldMask invalidate_mask = node->flush_reductions(info.traversal_mask,
                                                         info.req.redop, info);
-      PhysicalState *state = node->get_physical_state(info.ctx, 
-                                                      info.version_info); 
+      const PhysicalState *state = node->get_physical_state(info.ctx, 
+                                                            info.version_info);
       // Update our physical state to indicate which child
       // we are opening and in which fields
       if (has_child)
@@ -11908,7 +11882,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState* RegionTreeNode::get_delta_state(ContextID ctx, 
-                                                   VersionInfo &version_info)
+                                                   VersionInfo &version_info,
+                                                   bool advance)
     //--------------------------------------------------------------------------
     {
       PhysicalState *result = version_info.find_delta_state(this);
@@ -11919,7 +11894,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
 #endif
-      result = version_info.create_delta_state(this, manager);
+      result = version_info.create_delta_state(this, manager, advance);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
