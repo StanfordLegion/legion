@@ -16,6 +16,10 @@ import "legion"
 
 local c = legionlib.c
 
+-- This tests the way in which default partitions in placed into the
+-- environment, particularly with respect to the order that regions
+-- are accessed in.
+
 task f(s : region(int), t : partition(disjoint, s), n : int) : int
 where reads(s) do
   var w = 0
@@ -26,6 +30,24 @@ where reads(s) do
     end
   end
   return w
+end
+
+task h1(a : region(int),
+        b : partition(disjoint, a), c : partition(disjoint, a),
+        d : cross_product(b, c), n : int) : int
+where reads(a) do
+  -- Access d[0].partition first
+  var x = d[0].partition
+  return f(d[0], x, n)
+end
+
+task h2(a : region(int),
+        b : partition(disjoint, a), c : partition(disjoint, a),
+        d : cross_product(b, c), n : int) : int
+where reads(a) do
+  -- Access d[0] first
+  var x = d[0]
+  return f(x, d[0].partition, n)
 end
 
 task g() : int
@@ -58,10 +80,10 @@ task g() : int
   var x2 = new(ptr(int, r2))
   @x2 = 3
 
-  return f(cp[0], cp[0].partition, n)
+  return h1(r, p0, p1, cp, n) + h2(r, p0, p1, cp, n)
 end
 
 task main()
-  legionlib.assert(g() == 123, "test failed")
+  legionlib.assert(g() == 246, "test failed")
 end
 legionlib.start(main)
