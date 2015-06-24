@@ -1556,8 +1556,8 @@ function std.ispace(index_type)
     if previous_default and previous_default ~= partition then
       assert(false, "Ispace type can only have one default partition")
     end
-    if not std.is_partition(partition) then
-      assert(false, "Ispace type requires default partition to be a partition")
+    if not (std.is_partition(partition) or std.is_cross_product(partition)) then
+      assert(false, "Ispace type requires default partition to be a partition or cross product")
     end
     if partition:parent_ispace() ~= self then
       assert(false, "Ispace type requires default partition to be a partition of self")
@@ -1648,8 +1648,8 @@ function std.region(ispace_symbol, fspace_type)
     if previous_default and previous_default ~= partition then
       assert(false, "Region type can only have one default partition")
     end
-    if not std.is_partition(partition) then
-      assert(false, "Region type requires default partition to be a partition")
+    if not (std.is_partition(partition)  or std.is_cross_product(partition)) then
+      assert(false, "Region type requires default partition to be a partition or cross product")
     end
     if partition:parent_region() ~= self then
       assert(false, "Region type requires default partition to be a partition of self")
@@ -1783,7 +1783,7 @@ function std.cross_product(...)
   st.entries = terralib.newlist({
       { "impl", c.legion_logical_partition_t },
       { "product", c.legion_terra_index_cross_product_t },
-      { "partitions", c.legion_index_partition_t[#partition_symbols - 2] },
+      { "partitions", c.legion_index_partition_t[#partition_symbols] },
   })
 
   st.is_cross_product = true
@@ -1841,26 +1841,28 @@ function std.cross_product(...)
   end
 
   function st:subpartition_dynamic(i, region_type)
+    local region_symbol = terralib.newsymbol(region_type)
+    local partition = std.partition(self:cross_partition().disjointness, region_symbol)
     if #partition_symbols > 2 then
-      local subpartition_symbols = terralib.newlist()
-      for i = 2, #partition_symbols do
+      local partition_symbol = terralib.newsymbol(partition)
+      local subpartition_symbols = terralib.newlist({partition_symbol})
+      for i = 3, #partition_symbols do
         subpartition_symbols:insert(partition_symbols[i])
       end
       return std.cross_product(unpack(subpartition_symbols))
     else
-      local region_symbol = terralib.newsymbol(region_type)
-      return std.partition(self:cross_partition().disjointness, region_symbol)
+      return partition
     end
   end
 
   function st:force_cast(from, to, expr)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
-    -- FIXME: Potential for double evaluation here.
-    return `([to] { impl = [expr].impl, product = [expr].product })
+    -- FIXME: Potential for double (triple) evaluation here.
+    return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
   end
 
   function st.metamethods.__typename(st)
-    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    return "cross_product(" .. st.partition_symbols:mkstring(", ") .. ")"
   end
 
   return st
