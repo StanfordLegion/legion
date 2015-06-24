@@ -1256,6 +1256,9 @@ namespace LegionRuntime {
       LogicalPartition get_logical_partition_by_color(Context ctx, 
                                                       LogicalRegion parent, 
                                                       Color c);
+      LogicalPartition get_logical_partition_by_color(Context ctx,
+                                                      LogicalRegion parent,
+                                                      const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
@@ -1272,6 +1275,9 @@ namespace LegionRuntime {
       LogicalRegion get_logical_subregion_by_color(Context ctx, 
                                                    LogicalPartition parent, 
                                                    Color c);
+      LogicalRegion get_logical_subregion_by_color(Context ctx,
+                                                   LogicalPartition parent,
+                                                   const DomainPoint &c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
