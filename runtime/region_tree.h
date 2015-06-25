@@ -1555,6 +1555,9 @@ namespace LegionRuntime {
                                                             prev_epoch_users;
       LegionMap<VersionID,FieldMask,VERSION_ID_ALLOC>::track_aligned
                                                             field_versions;
+      // Fields for which we have outstanding local reductions
+      FieldMask outstanding_reduction_fields;
+      LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
       // Fields on which the user has 
@@ -1920,8 +1923,8 @@ namespace LegionRuntime {
     public:
       // Fields which have dirty data
       FieldMask dirty_mask;
-      // Fields which have reductions
-      FieldMask reduction_mask;
+      // Fields whose reductions have been flushed
+      FieldMask flushed_reductions;
       // State of any child nodes
       ChildState children;
       // The valid instance views
@@ -2080,8 +2083,15 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info);
+      void record_intermediate_version_numbers(LogicalState &state, 
+                                               const FieldMask &mask,
+                                               VersionInfo &version_info,
+                                               bool advance_dirty_below);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
-      void advance_dirty_below(LogicalState &state, const FieldMask &mask);
+      void record_logical_reduction(LogicalState &state, ReductionOpID redop,
+                                    const FieldMask &user_mask);
+      void clear_logical_reduction_fields(LogicalState &state,
+                                          const FieldMask &cleared_mask);
       void sanity_check_logical_state(LogicalState &state);
       void initialize_logical_state(ContextID ctx);
       void invalidate_logical_state(ContextID ctx);
@@ -2937,14 +2947,10 @@ namespace LegionRuntime {
     public:
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
-    public:
-      inline RegionTreeNode* get_last_node(void) const { return last_node; }
     protected:
-      bool perform_close_operations(RegionTreeNode *node,
-                                    LogicalRegion closing_handle);
+      bool premap_node(RegionTreeNode *node, LogicalRegion closing_handle);
     protected:
       const MappableInfo &info;
-      RegionTreeNode *last_node;
     }; 
 
     /**

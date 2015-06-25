@@ -9546,14 +9546,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PremapTraverser::PremapTraverser(RegionTreePath &p, const MappableInfo &i)
-      : PathTraverser(p), info(i), last_node(NULL)
+      : PathTraverser(p), info(i)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PremapTraverser::PremapTraverser(const PremapTraverser &rhs)
-      : PathTraverser(rhs.path), info(rhs.info), last_node(NULL)
+      : PathTraverser(rhs.path), info(rhs.info)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9579,26 +9579,24 @@ namespace LegionRuntime {
     bool PremapTraverser::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      return perform_close_operations(node, node->handle);
+      return premap_node(node, node->handle);
     }
 
     //--------------------------------------------------------------------------
     bool PremapTraverser::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      return perform_close_operations(node, node->parent->handle);
+      return premap_node(node, node->parent->handle);
     }
 
     //--------------------------------------------------------------------------
-    bool PremapTraverser::perform_close_operations(RegionTreeNode *node, 
+    bool PremapTraverser::premap_node(RegionTreeNode *node, 
                                                    LogicalRegion closing_handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(node->context, PERFORM_PREMAP_CLOSE_CALL);
 #endif
-      // Keep track of the most recent node visited
-      last_node = node;
       // Keep track of which fields have invalidated state due to
       // either close operations or flushed reductions. We'll need to
       // invalidate any remote region trees for these fields.
@@ -10436,6 +10434,8 @@ namespace LegionRuntime {
       dirty_below.clear();
       field_versions.clear();
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
+      outstanding_reduction_fields.clear();
+      outstanding_reductions.clear();
     } 
 
 #if 0
@@ -12062,14 +12062,13 @@ namespace LegionRuntime {
             state.prev_epoch_users, non_dominated_mask, arrived/*validates*/);
       }
 
-      // We also need to record the needed version numbers for this node
-      // Note that we do this after the close operations have been registered
-      // so we get the any updates to version numbers performed by close
-      // operations on which we will depend.
-      record_version_numbers(state, user.field_mask, version_info);
-
       if (arrived)
       {
+        // We also need to record the needed version numbers for this node
+        // Note that we do this after the close operations have been registered
+        // so we get the any updates to version numbers performed by close
+        // operations on which we will depend.
+        record_version_numbers(state, user.field_mask, version_info);
         // If this is a projection requirement, we also need to record any
         // version numbers from farther down in the tree as well. 
         // Do this before the version numbers can be updated.
@@ -12108,6 +12107,10 @@ namespace LegionRuntime {
           // Add ourselves to the current epoch
           state.curr_epoch_users.push_back(user);
         }
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask); 
         // Record any restrictions we have on mappings if necessary
         if (restrict_info.needs_check())
         {
@@ -12129,11 +12132,13 @@ namespace LegionRuntime {
       }
       else // We're still not there, so keep going
       {
-        // If we are doing a write or a reduce below then we need to advance
-        // the version number so that we avoid later operations thinking 
-        // that is safe to use the existing version number
-        if (HAS_WRITE(user.usage))
-          advance_dirty_below(state, user.field_mask);
+        // We also need to record the needed version numbers for this node
+        // Note that we do this after the close operations have been registered
+        // so we get the any updates to version numbers performed by close
+        // operations on which we will depend. If we're doing a write, then
+        // we also need to advance the dirty below field.
+        record_intermediate_numbers(state, user.field_mask, 
+                                    version_info, HAS_WRITE(user.usage));
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
           child->open_logical_node(ctx, user, path, version_info,
@@ -12157,11 +12162,11 @@ namespace LegionRuntime {
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx);
-      // First record any version information that we need
-      record_version_numbers(state, user.field_mask, version_info);
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
+        // First record any version information that we need
+        record_version_numbers(state, user.field_mask, version_info);
         // If this is a projection then we do need to capture any 
         // child version information because it might change
         // Do this before the version numbers are updated
@@ -12182,6 +12187,10 @@ namespace LegionRuntime {
           user.op->add_mapping_reference(user.gen);
           state.curr_epoch_users.push_back(user);
         }
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
         // Record any restrictions we have on mappings if necessary
         if (restrict_info.needs_check())
         {
@@ -12210,8 +12219,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         sanity_check_logical_state(state);
 #endif
-        if (HAS_WRITE(user.usage))
-          advance_dirty_below(state, user.field_mask);
+        record_intermediate_version_numbers(state, user.field_mask,
+                                          version_info, HAS_WRITE(user.usage));
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
         child_node->open_logical_node(ctx, user, path, version_info, 
@@ -12271,6 +12280,9 @@ namespace LegionRuntime {
       advance_version_numbers(state, closing_mask);
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
+      // We can also clear any outstanding reduction fields
+      if (!(state.outstanding_reduction_fields * closing_mask))
+        clear_logical_reduction_fields(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -12292,7 +12304,62 @@ namespace LegionRuntime {
 #endif
       FieldMask open_mask = current_mask;
       LegionDeque<FieldState>::aligned new_states;
+      // Before looking at any child states, first check to see if we need
+      // to do any closes to flush open reductions. This should be a pretty
+      // rare operation since we often won't have lots of reductions going
+      // on at different levels of the region tree.
+      if (!!state.outstanding_reduction_fields)
+      {
+        FieldMask reduction_flush_fields = 
+          current_mask & state.outstanding_reduction_fields;
+        if (!!reduction_flush_fields)
+        {
+          // If we are doing a reduction too, check to see if they are 
+          // the same in which case we can skip these fields
+          if (user.usage.redop > 0)
+          {
+            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it =
+              state.outstanding_reductions.find(user.usage.redop);
+            // Don't need to flush fields we are reducing to with the
+            // same operation
+            if (finder != state.outstanding_reductions.end())
+              reduction_flush_fields -= finder->second;
+          }
+          // See if we still have fields to close
+          if (!!reduction_flush_fields)
+          {
+            // We need to flush these fields so issue close operations
+            for (std::list<FieldState>::iterator it = 
+                  state.field_states.begin(); it != 
+                  state.field_states.end(); /*nothing*/)
+            {
+              if (it->valid_fields * reduction_flush_fields)
+              {
+                it++;
+                continue;
+              }
+              FieldMask already_open;
+              perform_close_operations(closer, reduction_flush_fields, *it,
+                                       next_child, false/*allow_next*/,
+                                       false/*needs upgrade*/,
+                                       false/*permit leave open*/,
+                                       record_close_operations,
+                                       new_state, already_open);
+              // Update the open mask
+              open_mask -= already_open;
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+            }
+            // Then we can mark that these fields no longer have 
+            // unflushed reductions
+            clear_logical_reduction_fields(state, reduction_flush_fields);
+          }
+        }
+      }
 
+      // Now we can look at all the children
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); /*nothing*/)
       {
@@ -12849,9 +12916,9 @@ namespace LegionRuntime {
       LegionMap<VersionID,FieldMask>::aligned to_add; 
       LegionMap<VersionID,FieldMask,
                VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
-      // Do this in reverse order so we can always push updates ahead
-      for (LegionMap<VersionID,FieldMask>::aligned::reverse_iterator it = 
-            current.rbegin(); it != current.rend(); it++)
+      // Do this in forward order so we can reduce deletions
+      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
+            current.begin(); it != current.end(); it++)
       {
         FieldMask overlap = it->second & mask;
         if (!overlap)
@@ -12895,15 +12962,98 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::advance_dirty_below(LogicalState &state, 
-                                             const FieldMask &mask)
+    void RegionTreeNode::record_intermediate_version_numbers(
+                            LogicalState &state, const FieldMask &mask,
+                            VersionInfo &version_info, bool advance_dirty_below)
     //--------------------------------------------------------------------------
     {
-      FieldMask new_dirty_below = mask - state.dirty_below; 
-      if (!!new_dirty_below)
+      // This routine is mostly the same as the one for record_version_numbers
+      // above, but in cases where we detect that we've already recorded a dirty 
+      // below field, then we need to record the version number before the 
+      // current one because it has already been advanced.
+      VersionInfo::RegionVersions &versions = version_info.find_region(this);
+#ifdef DEBUG_HIGH_LEVEL
+      FieldMask unversioned = mask;
+#endif
+      LegionMap<VersionID,FieldMask,
+               VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            current.begin(); it != current.end(); it++)
       {
-        advance_version_numbers(state, new_dirty_below);
-        state.dirty_below |= new_dirty_below;
+        FieldMask overlap = it->second & mask; 
+        if (!overlap)
+          continue;
+        FieldMask dirty_overlap = overlap & state.dirty_below;
+        if (!!dirty_overlap)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(it->first > 0);
+#endif
+          VersionID prev_id = it->first - 1;
+          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+            versions.find(prev_id);
+          if (finder == versions.end())
+            versions[prev_id] = dirty_overlap;
+          else
+            finder->second |= dirty_overlap;
+          FieldMask not_dirty = overlap - not_dirty;
+          if (!!not_dirty)
+            versions[it->first] = not_dirty;
+        }
+        else
+          versions.insert(*it);
+#ifdef DEBUG_HIGH_LEVEL
+        unversioned -= overlap;
+#endif
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!unversioned); // all the fields should have a version number
+#endif
+      if (advance_dirty_below)
+      {
+        FieldMask new_dirty_below = mask - state.dirty_below; 
+        if (!!new_dirty_below)
+        {
+          advance_version_numbers(state, new_dirty_below);
+          state.dirty_below |= new_dirty_below;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::record_logical_reduction(LogicalState &state,
+                                                  ReductionOpID redop,
+                                                  const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      state.outstanding_reduction_fields |= user_mask;
+      LegionMap<ReductionOpID,FieldMask>::aligned::iterator finder = 
+        state.outstanding_reductions.find(redop);
+      if (finder == state.outstanding_reductions.end())
+        state.outstanding_reductions[redop] = user_mask;
+      else
+        finder->second |= user_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::clear_logical_reduction_fields(LogicalState &state,
+                                                  const FieldMask &cleared_mask)
+    //--------------------------------------------------------------------------
+    {
+      state.outstanding_reduction_fields -= cleared_mask; 
+      std::vector<ReductionOpID> to_delete;
+      for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
+            state.outstanding_reductions.begin(); it !=
+            state.outstanding_reductions.end(); it++)
+      {
+        it->second -= cleared_mask; 
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<ReductionOpID>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        state.outstanding_reductions.erase(*it);
       }
     }
 
