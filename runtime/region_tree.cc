@@ -16454,6 +16454,9 @@ namespace LegionRuntime {
         LegionSpy::log_physical_instance(manager->get_instance().id,
             manager->memory.id, handle.index_space.id,
             handle.field_space.id, handle.tree_id);
+        for (std::set<FieldID>::const_iterator it = fields.begin();
+             it != fields.end(); ++it)
+          LegionSpy::log_instance_field(manager->get_instance().id, *it);
 #endif
       }
       return result;
@@ -16488,6 +16491,7 @@ namespace LegionRuntime {
             manager->memory.id, handle.index_space.id,
             handle.field_space.id, handle.tree_id, !reduction_list,
             ptr_space.exists() ? ptr_space.get_index_space().id : 0);
+        LegionSpy::log_instance_field(manager->get_instance().id, fid);
 #endif
       }
       return result;

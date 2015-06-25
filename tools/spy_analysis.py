@@ -2047,6 +2047,7 @@ class PhysicalInstance(object):
         self.node_name = "physical_inst_"+str(iid)+"_"+str(ver)
         self.igraph_outgoing_deps = set()
         self.igraph_incoming_deps = set()
+        self.fields = list()
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
@@ -2060,11 +2061,15 @@ class PhysicalInstance(object):
             self.op_users[field][op].append(req)
         return True
 
+    def add_field(self, fid):
+        self.fields.append(fid)
+
     def print_igraph_node(self, printer):
         if self.region.name <> None:
             label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
         else:
             label = hex(self.iid)+'@'+hex(self.memory.uid)
+        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
                 'shape=oval,penwidth=0,margin=0];')
@@ -2095,6 +2100,7 @@ class ReductionInstance(object):
         self.node_name = "reduction_inst_"+str(iid)+"_"+str(ver)
         self.igraph_outgoing_deps = set()
         self.igraph_incoming_deps = set()
+        self.fields = list()
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
@@ -2108,11 +2114,15 @@ class ReductionInstance(object):
             self.op_users[field][op].append(req)
         return True
 
+    def add_field(self, fid):
+        self.fields.append(fid)
+
     def print_igraph_node(self, printer):
         if self.region.name <> None:
             label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
         else:
             label = hex(self.iid)+'@'+hex(self.memory.uid)
+        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=deeppink3,fontsize=10,fontcolor=white,'+\
                 'shape=oval,penwidth=0,margin=0];')
@@ -3261,6 +3271,12 @@ class State(object):
             self.instances[iid].append(inst)
         else:
             self.instances[iid] = [inst]
+        return True
+
+    def add_instance_field(self, iid, fid):
+        if not iid in self.instances:
+            return False
+        self.instances[iid][-1].add_field(fid)
         return True
 
     def add_op_user(self, uid, idx, iid):
