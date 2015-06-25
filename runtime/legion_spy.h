@@ -371,6 +371,12 @@ namespace LegionRuntime {
                              tree_id, fold, indirect_id);
       }
 
+      static inline void log_instance_field(IDType inst_id, FieldID field_id)
+      {
+        log_spy.info("Instance Field " IDFMT " %u", inst_id, field_id);
+      }
+
+
       static inline void log_op_user(UniqueID user,
                                      unsigned idx, 
                                      IDType inst_id)
