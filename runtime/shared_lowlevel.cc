@@ -3290,7 +3290,7 @@ namespace LegionRuntime {
                                     size_t granularity);
         void create_weighted_subspaces(const std::vector<IndexSpace::Impl*> &subspaces,
                                     size_t granularity,
-                                    const std::vector<int> &weights);
+                                    std::vector<int> &weights);
 
         void create_subspaces_by_field(const std::vector<FieldDataDescriptor> &field_data,
                                        const std::map<DomainPoint,IndexSpace> &subspaces);
@@ -4678,26 +4678,51 @@ namespace LegionRuntime {
 
     void IndexSpace::Impl::create_weighted_subspaces(
               const std::vector<IndexSpace::Impl*> &subspaces, size_t granularity,
-              const std::vector<int> &weights)
+              std::vector<int> &weights)
     {
-      // Count how many elements we have in our mask
-      size_t elem_count = mask.pop_count();
       // Count the sum of all the weights
       int total_weight = 0;
       for (std::vector<int>::const_iterator it = weights.begin();
             it != weights.end(); it++)
         total_weight += *it;
-      // Compute the weight fraction
-      size_t weight_fraction = (elem_count + weights.size() - 1) / weights.size();
+      if (total_weight == 0) {
+        // If total granularity is zero fall back to equal partition
+        create_equal_subspaces(subspaces, granularity);
+        return;
+      }
+      // Count how many elements we have in our mask
+      size_t elem_count = mask.pop_count();
+      if ((elem_count <= size_t(total_weight)) && (granularity > 0)) {
+        // More weight than elements, if granularity is greater than zero
+        // then scale any non-zero weights so they will at least get the
+        // minimum number of elements ensured by granularity
+        size_t weight_per_element = (total_weight + elem_count - 1) / elem_count;
+        size_t minimum_weight = granularity * weight_per_element;
+        for (std::vector<int>::iterator it = weights.begin(); 
+              it != weights.end(); it++)
+        {
+          if (size_t(*it) < minimum_weight) {
+            total_weight += (minimum_weight - (*it));
+            (*it) = minimum_weight;
+          }
+        }
+      }
+      // compute the weight fraction
       int current = 0;
       assert(weights.size() == subspaces.size());
       unsigned weight_idx = 0;
+      float float_count = elem_count; // convert to floating point
+      float float_total_inv = 1.f / total_weight;
       for (std::vector<IndexSpace::Impl*>::const_iterator it = subspaces.begin();
             it != subspaces.end(); it++, weight_idx++)
       {
-        // Figure out how many elements to assign to this child 
-        size_t subspace_count = weights[weight_idx] * weight_fraction;
-        // Clamp if necessary
+        // Skip any entries with zero weight
+        if (weights[weight_idx] == 0)
+          continue;
+        float local_elems = float_count * float(weights[weight_idx]) * float_total_inv;
+        // Convert back to an integer by rounding
+        size_t subspace_count = (local_elems + 0.5);
+        // If we are less than the minimum granularity, increase that now
         if (subspace_count < granularity)
           subspace_count = granularity;
         bool done_early = false;
