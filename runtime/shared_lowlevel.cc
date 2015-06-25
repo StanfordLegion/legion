@@ -4714,6 +4714,9 @@ namespace LegionRuntime {
       unsigned weight_idx = 0;
       float float_count = elem_count; // convert to floating point
       float float_total_inv = 1.f / total_weight;
+      // Keep track of the accumulated rounding error, and once
+      // it gets to be larger than 1.0 add an element to the next value
+      float accumulated_error = 0.f;
       for (std::vector<IndexSpace::Impl*>::const_iterator it = subspaces.begin();
             it != subspaces.end(); it++, weight_idx++)
       {
@@ -4722,7 +4725,20 @@ namespace LegionRuntime {
           continue;
         float local_elems = float_count * float(weights[weight_idx]) * float_total_inv;
         // Convert back to an integer by rounding
-        size_t subspace_count = (local_elems + 0.5);
+        float rounded = (local_elems + 0.5);
+        size_t subspace_count = rounded; // truncate back to integer
+        // See the error that we got
+        accumulated_error += (local_elems - float(subspace_count));
+        // If we have accumulated too much round-off error, add an extra element
+        if (accumulated_error >= 1.f) {
+          subspace_count++;
+          accumulated_error -= 1.f;
+        }
+        // If we are on the last iteration and we have round-off error
+        // then increment our count by one
+        if ((weight_idx == (subspaces.size()-1)) && (accumulated_error > 0.f)) {
+          subspace_count++;
+        }
         // If we are less than the minimum granularity, increase that now
         if (subspace_count < granularity)
           subspace_count = granularity;
