@@ -2529,8 +2529,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::get_index_partition(Context ctx,
+                                    IndexSpace parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace HighLevelRuntime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(ctx, p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::get_index_subspace(Context ctx,
+                                     IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_subspace(ctx, p, color);

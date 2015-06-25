@@ -1197,9 +1197,13 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
+      IndexPartition get_index_partition(Context ctx, IndexSpace parent,
+                                         const DomainPoint &color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
       IndexSpace get_index_subspace(IndexPartition p, Color c);
+      IndexSpace get_index_subspace(Context ctx, IndexPartition p,
+                                    const DomainPoint &color);
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       bool has_multiple_domains(IndexSpace handle);
       Domain get_index_space_domain(Context ctx, IndexSpace handle);

@@ -7720,6 +7720,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(Context ctx,
+                                    IndexSpace parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition result = forest->get_index_partition(parent, 
+                                                          ColorPoint(color));
+#ifdef DEBUG_HIGH_LEVEL
+      if (!result.exists())
+      {
+        switch (color.get_dim())
+        {
+          case 0:
+          case 1:
+            log_index.error("Invalid color %d for get index partitions", 
+                                    color.point_data[0]);
+            break;
+          case 2:
+            log_index.error("Invalid color (%d,%d) for get index partitions", 
+                                    color.point_data[0], color.point_data[1]);
+            break;
+          case 3:
+            log_index.error("Invalid color (%d,%d,%d) for get index "
+                            "partitions", color.point_data[0], 
+                            color.point_data[1], color.point_data[2]);
+            break;
+        }
+        assert(false);
+        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace Runtime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
@@ -7742,6 +7776,38 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->get_index_subspace(p, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(Context ctx, IndexPartition p, 
+                                           const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
+#ifdef DEBUG_HIGH_LEVEL
+      if (!result.exists())
+      {
+        switch (color.get_dim())
+        {
+          case 0:
+          case 1:
+            log_index.error("Invalid color %d for get index subspace", 
+                                    color.point_data[0]);
+            break;
+          case 2:
+            log_index.error("Invalid color (%d,%d) for get index subspace", 
+                                    color.point_data[0], color.point_data[1]);
+            break;
+          case 3:
+            log_index.error("Invalid color (%d,%d,%d) for get index subspace",
+              color.point_data[0], color.point_data[1], color.point_data[2]);
+            break;
+        }
+        assert(false);
+        exit(ERROR_INVALID_INDEX_PART_COLOR); 
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
