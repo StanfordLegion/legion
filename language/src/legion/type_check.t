@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -805,25 +805,18 @@ function type_check.expr_partition(cx, node)
 end
 
 function type_check.expr_cross_product(cx, node)
-  local lhs = type_check.expr(cx, node.lhs)
-  local lhs_type = std.check_read(cx, lhs)
+  local args = node.args:map(function(arg) return type_check.expr(cx, arg) end)
+  local arg_types = args:map(function(arg) return std.check_read(cx, arg) end)
 
-  local rhs = type_check.expr(cx, node.rhs)
-  local rhs_type = std.check_read(cx, rhs)
-
-  if not std.is_partition(lhs_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
-                tostring(lhs_type))
-  end
-
-  if not std.is_partition(rhs_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
-                tostring(rhs_type))
+  for i, arg_type in ipairs(arg_types) do
+    if not std.is_partition(arg_type) then
+      log.error(node, "type mismatch in argument " .. tostring(i) ..
+                  ": expected partition but got " .. tostring(arg_type))
+    end
   end
 
   return ast.typed.ExprCrossProduct {
-    lhs = lhs,
-    rhs = rhs,
+    args = args,
     expr_type = node.expr_type,
     span = node.span,
   }

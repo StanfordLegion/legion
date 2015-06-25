@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -159,21 +159,12 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
-legion_terra_index_cross_product_t
-legion_terra_index_cross_product_create(legion_runtime_t runtime_,
-                                        legion_context_t ctx_,
-                                        legion_index_partition_t lhs_,
-                                        legion_index_partition_t rhs_)
+static void
+create_cross_product(HighLevelRuntime *runtime,
+                     Context ctx,
+                     IndexPartition lhs,
+                     IndexPartition rhs)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
-  IndexPartition lhs = CObjectWrapper::unwrap(lhs_);
-  IndexPartition rhs = CObjectWrapper::unwrap(rhs_);
-
-  legion_terra_index_cross_product_t prod;
-  prod.partition = CObjectWrapper::wrap(lhs);
-  prod.other = CObjectWrapper::wrap(rhs);
-
 #if USE_LEGION_CROSS_PRODUCT
   std::map<DomainPoint, IndexPartition> handles;
   runtime->create_cross_product_partitions(
@@ -220,8 +211,72 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
       runtime->get_index_partition_color(ctx, rhs));
   }
 #endif
+}
+static void
+create_cross_product_multi(HighLevelRuntime *runtime,
+                           Context ctx,
+                           size_t npartitions,
+                           IndexPartition next,
+                           std::vector<IndexPartition>::iterator rest,
+                           std::vector<IndexPartition>::iterator end,
+                           int level)
+{
+  if (rest != end) {
+    create_cross_product(runtime, ctx, next, *rest);
+    Domain colors = runtime->get_index_partition_color_space(ctx, next);
+    Color color2 = runtime->get_index_partition_color(ctx, *rest);
+    for (Domain::DomainPointIterator dp(colors); dp; dp++) {
+      Color color = dp.p.get_point<1>()[0];
+      IndexSpace is = runtime->get_index_subspace(ctx, next, color);
+      IndexPartition ip = runtime->get_index_partition(ctx, is, color2);
+      create_cross_product_multi(runtime, ctx, npartitions - 1, ip, rest+1, end, level + 1);
+    }
+  }
+}
 
-  return prod;
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_create(legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_partition_t lhs_,
+                                        legion_index_partition_t rhs_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexPartition lhs = CObjectWrapper::unwrap(lhs_);
+  IndexPartition rhs = CObjectWrapper::unwrap(rhs_);
+
+  create_cross_product(runtime, ctx, lhs, rhs);
+
+  legion_terra_index_cross_product_t result;
+  result.partition = CObjectWrapper::wrap(lhs);
+  result.other = CObjectWrapper::wrap(rhs);
+  return result;
+}
+
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_create_multi(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t *partitions_,
+  size_t npartitions)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  std::vector<IndexPartition> partitions;
+  for (size_t i = 0; i < npartitions; i++) {
+    partitions.push_back(CObjectWrapper::unwrap(partitions_[i]));
+  }
+
+  assert(npartitions >= 2);
+  create_cross_product_multi(runtime, ctx, npartitions,
+                             partitions[0],
+                             partitions.begin() + 1, partitions.end(), 0);
+
+  legion_terra_index_cross_product_t result;
+  result.partition = CObjectWrapper::wrap(partitions[0]);
+  result.other = CObjectWrapper::wrap(partitions[1]);
+  return result;
 }
 
 legion_index_partition_t

@@ -1614,7 +1614,7 @@ namespace LegionRuntime {
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             finish_event.id, finish_event.gen,
+                             finish_event->me.id(), finish_event->generation,
                              it->id, it->gen);
 #endif
       }
@@ -1684,25 +1684,25 @@ namespace LegionRuntime {
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
-               finish_event.id, finish_event.gen, existential_count);
+               finish_event->me.id(), finish_event->generation, existential_count);
       if (ev1.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev1.id, ev1.gen);
+            finish_event->me.id(), finish_event->generation, ev1.id, ev1.gen);
       if (ev2.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev2.id, ev2.gen);
+            finish_event->me.id(), finish_event->generation, ev2.id, ev2.gen);
       if (ev3.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev3.id, ev3.gen);
+            finish_event->me.id(), finish_event->generation, ev3.id, ev3.gen);
       if (ev4.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev4.id, ev4.gen);
+            finish_event->me.id(), finish_event->generation, ev4.id, ev4.gen);
       if (ev5.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev5.id, ev5.gen);
+            finish_event->me.id(), finish_event->generation, ev5.id, ev5.gen);
       if (ev6.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev6.id, ev6.gen);
+            finish_event->me.id(), finish_event->generation, ev6.id, ev6.gen);
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)
@@ -2882,7 +2882,7 @@ namespace LegionRuntime {
       b.timestamp = 0;
 
 #ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Barrier Creation: " IDFMT " %d", e.id, expected_arrivals);
+      log_event_graph.info("Barrier Creation: " IDFMT " %d", b.id, expected_arrivals);
 #endif
 
       return b;
@@ -9918,8 +9918,8 @@ namespace LegionRuntime {
 #endif
 #ifdef EVENT_GRAPH_TRACE
       {
-        FILE *log_file = Logger::get_log_file();
-        show_event_waiters(log_file);
+        //FILE *log_file = Logger::get_log_file();
+        show_event_waiters(/*log_file*/);
       }
 #endif
 

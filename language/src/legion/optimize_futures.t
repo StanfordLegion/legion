@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -522,11 +522,10 @@ function optimize_futures.expr_partition(cx, node)
 end
 
 function optimize_futures.expr_cross_product(cx, node)
-  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
-  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  local args = node.args:map(
+    function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
   return node {
-    lhs = lhs,
-    rhs = rhs,
+    args = args,
   }
 end
 

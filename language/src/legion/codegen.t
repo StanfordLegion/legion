@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -149,8 +149,7 @@ function context:add_ispace_root(ispace_type, index_space, index_allocator,
       }, ispace))
 end
 
-function context:add_ispace_subispace(ispace_type, index_space,
-                                      index_partition, index_allocator,
+function context:add_ispace_subispace(ispace_type, index_space, index_allocator,
                                       index_iterator, parent_ispace_type)
   if not self.ispaces then
     error("not in task context", 2)
@@ -167,7 +166,6 @@ function context:add_ispace_subispace(ispace_type, index_space,
     setmetatable(
       {
         index_space = index_space,
-        index_partition = index_partition,
         index_allocator = index_allocator,
         index_iterator = index_iterator,
         root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
@@ -448,7 +446,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     error("failed to find appropriate for region " .. tostring(region_type) .. " in unpack", 2)
   end
 
-  cx:add_ispace_subispace(region_type:ispace(), is, false, isa, it, parent_region_type:ispace())
+  cx:add_ispace_subispace(region_type:ispace(), is, isa, it, parent_region_type:ispace())
   cx:add_region_subregion(region_type, r, false, parent_region_type)
 
   return expr.just(actions, r)
@@ -1323,9 +1321,8 @@ function codegen.expr_field_access(cx, node)
     assert(cx:has_region(value_type))
     local lp = cx:region(value_type).logical_partition
     assert(lp)
-    local partition_type = std.as_read(node.expr_type)
     return values.value(
-      expr.once_only(actions, `([partition_type]({ impl = lp }))),
+      expr.once_only(actions, lp),
       node.expr_type)
   else
     local field_name = node.field_name
@@ -1353,26 +1350,27 @@ function codegen.expr_index_access(cx, node)
       if std.is_cross_product(value_type) and
         not cx:region(expr_type).logical_partition
       then
-        local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+        -- FIXME: Handle nested cross products
+        assert(std.is_partition(expr_type:default_partition()))
+
+        local subpartition_type = expr_type:default_partition()
+        local subpartition = terralib.newsymbol(subpartition_type, "subpartition")
+
         actions = quote
           [actions]
           var ip = c.legion_terra_index_cross_product_get_subpartition_by_color(
             [cx.runtime], [cx.context],
             [value.value].product, [index.value])
-          var [lp] = c.legion_logical_partition_create(
+          var lp = c.legion_logical_partition_create(
             [cx.runtime], [cx.context], [lr].impl, ip)
+          var [subpartition] = [subpartition_type] { impl = lp }
         end
-        cx:region(expr_type).logical_partition = lp
+        cx:region(expr_type).logical_partition = subpartition
       end
       return values.value(expr.just(actions, lr), expr_type)
     end
 
     local parent_region_type = value_type:parent_region()
-
-    local partition = `([value.value].impl)
-    if std.is_region(value_type) then
-      partition = cx:region(value_type).logical_partition
-    end
 
     local r = terralib.newsymbol(expr_type, "r")
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
@@ -1389,7 +1387,7 @@ function codegen.expr_index_access(cx, node)
       [actions]
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
         [cx.runtime], [cx.context],
-        [partition], [index.value])
+        [value.value].impl, [index.value])
       var [is] = [lr].index_space
       var [r] = [expr_type] { impl = [lr] }
     end
@@ -1410,11 +1408,14 @@ function codegen.expr_index_access(cx, node)
       end
     end
 
-    local lp = false
-    local ip = false
+    local subpartition = false
     if std.is_cross_product(value_type) then
-      lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
-      ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+      assert(expr_type:has_default_partition())
+      local subpartition_type = expr_type:default_partition()
+      subpartition = terralib.newsymbol(subpartition_type, "subpartition")
+
+      local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+      local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
       actions = quote
         [actions]
         var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color(
@@ -1423,10 +1424,32 @@ function codegen.expr_index_access(cx, node)
         var [lp] = c.legion_logical_partition_create(
           [cx.runtime], [cx.context], [lr], [ip])
       end
+
+      if std.is_partition(subpartition_type) then
+        actions = quote
+          [actions]
+          var [subpartition] = [subpartition_type] { impl = [lp] }
+        end
+      elseif std.is_cross_product(subpartition_type) then
+        actions = quote
+          [actions]
+          var ip2 = [value.value].partitions[2]
+          var [subpartition] = [subpartition_type] {
+            impl = [lp],
+            product = c.legion_terra_index_cross_product_t {
+              partition = [ip],
+              other = ip2,
+            },
+            -- FIXME: partitions
+          }
+        end
+      else
+        assert(false)
+      end
     end
 
-    cx:add_ispace_subispace(expr_type:ispace(), is, ip, isa, it, parent_region_type:ispace())
-    cx:add_region_subregion(expr_type, r, lp, parent_region_type)
+    cx:add_ispace_subispace(expr_type:ispace(), is, isa, it, parent_region_type:ispace())
+    cx:add_region_subregion(expr_type, r, subpartition, parent_region_type)
 
     return values.value(expr.just(actions, r), expr_type)
   elseif std.is_region(value_type) then
@@ -2338,32 +2361,42 @@ function codegen.expr_partition(cx, node)
 end
 
 function codegen.expr_cross_product(cx, node)
-  local lhs = codegen.expr(cx, node.lhs):read(cx)
-  local rhs = codegen.expr(cx, node.rhs):read(cx)
+  local args = node.args:map(function(arg) return codegen.expr(cx, arg):read(cx) end)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
-    [lhs.actions];
-    [rhs.actions];
+    [args:map(function(arg) return arg.actions end)]
     [emit_debuginfo(node)]
   end
 
+  local partitions = terralib.newsymbol(
+    c.legion_index_partition_t[#args], "partitions")
   local product = terralib.newsymbol(
     c.legion_terra_index_cross_product_t, "cross_product")
   local lr = cx:region(expr_type:parent_region()).logical_region
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var [product] = c.legion_terra_index_cross_product_create(
-      [cx.runtime], [cx.context],
-      [lhs.value].impl.index_partition,
-      [rhs.value].impl.index_partition)
+    var [partitions]
+    [std.zip(std.range(#args), args):map(
+       function(pair)
+         local i, arg = unpack(pair)
+         return quote partitions[i] = [arg.value].impl.index_partition end
+       end)]
+    var [product] = c.legion_terra_index_cross_product_create_multi(
+      [cx.runtime], [cx.context], &(partitions[0]), [#args])
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
   end
 
   return values.value(
-    expr.once_only(actions, `(expr_type { impl = [lp], product = [product] })),
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = [lp],
+          product = [product],
+          partitions = [partitions],
+        })),
     expr_type)
 end
 

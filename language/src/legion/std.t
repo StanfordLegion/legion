@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1556,8 +1556,8 @@ function std.ispace(index_type)
     if previous_default and previous_default ~= partition then
       assert(false, "Ispace type can only have one default partition")
     end
-    if not std.is_partition(partition) then
-      assert(false, "Ispace type requires default partition to be a partition")
+    if not (std.is_partition(partition) or std.is_cross_product(partition)) then
+      assert(false, "Ispace type requires default partition to be a partition or cross product")
     end
     if partition:parent_ispace() ~= self then
       assert(false, "Ispace type requires default partition to be a partition of self")
@@ -1648,8 +1648,8 @@ function std.region(ispace_symbol, fspace_type)
     if previous_default and previous_default ~= partition then
       assert(false, "Region type can only have one default partition")
     end
-    if not std.is_partition(partition) then
-      assert(false, "Region type requires default partition to be a partition")
+    if not (std.is_partition(partition)  or std.is_cross_product(partition)) then
+      assert(false, "Region type requires default partition to be a partition or cross product")
     end
     if partition:parent_region() ~= self then
       assert(false, "Region type requires default partition to be a partition of self")
@@ -1767,33 +1767,31 @@ function std.partition(disjointness, region)
   return st
 end
 
-function std.cross_product(lhs, rhs)
-  assert(terralib.issymbol(lhs),
-         "Cross product type requires argument 1 to be a symbol")
-  assert(terralib.issymbol(rhs),
-         "Cross product type requires argument 2 to be a symbol")
-  if terralib.types.istype(lhs.type) then
-    assert(std.is_partition(lhs.type),
-           "Cross prodcut type requires argument 1 to be a partition")
-  end
-  if terralib.types.istype(rhs.type) then
-    assert(std.is_partition(rhs.type),
-           "Cross prodcut type requires argument 1 to be a partition")
+function std.cross_product(...)
+  local partition_symbols = terralib.newlist({...})
+  assert(#partition_symbols >= 2, "Cross product type requires at least 2 arguments")
+  for i, partition_symbol in ipairs(partition_symbols) do
+    assert(terralib.issymbol(partition_symbol),
+           "Cross product type requires argument " .. tostring(i) .. " to be a symbol")
+    if terralib.types.istype(partition_symbol.type) then
+      assert(std.is_partition(partition_symbol.type),
+             "Cross prodcut type requires argument " .. tostring(i) .. " to be a partition")
+    end
   end
 
   local st = terralib.types.newstruct("cross_product")
   st.entries = terralib.newlist({
       { "impl", c.legion_logical_partition_t },
       { "product", c.legion_terra_index_cross_product_t },
+      { "partitions", c.legion_index_partition_t[#partition_symbols] },
   })
 
   st.is_cross_product = true
-  st.lhs_partition_symbol = lhs
-  st.rhs_partition_symbol = rhs
+  st.partition_symbols = partition_symbols
   st.subpartitions = {}
 
-  function st:partition()
-    local partition = self.lhs_partition_symbol.type
+  function st:partition(i)
+    local partition = self.partition_symbols[1].type
     assert(terralib.types.istype(partition) and
              std.is_partition(partition),
            "Cross product type requires partition")
@@ -1801,7 +1799,7 @@ function std.cross_product(lhs, rhs)
   end
 
   function st:cross_partition()
-    local partition = self.rhs_partition_symbol.type
+    local partition = self.partition_symbols[2].type
     assert(terralib.types.istype(partition) and
              std.is_partition(partition),
            "Cross product type requires partition")
@@ -1836,25 +1834,35 @@ function std.cross_product(lhs, rhs)
 
   function st:subpartition_constant(i, region_type)
     if not self.subpartitions[i] then
-      local region_symbol = terralib.newsymbol(region_type)
-      self.subpartitions[i] = std.partition(self:cross_partition().disjointness, region_symbol)
+      local partition = st:subpartition_dynamic(i, region_type)
+      self.subpartitions[i] = partition
     end
     return self.subpartitions[i]
   end
 
   function st:subpartition_dynamic(i, region_type)
     local region_symbol = terralib.newsymbol(region_type)
-    return std.partition(self:cross_partition().disjointness, region_symbol)
+    local partition = std.partition(self:cross_partition().disjointness, region_symbol)
+    if #partition_symbols > 2 then
+      local partition_symbol = terralib.newsymbol(partition)
+      local subpartition_symbols = terralib.newlist({partition_symbol})
+      for i = 3, #partition_symbols do
+        subpartition_symbols:insert(partition_symbols[i])
+      end
+      return std.cross_product(unpack(subpartition_symbols))
+    else
+      return partition
+    end
   end
 
   function st:force_cast(from, to, expr)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
-    -- FIXME: Potential for double evaluation here.
-    return `([to] { impl = [expr].impl, product = [expr].product })
+    -- FIXME: Potential for double (triple) evaluation here.
+    return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
   end
 
   function st.metamethods.__typename(st)
-    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    return "cross_product(" .. st.partition_symbols:mkstring(", ") .. ")"
   end
 
   return st
