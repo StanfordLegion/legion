@@ -4680,6 +4680,7 @@ namespace LegionRuntime {
               const std::vector<IndexSpace::Impl*> &subspaces, size_t granularity,
               std::vector<int> &weights)
     {
+      assert(weights.size() == subspaces.size());
       // Count the sum of all the weights
       int total_weight = 0;
       for (std::vector<int>::const_iterator it = weights.begin();
@@ -4692,6 +4693,7 @@ namespace LegionRuntime {
       }
       // Count how many elements we have in our mask
       size_t elem_count = mask.pop_count();
+#if 0
       if ((elem_count <= size_t(total_weight)) && (granularity > 0)) {
         // More weight than elements, if granularity is greater than zero
         // then scale any non-zero weights so they will at least get the
@@ -4707,9 +4709,8 @@ namespace LegionRuntime {
           }
         }
       }
-      // compute the weight fraction
+#endif
       int current = 0;
-      assert(weights.size() == subspaces.size());
       unsigned weight_idx = 0;
       float float_count = elem_count; // convert to floating point
       float float_total_inv = 1.f / total_weight;
