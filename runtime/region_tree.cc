@@ -9289,7 +9289,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = node->get_logical_state(ctx);
-      node->record_version_numbers(state, user_mask, version_info);
+      node->record_version_numbers(state, user_mask, 
+                                   version_info, false/*previous*/);
       return true;
     }
 
@@ -9298,7 +9299,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = node->get_logical_state(ctx);
-      node->record_version_numbers(state, user_mask, version_info);
+      node->record_version_numbers(state, user_mask, 
+                                   version_info, false/*previous*/);
       return true;
     }
 
@@ -10856,6 +10858,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
+                                                    const FieldMask &open_below,
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
               LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
     //--------------------------------------------------------------------------
@@ -10865,14 +10868,15 @@ namespace LegionRuntime {
       // don't run too early.
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
                                               current.op->get_logical_records();
-      register_dependences(current, leave_open_closes, 
+      register_dependences(current, open_below, leave_open_closes, 
                            leave_open_children, above_users, cusers, pusers);
-      register_dependences(current, force_close_closes, 
+      register_dependences(current, open_below, force_close_closes, 
                            force_close_children, above_users, cusers, pusers);
     }
 
     //--------------------------------------------------------------------------
     void LogicalCloser::register_dependences(const LogicalUser &current,
+                                             const FieldMask &open_below,
            LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
            LegionMap<ColorPoint,ClosingInfo>::aligned &children,
            LegionList<LogicalUser,LOGICAL_REC_ALLOC >::track_aligned &abv_users,
@@ -10911,8 +10915,10 @@ namespace LegionRuntime {
           // we are doing the analysis for (e.g. other region reqs)
           if (!child_users.empty())
             RegionTreeNode::perform_dependence_checks<CLOSE_LOGICAL_ALLOC,
-              false/*record*/, true/*has skip*/>(op_it->second, child_users,
-                                          close_op_mask, false/*validates*/,
+              false/*record*/, true/*has skip*/, false/*track dom*/>(
+                                          op_it->second, child_users,
+                                          close_op_mask, open_below,
+                                          false/*validates*/,
                                           current.op, current.gen);
         }
         // Next do checks against any operations above in the tree which
@@ -10921,8 +10927,10 @@ namespace LegionRuntime {
         // dependences against itself.
         if (!abv_users.empty())
           RegionTreeNode::perform_dependence_checks<LOGICAL_REC_ALLOC,
-              false/*record*/, false/*has skip*/>(op_it->second, abv_users,
-                                         close_op_mask, false/*validates*/,
+              false/*record*/, false/*has skip*/, false/*track dom*/>(
+                                         op_it->second, abv_users,
+                                         close_op_mask, open_below,
+                                         false/*validates*/,
                                          current.op, current.gen);
         // Finally register any dependences on users at this level
         // See the note above the for the tricky case
@@ -10930,14 +10938,18 @@ namespace LegionRuntime {
         if (!cur_users.empty())
           dominator_mask = 
             RegionTreeNode::perform_dependence_checks<CURR_LOGICAL_ALLOC,
-              false/*record*/, true/*has skip*/>(op_it->second, cur_users,
-                                        close_op_mask, false/*validates*/,
+              false/*record*/, true/*has skip*/, true/*track dom*/>(
+                                        op_it->second, cur_users,
+                                        close_op_mask, open_below,
+                                        false/*validates*/,
                                         current.op, current.gen);
         FieldMask non_dominated_mask = close_op_mask - dominator_mask;
         if (!!non_dominated_mask && !pre_users.empty())
           RegionTreeNode::perform_dependence_checks<PREV_LOGICAL_ALLOC,
-            false/*record*/, true/*has skip*/>(op_it->second, pre_users, 
-                                 non_dominated_mask, false/*validates*/,
+            false/*record*/, true/*has skip*/, false/*track dom*/>(
+                                 op_it->second, pre_users, 
+                                 non_dominated_mask, open_below,
+                                 false/*validates*/,
                                  current.op, current.gen);
         // Before we kick off this operation, add a mapping
         // reference to it since we know we are going to put it
@@ -10974,7 +10986,11 @@ namespace LegionRuntime {
                                                const FieldMask &local_mask)
     //--------------------------------------------------------------------------
     {
-      node->record_version_numbers(state, local_mask, close_versions);
+      // Don't need the previous because writes were already done in the
+      // sub-tree we are closing so the version number for the target
+      // region has already been advanced.
+      node->record_version_numbers(state, local_mask, 
+                                   close_versions, false/*previous*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12011,9 +12027,11 @@ namespace LegionRuntime {
       // have READ_WRITE privileges, we know we will always be the first
       // one to this node and will do our own physical close, so there is
       // no need to register a close operations here.
-      bool open_only = siphon_logical_children(closer, state, user.field_mask,
+      FieldMask open_below;
+      siphon_logical_children(closer, state, user.field_mask,
                 !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
-                                 arrived ? ColorPoint(): path.get_child(depth));
+                arrived ? ColorPoint(): path.get_child(depth), open_below);
+      const bool open_only = !open_below;
       // We always need to create and register close operations
       // regardless of whether we are tracing or not
       // If we're not replaying a trace we need to do work here
@@ -12030,7 +12048,7 @@ namespace LegionRuntime {
         closer.initialize_close_operations(this, user.op, next_child, 
                             version_info, restrict_info, trace_info);
         // Perform dependence analysis for all the close operations
-        closer.perform_dependence_analysis(user,
+        closer.perform_dependence_analysis(user, open_below,
                                            state.curr_epoch_users,
                                            state.prev_epoch_users);
         // Now we can flush out all the users dominated by closes
@@ -12051,16 +12069,18 @@ namespace LegionRuntime {
       // Now that we registered any close operation, do our analysis
       FieldMask dominator_mask = 
              perform_dependence_checks<CURR_LOGICAL_ALLOC,
-                                        true/*record*/,false/*has skip*/>(user,
-                 state.curr_epoch_users, user.field_mask, arrived/*validates*/);
+                       true/*record*/,false/*has skip*/,true/*track dom*/>(
+                          user, state.curr_epoch_users, user.field_mask, 
+                          open_below, arrived/*validates*/);
       FieldMask non_dominated_mask = user.field_mask - dominator_mask;
       // For the fields that weren't dominated, we have to check
       // those fields against the previous epoch's users
       if (!!non_dominated_mask)
       {
         perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                                  true/*record*/, false/*has skip*/>(user,
-            state.prev_epoch_users, non_dominated_mask, arrived/*validates*/);
+                        true/*record*/, false/*has skip*/, false/*track dom*/>(
+                            user, state.prev_epoch_users, non_dominated_mask, 
+                            open_below, arrived/*validates*/);
       }
 
       if (arrived)
@@ -12081,14 +12101,16 @@ namespace LegionRuntime {
           // We only advance version numbers for fields which are being
           // written and dominated the previous epoch because multiple 
           // writes for atomic and simultaneous go in the same generation.
-          if (IS_WRITE(user.usage))
+          if (HAS_WRITE(user.usage))
             advance_version_numbers(state, dominator_mask);
         }
         // We also need to record the needed version numbers for this node
         // Note that we do this after the version numbers have been updated
         // so that we get the version numbers that we are contributing to
-        // as part of the execution for this operation.
-        record_version_numbers(state, user.field_mask, version_info);
+        // as part of the execution for this operation. If we are writing
+        // in any way, then record the previous version number
+        record_version_numbers(state, user.field_mask, 
+                               version_info, HAS_WRITE(user.usage));
         // If this is a projection requirement, we also need to record any
         // version numbers from farther down in the tree as well. 
         // Do this before the version numbers can be updated.
@@ -12146,7 +12168,8 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, version_info);
+        record_version_numbers(state, user.field_mask,
+                               version_info, HAS_WRITE(user.usage));
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
           child->open_logical_node(ctx, user, path, version_info,
@@ -12174,10 +12197,11 @@ namespace LegionRuntime {
       if (!path.has_child(depth))
       {
         // If this is a write, then update our version numbers
-        if (IS_WRITE(user.usage))
+        if (HAS_WRITE(user.usage))
           advance_version_numbers(state, user.field_mask);
         // First record any version information that we need
-        record_version_numbers(state, user.field_mask, version_info);
+        record_version_numbers(state, user.field_mask, 
+                               version_info, HAS_WRITE(user.usage));
         // If this is a projection then we do need to capture any 
         // child version information because it might change
         // Do this before the version numbers are updated
@@ -12234,7 +12258,8 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, version_info);
+        record_version_numbers(state, user.field_mask, 
+                               version_info, HAS_WRITE(user.usage));
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -12310,11 +12335,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeNode::siphon_logical_children(LogicalCloser &closer,
+    void RegionTreeNode::siphon_logical_children(LogicalCloser &closer,
                                                  LogicalState &state,
                                                  const FieldMask &current_mask,
                                                  bool record_close_operations,
-                                                 const ColorPoint &next_child)
+                                                 const ColorPoint &next_child,
+                                                 FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -12323,7 +12349,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
-      FieldMask open_mask = current_mask;
       LegionDeque<FieldState>::aligned new_states;
       // Before looking at any child states, first check to see if we need
       // to do any closes to flush open reductions. This should be a pretty
@@ -12337,10 +12362,10 @@ namespace LegionRuntime {
         {
           // If we are doing a reduction too, check to see if they are 
           // the same in which case we can skip these fields
-          if (user.usage.redop > 0)
+          if (closer.user.usage.redop > 0)
           {
-            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it =
-              state.outstanding_reductions.find(user.usage.redop);
+            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator finder =
+              state.outstanding_reductions.find(closer.user.usage.redop);
             // Don't need to flush fields we are reducing to with the
             // same operation
             if (finder != state.outstanding_reductions.end())
@@ -12359,15 +12384,12 @@ namespace LegionRuntime {
                 it++;
                 continue;
               }
-              FieldMask already_open;
               perform_close_operations(closer, reduction_flush_fields, *it,
                                        next_child, false/*allow_next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
                                        record_close_operations,
-                                       new_state, already_open);
-              // Update the open mask
-              open_mask -= already_open;
+                                       new_states, open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -12407,7 +12429,7 @@ namespace LegionRuntime {
                   {
                     // Remove the child's open fields from the
                     // list of fields we need to open
-                    open_mask -= finder->second;
+                    open_below |= finder->second;
                   }
                 }
                 it++;
@@ -12430,8 +12452,7 @@ namespace LegionRuntime {
                                          false/*permit leave open*/,
                                          false/*record_close_operations*/,
                                          new_states, already_open);
-                // Update the open mask
-                open_mask -= already_open;
+                open_below |= already_open;
                 if (needs_upgrade && !!already_open)
                   new_states.push_back(
                       FieldState(closer.user, already_open, next_child));
@@ -12446,15 +12467,12 @@ namespace LegionRuntime {
           case OPEN_READ_WRITE:
             {
               // Close up any open partitions that conflict with ours
-              FieldMask already_open;
               perform_close_operations(closer, current_mask, *it, next_child,
                                        true/*allow next*/,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
                                        record_close_operations,
-                                       new_states, already_open);
-              // Update the open mask
-              open_mask -= already_open;
+                                       new_states, open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -12487,10 +12505,10 @@ namespace LegionRuntime {
                     if (!already_open || 
                         are_children_disjoint(cit->first, next_child))
                       continue;
-                    // Remove the already open fields from this open_mask
+                    // Add the already open fields to this open_below mask
                     // since either they are already open for the right child
                     // or we're going to mark them open in a new FieldState
-                    open_mask -= already_open;
+                    open_below |= already_open;
                     // Case 2
                     if (cit->first != (next_child))
                     {
@@ -12559,7 +12577,7 @@ namespace LegionRuntime {
                                            false/*permit leave open*/,
                                            record_close_operations,
                                            new_states, already_open);
-                  open_mask -= already_open;
+                  open_below |= already_open;
                   if (!!already_open)
                   {
                     // Create a new FieldState open in whatever mode is
@@ -12582,7 +12600,7 @@ namespace LegionRuntime {
                                          false/*permit leave open*/,
                                          record_close_operations,
                                          new_states, already_open);
-                open_mask -= already_open;
+                open_below |= already_open;
               }
               // Now see if the current field state is still valid
               if (!it->valid_fields)
@@ -12603,8 +12621,8 @@ namespace LegionRuntime {
                     finder = it->open_children.find(next_child);
                   if (finder != it->open_children.end())
                   {
-                    // Already open, so remove the open fields
-                    open_mask -= (finder->second & current_mask);
+                    // Already open, so add the open fields
+                    open_below |= (finder->second & current_mask);
                   }
                 }
                 it++;
@@ -12636,14 +12654,13 @@ namespace LegionRuntime {
       }
       // If we had any fields that still need to be opened, create
       // a new field state and add it into the set of new states
+      FieldMask open_mask = current_mask - open_below;
       if (next_child.is_valid() && !!open_mask)
         new_states.push_back(FieldState(closer.user, open_mask, next_child));
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
-#endif
-      // Return true if we are opening all the fields
-      return (open_mask == current_mask);
+#endif 
     }
 
     //--------------------------------------------------------------------------
@@ -12902,7 +12919,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_version_numbers(LogicalState &state,
                                                 const FieldMask &mask,
-                                                VersionInfo &version_info)
+                                                VersionInfo &version_info,
+                                                bool previous)
     //--------------------------------------------------------------------------
     {
       // Capture the version information for this logical region  
@@ -12912,16 +12930,34 @@ namespace LegionRuntime {
 #endif
       LegionMap<VersionID,FieldMask,
                VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            current.begin(); it != current.end(); it++)
+      if (!previous)
       {
-        FieldMask overlap = it->second & mask; 
-        if (!overlap)
-          continue;
-        versions.insert(*it);
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              current.begin(); it != current.end(); it++)
+        {
+          FieldMask overlap = it->second & mask; 
+          if (!overlap)
+            continue;
+          versions[it->first] = overlap;
 #ifdef DEBUG_HIGH_LEVEL
-        unversioned -= overlap;
+          unversioned -= overlap;
 #endif
+        }
+      }
+      else
+      {
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              current.begin(); it != current.end(); it++)
+        {
+          FieldMask overlap = it->second & mask; 
+          if (!overlap)
+            continue;
+#ifdef DEBUG_HIGH_LEVEL
+          unversioned -= overlap;
+          assert(it->first > 0);
+#endif
+          versions[it->first-1] = overlap;
+        }
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(!unversioned); // all the fields should have a version number
@@ -15254,12 +15290,13 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP>
+    template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
     /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
       const LogicalUser &user, 
       typename LegionList<LogicalUser, ALLOC>::track_aligned &prev_users,
-      const FieldMask &check_mask, bool validates_regions,
-      Operation *to_skip /*= NULL*/, GenerationID skip_gen /* = 0*/)
+      const FieldMask &check_mask, const FieldMask &open_below,
+      bool validates_regions, Operation *to_skip /*= NULL*/, 
+      GenerationID skip_gen /* = 0*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15271,6 +15308,11 @@ namespace LegionRuntime {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask;
+      // For domination, we only need to observe fields that
+      // are open below, therefore, any fields which are not open
+      // below can already be recorded as observed.
+      if (TRACK_DOM)
+        observed_mask = check_mask - open_below;
       FieldMask user_check_mask = user.field_mask & check_mask;
       const bool tracing = user.op->is_tracing();
       for (typename LegionList<LogicalUser, ALLOC>::track_aligned::iterator 
@@ -15284,7 +15326,8 @@ namespace LegionRuntime {
         FieldMask overlap = user_check_mask & it->field_mask;
         if (!!overlap)
         {
-          observed_mask |= overlap;
+          if (TRACK_DOM)
+            observed_mask |= overlap;
           DependenceType dtype = check_dependence_type(it->usage, user.usage);
           bool validate = validates_regions;
           switch (dtype)
@@ -15396,7 +15439,10 @@ namespace LegionRuntime {
       // It's only sound to say that we dominate fields that
       // we actually observed users for so intersect the dominator 
       // mask with the observed mask
-      return (dominator_mask & observed_mask);
+      if (TRACK_DOM)
+        return (dominator_mask & observed_mask);
+      else
+        return dominator_mask;
     }
 
     //--------------------------------------------------------------------------

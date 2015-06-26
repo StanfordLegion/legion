@@ -1610,6 +1610,7 @@ namespace LegionRuntime {
                                        const RestrictInfo &restrict_info,
                                        const TraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
+                                       const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
       void register_close_operations(
@@ -1627,7 +1628,8 @@ namespace LegionRuntime {
                           const TraceInfo &trace_info, bool open,
                           const LegionList<ClosingSet>::aligned &close_sets,
                       LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops);
-      void register_dependences(const LogicalUser &current,
+      void register_dependences(const LogicalUser &current, 
+                                const FieldMask &open_below,
              LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
              LegionMap<ColorPoint,ClosingInfo>::aligned &children,
              LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
@@ -2060,11 +2062,12 @@ namespace LegionRuntime {
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open);
-      bool siphon_logical_children(LogicalCloser &closer,
+      void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &closing_mask,
                                    bool record_close_operations,
-                                   const ColorPoint &next_child);
+                                   const ColorPoint &next_child,
+                                   FieldMask &open_below);
       void perform_close_operations(LogicalCloser &closer,
                                     const FieldMask &closing_mask,
                                     FieldState &closing_state,
@@ -2082,7 +2085,7 @@ namespace LegionRuntime {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
-                                  VersionInfo &info);
+                                  VersionInfo &info, bool previous);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
@@ -2321,11 +2324,12 @@ namespace LegionRuntime {
                              FieldSpaceNode *column, AddressSpaceID source);
     public:
       // Logical helper operations
-      template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP> 
+      template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
       static FieldMask perform_dependence_checks(const LogicalUser &user, 
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
-          const FieldMask &check_mask, bool validates_regions,
-          Operation *to_skip = NULL, GenerationID skip_gen = 0);
+          const FieldMask &check_mask, const FieldMask &open_below,
+          bool validates_regions, Operation *to_skip = NULL, 
+          GenerationID skip_gen = 0);
       template<AllocationType ALLOC>
       static void perform_closing_checks(LogicalCloser &closer,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
