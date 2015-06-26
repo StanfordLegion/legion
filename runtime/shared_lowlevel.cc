@@ -45,6 +45,7 @@ using namespace LegionRuntime::Accessor;
 #include <unistd.h>
 #ifdef LEGION_BACKTRACE
 #include <execinfo.h>
+#include <cxxabi.h>
 #endif
 
 #define BASE_EVENTS	  1024	
@@ -5783,8 +5784,44 @@ namespace LegionRuntime {
         buffer_size += (strlen(bt_syms[i]) + 1);
       char *buffer = (char*)malloc(buffer_size);
       int offset = 0;
-      for (int i = 0; i < bt_size; i++)
-        offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += sprintf(buffer+offset,"  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function with no arguments.
+            offset += sprintf(buffer+offset,"  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+        }
+      }
       fprintf(stderr,"BACKTRACE\n----------\n%s\n----------\n", buffer);
       fflush(stderr);
       free(buffer);
