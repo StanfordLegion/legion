@@ -12043,7 +12043,8 @@ namespace LegionRuntime {
         state.dirty_below -= closed_mask;
         // Now we can add the close operations to the current epoch
         closer.register_close_operations(state.curr_epoch_users);
-      }
+      } 
+
       // We also always do our dependence analysis even if we have
       // already traced because we need to pick up dependences on 
       // any dynamic close operations that we need to do
@@ -12063,20 +12064,7 @@ namespace LegionRuntime {
       }
 
       if (arrived)
-      {
-        // We also need to record the needed version numbers for this node
-        // Note that we do this after the close operations have been registered
-        // so we get the any updates to version numbers performed by close
-        // operations on which we will depend.
-        record_version_numbers(state, user.field_mask, version_info);
-        // If this is a projection requirement, we also need to record any
-        // version numbers from farther down in the tree as well. 
-        // Do this before the version numbers can be updated.
-        if (version_info.is_projection())
-        {
-          VersionRecorder recorder(ctx, version_info, user.field_mask);
-          visit_node(&recorder);
-        }
+      { 
         // If we dominated and this is our final destination then we 
         // can filter the operations since we actually do dominate them
         if (!!dominator_mask)
@@ -12090,12 +12078,24 @@ namespace LegionRuntime {
           // them to prev epoch users.  If all fields masked off, then remove
           // them from the list of current epoch users.
           filter_curr_epoch_users(state, dominator_mask);
-          // We only update the version numbers for fields which were dominated
-          // when doing a write because if we didn't dominate, that means there
-          // is another writer already registered which has already updated the 
-          // version number for us. Don't count reductions as writes here.
+          // We only advance version numbers for fields which are being
+          // written and dominated the previous epoch because multiple 
+          // writes for atomic and simultaneous go in the same generation.
           if (IS_WRITE(user.usage))
             advance_version_numbers(state, dominator_mask);
+        }
+        // We also need to record the needed version numbers for this node
+        // Note that we do this after the version numbers have been updated
+        // so that we get the version numbers that we are contributing to
+        // as part of the execution for this operation.
+        record_version_numbers(state, user.field_mask, version_info);
+        // If this is a projection requirement, we also need to record any
+        // version numbers from farther down in the tree as well. 
+        // Do this before the version numbers can be updated.
+        if (version_info.is_projection())
+        {
+          VersionRecorder recorder(ctx, version_info, user.field_mask);
+          visit_node(&recorder);
         }
         // Here is the only difference with tracing.  If we already
         // traced then we don't need to register ourselves as a user
@@ -12132,13 +12132,21 @@ namespace LegionRuntime {
       }
       else // We're still not there, so keep going
       {
-        // We also need to record the needed version numbers for this node
-        // Note that we do this after the close operations have been registered
-        // so we get the any updates to version numbers performed by close
-        // operations on which we will depend. If we're doing a write, then
-        // we also need to advance the dirty below field.
-        record_intermediate_numbers(state, user.field_mask, 
-                                    version_info, HAS_WRITE(user.usage));
+        // If we are writing in any way (including reduces), check to
+        // see if we have already marked those fields dirty. If not,
+        // advance the version numbers for those fields.
+        if (HAS_WRITE(user.usage))
+        {
+          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          if (!!new_dirty_fields)
+          {
+            advance_version_numbers(state, new_dirty_fields);
+            state.dirty_below |= new_dirty_fields;
+          }
+        }
+        // Record version numbers of the fields which we are contributing
+        // to from this node.
+        record_version_numbers(state, user.field_mask, version_info);
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
           child->open_logical_node(ctx, user, path, version_info,
@@ -12165,6 +12173,9 @@ namespace LegionRuntime {
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
+        // If this is a write, then update our version numbers
+        if (IS_WRITE(user.usage))
+          advance_version_numbers(state, user.field_mask);
         // First record any version information that we need
         record_version_numbers(state, user.field_mask, version_info);
         // If this is a projection then we do need to capture any 
@@ -12175,9 +12186,6 @@ namespace LegionRuntime {
           VersionRecorder recorder(ctx, version_info, user.field_mask);
           visit_node(&recorder);
         }
-        // If this is a write, then update our version numbers
-        if (IS_WRITE(user.usage))
-          advance_version_numbers(state, user.field_mask);
         // No need to record ourselves if we've already traced
         if (!already_traced)
         {
@@ -12212,6 +12220,21 @@ namespace LegionRuntime {
       }
       else
       {
+        // If we are writing in any way (including reduces), check to
+        // see if we have already marked those fields dirty. If not,
+        // advance the version numbers for those fields.
+        if (HAS_WRITE(user.usage))
+        {
+          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          if (!!new_dirty_fields)
+          {
+            advance_version_numbers(state, new_dirty_fields);
+            state.dirty_below |= new_dirty_fields;
+          }
+        }
+        // Record version numbers of the fields which we are contributing
+        // to from this node.
+        record_version_numbers(state, user.field_mask, version_info);
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -12219,8 +12242,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         sanity_check_logical_state(state);
 #endif
-        record_intermediate_version_numbers(state, user.field_mask,
-                                          version_info, HAS_WRITE(user.usage));
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
         child_node->open_logical_node(ctx, user, path, version_info, 
@@ -12959,66 +12980,7 @@ namespace LegionRuntime {
 #endif
         current.insert(*it);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::record_intermediate_version_numbers(
-                            LogicalState &state, const FieldMask &mask,
-                            VersionInfo &version_info, bool advance_dirty_below)
-    //--------------------------------------------------------------------------
-    {
-      // This routine is mostly the same as the one for record_version_numbers
-      // above, but in cases where we detect that we've already recorded a dirty 
-      // below field, then we need to record the version number before the 
-      // current one because it has already been advanced.
-      VersionInfo::RegionVersions &versions = version_info.find_region(this);
-#ifdef DEBUG_HIGH_LEVEL
-      FieldMask unversioned = mask;
-#endif
-      LegionMap<VersionID,FieldMask,
-               VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            current.begin(); it != current.end(); it++)
-      {
-        FieldMask overlap = it->second & mask; 
-        if (!overlap)
-          continue;
-        FieldMask dirty_overlap = overlap & state.dirty_below;
-        if (!!dirty_overlap)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(it->first > 0);
-#endif
-          VersionID prev_id = it->first - 1;
-          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-            versions.find(prev_id);
-          if (finder == versions.end())
-            versions[prev_id] = dirty_overlap;
-          else
-            finder->second |= dirty_overlap;
-          FieldMask not_dirty = overlap - not_dirty;
-          if (!!not_dirty)
-            versions[it->first] = not_dirty;
-        }
-        else
-          versions.insert(*it);
-#ifdef DEBUG_HIGH_LEVEL
-        unversioned -= overlap;
-#endif
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!unversioned); // all the fields should have a version number
-#endif
-      if (advance_dirty_below)
-      {
-        FieldMask new_dirty_below = mask - state.dirty_below; 
-        if (!!new_dirty_below)
-        {
-          advance_version_numbers(state, new_dirty_below);
-          state.dirty_below |= new_dirty_below;
-        }
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_logical_reduction(LogicalState &state,

@@ -2083,10 +2083,6 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info);
-      void record_intermediate_version_numbers(LogicalState &state, 
-                                               const FieldMask &mask,
-                                               VersionInfo &version_info,
-                                               bool advance_dirty_below);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
