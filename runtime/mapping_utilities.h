@@ -218,19 +218,29 @@ namespace LegionRuntime {
         void update_profiling_info(const Task *task, Processor target, 
                                    Processor::Kind kind,
                                    const Mapper::ExecutionProfile &profile);
-      protected:
+      public:
+        struct Profile {
+          long long execution_time;
+          Processor target_processor;
+          DomainPoint index_point;
+        };
+
         struct VariantProfile {
         public:
           VariantProfile(void);
         public:
           long long total_time;
-          std::list<long long> execution_times;
+          std::list<Profile> samples;
         };
-      protected:
+
         typedef std::map<Processor::Kind,VariantProfile> VariantMap;
         typedef std::map<Processor::TaskFuncID,VariantMap> TaskMap;
+
+        const TaskMap& get_task_profiles() const { return task_profiles; }
+
+      protected:
         unsigned needed_samples;
-        unsigned max_samples; 
+        unsigned max_samples;
         TaskMap task_profiles;
       };
 

@@ -626,7 +626,7 @@ namespace LegionRuntime {
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
-          if (it->second.execution_times.size() < max_samples)
+          if (it->second.samples.size() < max_samples)
             return false;
         }
         return true;
@@ -648,14 +648,14 @@ namespace LegionRuntime {
           if (!best_set)
           {
             best_time = float(it->second.total_time)/
-                        float(it->second.execution_times.size());
+                        float(it->second.samples.size());
             best_kind = it->first;
             best_set = true;
           }
           else
           {
             float time = float(it->second.total_time)/
-                         float(it->second.execution_times.size());
+                         float(it->second.samples.size());
             if (time < best_time)
             {
               best_time = time;
@@ -678,7 +678,7 @@ namespace LegionRuntime {
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
-          if (it->second.execution_times.size() < max_samples)
+          if (it->second.samples.size() < max_samples)
             return it->first;
         }
         return best_processor_kind(task);
@@ -694,27 +694,30 @@ namespace LegionRuntime {
         TaskMap::iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
         {
-	  const std::map<VariantID,TaskVariantCollection::Variant>& variants = 
+          const std::map<VariantID,TaskVariantCollection::Variant>& variants =
             task->variants->get_all_variants();
           for (std::map<VariantID,TaskVariantCollection::Variant>::
                const_iterator it = variants.begin(); it != variants.end(); it++)
           {
-            task_profiles[task->task_id][it->second.proc_kind] = 
+            task_profiles[task->task_id][it->second.proc_kind] =
               VariantProfile();
           }
           finder = task_profiles.find(task->task_id);
         }
         VariantMap::iterator var_finder = finder->second.find(kind);
         assert(var_finder != finder->second.end());
-        if (var_finder->second.execution_times.size() == max_samples)
+        if (var_finder->second.samples.size() == max_samples)
         {
-          var_finder->second.total_time -= 
-            var_finder->second.execution_times.front();
-          var_finder->second.execution_times.pop_front();
+          var_finder->second.total_time -=
+            var_finder->second.samples.front().execution_time;
+          var_finder->second.samples.pop_front();
         }
-        long long total_time = profile.stop_time - profile.start_time;
-        var_finder->second.total_time += total_time;
-        var_finder->second.execution_times.push_back(total_time);
+        Profile sample;
+        sample.execution_time = profile.stop_time - profile.start_time;
+        sample.target_processor = task->target_proc;
+        sample.index_point = task->index_point;
+        var_finder->second.total_time += sample.execution_time;
+        var_finder->second.samples.push_back(sample);
       }
 
       //------------------------------------------------------------------------
