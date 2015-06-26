@@ -40,6 +40,7 @@ using namespace LegionRuntime::Accessor;
 #include <unistd.h>
 #if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE) || defined(DEADLOCK_TRACE)
 #include <execinfo.h>
+#include <cxxabi.h>
 #endif
 
 #ifdef __SSE2__
@@ -8662,17 +8663,60 @@ namespace LegionRuntime {
       void *bt[256];
       int bt_size = backtrace(bt, 256);
       char **bt_syms = backtrace_symbols(bt, bt_size);
-      size_t buffer_size = 1;
-      for (int i = 0; i < bt_size; i++)
-        buffer_size += (strlen(bt_syms[i]) + 1);
+      size_t buffer_size = 2048; // default buffer size
       char *buffer = (char*)malloc(buffer_size);
-      int offset = 0;
-      for (int i = 0; i < bt_size; i++)
-        offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+      size_t offset = 0;
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        // If offset is within half of the buffer size, double the buffer
+        if (offset >= (buffer_size / 2)) {
+          buffer_size *= 2;
+          buffer = (char*)realloc(buffer, buffer_size);
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function with no arguments.
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += snprintf(buffer+offset,buffer_size-offset,
+                             "%s\n",bt_syms[i]);
+        }
+      }
       fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
               gasnet_mynode(), pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
+      free(funcname);
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit
