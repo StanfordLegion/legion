@@ -910,23 +910,28 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if (not check(param_type:partition(), arg_type:partition(), mapping)) or
-        (not check(param_type:cross_partition(), arg_type:cross_partition(), mapping))
+      if #param_type:partitions() ~= #arg_type:partitions() or
+        not std.all(
+          std.zip(param_type:partitions(), arg_type:partitions()):map(
+            function(pair)
+              local param_partition, arg_partition = unpack(pair)
+              return check(param_partition, arg_partition, mapping)
+            end))
       then
-        local param_partition = param_type:partition()
-        local param_cross_partition = param_type:cross_partition()
-        local param_partition_as_arg_type = mapping[param_partition]
-        local param_cross_partition_as_arg_type = mapping[param_cross_partition]
-        for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_partition] then
-            param_partition_as_arg_type = v
-          end
-          if terralib.issymbol(v) and v.type == mapping[param_cross_partition] then
-            param_cross_partition_as_arg_type = v
-          end
-        end
+        local param_partitions = param_type:partitions()
+        local param_partitions_as_arg_type = param_partitions:map(
+          function(param_partition)
+            local param_partition_as_arg_type = mapping[param_partition]
+            for k, v in pairs(mapping) do
+              if terralib.issymbol(v) and v.type == mapping[param_partition] then
+                param_partition_as_arg_type = v
+              end
+            end
+            return param_partition_as_arg_type
+        end)
         local param_as_arg_type = std.cross_product(
-          param_partition_as_arg_type, param_cross_partition_as_arg_type)
+          unpack(param_partitions_as_arg_type))
+
         log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
@@ -1790,20 +1795,19 @@ function std.cross_product(...)
   st.partition_symbols = partition_symbols
   st.subpartitions = {}
 
-  function st:partition(i)
-    local partition = self.partition_symbols[1].type
-    assert(terralib.types.istype(partition) and
-             std.is_partition(partition),
-           "Cross product type requires partition")
-    return partition
+  function st:partitions()
+    return self.partition_symbols:map(
+      function(partition_symbol)
+        local partition = partition_symbol.type
+        assert(terralib.types.istype(partition) and
+                 std.is_partition(partition),
+               "Cross product type requires partition")
+        return partition
+    end)
   end
 
-  function st:cross_partition()
-    local partition = self.partition_symbols[2].type
-    assert(terralib.types.istype(partition) and
-             std.is_partition(partition),
-           "Cross product type requires partition")
-    return partition
+  function st:partition(i)
+    return self:partitions()[i or 1]
   end
 
   function st:is_disjoint()
@@ -1842,7 +1846,7 @@ function std.cross_product(...)
 
   function st:subpartition_dynamic(i, region_type)
     local region_symbol = terralib.newsymbol(region_type)
-    local partition = std.partition(self:cross_partition().disjointness, region_symbol)
+    local partition = std.partition(self:partition(2).disjointness, region_symbol)
     if #partition_symbols > 2 then
       local partition_symbol = terralib.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})
