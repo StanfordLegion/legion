@@ -2593,6 +2593,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::get_index_space_partition_colors(Context ctx,
+                                                            IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_partition_colors(ctx, sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
     bool HighLevelRuntime::is_index_partition_disjoint(Context ctx, 
                                                        IndexPartition p)
     //--------------------------------------------------------------------------

@@ -7919,6 +7919,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ColorPoint> color_points;
+      forest->get_index_space_partition_colors(sp, color_points);
+      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
+            it != color_points.end(); it++)
+      {
+        colors.insert(it->get_point());
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {

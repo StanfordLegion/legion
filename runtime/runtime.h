@@ -1218,6 +1218,8 @@ namespace LegionRuntime {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace handle,
                                             std::set<Color> &colors);
+      void get_index_space_partition_colors(Context ctx, IndexSpace handle,
+                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
