@@ -6656,7 +6656,7 @@ namespace LegionRuntime {
                               IndexPartition p, Arrays::Point<DIM> color_point)
     //--------------------------------------------------------------------------
     {
-      DomainPoint dom_point = Domain::from_point<DIM>(color_point);
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
       return get_index_subspace(ctx, p, dom_point);
     }
 
@@ -6739,7 +6739,7 @@ namespace LegionRuntime {
                                           Arrays::Point<DIM> &color_point) const
     //--------------------------------------------------------------------------
     {
-      DomainPoint dom_point = Domain::from_point<DIM>(color_point);
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
       return get_index_subspace(p, dom_point);
     }
     
