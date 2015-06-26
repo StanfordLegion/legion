@@ -771,6 +771,71 @@ function std.fn_param_symbols(fn_type)
   return param_symbols
 end
 
+local function type_compatible(a, b)
+  return (std.is_ispace(a) and std.is_ispace(b)) or
+    (std.is_region(a) and std.is_region(b)) or
+    (std.is_partition(a) and std.is_partition(b)) or
+    (std.is_cross_product(a) and std.is_cross_product(b))
+end
+
+local function type_isomorphic(param_type, arg_type, check, mapping)
+  if std.is_ispace(param_type) and std.is_ispace(arg_type) then
+    return std.type_eq(param_type.index_type, arg_type.index_type, mapping)
+  elseif std.is_region(param_type) and std.is_region(arg_type) then
+      return std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+  elseif std.is_partition(param_type) and std.is_partition(arg_type) then
+    return (param_type:is_disjoint() == arg_type:is_disjoint()) and
+      (check(param_type:parent_region(), arg_type:parent_region(), mapping))
+  elseif
+    std.is_cross_product(param_type) and std.is_cross_product(arg_type)
+  then
+    return (#param_type:partitions() == #arg_type:partitions()) and
+      std.all(
+        std.zip(param_type:partitions(), arg_type:partitions()):map(
+          function(pair)
+            local param_partition, arg_partition = unpack(pair)
+            return check(param_partition, arg_partition, mapping)
+      end))
+  else
+    return false
+  end
+end
+
+local function reconstruct_param_as_arg_type(param_type, mapping)
+  if std.is_ispace(param_type) then
+    local index_type = std.type_sub(param_type.index_type, mapping)
+    return std.ispace(index_type)
+  elseif std.is_region(param_type) then
+    local fspace_type = std.type_sub(param_type.fspace_type, mapping)
+    return std.region(fspace_type)
+  elseif std.is_partition(param_type) then
+    local param_parent_region = param_type:parent_region()
+    local param_parent_region_as_arg_type = mapping[param_parent_region]
+    for k, v in pairs(mapping) do
+      if terralib.issymbol(v) and v.type == mapping[param_parent_region] then
+        param_parent_region_as_arg_type = v
+      end
+    end
+    return std.partition(
+      param_type.disjointness, param_parent_region_as_arg_type)
+  elseif std.is_cross_product(param_type) then
+    local param_partitions = param_type:partitions()
+    local param_partitions_as_arg_type = param_partitions:map(
+      function(param_partition)
+        local param_partition_as_arg_type = mapping[param_partition]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_partition] then
+            param_partition_as_arg_type = v
+          end
+        end
+        return param_partition_as_arg_type
+    end)
+    return std.cross_product(unpack(param_partitions_as_arg_type))
+  else
+    assert(false)
+  end
+end
+
 function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
   if (#args < #params) or (#args > #params and not isvararg) then
     log.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
@@ -804,7 +869,9 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] == arg_type
     then
       -- Ok
-    elseif std.is_ispace(param_type) and std.is_ispace(arg_type) then
+    elseif type_compatible(param_type, arg_type) then
+      -- Regions (and other unique types) require a special pass here 
+
       -- Check for previous mappings. This can happen if two
       -- parameters are aliased to the same region.
       if (mapping[param] or mapping[param_type]) and
@@ -823,115 +890,8 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if not std.type_eq(param_type.index_type, arg_type.index_type, mapping) then
-        local index_type = std.type_sub(param_type.index_type, mapping)
-        local param_as_arg_type = std.region(index_type)
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg_type))
-      end
-    elseif std.is_region(param_type) and std.is_region(arg_type) then
-      -- Check for previous mappings. This can happen if two
-      -- parameters are aliased to the same region.
-      if (mapping[param] or mapping[param_type]) and
-        not (mapping[param] == arg or mapping[param_type] == arg_type)
-      then
-        local param_as_arg_type = mapping[param_type]
-        for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_type] then
-            param_as_arg_type = v
-          end
-        end
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg))
-      end
-
-      mapping[param] = arg
-      mapping[param_type] = arg_type
-      if not std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping) then
-        local fspace_type = std.type_sub(param_type.fspace_type, mapping)
-        local param_as_arg_type = std.region(fspace_type)
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg_type))
-      end
-    elseif std.is_partition(param_type) and std.is_partition(arg_type) then
-      -- Check for previous mappings. This can happen if two
-      -- parameters are aliased to the same partition.
-      if (mapping[param] or mapping[param_type]) and
-        not (mapping[param] == arg or mapping[param_type] == arg_type)
-      then
-        local param_as_arg_type = mapping[param_type]
-        for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_type] then
-            param_as_arg_type = v
-          end
-        end
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg))
-      end
-
-      mapping[param] = arg
-      mapping[param_type] = arg_type
-      if (not param_type.disjoint == arg_type.disjoint) or
-        (not check(param_type:parent_region(), arg_type:parent_region(), mapping))
-      then
-        local param_parent_region = param_type:parent_region()
-        local param_parent_region_as_arg_type = mapping[param_parent_region]
-        for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_parent_region] then
-            param_parent_region_as_arg_type = v
-          end
-        end
-        local param_as_arg_type = std.partition(
-          param_type.disjointness, param_parent_region_as_arg_type)
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg_type))
-      end
-    elseif std.is_cross_product(param_type) and std.is_cross_product(arg_type) then
-      -- Check for previous mappings. This can happen if two
-      -- parameters are aliased to the same partition.
-      if (mapping[param] or mapping[param_type]) and
-        not (mapping[param] == arg or mapping[param_type] == arg_type)
-      then
-        local param_as_arg_type = mapping[param_type]
-        for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_type] then
-            param_as_arg_type = v
-          end
-        end
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
-                    ": expected " .. tostring(param_as_arg_type) ..
-                    " but got " .. tostring(arg))
-      end
-
-      mapping[param] = arg
-      mapping[param_type] = arg_type
-      if #param_type:partitions() ~= #arg_type:partitions() or
-        not std.all(
-          std.zip(param_type:partitions(), arg_type:partitions()):map(
-            function(pair)
-              local param_partition, arg_partition = unpack(pair)
-              return check(param_partition, arg_partition, mapping)
-            end))
-      then
-        local param_partitions = param_type:partitions()
-        local param_partitions_as_arg_type = param_partitions:map(
-          function(param_partition)
-            local param_partition_as_arg_type = mapping[param_partition]
-            for k, v in pairs(mapping) do
-              if terralib.issymbol(v) and v.type == mapping[param_partition] then
-                param_partition_as_arg_type = v
-              end
-            end
-            return param_partition_as_arg_type
-        end)
-        local param_as_arg_type = std.cross_product(
-          unpack(param_partitions_as_arg_type))
-
+      if not type_isomorphic(param_type, arg_type, check, mapping) then
+        local param_as_arg_type = reconstruct_param_as_arg_type(param_type, mapping)
         log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
@@ -1729,12 +1689,11 @@ function std.partition(disjointness, region)
 
   st.is_partition = true
   st.disjointness = disjointness
-  st.disjoint = disjointness == std.disjoint
   st.parent_region_symbol = region
   st.subregions = {}
 
   function st:is_disjoint()
-    return self.disjoint
+    return self.disjointness == std.disjoint
   end
 
   function st:parent_region()
