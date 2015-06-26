@@ -1369,6 +1369,9 @@ namespace LegionRuntime {
       // If we are projection requirement, we need to record extra info
       if (req.handle_type != SINGULAR)
         version_info.set_projection();
+      // If we are a write, mark that we are advancing
+      if (HAS_WRITE(user.usage))
+        version_info.set_advance();
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -8662,7 +8665,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : projection(false)
+      : projection(false), advance(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -8758,38 +8761,7 @@ namespace LegionRuntime {
       // Save the resulting physical state
       finder->second.physical_state = result;
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalState* VersionInfo::find_delta_state(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
-        node_infos.find(node);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != node_infos.end());
-#endif
-      return finder->second.delta_state;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalState* VersionInfo::create_delta_state(RegionTreeNode *node,
-                                                   VersionManager *manager,
-                                                   bool advance)
-    //--------------------------------------------------------------------------
-    {
-      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
-        node_infos.find(node);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != node_infos.end());
-      assert(finder->second.delta_state == NULL);
-#endif
-      PhysicalState *result = 
-        manager->construct_delta(node, finder->second.version_numbers, advance);
-      // Save the resulting delta state
-      finder->second.delta_state = result;
-      return result;
-    }
+    } 
     
     /////////////////////////////////////////////////////////////
     // RestrictInfo 
@@ -10989,8 +10961,7 @@ namespace LegionRuntime {
       // Don't need the previous because writes were already done in the
       // sub-tree we are closing so the version number for the target
       // region has already been advanced.
-      node->record_version_numbers(state, local_mask, 
-                                   close_versions, false/*previous*/);
+      node->record_version_numbers(state, local_mask, close_versions);
     }
 
     //--------------------------------------------------------------------------
@@ -12030,7 +12001,7 @@ namespace LegionRuntime {
       FieldMask open_below;
       siphon_logical_children(closer, state, user.field_mask,
                 !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
-                arrived ? ColorPoint(): path.get_child(depth), open_below);
+                arrived ? ColorPoint() : path.get_child(depth), open_below);
       const bool open_only = !open_below;
       // We always need to create and register close operations
       // regardless of whether we are tracing or not
@@ -12101,7 +12072,7 @@ namespace LegionRuntime {
           // We only advance version numbers for fields which are being
           // written and dominated the previous epoch because multiple 
           // writes for atomic and simultaneous go in the same generation.
-          if (HAS_WRITE(user.usage))
+          if (version_info.will_advance())
             advance_version_numbers(state, dominator_mask);
         }
         // We also need to record the needed version numbers for this node
@@ -12109,8 +12080,7 @@ namespace LegionRuntime {
         // so that we get the version numbers that we are contributing to
         // as part of the execution for this operation. If we are writing
         // in any way, then record the previous version number
-        record_version_numbers(state, user.field_mask, 
-                               version_info, HAS_WRITE(user.usage));
+        record_version_numbers(state, user.field_mask, version_info);
         // If this is a projection requirement, we also need to record any
         // version numbers from farther down in the tree as well. 
         // Do this before the version numbers can be updated.
@@ -12168,8 +12138,7 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask,
-                               version_info, HAS_WRITE(user.usage));
+        record_version_numbers(state, user.field_mask, version_info);
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
           child->open_logical_node(ctx, user, path, version_info,
@@ -12200,8 +12169,7 @@ namespace LegionRuntime {
         if (HAS_WRITE(user.usage))
           advance_version_numbers(state, user.field_mask);
         // First record any version information that we need
-        record_version_numbers(state, user.field_mask, 
-                               version_info, HAS_WRITE(user.usage));
+        record_version_numbers(state, user.field_mask, version_info);
         // If this is a projection then we do need to capture any 
         // child version information because it might change
         // Do this before the version numbers are updated
@@ -12258,8 +12226,7 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, 
-                               version_info, HAS_WRITE(user.usage));
+        record_version_numbers(state, user.field_mask, version_info);
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -12919,8 +12886,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_version_numbers(LogicalState &state,
                                                 const FieldMask &mask,
-                                                VersionInfo &version_info,
-                                                bool previous)
+                                                VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       // Capture the version information for this logical region  
@@ -12930,7 +12896,7 @@ namespace LegionRuntime {
 #endif
       LegionMap<VersionID,FieldMask,
                VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
-      if (!previous)
+      if (!version_info.will_advance())
       {
         for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
               current.begin(); it != current.end(); it++)

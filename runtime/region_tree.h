@@ -1330,10 +1330,9 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : physical_state(NULL), delta_state(NULL) { }
+          : physical_state(NULL) { }
       public:
         PhysicalState *physical_state;
-        PhysicalState *delta_state;
         RegionVersions version_numbers;
       };
     public:
@@ -1347,6 +1346,8 @@ namespace LegionRuntime {
         { return node_infos[node].version_numbers; }
       inline void set_projection(void) { projection = true; }
       inline bool is_projection(void) const { return projection; }
+      inline void set_advance(void) { advance = true; }
+      inline bool will_advance(void) { return advance; }
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void clear(void);
@@ -1360,6 +1361,7 @@ namespace LegionRuntime {
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       bool projection;
+      bool advance;
     };
 
     /**
@@ -2085,7 +2087,7 @@ namespace LegionRuntime {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
-                                  VersionInfo &info, bool previous);
+                                  VersionInfo &info);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
