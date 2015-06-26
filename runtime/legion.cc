@@ -3841,6 +3841,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_index_subspace(IndexPartition p, 
+                                          const DomainPoint &color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_subspace(p, color);
+    }
+
+    //--------------------------------------------------------------------------
     bool Mapper::has_multiple_domains(IndexSpace handle) const
     //--------------------------------------------------------------------------
     {

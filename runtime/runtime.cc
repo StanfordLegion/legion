@@ -7783,6 +7783,14 @@ namespace LegionRuntime {
                                            const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
+      return get_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, 
+                                           const DomainPoint &color) 
+    //--------------------------------------------------------------------------
+    {
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
