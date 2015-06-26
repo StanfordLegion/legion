@@ -609,24 +609,72 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
+      void MappingProfiler::set_needed_profiling_samples(
+          Processor::TaskFuncID task_id, unsigned num_samples)
+      //------------------------------------------------------------------------
+      {
+        if (num_samples > 0)
+        {
+          OptionMap::iterator finder = profiling_options.find(task_id);
+          if (finder == profiling_options.end())
+            profiling_options[task_id].needed_samples = num_samples;
+          else
+            finder->second.needed_samples = num_samples;
+        }
+      }
+
+      //------------------------------------------------------------------------
       void MappingProfiler::set_max_profiling_samples(unsigned max)
       //------------------------------------------------------------------------
       {
         if (max > 0)
           max_samples = max;
       }
-      
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::set_max_profiling_samples(
+          Processor::TaskFuncID task_id, unsigned max)
+      //------------------------------------------------------------------------
+      {
+        if (max > 0)
+        {
+          OptionMap::iterator finder = profiling_options.find(task_id);
+          if (finder == profiling_options.end())
+            profiling_options[task_id].max_samples = max;
+          else
+            finder->second.max_samples = max;
+        }
+      }
+
+      void MappingProfiler::set_gather_in_original_processor(
+          Processor::TaskFuncID task_id, bool flag)
+      {
+        OptionMap::iterator finder = profiling_options.find(task_id);
+        if (finder == profiling_options.end())
+          profiling_options[task_id].gather_in_orig_proc = flag;
+        else
+          finder->second.gather_in_orig_proc = flag;
+      }
+
       //------------------------------------------------------------------------
       bool MappingProfiler::profiling_complete(const Task *task) const
       //------------------------------------------------------------------------
       {
+        unsigned needed_samples_for_this_task = needed_samples;
+        {
+          OptionMap::const_iterator finder =
+            profiling_options.find(task->task_id);
+          if (finder != profiling_options.end())
+            needed_samples_for_this_task = finder->second.needed_samples;
+        }
+
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
           return false;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
-          if (it->second.samples.size() < max_samples)
+          if (it->second.samples.size() < needed_samples_for_this_task)
             return false;
         }
         return true;
@@ -691,6 +739,14 @@ namespace LegionRuntime {
                                         const Mapper::ExecutionProfile &profile)
       //------------------------------------------------------------------------
       {
+        unsigned max_samples_for_this_task = max_samples;
+        {
+          OptionMap::const_iterator finder =
+            profiling_options.find(task->task_id);
+          if (finder != profiling_options.end())
+            max_samples_for_this_task = finder->second.max_samples;
+        }
+
         TaskMap::iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
         {
@@ -706,7 +762,7 @@ namespace LegionRuntime {
         }
         VariantMap::iterator var_finder = finder->second.find(kind);
         assert(var_finder != finder->second.end());
-        if (var_finder->second.samples.size() == max_samples)
+        if (var_finder->second.samples.size() == max_samples_for_this_task)
         {
           var_finder->second.total_time -=
             var_finder->second.samples.front().execution_time;
@@ -723,6 +779,13 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       MappingProfiler::VariantProfile::VariantProfile(void)
         : total_time(0)
+      //------------------------------------------------------------------------
+      {
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::ProfilingOption::ProfilingOption(void)
+        : needed_samples(1), max_samples(32), gather_in_orig_proc(false)
       //------------------------------------------------------------------------
       {
       }

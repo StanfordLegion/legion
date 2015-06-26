@@ -191,11 +191,22 @@ namespace LegionRuntime {
          * complete for that variant. The default number is one.
          */
         void set_needed_profiling_samples(unsigned num_samples);
+        void set_needed_profiling_samples(Processor::TaskFuncID task_id,
+                                          unsigned num_samples);
         /**
          * Set the maximum number of profiling samples to keep 
          * around for any variant. By default it is 32.
          */
         void set_max_profiling_samples(unsigned max_samples);
+        void set_max_profiling_samples(Processor::TaskFuncID task_id,
+                                       unsigned max_samples);
+        /**
+         * Set the profiling samples to be gathered in the profiler
+         * of the processor that triggered the task. By default it is false.
+         */
+        void set_gather_in_original_processor(Processor::TaskFuncID task_id,
+                                              bool flag);
+
         /**
          * Check to see if profiling is complete for all the 
          * variants of this task.
@@ -238,10 +249,20 @@ namespace LegionRuntime {
 
         const TaskMap& get_task_profiles() const { return task_profiles; }
 
+        struct ProfilingOption {
+          ProfilingOption(void);
+          unsigned needed_samples;
+          unsigned max_samples;
+          bool gather_in_orig_proc;
+        };
+
+        typedef std::map<Processor::TaskFuncID,ProfilingOption> OptionMap;
+
       protected:
         unsigned needed_samples;
         unsigned max_samples;
         TaskMap task_profiles;
+        OptionMap profiling_options;
       };
 
     };
