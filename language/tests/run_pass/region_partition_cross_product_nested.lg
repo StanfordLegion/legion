@@ -92,14 +92,14 @@ task main()
   assert_disjoint(r01, r11)
   assert_disjoint(r10, r11)
 
-  var r000 = prod[0].partition[0].partition[0]
-  var r001 = prod[0].partition[0].partition[1]
-  var r010 = prod[0].partition[1].partition[0]
-  var r011 = prod[0].partition[1].partition[1]
-  var r100 = prod[1].partition[0].partition[0]
-  var r101 = prod[1].partition[0].partition[1]
-  var r110 = prod[1].partition[1].partition[0]
-  var r111 = prod[1].partition[1].partition[1]
+  var r000 = prod[0].product[0].partition[0]
+  var r001 = prod[0].product[0].partition[1]
+  var r010 = prod[0].product[1].partition[0]
+  var r011 = prod[0].product[1].partition[1]
+  var r100 = prod[1].product[0].partition[0]
+  var r101 = prod[1].product[0].partition[1]
+  var r110 = prod[1].product[1].partition[0]
+  var r111 = prod[1].product[1].partition[1]
 
   -- Check static constraints
   assert_disjoint(r000, r001)

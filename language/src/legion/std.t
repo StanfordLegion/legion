@@ -1613,8 +1613,8 @@ function std.region(ispace_symbol, fspace_type)
     if previous_default and previous_default ~= partition then
       assert(false, "Region type can only have one default partition")
     end
-    if not (std.is_partition(partition)  or std.is_cross_product(partition)) then
-      assert(false, "Region type requires default partition to be a partition or cross product")
+    if not std.is_partition(partition) then
+      assert(false, "Region type requires default partition to be a partition")
     end
     if partition:parent_region() ~= self then
       assert(false, "Region type requires default partition to be a partition of self")
@@ -1632,6 +1632,32 @@ function std.region(ispace_symbol, fspace_type)
       assert(false, "Region type has no default partition")
     end
     return partition
+  end
+
+  function st:set_default_product(product)
+    local previous_default = rawget(self, "product")
+    if previous_default and previous_default ~= product then
+      assert(false, "Region type can only have one default product")
+    end
+    if not std.is_cross_product(product) then
+      assert(false, "Region type requires default product to be a cross product")
+    end
+    if product:parent_region() ~= self then
+      assert(false, "Region type requires default product to be a partition of self")
+    end
+    self.product = product
+  end
+
+  function st:has_default_product()
+    return rawget(self, "product")
+  end
+
+  function st:default_product()
+    local product = rawget(self, "product")
+    if not product then
+      assert(false, "Region type has no default product")
+    end
+    return product
   end
 
   -- Methods for the partition API:
@@ -1780,7 +1806,14 @@ function std.cross_product(...)
   function st:subregion_constant(i)
     local region_type = self:partition():subregion_constant(i)
     local partition_type = self:subpartition_constant(i, region_type)
-    region_type:set_default_partition(partition_type)
+    if std.is_cross_product(partition_type) then
+      region_type:set_default_partition(partition_type:partition())
+      region_type:set_default_product(partition_type)
+    elseif std.is_partition(partition_type) then
+      region_type:set_default_partition(partition_type)
+    else
+      assert(false)
+    end
     return region_type
   end
 
@@ -1791,7 +1824,14 @@ function std.cross_product(...)
   function st:subregion_dynamic(i)
     local region_type = self:partition():subregion_dynamic(i)
     local partition_type = self:subpartition_dynamic(i, region_type)
-    region_type:set_default_partition(partition_type)
+    if std.is_cross_product(partition_type) then
+      region_type:set_default_partition(partition_type:partition())
+      region_type:set_default_product(partition_type)
+    elseif std.is_partition(partition_type) then
+      region_type:set_default_partition(partition_type)
+    else
+      assert(false)
+    end
     return region_type
   end
 

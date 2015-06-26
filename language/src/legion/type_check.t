@@ -113,20 +113,24 @@ function type_check.expr_field_access(cx, node)
 
   if std.is_region(std.as_read(value_type)) then
     local region_type = std.check_read(cx, value)
-    if node.field_name == "partition" and
-      region_type:has_default_partition()
+    local field_type
+    if node.field_name == "partition" and region_type:has_default_partition()
     then
-      local field_type = region_type:default_partition()
-      return ast.typed.ExprFieldAccess {
-        value = value,
-        field_name = node.field_name,
-        expr_type = field_type,
-        span = node.span,
-      }
+      field_type = region_type:default_partition()
+    elseif node.field_name == "product" and region_type:has_default_product()
+    then
+      field_type = region_type:default_product()
     else
       log.error(node, "no field '" .. node.field_name .. "' in type " ..
                   tostring(std.as_read(value_type)))
     end
+
+    return ast.typed.ExprFieldAccess {
+      value = value,
+      field_name = node.field_name,
+      expr_type = field_type,
+      span = node.span,
+    }
   else
     -- If the value is an fspace instance, or a index or bounded type,
     -- unpack before allowing access.
