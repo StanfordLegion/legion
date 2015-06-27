@@ -222,13 +222,7 @@ namespace LegionRuntime {
          * profiling.  If all are complete the best variant will be returned.
          */
         Processor::Kind next_processor_kind(const Task *task) const;
-        /**
-         * Update the profiling kind for the variants of the task on 
-         * the given processor kind.
-         */
-        void update_profiling_info(const Task *task, Processor target, 
-                                   Processor::Kind kind,
-                                   const Mapper::ExecutionProfile &profile);
+
       public:
         struct Profile {
           long long execution_time;
@@ -247,16 +241,25 @@ namespace LegionRuntime {
         typedef std::map<Processor::Kind,VariantProfile> VariantMap;
         typedef std::map<Processor::TaskFuncID,VariantMap> TaskMap;
 
-        const TaskMap& get_task_profiles() const { return task_profiles; }
+        void add_profiling_sample(Processor::TaskFuncID task_id,
+                                  const Profile& sample);
+
+        TaskMap get_task_profiles() const;
+        VariantMap get_variant_profiles(Processor::TaskFuncID tid) const;
+        VariantProfile get_variant_profile(Processor::TaskFuncID tid,
+                                           Processor::Kind kind) const;
 
         struct ProfilingOption {
           ProfilingOption(void);
+          ProfilingOption(unsigned, unsigned);
           unsigned needed_samples;
           unsigned max_samples;
           bool gather_in_orig_proc;
         };
 
         typedef std::map<Processor::TaskFuncID,ProfilingOption> OptionMap;
+
+        ProfilingOption get_profiling_option(Processor::TaskFuncID tid) const;
 
       protected:
         unsigned needed_samples;

@@ -610,16 +610,19 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       void MappingProfiler::set_needed_profiling_samples(
-          Processor::TaskFuncID task_id, unsigned num_samples)
+                            Processor::TaskFuncID task_id, unsigned num_samples)
       //------------------------------------------------------------------------
       {
         if (num_samples > 0)
         {
           OptionMap::iterator finder = profiling_options.find(task_id);
           if (finder == profiling_options.end())
-            profiling_options[task_id].needed_samples = num_samples;
-          else
-            finder->second.needed_samples = num_samples;
+          {
+            profiling_options[task_id] =
+              ProfilingOption(needed_samples, max_samples);
+            finder = profiling_options.find(task_id);
+          }
+          finder->second.needed_samples = num_samples;
         }
       }
 
@@ -633,16 +636,19 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       void MappingProfiler::set_max_profiling_samples(
-          Processor::TaskFuncID task_id, unsigned max)
+                                    Processor::TaskFuncID task_id, unsigned max)
       //------------------------------------------------------------------------
       {
         if (max > 0)
         {
           OptionMap::iterator finder = profiling_options.find(task_id);
           if (finder == profiling_options.end())
-            profiling_options[task_id].max_samples = max;
-          else
-            finder->second.max_samples = max;
+          {
+            profiling_options[task_id] =
+              ProfilingOption(needed_samples, max_samples);
+            finder = profiling_options.find(task_id);
+          }
+          finder->second.max_samples = max;
         }
       }
 
@@ -651,9 +657,13 @@ namespace LegionRuntime {
       {
         OptionMap::iterator finder = profiling_options.find(task_id);
         if (finder == profiling_options.end())
-          profiling_options[task_id].gather_in_orig_proc = flag;
-        else
-          finder->second.gather_in_orig_proc = flag;
+        {
+          profiling_options[task_id] =
+            ProfilingOption(needed_samples, max_samples);
+          finder = profiling_options.find(task_id);
+        }
+
+        finder->second.gather_in_orig_proc = flag;
       }
 
       //------------------------------------------------------------------------
@@ -733,47 +743,91 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      void MappingProfiler::update_profiling_info(const Task *task, 
-                                                  Processor target, 
-                                                  Processor::Kind kind,
-                                        const Mapper::ExecutionProfile &profile)
+      void MappingProfiler::add_profiling_sample(Processor::TaskFuncID task_id,
+                                         const MappingProfiler::Profile& sample)
       //------------------------------------------------------------------------
       {
         unsigned max_samples_for_this_task = max_samples;
         {
-          OptionMap::const_iterator finder =
-            profiling_options.find(task->task_id);
+          OptionMap::const_iterator finder = profiling_options.find(task_id);
           if (finder != profiling_options.end())
             max_samples_for_this_task = finder->second.max_samples;
         }
 
-        TaskMap::iterator finder = task_profiles.find(task->task_id);
+        TaskMap::iterator finder = task_profiles.find(task_id);
         if (finder == task_profiles.end())
         {
-          const std::map<VariantID,TaskVariantCollection::Variant>& variants =
-            task->variants->get_all_variants();
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-               const_iterator it = variants.begin(); it != variants.end(); it++)
-          {
-            task_profiles[task->task_id][it->second.proc_kind] =
-              VariantProfile();
-          }
-          finder = task_profiles.find(task->task_id);
+          task_profiles[task_id] = VariantMap();
+          finder = task_profiles.find(task_id);
         }
+        Processor::Kind kind = sample.target_processor.kind();
         VariantMap::iterator var_finder = finder->second.find(kind);
-        assert(var_finder != finder->second.end());
+        if (var_finder == finder->second.end())
+        {
+          finder->second[kind] = VariantProfile();
+          var_finder = finder->second.find(kind);
+        }
         if (var_finder->second.samples.size() == max_samples_for_this_task)
         {
           var_finder->second.total_time -=
             var_finder->second.samples.front().execution_time;
           var_finder->second.samples.pop_front();
         }
-        Profile sample;
-        sample.execution_time = profile.stop_time - profile.start_time;
-        sample.target_processor = task->target_proc;
-        sample.index_point = task->index_point;
         var_finder->second.total_time += sample.execution_time;
         var_finder->second.samples.push_back(sample);
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::TaskMap MappingProfiler::get_task_profiles() const
+      //------------------------------------------------------------------------
+      {
+        return task_profiles;
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::VariantMap MappingProfiler::get_variant_profiles(
+                                                Processor::TaskFuncID tid) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(tid);
+        if (finder != task_profiles.end())
+          return finder->second;
+        else
+          return VariantMap();
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::VariantProfile MappingProfiler::get_variant_profile(
+                          Processor::TaskFuncID tid, Processor::Kind kind) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(tid);
+        if (finder != task_profiles.end())
+        {
+          MappingProfiler::VariantMap::const_iterator var_finder =
+            finder->second.find(kind);
+          if (var_finder != finder->second.end())
+            return var_finder->second;
+          else
+            return VariantProfile();
+        }
+        else
+          return VariantProfile();
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::ProfilingOption MappingProfiler::get_profiling_option(
+                                                Processor::TaskFuncID tid) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::OptionMap::const_iterator finder =
+          profiling_options.find(tid);
+        if (finder != profiling_options.end())
+          return finder->second;
+        else
+          return ProfilingOption();
       }
 
       //------------------------------------------------------------------------
@@ -790,6 +844,13 @@ namespace LegionRuntime {
       {
       }
 
+      MappingProfiler::ProfilingOption::ProfilingOption(
+                                unsigned needed_samples_, unsigned max_samples_)
+        : needed_samples(needed_samples_), max_samples(max_samples_),
+          gather_in_orig_proc(false)
+      //------------------------------------------------------------------------
+      {
+      }
     };
   };
 };
