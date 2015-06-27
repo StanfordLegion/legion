@@ -134,6 +134,8 @@ function parser.expr_primary(p)
       local field_names = terralib.newlist()
       if p:nextif("partition") then
         field_names:insert("partition")
+      elseif p:nextif("product") then
+        field_names:insert("product")
       elseif p:nextif("{") then
         repeat
           if p:matches("}") then break end

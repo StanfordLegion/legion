@@ -96,6 +96,7 @@ local language = {
     "new",
     "null",
     "partition",
+    "product",
     "ptr", -- reserved for future use
     "reads",
     "reduces",
