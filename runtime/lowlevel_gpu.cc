@@ -709,7 +709,6 @@ namespace LegionRuntime {
       }
       else
       {
-        
         std::vector<GPUJob*> ready_copies;
         bool perform_checks = false;
         if (!gpu_worker)
@@ -720,26 +719,45 @@ namespace LegionRuntime {
           // Reset if we have complete operations
           have_complete_operations = false;
         }
-        Task *task = task_queue.pop();  
-        // If this is the kill pill, then do a 
-        // little extra work before releasing the lock
-        if (task->func_id == 0) {
-          finished();
-          // Mark that we received the shutdown trigger
-          shutdown_trigger = true;
-          gasnett_cond_signal(&condvar);
-          gasnet_hsl_unlock(&mutex);
-          // Trigger the completion task
-          if (__sync_fetch_and_add(&(task->run_count),1) == 0)
-            get_runtime()->get_genevent_impl(task->finish_event)->
-                          trigger(task->finish_event.gen, gasnet_mynode());
-          // Delete the task
-          if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-            delete task;
-          // We already handled the task so we don't need to do it later
-          task = 0;
+        GPUTask *gpu_task = 0;
+        if (!task_queue.empty()) {
+          Task *task = task_queue.pop();  
+          // If this is the kill pill, then do a 
+          // little extra work before releasing the lock
+          if (task->func_id == 0) {
+            finished();
+            // Mark that we received the shutdown trigger
+            shutdown_trigger = true;
+            gasnett_cond_signal(&condvar);
+            gasnet_hsl_unlock(&mutex);
+            // Trigger the completion task
+            if (__sync_fetch_and_add(&(task->run_count),1) == 0)
+              get_runtime()->get_genevent_impl(task->finish_event)->
+                            trigger(task->finish_event.gen, gasnet_mynode());
+            // Delete the task
+            if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+              delete task;
+          } else {
+            // Figure out if we are going to execute this task, if so we
+            // need to add it to our list of pending tasks on the current stream
+            // before we release the lock and run the task
+            if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
+              // Wrap this task up in a GPUTask
+              gpu_task = new GPUTask(this, task);
+              // Add it to the set of tasks to query
+              pending_tasks[current_stream].push_back(gpu_task);
+              // Now release the lock
+              gasnet_hsl_unlock(&mutex);
+            } else {
+              // Now release the lock
+              gasnet_hsl_unlock(&mutex);
+              // Remove our delete reference
+              if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+                delete task;
+            }
+          }
         } else {
-          // Now release the lock
+          // Still have to release the lock
           gasnet_hsl_unlock(&mutex);
         }
         if (perform_checks) 
@@ -762,41 +780,21 @@ namespace LegionRuntime {
             (*it)->execute();
           }
         }
-        if (task)
+        if (gpu_task)
         {
-          if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
-            // Wrap this task up in a GPUTask
-            GPUTask *gpu_task = new GPUTask(this, task);
-            gpu_task->set_local_stream(task_streams[current_stream]);
-            //printf("executing job %p\n", job);
-            gpu_task->pre_execute();
-            assert(task_modules.empty());
-            gpu_task->execute();
-            // When we are done, tell the task about all the modules
-            // it needs to unload
-            gpu_task->record_modules(task_modules);
-            task_modules.clear();
-            // Check to see if we are done or not
-            if (gpu_task->is_finished())
-            {
-              gpu_task->finish_job();
-              delete gpu_task;
-            }
-            else
-            {
-              gasnet_hsl_lock(&mutex);
-              // Add it to the set of tasks to query
-              pending_tasks[current_stream].push_back(gpu_task);
-              gasnet_hsl_unlock(&mutex);
-            }
-            // Update the current stream
-            current_stream++;
-            if ((size_t)current_stream >= task_streams.size())
-              current_stream = 0;
-          } else {
-            if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-              delete task;
-          }
+          gpu_task->set_local_stream(task_streams[current_stream]);
+          //printf("executing job %p\n", job);
+          gpu_task->pre_execute();
+          assert(task_modules.empty());
+          gpu_task->execute();
+          // When we are done, tell the task about all the modules
+          // it needs to unload
+          gpu_task->record_modules(task_modules);
+          task_modules.clear();
+          // Update the current stream
+          current_stream++;
+          if ((size_t)current_stream >= task_streams.size())
+            current_stream = 0;
         }
       }
 
