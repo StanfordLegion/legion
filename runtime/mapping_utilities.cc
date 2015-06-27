@@ -836,8 +836,7 @@ namespace LegionRuntime {
       void MappingProfiler::clear_samples(Processor::TaskFuncID task_id)
       //------------------------------------------------------------------------
       {
-        MappingProfiler::TaskMap::const_iterator finder =
-          task_profiles.find(task_id);
+        MappingProfiler::TaskMap::iterator finder = task_profiles.find(task_id);
         if (finder != task_profiles.end()) task_profiles.erase(finder);
       }
 
@@ -846,8 +845,7 @@ namespace LegionRuntime {
                                                            Processor::Kind kind)
       //------------------------------------------------------------------------
       {
-        MappingProfiler::TaskMap::const_iterator finder =
-          task_profiles.find(task_id);
+        MappingProfiler::TaskMap::iterator finder = task_profiles.find(task_id);
         if (finder != task_profiles.end())
         {
           MappingProfiler::VariantMap::iterator var_finder =
