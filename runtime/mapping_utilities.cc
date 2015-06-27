@@ -609,24 +609,82 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
+      void MappingProfiler::set_needed_profiling_samples(
+                            Processor::TaskFuncID task_id, unsigned num_samples)
+      //------------------------------------------------------------------------
+      {
+        if (num_samples > 0)
+        {
+          OptionMap::iterator finder = profiling_options.find(task_id);
+          if (finder == profiling_options.end())
+          {
+            profiling_options[task_id] =
+              ProfilingOption(needed_samples, max_samples);
+            finder = profiling_options.find(task_id);
+          }
+          finder->second.needed_samples = num_samples;
+        }
+      }
+
+      //------------------------------------------------------------------------
       void MappingProfiler::set_max_profiling_samples(unsigned max)
       //------------------------------------------------------------------------
       {
         if (max > 0)
           max_samples = max;
       }
-      
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::set_max_profiling_samples(
+                                    Processor::TaskFuncID task_id, unsigned max)
+      //------------------------------------------------------------------------
+      {
+        if (max > 0)
+        {
+          OptionMap::iterator finder = profiling_options.find(task_id);
+          if (finder == profiling_options.end())
+          {
+            profiling_options[task_id] =
+              ProfilingOption(needed_samples, max_samples);
+            finder = profiling_options.find(task_id);
+          }
+          finder->second.max_samples = max;
+        }
+      }
+
+      void MappingProfiler::set_gather_in_original_processor(
+          Processor::TaskFuncID task_id, bool flag)
+      {
+        OptionMap::iterator finder = profiling_options.find(task_id);
+        if (finder == profiling_options.end())
+        {
+          profiling_options[task_id] =
+            ProfilingOption(needed_samples, max_samples);
+          finder = profiling_options.find(task_id);
+        }
+
+        finder->second.gather_in_orig_proc = flag;
+      }
+
       //------------------------------------------------------------------------
       bool MappingProfiler::profiling_complete(const Task *task) const
       //------------------------------------------------------------------------
       {
+        unsigned needed_samples_for_this_task = needed_samples;
+        {
+          OptionMap::const_iterator finder =
+            profiling_options.find(task->task_id);
+          if (finder != profiling_options.end())
+            needed_samples_for_this_task = finder->second.needed_samples;
+        }
+
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
           return false;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
-          if (it->second.execution_times.size() < max_samples)
+          if (it->second.samples.size() < needed_samples_for_this_task)
             return false;
         }
         return true;
@@ -648,14 +706,14 @@ namespace LegionRuntime {
           if (!best_set)
           {
             best_time = float(it->second.total_time)/
-                        float(it->second.execution_times.size());
+                        float(it->second.samples.size());
             best_kind = it->first;
             best_set = true;
           }
           else
           {
             float time = float(it->second.total_time)/
-                         float(it->second.execution_times.size());
+                         float(it->second.samples.size());
             if (time < best_time)
             {
               best_time = time;
@@ -678,43 +736,98 @@ namespace LegionRuntime {
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
-          if (it->second.execution_times.size() < max_samples)
+          if (it->second.samples.size() < max_samples)
             return it->first;
         }
         return best_processor_kind(task);
       }
 
       //------------------------------------------------------------------------
-      void MappingProfiler::update_profiling_info(const Task *task, 
-                                                  Processor target, 
-                                                  Processor::Kind kind,
-                                        const Mapper::ExecutionProfile &profile)
+      void MappingProfiler::add_profiling_sample(Processor::TaskFuncID task_id,
+                                         const MappingProfiler::Profile& sample)
       //------------------------------------------------------------------------
       {
-        TaskMap::iterator finder = task_profiles.find(task->task_id);
+        unsigned max_samples_for_this_task = max_samples;
+        {
+          OptionMap::const_iterator finder = profiling_options.find(task_id);
+          if (finder != profiling_options.end())
+            max_samples_for_this_task = finder->second.max_samples;
+        }
+
+        TaskMap::iterator finder = task_profiles.find(task_id);
         if (finder == task_profiles.end())
         {
-	  const std::map<VariantID,TaskVariantCollection::Variant>& variants = 
-            task->variants->get_all_variants();
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-               const_iterator it = variants.begin(); it != variants.end(); it++)
-          {
-            task_profiles[task->task_id][it->second.proc_kind] = 
-              VariantProfile();
-          }
-          finder = task_profiles.find(task->task_id);
+          task_profiles[task_id] = VariantMap();
+          finder = task_profiles.find(task_id);
         }
+        Processor::Kind kind = sample.target_processor.kind();
         VariantMap::iterator var_finder = finder->second.find(kind);
-        assert(var_finder != finder->second.end());
-        if (var_finder->second.execution_times.size() == max_samples)
+        if (var_finder == finder->second.end())
         {
-          var_finder->second.total_time -= 
-            var_finder->second.execution_times.front();
-          var_finder->second.execution_times.pop_front();
+          finder->second[kind] = VariantProfile();
+          var_finder = finder->second.find(kind);
         }
-        long long total_time = profile.stop_time - profile.start_time;
-        var_finder->second.total_time += total_time;
-        var_finder->second.execution_times.push_back(total_time);
+        if (var_finder->second.samples.size() == max_samples_for_this_task)
+        {
+          var_finder->second.total_time -=
+            var_finder->second.samples.front().execution_time;
+          var_finder->second.samples.pop_front();
+        }
+        var_finder->second.total_time += sample.execution_time;
+        var_finder->second.samples.push_back(sample);
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::TaskMap MappingProfiler::get_task_profiles() const
+      //------------------------------------------------------------------------
+      {
+        return task_profiles;
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::VariantMap MappingProfiler::get_variant_profiles(
+                                                Processor::TaskFuncID tid) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(tid);
+        if (finder != task_profiles.end())
+          return finder->second;
+        else
+          return VariantMap();
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::VariantProfile MappingProfiler::get_variant_profile(
+                          Processor::TaskFuncID tid, Processor::Kind kind) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(tid);
+        if (finder != task_profiles.end())
+        {
+          MappingProfiler::VariantMap::const_iterator var_finder =
+            finder->second.find(kind);
+          if (var_finder != finder->second.end())
+            return var_finder->second;
+          else
+            return VariantProfile();
+        }
+        else
+          return VariantProfile();
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::ProfilingOption MappingProfiler::get_profiling_option(
+                                                Processor::TaskFuncID tid) const
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::OptionMap::const_iterator finder =
+          profiling_options.find(tid);
+        if (finder != profiling_options.end())
+          return finder->second;
+        else
+          return ProfilingOption();
       }
 
       //------------------------------------------------------------------------
@@ -724,6 +837,20 @@ namespace LegionRuntime {
       {
       }
 
+      //------------------------------------------------------------------------
+      MappingProfiler::ProfilingOption::ProfilingOption(void)
+        : needed_samples(1), max_samples(32), gather_in_orig_proc(false)
+      //------------------------------------------------------------------------
+      {
+      }
+
+      MappingProfiler::ProfilingOption::ProfilingOption(
+                                unsigned needed_samples_, unsigned max_samples_)
+        : needed_samples(needed_samples_), max_samples(max_samples_),
+          gather_in_orig_proc(false)
+      //------------------------------------------------------------------------
+      {
+      }
     };
   };
 };
