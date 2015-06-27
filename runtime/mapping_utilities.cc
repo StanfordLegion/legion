@@ -679,7 +679,7 @@ namespace LegionRuntime {
         }
 
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
-        if (finder == task_profiles.end())
+        if (finder == task_profiles.end() || finder->second.size() == 0)
           return false;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
@@ -731,7 +731,7 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       {
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
-        if (finder == task_profiles.end())
+        if (finder == task_profiles.end() || finder->second.size() == 0)
           return task->variants->get_all_variants().begin()->second.proc_kind;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
@@ -828,6 +828,31 @@ namespace LegionRuntime {
           return finder->second;
         else
           return ProfilingOption();
+      }
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::clear_samples(Processor::TaskFuncID task_id)
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(task_id);
+        if (finder != task_profiles.end()) task_profiles.erase(finder);
+      }
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::clear_samples(Processor::TaskFuncID task_id,
+                                                           Processor::Kind kind)
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(task_id);
+        if (finder != task_profiles.end())
+        {
+          MappingProfiler::VariantMap::iterator var_finder =
+            task_profiles[task_id].find(kind);
+          if (var_finder != task_profiles[task_id].end())
+            task_profiles[task_id].erase(var_finder);
+        }
       }
 
       //------------------------------------------------------------------------

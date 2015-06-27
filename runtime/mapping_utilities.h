@@ -249,6 +249,9 @@ namespace LegionRuntime {
         VariantProfile get_variant_profile(Processor::TaskFuncID tid,
                                            Processor::Kind kind) const;
 
+        void clear_samples(Processor::TaskFuncID task_id);
+        void clear_samples(Processor::TaskFuncID task_id, Processor::Kind kind);
+
         struct ProfilingOption {
           ProfilingOption(void);
           ProfilingOption(unsigned, unsigned);
