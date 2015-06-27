@@ -212,6 +212,7 @@ namespace LegionRuntime {
          * variants of this task.
          */
         bool profiling_complete(const Task *task) const;
+        bool profiling_complete(const Task *task, Processor::Kind kind) const;
         /**
          * Return the processor kind for the best performing 
          * variant of this task.

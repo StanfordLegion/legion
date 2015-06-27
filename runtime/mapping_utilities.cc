@@ -693,6 +693,30 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
+      bool MappingProfiler::profiling_complete(
+                                   const Task *task, Processor::Kind kind) const
+      //------------------------------------------------------------------------
+      {
+        unsigned needed_samples_for_this_task = needed_samples;
+        {
+          OptionMap::const_iterator finder =
+            profiling_options.find(task->task_id);
+          if (finder != profiling_options.end())
+            needed_samples_for_this_task = finder->second.needed_samples;
+        }
+
+        TaskMap::const_iterator finder = task_profiles.find(task->task_id);
+        if (finder == task_profiles.end() || finder->second.size() == 0)
+          return false;
+
+        VariantMap::const_iterator var_finder = finder->second.find(kind);
+        if (var_finder == finder->second.end() ||
+            var_finder->second.samples.size() < needed_samples_for_this_task)
+            return false;
+        return true;
+      }
+
+      //------------------------------------------------------------------------
       Processor::Kind MappingProfiler::best_processor_kind(
                                                         const Task *task) const
       //------------------------------------------------------------------------
