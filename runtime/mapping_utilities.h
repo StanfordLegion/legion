@@ -265,6 +265,10 @@ namespace LegionRuntime {
         AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id,
                                                Processor::Kind kind) const;
 
+        AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id)
+                                                                          const;
+
+
         struct ProfilingOption {
           ProfilingOption(void);
           ProfilingOption(unsigned, unsigned);

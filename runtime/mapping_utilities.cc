@@ -964,6 +964,56 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
+      MappingProfiler::AssignmentMap MappingProfiler::get_balanced_assignments(
+                                            Processor::TaskFuncID task_id) const
+      //------------------------------------------------------------------------
+      {
+        using namespace std;
+
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(task_id);
+        if (finder == task_profiles.end())
+          return MappingProfiler::AssignmentMap();
+
+        const MappingProfiler::VariantMap& varMap = finder->second;
+
+        set<DomainPoint> points;
+        map<Processor::Kind, pair<double, int> > exec_times;
+        map<Processor, double> total_exec_times;
+
+        // calculate average execution times
+        for (MappingProfiler::VariantMap::const_iterator it = varMap.begin();
+             it != varMap.end(); ++it)
+        {
+          Processor::Kind kind = it->first;
+          const VariantProfile& profile = it->second;
+          exec_times[kind] = pair<double, int>(0.0, 0);
+          for (list<Profile>::const_iterator it2 = profile.samples.begin();
+               it2 != profile.samples.end(); ++it2)
+          {
+            exec_times[kind].first += it2->execution_time;
+            exec_times[kind].second++;
+            total_exec_times[it2->target_processor] = 0;
+            points.insert(it2->index_point);
+          }
+          exec_times[kind].first /= exec_times[kind].second;
+        }
+
+        MappingProfiler::AssignmentMap assignmentMap;
+        for (set<DomainPoint>::iterator it = points.begin(); it != points.end();
+             it++)
+        {
+          map<Processor, double>::iterator finder =
+            max_element(total_exec_times.begin(), total_exec_times.end(),
+                        compare_second<Processor>);
+          double exec_time = exec_times[finder->first.kind()].first;
+          assignmentMap[finder->first].push_back(*it);
+          finder->second += exec_time;
+        }
+        return assignmentMap;
+      }
+
+      //------------------------------------------------------------------------
       MappingProfiler::VariantProfile::VariantProfile(void)
         : total_time(0)
       //------------------------------------------------------------------------
