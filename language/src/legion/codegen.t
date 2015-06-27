@@ -3198,7 +3198,8 @@ function codegen.stat_index_launch(cx, node)
     if not node.args_provably.variant[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
-      -- Run codegen halfway to get the partition.
+      -- Run codegen halfway to get the partition. Note: Remember to
+      -- splice the actions back in later.
       local partition = codegen.expr(cx, arg.value):read(cx)
       args_partitions[i] = partition
 
@@ -3224,16 +3225,24 @@ function codegen.stat_index_launch(cx, node)
   local actions = quote
     [domain[1].actions];
     [domain[2].actions];
-    -- ignore domain[3] because we know it is a constant
+    -- Ignore domain[3] because we know it is a constant.
     [fn.actions];
-    [std.zip(args, node.args_provably.invariant):map(
+    [std.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
-         local arg, invariant = unpack(pair)
-         if invariant then
-           return arg.actions
-         else
-           return quote end
+         local arg, arg_partition, invariant = unpack(pair)
+
+         -- Here we slice partition actions back in.
+         local arg_actions = quote end
+         if arg_partition then
+           arg_actions = quote [arg_actions]; [arg_partition.actions] end
          end
+
+         -- Normal invariant arg actions.
+         if invariant then
+           arg_actions = quote [arg_actions]; [arg.actions] end
+         end
+
+         return arg_actions
        end)]
   end
 
