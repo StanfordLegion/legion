@@ -837,7 +837,15 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       {
         MappingProfiler::TaskMap::iterator finder = task_profiles.find(task_id);
-        if (finder != task_profiles.end()) task_profiles.erase(finder);
+        if (finder != task_profiles.end())
+        {
+          for (MappingProfiler::VariantMap::iterator it =
+               finder->second.begin(); it != finder->second.end(); ++it)
+          {
+            it->second.samples.clear();
+            it->second.total_time = 0;
+          }
+        }
       }
 
       //------------------------------------------------------------------------
@@ -849,9 +857,12 @@ namespace LegionRuntime {
         if (finder != task_profiles.end())
         {
           MappingProfiler::VariantMap::iterator var_finder =
-            task_profiles[task_id].find(kind);
-          if (var_finder != task_profiles[task_id].end())
-            task_profiles[task_id].erase(var_finder);
+            finder->second.find(kind);
+          if (var_finder != finder->second.end())
+          {
+            var_finder->second.samples.clear();
+            var_finder->second.total_time = 0;
+          }
         }
       }
 
