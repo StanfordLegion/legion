@@ -1330,8 +1330,9 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : physical_state(NULL) { }
+          : premap_only(false), physical_state(NULL) { }
       public:
+        bool premap_only; // state needed for premapping only
         PhysicalState *physical_state;
         RegionVersions version_numbers;
       };
@@ -1342,8 +1343,8 @@ namespace LegionRuntime {
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      inline RegionVersions& find_region(RegionTreeNode *node)
-        { return node_infos[node].version_numbers; }
+      inline NodeInfo& find_tree_node_info(RegionTreeNode *node)
+        { return node_infos[node]; }
       inline void set_projection(void) { projection = true; }
       inline bool is_projection(void) const { return projection; }
       inline void set_advance(void) { advance = true; }
@@ -1352,12 +1353,9 @@ namespace LegionRuntime {
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void clear(void);
     public:
-      const PhysicalState* find_physical_state(RegionTreeNode *node); 
-      const PhysicalState* create_physical_state(RegionTreeNode *node,
-                                                 VersionManager *manager);
-      PhysicalState *find_delta_state(RegionTreeNode *node);
-      PhysicalState *create_delta_state(RegionTreeNode *node,
-                                        VersionManager *manager, bool mutate);
+      PhysicalState* find_physical_state(RegionTreeNode *node); 
+      PhysicalState* create_physical_state(RegionTreeNode *node,
+                                           VersionManager *manager);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       bool projection;
@@ -1927,8 +1925,8 @@ namespace LegionRuntime {
     public:
       // Fields which have dirty data
       FieldMask dirty_mask;
-      // Fields whose reductions have been flushed
-      FieldMask flushed_reductions;
+      // Fields with outstanding reductions
+      FieldMask reduction_mask;
       // State of any child nodes
       ChildState children;
       // The valid instance views
@@ -2005,9 +2003,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-                                     bool apply = true);
-      PhysicalState* construct_delta(RegionTreeNode *node,
-        const LegionMap<VersionID,FieldMask>::aligned &versions, bool advance);
+                                     bool premap_only);
       void apply_updates(const FieldMask &update_mask, 
                          const PhysicalState *state);
       void check_init(void);
@@ -2016,7 +2012,8 @@ namespace LegionRuntime {
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       Reservation version_lock;
-      LegionMap<VersionID,StateInfo>::aligned version_infos;
+      LegionMap<VersionID,StateInfo>::aligned current_version_infos;
+      LegionMap<VersionID,StateInfo>::aligned previous_version_infos;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
@@ -2036,9 +2033,24 @@ namespace LegionRuntime {
     public:
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      const PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info);
-      PhysicalState* get_delta_state(ContextID ctx, 
-                                     VersionInfo &info, bool advance);
+      inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info)
+      {
+        // First check to see if the version info already has a state
+        PhysicalState *result = info.find_physical_state(this);  
+        if (result != NULL)
+          return result;
+        // If it didn't have it then we need to make it
+        VersionManager *manager = version_managers.lookup_entry(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(manager != NULL);
+#endif
+        // Now have the version info create a physical state with the manager
+        result = info.create_physical_state(this, manager);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result != NULL);
+#endif
+        return result;
+      }
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
@@ -2087,7 +2099,8 @@ namespace LegionRuntime {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
-                                  VersionInfo &info);
+                                  VersionInfo &info, bool capture_previous,
+                                  bool premap_only);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
@@ -2213,8 +2226,7 @@ namespace LegionRuntime {
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    CopyTracker *tracker = NULL);
       void invalidate_instance_views(PhysicalState *state,
-                                     const FieldMask &invalid_mask, 
-                                     bool clean, bool force);
+                                     const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
