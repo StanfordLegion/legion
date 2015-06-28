@@ -25,11 +25,11 @@
 // A little bit of a hack for now for profiling
 // GPU tasks, this will go away with the new 
 // profiling interface
-#if defined(LEGION_LOGGING) || defined(LEGION_PROF)
+//#if defined(LEGION_LOGGING) || defined(LEGION_PROF)
 #ifdef USE_CUDA
 #include "cuda_runtime.h"
 #endif
-#endif
+//#endif
 
 #define PRINT_REG(reg) (reg).index_space.id,(reg).field_space.id, (reg).tree_id
 
@@ -4935,6 +4935,10 @@ namespace LegionRuntime {
     {
       if (profile_task)
       {
+#ifdef USE_CUDA
+        if (executing_processor.kind() == Processor::TOC_PROC)
+          cudaStreamSynchronize(0);
+#endif
         this->stop_time = (TimeStamp::get_current_time_in_micros() -
                               Runtime::init_time);
         runtime->invoke_mapper_notify_profiling(executing_processor, this);
