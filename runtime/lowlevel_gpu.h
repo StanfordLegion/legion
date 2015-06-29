@@ -71,23 +71,16 @@ namespace LegionRuntime {
     class GPUJob : public EventWaiter {
     public:
       GPUJob(GPUProcessor *_gpu)
-	: gpu(_gpu), event_recorded(false) { }
+	: gpu(_gpu) { }
       virtual ~GPUJob(void) {}
     public:
       virtual bool event_triggered(void) = 0;
       virtual void print_info(FILE *f) = 0;
       virtual void run_or_wait(Event start_event) = 0;
       virtual void execute(void) = 0;
-      virtual void finish_job(void);
+      virtual void finish_job(void) = 0;
     public:
-      void pre_execute(void);
-      bool is_finished(void); 
-      void record_event(CUstream s);
-    public:
-      GPUProcessor *gpu;
-      CUevent complete_event;
-    protected:
-      volatile bool event_recorded;
+      GPUProcessor *const gpu;
     };
 
     // This just wraps up a normal task
@@ -104,6 +97,9 @@ namespace LegionRuntime {
     public:
       void set_local_stream(CUstream s) { local_stream = s; }
       void record_modules(const std::set<void**> &m) { modules = m; }
+    public:
+      // Helper method for handling a callback
+      static void handle_callback(CUstream stream, CUresult res, void *data);
     public:
       Task *task;
       CUstream local_stream;
@@ -124,6 +120,9 @@ namespace LegionRuntime {
       virtual void finish_job(void);
     public:
       void post_execute(void);
+    public:
+      // Helper method for handling a callback
+      static void handle_callback(CUstream stream, CUresult res, void *data);
     protected:
       GPUMemcpyKind kind;
       CUstream local_stream;
@@ -179,10 +178,10 @@ namespace LegionRuntime {
       GPUWorker(void);
       virtual ~GPUWorker(void);
     public:
-      void notify_pending_copy(GPUProcessor *gpu);
-      void notify_complete_task(GPUProcessor *gpu);
-      void notify_complete_copy(GPUProcessor *gpu);
       void shutdown(void);
+    public:
+      void enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy);
+      void handle_complete_job(GPUProcessor *proc, GPUJob *job);
     public:
       virtual Processor get_processor(void) const;
       virtual void thread_main(void);
@@ -193,9 +192,10 @@ namespace LegionRuntime {
     private:
       static GPUWorker*& get_worker(void);
     protected:
-      std::set<GPUProcessor*> pending_copies;
-      std::set<GPUProcessor*> complete_tasks;
-      std::set<GPUProcessor*> complete_copies;
+      // Keep these sorted by processors
+      std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
+      std::map<GPUProcessor*,std::deque<GPUJob*> > complete_jobs;
+      bool copies_empty, jobs_empty;
       gasnet_hsl_t   worker_lock;
       gasnett_cond_t worker_cond;
       bool worker_shutdown_requested;
@@ -269,18 +269,13 @@ namespace LegionRuntime {
 			  Event start_event, Event finish_event);
     public:
       // Helper method for getting a thread's processor value
-      static Processor get_processor(void);
-      // Helper method for handling a callback
-      static void handle_callback(CUstream stream, CUresult res, void *data);
+      static Processor get_processor(void); 
     public:
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);
       void handle_peer_access(CUcontext peer_ctx);
       bool can_access_peer(GPUProcessor *peer) const;
-      void launch_copies(void);
-      void complete_tasks(void);
-      void complete_copies(void);
-      void process_callback(CUstream stream);
+      void handle_complete_job(GPUJob *job);
       CUstream get_current_task_stream(void);
     public:
       void load_context(void);
@@ -292,13 +287,8 @@ namespace LegionRuntime {
     public:
       void enqueue_copy(GPUMemcpy *copy);
     public:
-      void check_for_complete_tasks(void);
-      void check_for_complete_copies(void);
-    public:
-      void add_host_device_copy(GPUJob *copy);
-      void add_device_host_copy(GPUJob *copy);
-      void add_device_device_copy(GPUJob *copy);
-      void add_peer_to_peer_copy(GPUJob *copy);
+      void issue_copies(const std::deque<GPUMemcpy*> &to_issue);
+      void finish_jobs(const std::deque<GPUJob*> &to_complete);
     private:
       static GPUProcessor **node_gpus;
       static size_t num_node_gpus;
@@ -310,10 +300,9 @@ namespace LegionRuntime {
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
-      bool have_complete_operations;
     protected:
-      std::list<GPUTask*> tasks;
-      std::deque<GPUJob*> copies;
+      std::deque<GPUMemcpy*> copies;
+      std::deque<GPUJob*> complete_jobs;
 
       std::set<GPUProcessor*> peer_gpus;
 
@@ -329,12 +318,6 @@ namespace LegionRuntime {
     protected:
       unsigned current_stream;
       std::vector<CUstream> task_streams;
-      // List of pending copies on each stream
-      std::deque<GPUJob*> host_device_copies;
-      std::deque<GPUJob*> device_host_copies;
-      std::deque<GPUJob*> device_device_copies;
-      std::deque<GPUJob*> peer_to_peer_copies;
-      std::vector<std::deque<GPUJob*> > pending_tasks;
     public:
       // Our helper cuda calls
       void** internal_register_fat_binary(void *fat_bin);
