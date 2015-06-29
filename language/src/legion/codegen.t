@@ -3193,15 +3193,15 @@ function codegen.stat_index_launch(cx, node)
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
   local args = terralib.newlist()
-  local args_partitions = {}
+  local args_partitions = terralib.newlist()
   for i, arg in ipairs(node.call.args) do
+    local partition = false
     if not node.args_provably.variant[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
       -- Run codegen halfway to get the partition. Note: Remember to
       -- splice the actions back in later.
-      local partition = codegen.expr(cx, arg.value):read(cx)
-      args_partitions[i] = partition
+      partition = codegen.expr(cx, arg.value):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
       local partition_type = std.as_read(arg.value.expr_type)
@@ -3220,6 +3220,7 @@ function codegen.stat_index_launch(cx, node)
         }):read(cx)
       args:insert(region)
     end
+    args_partitions:insert(partition)
   end
 
   local actions = quote
