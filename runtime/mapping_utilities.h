@@ -212,6 +212,7 @@ namespace LegionRuntime {
          * variants of this task.
          */
         bool profiling_complete(const Task *task) const;
+        bool profiling_complete(const Task *task, Processor::Kind kind) const;
         /**
          * Return the processor kind for the best performing 
          * variant of this task.
@@ -248,6 +249,25 @@ namespace LegionRuntime {
         VariantMap get_variant_profiles(Processor::TaskFuncID tid) const;
         VariantProfile get_variant_profile(Processor::TaskFuncID tid,
                                            Processor::Kind kind) const;
+
+        void clear_samples(Processor::TaskFuncID task_id);
+        void clear_samples(Processor::TaskFuncID task_id, Processor::Kind kind);
+
+        typedef std::list<DomainPoint> PointList;
+        typedef std::map<Processor, PointList> AssignmentMap;
+
+        /**
+         * Return a balanced assignment of point tasks to processors by LPT
+         * (Lognest-Processing Time) scheduling based on the average
+         * execution times. Assume that processors of the same kind are
+         * homogeneous and only the workload of point tasks can be skwed.
+         */
+        AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id,
+                                               Processor::Kind kind) const;
+
+        AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id)
+                                                                          const;
+
 
         struct ProfilingOption {
           ProfilingOption(void);

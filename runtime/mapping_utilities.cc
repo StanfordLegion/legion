@@ -16,6 +16,9 @@
 
 #include "mapping_utilities.h"
 
+#include <algorithm>
+#include <limits>
+
 namespace LegionRuntime {
   namespace HighLevel {
     namespace MappingUtilities {
@@ -679,7 +682,7 @@ namespace LegionRuntime {
         }
 
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
-        if (finder == task_profiles.end())
+        if (finder == task_profiles.end() || finder->second.size() == 0)
           return false;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
@@ -687,6 +690,30 @@ namespace LegionRuntime {
           if (it->second.samples.size() < needed_samples_for_this_task)
             return false;
         }
+        return true;
+      }
+
+      //------------------------------------------------------------------------
+      bool MappingProfiler::profiling_complete(
+                                   const Task *task, Processor::Kind kind) const
+      //------------------------------------------------------------------------
+      {
+        unsigned needed_samples_for_this_task = needed_samples;
+        {
+          OptionMap::const_iterator finder =
+            profiling_options.find(task->task_id);
+          if (finder != profiling_options.end())
+            needed_samples_for_this_task = finder->second.needed_samples;
+        }
+
+        TaskMap::const_iterator finder = task_profiles.find(task->task_id);
+        if (finder == task_profiles.end() || finder->second.size() == 0)
+          return false;
+
+        VariantMap::const_iterator var_finder = finder->second.find(kind);
+        if (var_finder == finder->second.end() ||
+            var_finder->second.samples.size() < needed_samples_for_this_task)
+            return false;
         return true;
       }
 
@@ -731,7 +758,7 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       {
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
-        if (finder == task_profiles.end())
+        if (finder == task_profiles.end() || finder->second.size() == 0)
           return task->variants->get_all_variants().begin()->second.proc_kind;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
@@ -828,6 +855,174 @@ namespace LegionRuntime {
           return finder->second;
         else
           return ProfilingOption();
+      }
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::clear_samples(Processor::TaskFuncID task_id)
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::iterator finder = task_profiles.find(task_id);
+        if (finder != task_profiles.end())
+        {
+          for (MappingProfiler::VariantMap::iterator it =
+               finder->second.begin(); it != finder->second.end(); ++it)
+          {
+            it->second.samples.clear();
+            it->second.total_time = 0;
+          }
+        }
+      }
+
+      //------------------------------------------------------------------------
+      void MappingProfiler::clear_samples(Processor::TaskFuncID task_id,
+                                                           Processor::Kind kind)
+      //------------------------------------------------------------------------
+      {
+        MappingProfiler::TaskMap::iterator finder = task_profiles.find(task_id);
+        if (finder != task_profiles.end())
+        {
+          MappingProfiler::VariantMap::iterator var_finder =
+            finder->second.find(kind);
+          if (var_finder != finder->second.end())
+          {
+            var_finder->second.samples.clear();
+            var_finder->second.total_time = 0;
+          }
+        }
+      }
+
+      template<typename T>
+      static bool compare_second(const std::pair<T, double>& pair1,
+                                 const std::pair<T, double>& pair2)
+      {
+        return pair1.second > pair2.second;
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::AssignmentMap MappingProfiler::get_balanced_assignments(
+                      Processor::TaskFuncID task_id, Processor::Kind kind) const
+      //------------------------------------------------------------------------
+      {
+        using namespace std;
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(task_id);
+        if (finder == task_profiles.end())
+          return MappingProfiler::AssignmentMap();
+
+        MappingProfiler::VariantMap::const_iterator var_finder =
+          finder->second.find(kind);
+        if (var_finder == finder->second.end())
+          return MappingProfiler::AssignmentMap();
+
+        const VariantProfile& profile = var_finder->second;
+
+        // calculate average execution times
+        map<Processor, double> total_exec_times;
+        map<DomainPoint, pair<double, int> > exec_times;
+        for (list<Profile>::const_iterator it = profile.samples.begin();
+             it != profile.samples.end(); ++it)
+        {
+          if (exec_times.find(it->index_point) == exec_times.end())
+          {
+            exec_times[it->index_point].first = it->execution_time;
+            exec_times[it->index_point].second = 1;
+          }
+          else
+          {
+            exec_times[it->index_point].first += it->execution_time;
+            exec_times[it->index_point].second += 1;
+          }
+          if (total_exec_times.find(it->target_processor) ==
+              total_exec_times.end())
+            total_exec_times[it->target_processor] = 0;
+        }
+
+        // sort points by their average execution times
+        vector<pair<DomainPoint, double> > avg_exec_times;
+        for (map<DomainPoint, pair<double, int> >::iterator it =
+             exec_times.begin(); it != exec_times.end(); ++it)
+        {
+          double avg_exec_time = it->second.first / it->second.second;
+          avg_exec_times.push_back(
+              pair<DomainPoint, double>(it->first, avg_exec_time));
+        }
+        sort(avg_exec_times.begin(), avg_exec_times.end(),
+             compare_second<DomainPoint>);
+
+        // LPT scheduling
+        MappingProfiler::AssignmentMap assignmentMap;
+        for (unsigned int i = 0; i < avg_exec_times.size(); ++i)
+        {
+          map<Processor, double>::iterator finder =
+            max_element(total_exec_times.begin(), total_exec_times.end(),
+                        compare_second<Processor>);
+          pair<DomainPoint, double>& p = avg_exec_times[i];
+
+          assignmentMap[finder->first].push_back(p.first);
+          finder->second += p.second;
+        }
+        return assignmentMap;
+      }
+
+      //------------------------------------------------------------------------
+      MappingProfiler::AssignmentMap MappingProfiler::get_balanced_assignments(
+                                            Processor::TaskFuncID task_id) const
+      //------------------------------------------------------------------------
+      {
+        using namespace std;
+
+        MappingProfiler::TaskMap::const_iterator finder =
+          task_profiles.find(task_id);
+        if (finder == task_profiles.end())
+          return MappingProfiler::AssignmentMap();
+
+        const MappingProfiler::VariantMap& varMap = finder->second;
+
+        set<DomainPoint> points;
+        map<Processor::Kind, pair<double, int> > exec_times;
+        map<Processor, double> total_exec_times;
+
+        // calculate average execution times
+        for (MappingProfiler::VariantMap::const_iterator it = varMap.begin();
+             it != varMap.end(); ++it)
+        {
+          Processor::Kind kind = it->first;
+          const VariantProfile& profile = it->second;
+          exec_times[kind] = pair<double, int>(0.0, 0);
+          for (list<Profile>::const_iterator it2 = profile.samples.begin();
+               it2 != profile.samples.end(); ++it2)
+          {
+            exec_times[kind].first += it2->execution_time;
+            exec_times[kind].second++;
+            total_exec_times[it2->target_processor] = 0;
+            points.insert(it2->index_point);
+          }
+          exec_times[kind].first /= exec_times[kind].second;
+        }
+
+        MappingProfiler::AssignmentMap assignmentMap;
+        for (set<DomainPoint>::iterator it = points.begin(); it != points.end();
+             it++)
+        {
+          double min_exec_time = numeric_limits<double>::max();
+          map<Processor, double>::iterator finder = total_exec_times.end();
+          for (map<Processor, double>::iterator it2 = total_exec_times.begin();
+               it2 != total_exec_times.end(); ++it2)
+          {
+            double exec_time =
+              it2->second + exec_times[it2->first.kind()].first;
+            if (exec_time < min_exec_time)
+            {
+              finder = it2;
+              min_exec_time = exec_time;
+            }
+          }
+
+          assert(finder != total_exec_times.end());
+          assignmentMap[finder->first].push_back(*it);
+          finder->second = min_exec_time;
+        }
+        return assignmentMap;
       }
 
       //------------------------------------------------------------------------
