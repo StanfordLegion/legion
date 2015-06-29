@@ -40,6 +40,8 @@ namespace LegionRuntime {
 
     bool GPUJob::is_finished(void)
     {
+      if (!event_recorded)
+        return false;
       CUresult result = cuEventQuery(complete_event);
       if (result == CUDA_SUCCESS)
         return true;
@@ -50,6 +52,15 @@ namespace LegionRuntime {
         CHECK_CU( result );
       }
       return false;
+    }
+
+    void GPUJob::record_event(CUstream local_stream)
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!event_recorded);
+#endif
+      CHECK_CU( cuEventRecord(complete_event, local_stream) );
+      event_recorded = true;
     }
 
     GPUTask::GPUTask(GPUProcessor *_gpu, Task *_task)
@@ -108,7 +119,8 @@ namespace LegionRuntime {
                             (stop - start));
 #endif
       // Now log our CUDA event on the stream
-      CHECK_CU( cuEventRecord(complete_event, local_stream) );
+      record_event(local_stream); 
+      // Mark that we recor
       // Add a callback for when the event has triggered
       CHECK_CU( cuStreamAddCallback(local_stream, GPUProcessor::handle_callback, 
                                     (void*)gpu, 0) );
@@ -188,7 +200,7 @@ namespace LegionRuntime {
 
     void GPUMemcpy::post_execute(void)
     {
-      CHECK_CU( cuEventRecord(complete_event, local_stream) );
+      record_event(local_stream);
       if (kind == GPU_MEMCPY_HOST_TO_DEVICE)
         gpu->add_host_device_copy(this);
       else if (kind == GPU_MEMCPY_DEVICE_TO_HOST)

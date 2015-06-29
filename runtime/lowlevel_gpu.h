@@ -71,7 +71,7 @@ namespace LegionRuntime {
     class GPUJob : public EventWaiter {
     public:
       GPUJob(GPUProcessor *_gpu)
-	: gpu(_gpu) { }
+	: gpu(_gpu), event_recorded(false) { }
       virtual ~GPUJob(void) {}
     public:
       virtual bool event_triggered(void) = 0;
@@ -82,9 +82,12 @@ namespace LegionRuntime {
     public:
       void pre_execute(void);
       bool is_finished(void); 
+      void record_event(CUstream s);
     public:
       GPUProcessor *gpu;
       CUevent complete_event;
+    protected:
+      volatile bool event_recorded;
     };
 
     // This just wraps up a normal task
