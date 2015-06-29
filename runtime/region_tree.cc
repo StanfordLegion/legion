@@ -1138,6 +1138,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_field_index(
+                       const std::set<RegionNode*> &regions, unsigned field_idx)
+    //--------------------------------------------------------------------------
+    {
+      FieldInvalidator invalidator(field_idx);
+      for (std::set<RegionNode*>::const_iterator it = regions.begin();
+            it != regions.end(); it++)
+      {
+        (*it)->visit_node(&invalidator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::get_all_fields(FieldSpace handle, 
                                           std::set<FieldID> &to_set)
     //--------------------------------------------------------------------------
@@ -8399,6 +8412,23 @@ namespace LegionRuntime {
     void FieldSpaceNode::free_field(FieldID fid, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      unsigned field_idx;
+      std::set<RegionNode*> cached_nodes;
+      {
+        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
+        std::map<FieldID,FieldInfo>::iterator finder = fields.find(fid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != fields.end());
+#endif
+        // If we already destroyed the field then we are done
+        if (finder->second.destroyed)
+          return;
+        field_idx = finder->second.idx;
+        cached_nodes = logical_nodes;
+      }
+      // Invalidate all the contexts on this node
+      context->invalidate_field_index(cached_nodes, field_idx);
+      // Send any remote free invalidations
       AutoLock n_lock(node_lock);
       std::map<FieldID,FieldInfo>::iterator finder = fields.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
@@ -15547,6 +15577,21 @@ namespace LegionRuntime {
         state->valid_views.erase(*it);
       }
       release_physical_state(state);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::clear_physical_states(const FieldMask &clear_mask)
+    //--------------------------------------------------------------------------
+    {
+      for (size_t idx = 0; idx < physical_states.max_entries(); idx++)
+      {
+        if (physical_states.has_entry(idx))
+        {
+          PhysicalState *state = acquire_physical_state(idx, true/*exclusive*/);
+          invalidate_physical_state(state, clear_mask, true/*force*/);
+          release_physical_state(state);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
