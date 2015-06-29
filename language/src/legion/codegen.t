@@ -2006,6 +2006,30 @@ function codegen.expr_raw_runtime(cx, node)
     value_type)
 end
 
+function codegen.expr_raw_value(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = value.actions
+  local result
+  if std.is_ispace(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_region(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_partition(value_type) then
+    result = `([value.value].impl)
+  elseif std.is_cross_product(value_type) then
+    result = `([value.value].product)
+  else
+    assert(false)
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
   local expr_type = std.as_read(node.expr_type)
@@ -2783,6 +2807,9 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.ExprRawRuntime) then
     return codegen.expr_raw_runtime(cx, node)
 
+  elseif node:is(ast.typed.ExprRawValue) then
+    return codegen.expr_raw_value(cx, node)
+
   elseif node:is(ast.typed.ExprIsnull) then
     return codegen.expr_isnull(cx, node)
 
@@ -3193,14 +3220,15 @@ function codegen.stat_index_launch(cx, node)
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
   local args = terralib.newlist()
-  local args_partitions = {}
+  local args_partitions = terralib.newlist()
   for i, arg in ipairs(node.call.args) do
+    local partition = false
     if not node.args_provably.variant[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
-      -- Run codegen halfway to get the partition.
-      local partition = codegen.expr(cx, arg.value):read(cx)
-      args_partitions[i] = partition
+      -- Run codegen halfway to get the partition. Note: Remember to
+      -- splice the actions back in later.
+      partition = codegen.expr(cx, arg.value):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
       local partition_type = std.as_read(arg.value.expr_type)
@@ -3219,21 +3247,30 @@ function codegen.stat_index_launch(cx, node)
         }):read(cx)
       args:insert(region)
     end
+    args_partitions:insert(partition)
   end
 
   local actions = quote
     [domain[1].actions];
     [domain[2].actions];
-    -- ignore domain[3] because we know it is a constant
+    -- Ignore domain[3] because we know it is a constant.
     [fn.actions];
-    [std.zip(args, node.args_provably.invariant):map(
+    [std.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
-         local arg, invariant = unpack(pair)
-         if invariant then
-           return arg.actions
-         else
-           return quote end
+         local arg, arg_partition, invariant = unpack(pair)
+
+         -- Here we slice partition actions back in.
+         local arg_actions = quote end
+         if arg_partition then
+           arg_actions = quote [arg_actions]; [arg_partition.actions] end
          end
+
+         -- Normal invariant arg actions.
+         if invariant then
+           arg_actions = quote [arg_actions]; [arg.actions] end
+         end
+
+         return arg_actions
        end)]
   end
 

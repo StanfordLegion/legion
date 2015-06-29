@@ -277,6 +277,15 @@ function parser.expr_simple(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__raw") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprRawValue {
+      value = value,
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("isnull") then
     p:expect("(")
     local pointer = p:expr()
