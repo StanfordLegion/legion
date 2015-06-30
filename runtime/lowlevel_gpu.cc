@@ -73,7 +73,7 @@ namespace LegionRuntime {
       start_enclosing(task->finish_event); 
       unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
-      if (task->capture_timeline()) {
+      if (task->perform_capture()) {
         CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
                                       (void*)this, 0) );
       }
