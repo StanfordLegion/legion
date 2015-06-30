@@ -803,7 +803,7 @@ namespace LegionRuntime {
             : func_id(id), args(0), arglen(_arglen),
               complete(_complete), priority(_priority), 
               start_arrivals(_start_arrivals), finish_arrivals(_finish_arrivals),
-              expected(_expected)
+              expected(_expected), requests(reqs)
           {
             if (arglen > 0)
             {
@@ -5710,6 +5710,7 @@ namespace LegionRuntime {
     };
 
     DMAOperation::DMAOperation(const Realm::ProfilingRequestSet &reqs)
+      : requests(reqs)
     {
       measurements.import_requests(reqs);
       capture_timeline = measurements.wants_measurement<
