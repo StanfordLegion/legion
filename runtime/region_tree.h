@@ -2824,8 +2824,6 @@ namespace LegionRuntime {
       virtual bool visit_partition(PartitionNode *node) 
         { node->clear_physical_states(to_clear); return true; }
     protected:
-      void clear_field(RegionTreeNode *node);
-    protected:
       FieldMask to_clear;
     };
 

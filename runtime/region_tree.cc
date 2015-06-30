@@ -9349,6 +9349,28 @@ namespace LegionRuntime {
     {
       // Assume we are already holding the node lock
       allocated_indexes.unset_bit(index);
+      // We also need to invalidate all our layout descriptions
+      // that contain this field
+      std::vector<FIELD_TYPE> to_delete;
+      for (std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+                  LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it = 
+            layouts.begin(); it != layouts.end(); it++)
+      {
+        // If the bit is set, remove the layout descriptions
+        if (it->first & (1ULL << index))
+        {
+          LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+            &descs = it->second;
+          for (unsigned idx = 0; idx < descs.size(); idx++)
+            delete descs[idx];
+          to_delete.push_back(it->first);
+        }
+      }
+      for (std::vector<FIELD_TYPE>::const_iterator it = to_delete.begin();
+            it != to_delete.end(); it++)
+      {
+        layouts.erase(*it);
+      }
     }
 
     /////////////////////////////////////////////////////////////
