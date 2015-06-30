@@ -1273,6 +1273,10 @@ end
 
 -- A helper for capturing debug information.
 function emit_debuginfo(node)
+  assert(node.span.source and node.span.start.line)
+  if string.len(node.span.source) == 0 then
+    return quote end
+  end
   return quote
     terralib.debuginfo(node.span.source, node.span.start.line)
   end
