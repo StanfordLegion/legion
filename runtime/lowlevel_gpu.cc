@@ -73,6 +73,10 @@ namespace LegionRuntime {
       start_enclosing(task->finish_event); 
       unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
+      if (task->capture_timeline()) {
+        CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
+                                      (void*)this, 0) );
+      }
       (*fptr)(task->args, task->arglen, gpu->me);
 #ifdef EVENT_GRAPH_TRACE
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
@@ -83,7 +87,7 @@ namespace LegionRuntime {
 #endif
       // Mark that we recor
       // Add a callback for when the event has triggered
-      CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_callback, 
+      CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_finish, 
                                     (void*)this, 0) );
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -116,9 +120,17 @@ namespace LegionRuntime {
           trigger(task->finish_event.gen, gasnet_mynode());
     }
 
-    /*static*/ void GPUTask::handle_callback(CUstream stream, CUresult res, void *data)
+    /*static*/ void GPUTask::handle_start(CUstream stream, CUresult res, void *data)
     {
       GPUTask *task = static_cast<GPUTask*>(data);
+      task->task->mark_started();
+    }
+
+    /*static*/ void GPUTask::handle_finish(CUstream stream, CUresult res, void *data)
+    {
+      GPUTask *task = static_cast<GPUTask*>(data);
+      if (task->task->perform_capture())
+        task->task->mark_completed();
       task->gpu->handle_complete_job(task);
     }
 
@@ -166,7 +178,7 @@ namespace LegionRuntime {
     void GPUMemcpy::post_execute(void)
     {
       // Add a callback to the stream to record when the operation is done
-      CHECK_CU( cuStreamAddCallback(local_stream, GPUMemcpy::handle_callback,
+      CHECK_CU( cuStreamAddCallback(local_stream, GPUMemcpy::handle_finish,
                                     (void*)this, 0) );
     }
 
@@ -178,7 +190,7 @@ namespace LegionRuntime {
           trigger(finish_event.gen, gasnet_mynode());
     }
 
-    /*static*/ void GPUMemcpy::handle_callback(CUstream stream, CUresult res, void *data)
+    /*static*/ void GPUMemcpy::handle_finish(CUstream stream, CUresult res, void *data)
     {
       GPUMemcpy *copy = static_cast<GPUMemcpy*>(data);
       copy->gpu->handle_complete_job(copy);

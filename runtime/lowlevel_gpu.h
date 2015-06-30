@@ -98,8 +98,9 @@ namespace LegionRuntime {
       void set_local_stream(CUstream s) { local_stream = s; }
       void record_modules(const std::set<void**> &m) { modules = m; }
     public:
-      // Helper method for handling a callback
-      static void handle_callback(CUstream stream, CUresult res, void *data);
+      // Helper methods for handling a callback
+      static void handle_start(CUstream stream, CUresult res, void *data);
+      static void handle_finish(CUstream stream, CUresult res, void *data);
     public:
       Task *task;
       CUstream local_stream;
@@ -122,7 +123,7 @@ namespace LegionRuntime {
       void post_execute(void);
     public:
       // Helper method for handling a callback
-      static void handle_callback(CUstream stream, CUresult res, void *data);
+      static void handle_finish(CUstream stream, CUresult res, void *data);
     protected:
       GPUMemcpyKind kind;
       CUstream local_stream;

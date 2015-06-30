@@ -88,6 +88,10 @@ namespace Realm {
     template <typename T>
     ProfilingRequest &add_measurement(void);
 
+    size_t compute_size(void) const;
+    void* serialize(void *target) const;
+    const void* deserialize(const void *source);
+
   protected:
     friend class ProfilingMeasurementCollection;
 
@@ -110,6 +114,12 @@ namespace Realm {
 				  const void *payload = 0, size_t payload_size = 0);
 
     size_t request_count(void) const;
+
+    void clear(void);
+
+    size_t compute_size(void) const;
+    void* serialize(void *target) const;
+    const void* deserialize(const void *source);
 
   protected:
     friend class ProfilingMeasurementCollection;

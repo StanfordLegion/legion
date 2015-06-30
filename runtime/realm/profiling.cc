@@ -61,6 +61,77 @@ namespace Realm {
     return *this;
   }
 
+  size_t ProfilingRequest::compute_size(void) const
+  {
+    size_t result = sizeof(response_proc) + sizeof(response_task_id) + 
+                    (2 * sizeof(size_t)) + user_data_size + 
+                    requested_measurements.size() * sizeof(ProfilingMeasurementID);
+    return result;
+  }
+
+  void* ProfilingRequest::serialize(void *target) const
+  {
+    char *buffer = (char*)target;
+    memcpy(buffer,&response_proc,sizeof(response_proc));
+    buffer += sizeof(response_proc);
+    memcpy(buffer,&response_task_id,sizeof(response_task_id));
+    buffer += sizeof(response_task_id);
+    memcpy(buffer,&user_data_size,sizeof(user_data_size));
+    buffer += sizeof(user_data_size);
+    if (user_data_size > 0) {
+      memcpy(buffer,user_data,user_data_size);
+      buffer += user_data_size;
+    }
+    size_t measurement_count = requested_measurements.size();
+    memcpy(buffer,&measurement_count,sizeof(measurement_count));
+    buffer += sizeof(measurement_count);
+    for (std::set<ProfilingMeasurementID>::const_iterator it = 
+          requested_measurements.begin(); it != requested_measurements.end(); it++)
+    {
+      const ProfilingMeasurementID &measurement = *it;
+      memcpy(buffer,&measurement,sizeof(measurement));
+      buffer += sizeof(measurement);
+    }
+    return buffer;
+  }
+
+  const void* ProfilingRequest::deserialize(const void *source)
+  {
+    // Already unpacked proc and task
+    const char *buffer = (const char*)source;
+    memcpy(&user_data_size,buffer,sizeof(user_data_size));
+    buffer += sizeof(user_data_size);
+    if (user_data_size > 0) {
+      add_user_data(buffer, user_data_size);
+      buffer += user_data_size;
+    }
+    size_t num_measurements;
+    memcpy(&num_measurements,buffer,sizeof(num_measurements));
+    buffer += sizeof(num_measurements);
+    for (unsigned idx = 0; idx < num_measurements; idx++)
+    {
+      ProfilingMeasurementID measurement;
+      memcpy(&measurement,buffer,sizeof(measurement));
+      buffer += sizeof(measurement);
+      switch (measurement)
+      {
+        case ProfilingMeasurements::OperationStatus::ID:
+          {
+            add_measurement<ProfilingMeasurements::OperationStatus>();
+            break;
+          }
+        case ProfilingMeasurements::OperationTimeline::ID:
+          {
+            add_measurement<ProfilingMeasurements::OperationTimeline>();
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+    return buffer;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -104,6 +175,62 @@ namespace Realm {
   size_t ProfilingRequestSet::request_count(void) const
   {
     return requests.size();
+  }
+
+  void ProfilingRequestSet::clear(void)
+  {
+    for (std::vector<ProfilingRequest*>::iterator it = 
+          requests.begin(); it != requests.end(); it++)
+    {
+      delete (*it);
+    }
+    requests.clear();
+  }
+
+  size_t ProfilingRequestSet::compute_size(void) const
+  {
+    size_t result = sizeof(size_t);
+    for (std::vector<ProfilingRequest*>::const_iterator it = 
+          requests.begin(); it != requests.end(); it++)
+    {
+      result += (*it)->compute_size();
+    }
+    return result;
+  }
+
+  void* ProfilingRequestSet::serialize(void *target) const
+  {
+    char *buffer = (char*)target;
+    size_t num_requests = requests.size();
+    memcpy(buffer,&num_requests,sizeof(num_requests));
+    buffer += sizeof(num_requests);
+    for (std::vector<ProfilingRequest*>::const_iterator it = 
+          requests.begin(); it != requests.end(); it++)
+    {
+      buffer = (char*)((*it)->serialize(buffer));
+    }
+    return buffer;
+  }
+
+  const void* ProfilingRequestSet::deserialize(const void *source)
+  {
+    const char *buffer = (const char*)source;
+    size_t num_reqs;
+    memcpy(&num_reqs,buffer,sizeof(num_reqs));
+    buffer += sizeof(num_reqs);
+    for (unsigned idx = 0; idx < num_reqs; idx++)
+    {
+      Processor resp_proc;
+      memcpy(&resp_proc,buffer,sizeof(resp_proc));
+      buffer += sizeof(resp_proc);
+      TaskFuncID resp_task;
+      memcpy(&resp_task,buffer,sizeof(resp_task));
+      buffer += sizeof(resp_task);
+      ProfilingRequest *new_req = new ProfilingRequest(resp_proc, resp_task);
+      buffer = (const char*)new_req->deserialize(buffer);
+      requests.push_back(new_req);
+    }
+    return buffer;
   }
 
 

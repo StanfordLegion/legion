@@ -1114,6 +1114,16 @@ namespace LegionRuntime {
         return d;
       }
 
+      size_t compute_size(void) const
+      {
+        size_t result;
+        if (dim == 0)
+          result = (2 * sizeof(IDType));
+        else
+          result = ((1 + 2 * dim) * sizeof(IDType));
+        return result;
+      }
+
       IDType *serialize(IDType *data) const
       {
 	*data++ = dim;

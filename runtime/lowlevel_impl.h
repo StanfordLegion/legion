@@ -35,6 +35,8 @@
 #include "realm/dynamic_set.h"
 #endif
 
+#include "realm/operation.h"
+
 #include <assert.h>
 
 #include "activemsg.h"
@@ -70,6 +72,8 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 
 namespace Realm {
   class Module;
+  class Operation;
+  class ProfilingRequestSet;
 };
 
 namespace LegionRuntime {
@@ -919,11 +923,17 @@ namespace LegionRuntime {
     class ProcessorGroup;
 
     // information for a task launch
-    class Task {
+    class Task : public Realm::Operation {
     public:
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
 	   const void *_args, size_t _arglen,
+	   Event _finish_event, int _priority,
+           int expected_count);
+      Task(Processor _proc,
+	   Processor::TaskFuncID _func_id,
+	   const void *_args, size_t _arglen,
+           const Realm::ProfilingRequestSet &reqs,
 	   Event _finish_event, int _priority,
            int expected_count);
 
@@ -954,6 +964,12 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority) = 0;
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority) = 0;
 
@@ -1072,6 +1088,13 @@ namespace LegionRuntime {
 			      //std::set<RegionInstance> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+
 
     public: //protected:
       bool members_valid;
@@ -1207,6 +1230,11 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
     protected:
