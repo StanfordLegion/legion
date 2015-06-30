@@ -14,6 +14,10 @@
 
 -- runs-with:
 -- [
+-- ]
+
+-- FIXME: Turn this test off for now.
+
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-compact", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
@@ -25,7 +29,6 @@
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1", "-compact", "0"],
 --   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2", "-compact", "0"]
--- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
