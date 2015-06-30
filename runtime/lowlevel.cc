@@ -6071,7 +6071,7 @@ namespace LegionRuntime {
       Event finish_event;
       Processor::TaskFuncID func_id;
       int priority;
-      size_t user_arglen;
+      int user_arglen;
     };
 
     void Event::wait(void) const
@@ -6148,7 +6148,7 @@ namespace LegionRuntime {
       Processor::Impl *p = args.proc.impl();
       log_task.debug("remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
 	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
-      if (args.user_arglen == datalen) {
+      if (args.user_arglen == int(datalen)) {
         // Only have user data
         p->spawn_task(args.func_id, data, datalen,
                       args.start_event, args.finish_event, args.priority);
@@ -6204,7 +6204,7 @@ namespace LegionRuntime {
 	msgargs.start_event = start_event;
 	msgargs.finish_event = finish_event;
         msgargs.priority = priority;
-        msgargs.user_arglen = arglen;
+        msgargs.user_arglen = int(arglen);
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
       }
@@ -6225,7 +6225,7 @@ namespace LegionRuntime {
 	msgargs.start_event = start_event;
 	msgargs.finish_event = finish_event;
         msgargs.priority = priority;
-        msgargs.user_arglen = arglen;
+        msgargs.user_arglen = int(arglen);
         // Make a copy of the arguments and the profiling requests in
         // the same buffer so that we can copy them over
         size_t msg_buffer_size = arglen + reqs.compute_size();
