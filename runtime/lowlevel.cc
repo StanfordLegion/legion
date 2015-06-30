@@ -6072,7 +6072,6 @@ namespace LegionRuntime {
       Processor::TaskFuncID func_id;
       int priority;
       size_t user_arglen;
-      bool has_profiling_reqs; // if we have profiling requests
     };
 
     void Event::wait(void) const
@@ -6149,7 +6148,8 @@ namespace LegionRuntime {
       Processor::Impl *p = args.proc.impl();
       log_task.debug("remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
 	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
-      if (!args.has_profiling_reqs) {
+      if (args.user_arglen == datalen) {
+        // Only have user data
         p->spawn_task(args.func_id, data, datalen,
                       args.start_event, args.finish_event, args.priority);
       } else {
@@ -6205,7 +6205,6 @@ namespace LegionRuntime {
 	msgargs.finish_event = finish_event;
         msgargs.priority = priority;
         msgargs.user_arglen = arglen;
-        msgargs.has_profiling_reqs = false;
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
       }
@@ -6227,7 +6226,6 @@ namespace LegionRuntime {
 	msgargs.finish_event = finish_event;
         msgargs.priority = priority;
         msgargs.user_arglen = arglen;
-        msgargs.has_profiling_reqs = true;
         // Make a copy of the arguments and the profiling requests in
         // the same buffer so that we can copy them over
         size_t msg_buffer_size = arglen + reqs.compute_size();
