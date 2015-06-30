@@ -6066,12 +6066,12 @@ namespace LegionRuntime {
     }
  
     struct SpawnTaskArgs : public BaseMedium {
-      Processor proc;
       Event start_event;
       Event finish_event;
       Processor::TaskFuncID func_id;
-      int priority;
-      int user_arglen;
+      Processor proc;
+      size_t user_arglen;
+      short priority;
     };
 
     void Event::wait(void) const
@@ -6203,8 +6203,8 @@ namespace LegionRuntime {
 	msgargs.func_id = func_id;
 	msgargs.start_event = start_event;
 	msgargs.finish_event = finish_event;
-        msgargs.priority = priority;
-        msgargs.user_arglen = int(arglen);
+        msgargs.priority = short(priority);
+        msgargs.user_arglen = arglen;
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
       }
@@ -6224,8 +6224,8 @@ namespace LegionRuntime {
 	msgargs.func_id = func_id;
 	msgargs.start_event = start_event;
 	msgargs.finish_event = finish_event;
-        msgargs.priority = priority;
-        msgargs.user_arglen = int(arglen);
+        msgargs.priority = short(priority);
+        msgargs.user_arglen = arglen;
         // Make a copy of the arguments and the profiling requests in
         // the same buffer so that we can copy them over
         size_t msg_buffer_size = arglen + reqs.compute_size();
