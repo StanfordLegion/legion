@@ -8022,14 +8022,18 @@ namespace LegionRuntime {
     {
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
-      for (std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+      for (std::map<FIELD_TYPE,LegionList<LayoutDescription*,
             LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it =
             layouts.begin(); it != layouts.end(); it++)
       {
-        LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+        LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
           &descs = it->second;
-        for (unsigned idx = 0; idx < descs.size(); idx++)
-          delete descs[idx];
+        for (LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::
+              tracked::iterator it = descs.begin(); it != descs.end(); it++)
+        {
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
       }
       layouts.clear();
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
@@ -8984,14 +8988,14 @@ namespace LegionRuntime {
     {
       uint64_t hash_key = mask.get_hash_key();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+      std::map<FIELD_TYPE,LegionList<LayoutDescription*,
         LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
                                                     layouts.find(hash_key);
       if (finder == layouts.end())
         return NULL;
       // First go through the existing descriptions and see if we find
       // one that matches the existing layout
-      for (std::deque<LayoutDescription*>::const_iterator it = 
+      for (std::list<LayoutDescription*>::const_iterator it = 
             finder->second.begin(); it != finder->second.end(); it++)
       {
         if ((*it)->match_layout(mask, domain, blocking_factor))
@@ -9031,11 +9035,11 @@ namespace LegionRuntime {
     {
       uint64_t hash_key = layout->allocated_fields.get_hash_key();
       AutoLock n_lock(node_lock);
-      LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+      LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
         &descs = layouts[hash_key];
       if (!descs.empty())
       {
-        for (LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+        for (LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
               ::const_iterator it = descs.begin(); it != descs.end(); it++)
         {
           if (layout->match_layout(*it))
@@ -9049,6 +9053,7 @@ namespace LegionRuntime {
       }
       // Otherwise we successfully registered it
       descs.push_back(layout);
+      layout->add_reference();
       return layout;
     }
 
@@ -9352,18 +9357,34 @@ namespace LegionRuntime {
       // We also need to invalidate all our layout descriptions
       // that contain this field
       std::vector<FIELD_TYPE> to_delete;
-      for (std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
-                  LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it = 
-            layouts.begin(); it != layouts.end(); it++)
+      for (std::map<FIELD_TYPE,LegionList<LayoutDescription*,
+                  LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator lit = 
+            layouts.begin(); lit != layouts.end(); lit++)
       {
         // If the bit is set, remove the layout descriptions
-        if (it->first & (1ULL << index))
+        if (lit->first & (1ULL << index))
         {
-          LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
-            &descs = it->second;
-          for (unsigned idx = 0; idx < descs.size(); idx++)
-            delete descs[idx];
-          to_delete.push_back(it->first);
+          LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+            &descs = lit->second;
+          bool perform_delete = true;
+          for (LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::
+                tracked::iterator it = descs.begin(); 
+                it != descs.end(); /*nothing*/)
+          {
+            if ((*it)->allocated_fields.is_set(index))
+            {
+              if ((*it)->remove_reference())
+                delete (*it);
+              it = descs.erase(it);
+            }
+            else 
+            {
+              it++;
+              perform_delete = false;
+            }
+          }
+          if (perform_delete)
+            to_delete.push_back(lit->first);
         }
       }
       for (std::vector<FIELD_TYPE>::const_iterator it = to_delete.begin();
@@ -19439,6 +19460,8 @@ namespace LegionRuntime {
     {
       // Tell the runtime so it can update the per memory data structures
       context->runtime->allocate_physical_instance(this);
+      // Add a reference to the layout
+      layout->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -19461,6 +19484,8 @@ namespace LegionRuntime {
       // garbage collected the physical instance
       if (!owner)
         context->runtime->free_physical_instance(this);
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------

@@ -1400,7 +1400,7 @@ namespace LegionRuntime {
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
       // differentiate them.
-      std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+      std::map<FIELD_TYPE,LegionList<LayoutDescription*,
                           LAYOUT_DESCRIPTION_ALLOC>::tracked> layouts;
     private:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
@@ -3075,7 +3075,7 @@ namespace LegionRuntime {
      * same layout then they can all share the same
      * description object.
      */
-    class LayoutDescription {
+    class LayoutDescription : public Collectable {
     public:
       struct OffsetEntry {
       public:
