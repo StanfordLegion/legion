@@ -37,6 +37,11 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+// Forward declaration for profiling
+namespace Realm {
+  class ProfilingRequestSet;
+}
+
 namespace LegionRuntime {
   namespace LowLevel {
     // forward class declarations because these things all refer to each other
@@ -415,6 +420,11 @@ namespace LegionRuntime {
       Event spawn(TaskFuncID func_id, const void *args, size_t arglen,
 		  Event wait_on = Event::NO_EVENT, int priority = 0) const;
 
+      // Same as the above but with requests for profiling
+      Event spawn(TaskFuncID func_id, const void *args, size_t arglen,
+                  const Realm::ProfilingRequestSet &requests,
+                  Event wait_on = Event::NO_EVENT, int priority = 0) const;
+
       static Processor get_executing_processor(void);
     };
 
@@ -673,7 +683,6 @@ namespace LegionRuntime {
 				      bool mutable_results,
 				      Event wait_on = Event::NO_EVENT) const;
 
-
       // logical operations on IndexSpaces can be either maps (performing operations in 
       //   parallel on many pairs of IndexSpaces) or reductions (many IndexSpaces -> one) 
       enum IndexSpaceOperation {
@@ -706,6 +715,44 @@ namespace LegionRuntime {
 				      Event wait_on = Event::NO_EVENT) const;
       Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor>& field_data,
 					 std::map<IndexSpace, IndexSpace>& subspaces,
+					 bool mutable_results,
+					 Event wait_on = Event::NO_EVENT) const;
+      // Variants of the above but with profiling information
+      Event create_equal_subspaces(size_t count, size_t granularity,
+				   std::vector<IndexSpace>& subspaces,
+                                   const Realm::ProfilingRequestSet &reqs,
+				   bool mutable_results,
+				   Event wait_on = Event::NO_EVENT) const;
+      Event create_weighted_subspaces(size_t count, size_t granularity,
+				      const std::vector<int>& weights,
+				      std::vector<IndexSpace>& subspaces,
+                                      const Realm::ProfilingRequestSet &reqs,
+				      bool mutable_results,
+				      Event wait_on = Event::NO_EVENT) const;
+      static Event compute_index_spaces(std::vector<BinaryOpDescriptor>& pairs,
+                                        const Realm::ProfilingRequestSet &reqs,
+					bool mutable_results,
+					Event wait_on = Event::NO_EVENT);
+      static Event reduce_index_spaces(IndexSpaceOperation op,
+				       const std::vector<IndexSpace>& spaces,
+                                       const Realm::ProfilingRequestSet &reqs,
+				       IndexSpace& result,
+				       bool mutable_results,
+                                       IndexSpace parent = IndexSpace::NO_SPACE,
+				       Event wait_on = Event::NO_EVENT);
+      Event create_subspaces_by_field(const std::vector<FieldDataDescriptor>& field_data,
+				      std::map<DomainPoint, IndexSpace>& subspaces,
+                                      const Realm::ProfilingRequestSet &reqs,
+				      bool mutable_results,
+				      Event wait_on = Event::NO_EVENT) const;
+      Event create_subspaces_by_image(const std::vector<FieldDataDescriptor>& field_data,
+				      std::map<IndexSpace, IndexSpace>& subspaces,
+                                      const Realm::ProfilingRequestSet &reqs,
+				      bool mutable_results,
+				      Event wait_on = Event::NO_EVENT) const;
+      Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor>& field_data,
+					 std::map<IndexSpace, IndexSpace>& subspaces,
+                                         const Realm::ProfilingRequestSet &reqs,
 					 bool mutable_results,
 					 Event wait_on = Event::NO_EVENT) const;
     };
@@ -1367,6 +1414,18 @@ namespace LegionRuntime {
 			  const ElementMask& mask,
 			  Event wait_on = Event::NO_EVENT,
 			  ReductionOpID redop_id = 0, bool red_fold = false) const;
+
+      // Variants of the above for profiling
+      Event fill(const std::vector<CopySrcDstField> &dsts,
+                 const Realm::ProfilingRequestSet &requests,
+                 const void *fill_value, size_t fill_value_size,
+                 Event wait_on = Event::NO_EVENT) const;
+      
+      Event copy(const std::vector<CopySrcDstField>& srcs,
+		 const std::vector<CopySrcDstField>& dsts,
+                 const Realm::ProfilingRequestSet &reqeusts,
+		 Event wait_on = Event::NO_EVENT,
+		 ReductionOpID redop_id = 0, bool red_fold = false) const;
     };
 
     class IndexSpaceAllocator {
