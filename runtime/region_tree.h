@@ -198,6 +198,8 @@ namespace LegionRuntime {
                                   const std::vector<size_t> &sizes,
                                   const std::vector<unsigned> &indexes,
                                   AddressSpaceID source);
+      void invalidate_field_index(const std::set<RegionNode*> &regions,
+                                  unsigned field_idx);
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
@@ -2181,6 +2183,7 @@ namespace LegionRuntime {
       // Entry
       void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
                                  PhysicalManager *target);
+      void clear_physical_states(const FieldMask &mask);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual const ColorPoint& get_color(void) const = 0;
@@ -2809,6 +2812,21 @@ namespace LegionRuntime {
       const bool total;
       const bool force;
       const FieldMask invalid_mask;
+    };
+
+    class FieldInvalidator : public NodeTraverser {
+    public:
+      FieldInvalidator(unsigned idx) { to_clear.set_bit(idx); }
+    public:
+      virtual bool visit_only_valid(void) const { return false; }
+      virtual bool visit_region(RegionNode *node) 
+        { node->clear_physical_states(to_clear); return true; }
+      virtual bool visit_partition(PartitionNode *node) 
+        { node->clear_physical_states(to_clear); return true; }
+    protected:
+      void clear_field(RegionTreeNode *node);
+    protected:
+      FieldMask to_clear;
     };
 
     /**
