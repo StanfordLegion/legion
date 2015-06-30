@@ -16,6 +16,14 @@
 #ifndef __LEGION_TERRA_PARTITIONS_H__
 #define __LEGION_TERRA_PARTITIONS_H__
 
+// C declarations for legion_terra_partitions.cc
+
+// ******************** IMPORTANT **************************
+//
+// This file is PURE C, **NOT** C++.
+//
+// ******************** IMPORTANT **************************
+
 #ifdef __cplusplus
 extern "C" {
 #endif

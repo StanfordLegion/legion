@@ -14,6 +14,7 @@
  */
 
 #include "legion_terra_partitions.h"
+#include "legion_terra_partitions_cxx.h"
 
 #include "arrays.h"
 #include "legion.h"
@@ -21,9 +22,6 @@
 #include "legion_utilities.h"
 #include "lowlevel.h"
 #include "utilities.h"
-
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
 
 #ifdef SHARED_LOWLEVEL
 #define USE_LEGION_CROSS_PRODUCT 1
@@ -159,56 +157,60 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
-static void
+void
 create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
                      IndexPartition lhs,
-                     IndexPartition rhs)
+                     IndexPartition rhs,
+                     Color rhs_color /* = -1 */)
 {
+  if (rhs_color == (Color)-1) {
+    rhs_color = runtime->get_index_partition_color(ctx, rhs);
+  }
+
 #if USE_LEGION_CROSS_PRODUCT
   std::map<DomainPoint, IndexPartition> handles;
   runtime->create_cross_product_partitions(
     ctx, lhs, rhs, handles,
     (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
-    runtime->get_index_partition_color(ctx, rhs),
-    true);
+    rhs_color, true);
 #else
   // FIXME: Validate: same index tree
 
   Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
   Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
 
-  for (Domain::DomainPointIterator lhs_dp(lhs_colors); lhs_dp; lhs_dp++) {
-    Color lhs_color = lhs_dp.p.get_point<1>()[0];
-    IndexSpace lhs_space = runtime->get_index_subspace(ctx, lhs, lhs_color);
+  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
+    Color lh_color = lh_dp.p.get_point<1>()[0];
+    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
 
-    std::set<ptr_t> lhs_points;
-    for (IndexIterator lhs_it(runtime, ctx, lhs_space); lhs_it.has_next();) {
-      lhs_points.insert(lhs_it.next());
+    std::set<ptr_t> lh_points;
+    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+      lh_points.insert(lh_it.next());
     }
 
-    Coloring lhs_coloring;
+    Coloring lh_coloring;
 
-    for (Domain::DomainPointIterator rhs_dp(rhs_colors); rhs_dp; rhs_dp++) {
-      Color rhs_color = rhs_dp.p.get_point<1>()[0];
-      IndexSpace rhs_space = runtime->get_index_subspace(ctx, rhs, rhs_color);
+    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
+      Color rh_color = rh_dp.p.get_point<1>()[0];
+      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
 
       // Ensure the color exists.
-      lhs_coloring[rhs_color];
+      lh_coloring[rh_color];
 
-      for (IndexIterator rhs_it(runtime, ctx, rhs_space); rhs_it.has_next();) {
-        ptr_t rhs_ptr = rhs_it.next();
+      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
+        ptr_t rh_ptr = rh_it.next();
 
-        if (lhs_points.count(rhs_ptr)) {
-          lhs_coloring[rhs_color].points.insert(rhs_ptr);
+        if (lh_points.count(rh_ptr)) {
+          lh_coloring[rh_color].points.insert(rh_ptr);
         }
       }
     }
 
     runtime->create_index_partition(
-      ctx, lhs_space, lhs_coloring,
+      ctx, lh_space, lh_coloring,
       runtime->is_index_partition_disjoint(ctx, rhs),
-      runtime->get_index_partition_color(ctx, rhs));
+      rhs_color);
   }
 #endif
 }
