@@ -1233,6 +1233,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_logical_partition_by_color(LogicalRegion parent,
+                                                        const ColorPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *parent_node = get_node(parent);
+      return parent_node->has_color(color);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition RegionTreeForest::get_logical_partition_by_tree(
                       IndexPartition handle, FieldSpace space, RegionTreeID tid)
     //--------------------------------------------------------------------------
@@ -1260,6 +1269,15 @@ namespace LegionRuntime {
       LogicalRegion result(parent.tree_id, index_node->handle,
                            parent.field_space);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_logical_subregion_by_color(
+                               LogicalPartition parent, const ColorPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      PartitionNode *parent_node = get_node(parent);
+      return parent_node->has_color(color);
     }
 
     //--------------------------------------------------------------------------
@@ -16149,6 +16167,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionNode::has_color(const ColorPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      // Ask the row source since it eagerly instantiates
+      return row_source->has_child(c);
+    }
+
+    //--------------------------------------------------------------------------
     PartitionNode* RegionNode::get_child(const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -17764,6 +17790,14 @@ namespace LegionRuntime {
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       return (color_map.find(c) != color_map.end());
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionNode::has_color(const ColorPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      // Ask the row source because it eagerly instantiates
+      return row_source->has_child(c);
     }
 
     //--------------------------------------------------------------------------
