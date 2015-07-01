@@ -116,6 +116,10 @@ function traverse_symbols.expr(defined, undefined, node)
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
+    local defined_local = defined:new_local_scope()
+    local code = codegen(node)
+    local actions = code.actions
+    traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
     traverse_symbols.expr(defined, undefined, node.value)
     traverse_symbols.expr(defined, undefined, node.index)
 

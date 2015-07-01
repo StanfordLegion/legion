@@ -3070,20 +3070,32 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
+      "multi-dimensional index spaces are not supported yet")
+
     -- wrap for-loop body as a terra function
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
     local base = terralib.newsymbol(uint32, "base")
     local count = terralib.newsymbol(c.size_t, "count")
-    local ptr_init = quote
-      var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
-      var [symbol] = [symbol.type]{
-        __ptr = c.legion_ptr_t {
-          value = tid
+    local ptr_init
+    if ispace_type.dim == 0 then
+      ptr_init = quote
+        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
+        var [symbol] = [symbol.type] {
+          __ptr = c.legion_ptr_t {
+            value = tid
+          }
         }
-      }
-      if tid >= [count] + [base] then return end
+        if tid >= [count] + [base] then return end
+      end
+    else
+      ptr_init = quote
+        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
+        var [symbol] = [symbol.type] { __ptr = tid }
+        if tid >= [count] + [base] then return end
+      end
     end
     local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
     local undefined =
@@ -3105,14 +3117,23 @@ function codegen.stat_for_list(cx, node)
     -- kernel launch
     local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
 
-    return quote
-      do
-        [actions];
+    if ispace_type.dim == 0 then
+      return quote
+        [actions]
         while iterator_has_next([it]) do
           var [count] : c.size_t = 0
-          var [base] = iterator_next_span([it], &[count], -1).value
+          var [base] = iterator_next_span([it], &count, -1).value
           [kernel_call]
         end
+        [cleanup_actions]
+      end
+    else
+      return quote
+        [actions]
+        var rect = c.legion_domain_get_rect_1d([domain])
+        var [count] = rect.hi.x[0] - rect.lo.x[0] + 1
+        var [base] = rect.lo.x[0]
+        [kernel_call]
         [cleanup_actions]
       end
     end
@@ -3225,6 +3246,7 @@ function codegen.stat_for_list_vectorized(cx, node)
   else
     local fields = ispace_type.index_type.fields
     if fields then
+      -- XXX: multi-dimensional index spaces are not supported yet
       local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
       local rect = terralib.newsymbol("rect")
       local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
