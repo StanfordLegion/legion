@@ -2634,11 +2634,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint HighLevelRuntime::get_index_space_color_point(Context ctx,
+                                                              IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     Color HighLevelRuntime::get_index_partition_color(Context ctx,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint HighLevelRuntime::get_index_partition_color_point(Context ctx,
+                                                          IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color_point(ctx, handle);
     }
 
     //--------------------------------------------------------------------------

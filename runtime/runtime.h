@@ -1229,8 +1229,11 @@ namespace LegionRuntime {
       bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_space_color(IndexSpace handle);
+      DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
+      DomainPoint get_index_partition_color_point(Context ctx, 
+                                                  IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);

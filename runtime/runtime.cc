@@ -7988,6 +7988,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(Context ctx, 
+                                                     IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_index_partition_color(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -8000,6 +8008,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color(handle).get_index();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_partition_color_point(Context ctx,
+                                                         IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color(handle).get_point();
     }
 
     //--------------------------------------------------------------------------
