@@ -120,7 +120,6 @@ function traverse_symbols.expr(defined, undefined, node)
     local code = codegen(node)
     local actions = code.actions
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
-    traverse_symbols.expr(defined, undefined, node.value)
     traverse_symbols.expr(defined, undefined, node.index)
 
   elseif node:is(ast.typed.ExprUnary) then
