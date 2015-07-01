@@ -1325,7 +1325,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       end
       if std.is_region(bound) and
         not (std.type_eq(bound.fspace_type, self.points_to_type) or
-               std.is_unpack_result(self.points_to_type))
+             (self.points_to_type:isvector() and
+              std.type_eq(bound.fspace_type, self.points_to_type.type)) or
+             std.is_unpack_result(self.points_to_type))
       then
         log.error(nil, tostring(self.index_type) .. " expected region(" ..
                     tostring(self.points_to_type) .. ") as argument " ..
