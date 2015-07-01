@@ -1311,7 +1311,7 @@ do
   var dtfac = conf.dtfac
   var dtinit = conf.dtinit
   var dtmax = conf.dtmax
-  var gamma = conf.qgamma
+  var gamma = conf.gamma
   var q1 = conf.q1
   var q2 = conf.q2
   var qgamma = conf.qgamma
