@@ -2725,7 +2725,7 @@ namespace LegionRuntime {
 
 		//for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
 		for (unsigned idx = 0; idx < oasvec.size(); idx++)
-		  ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+		  ipc->copy_field(irect.lo, orect.lo, irect.hi[0] - irect.lo[0] + 1, idx);
 		//it2->src_offset, it2->dst_offset, it2->size);
 	      }
 	    }
@@ -3478,7 +3478,7 @@ namespace LegionRuntime {
 	      
 	      //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
 	      for (unsigned idx = 0; idx < oasvec.size(); idx++)
-		ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+		ipc->copy_field(irect.lo, orect.lo, irect.hi[0] - irect.lo[0] + 1, idx);
 	      //it2->src_offset, it2->dst_offset, it2->size);
 	    }
 	  }

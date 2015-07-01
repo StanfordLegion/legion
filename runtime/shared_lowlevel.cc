@@ -7451,7 +7451,7 @@ namespace LegionRuntime {
       assert(bytes2 == 1);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = (strides[i] * 
+	offsets[i].offset = (strides[i][0] * 
 			     ((impl->get_block_size() > 1) ? field_size : impl->get_elmt_size()));
       return dst;
     }

@@ -10643,7 +10643,7 @@ namespace LegionRuntime {
       if(!dst) return 0;
 
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = strides[i] * elmt_stride;
+	offsets[i].offset = strides[i][0] * elmt_stride;
 
       return dst;
     }
