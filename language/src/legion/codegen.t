@@ -613,9 +613,9 @@ local function get_element_pointer(index_type, field_type, base_pointer, strides
         offset = `([index].__ptr.[ field ] * [ strides[i] ])
       end
     end
-    return `(@([&field_type](&(([&int8](base_pointer))[offset]))))
+    return `(@[&field_type](&(([&int8](base_pointer))[offset])))
   else
-    return `(base_pointer[ [index].__ptr ])
+    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
   end
 end
 
@@ -739,11 +739,17 @@ function ref:read(cx, expr_type)
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
          end
-         if not aligned_instances and expr_type and
-            (expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type)) then
+         if expr_type and
+            (expr_type:isvector() or
+             std.is_vptr(expr_type) or
+             std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
+           local align = sizeof(field_type)
+           if aligned_instances then
+             align = sizeof(vector(field_type, expr_type.N))
+           end
            return quote
-             [result] = terralib.attrload(&[field_value],
-                                          { align = [ sizeof(field_type) ] })
+             [result] = terralib.attrload(&[field_value], {align = [align]})
            end
          else
            return quote [result] = [field_value] end
@@ -769,12 +775,18 @@ function ref:write(cx, value, expr_type)
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
          end
-         if not aligned_instances and expr_type and
-            (expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type)) then
-          return quote
-            terralib.attrstore(&[field_value], [result],
-                               { align = [ sizeof(field_type) ] })
-          end
+         if expr_type and
+            (expr_type:isvector() or
+             std.is_vptr(expr_type) or
+             std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
+           local align = sizeof(field_type)
+           if aligned_instances then
+             align = sizeof(vector(field_type, expr_type.N))
+           end
+           return quote
+             terralib.attrstore(&[field_value], [result], {align = [align]})
+           end
          else
           return quote [field_value] = [result] end
         end
@@ -810,20 +822,26 @@ function ref:reduce(cx, value, op, expr_type)
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
          end
-         if not aligned_instances and expr_type and (expr_type:isvector() or std.is_sov(expr_type)) then
+         if expr_type and
+            (expr_type:isvector() or
+             std.is_vptr(expr_type) or
+             std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
+           local align = sizeof(field_type)
+           if aligned_instances then
+             align = sizeof(vector(field_type, expr_type.N))
+           end
+
            local field_value_load = quote
-              terralib.attrload(&[field_value],
-                                { align = [ sizeof(field_type) ] })
+              terralib.attrload(&[field_value], {align = [align]})
            end
            local sym = terralib.newsymbol()
            return quote
              var [sym] : expr_type =
-               terralib.attrload(&[field_value],
-                                 { align = [ sizeof(field_type) ] })
-             terralib.attrstore(
-               &[field_value],
+               terralib.attrload(&[field_value], {align = [align]})
+             terralib.attrstore(&[field_value],
                [std.quote_binary_op(fold_op, sym, result)],
-               { align = [ sizeof(field_type) ] })
+               {align = [align]})
            end
          else
            return quote
@@ -3055,20 +3073,32 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
+      "multi-dimensional index spaces are not supported yet")
+
     -- wrap for-loop body as a terra function
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
     local base = terralib.newsymbol(uint32, "base")
     local count = terralib.newsymbol(c.size_t, "count")
-    local ptr_init = quote
-      var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
-      var [symbol] = [symbol.type]{
-        __ptr = c.legion_ptr_t {
-          value = tid
+    local ptr_init
+    if ispace_type.dim == 0 then
+      ptr_init = quote
+        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
+        var [symbol] = [symbol.type] {
+          __ptr = c.legion_ptr_t {
+            value = tid
+          }
         }
-      }
-      if tid >= [count] + [base] then return end
+        if tid >= [count] + [base] then return end
+      end
+    else
+      ptr_init = quote
+        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
+        var [symbol] = [symbol.type] { __ptr = tid }
+        if tid >= [count] + [base] then return end
+      end
     end
     local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
     local undefined =
@@ -3090,14 +3120,23 @@ function codegen.stat_for_list(cx, node)
     -- kernel launch
     local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
 
-    return quote
-      do
-        [actions];
+    if ispace_type.dim == 0 then
+      return quote
+        [actions]
         while iterator_has_next([it]) do
           var [count] : c.size_t = 0
-          var [base] = iterator_next_span([it], &[count], -1).value
+          var [base] = iterator_next_span([it], &count, -1).value
           [kernel_call]
         end
+        [cleanup_actions]
+      end
+    else
+      return quote
+        [actions]
+        var rect = c.legion_domain_get_rect_1d([domain])
+        var [count] = rect.hi.x[0] - rect.lo.x[0] + 1
+        var [base] = rect.lo.x[0]
+        [kernel_call]
         [cleanup_actions]
       end
     end
@@ -3124,40 +3163,54 @@ function codegen.stat_for_list_vectorized(cx, node)
   local orig_block = codegen.block(cx, node.orig_block)
   local vector_width = node.vector_width
 
-  assert(cx:has_region(value_type))
-  local lr = cx:region(value_type).logical_region
-  local it = cx:ispace(value_type:ispace()).index_iterator
+  local ispace_type, is, it
+  if std.is_region(value_type) then
+    ispace_type = value_type:ispace()
+    assert(cx:has_ispace(ispace_type))
+    is = `([value.value].impl.index_space)
+    it = cx:ispace(ispace_type).index_iterator
+  else
+    ispace_type = value_type
+    is = `([value.value].impl)
+  end
 
   local actions = quote
     [value.actions]
   end
   local cleanup_actions = quote end
 
-  local iterator_has_next
-  local iterator_next_span
-  if cache_index_iterator then
-    iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-    iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-    actions = quote
-      [actions]
-      c.legion_terra_cached_index_iterator_reset(it)
+  local iterator_has_next, iterator_next_span -- For unstructured
+  local domain -- For structured
+  if ispace_type.dim == 0 then
+    if it and cache_index_iterator then
+      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
+      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
+      actions = quote
+        [actions]
+        c.legion_terra_cached_index_iterator_reset(it)
+      end
+    else
+      iterator_has_next = c.legion_index_iterator_has_next
+      iterator_next_span = c.legion_index_iterator_next_span
+      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+      actions = quote
+        [actions]
+        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
+      end
+      cleanup_actions = quote
+        c.legion_index_iterator_destroy([it])
+      end
     end
   else
-    iterator_has_next = c.legion_index_iterator_has_next
-    iterator_next_span = c.legion_index_iterator_next_span
-    it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+    domain = terralib.newsymbol(c.legion_domain_t, "domain")
     actions = quote
       [actions]
-      var is = [lr].impl.index_space
-      var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], is)
-    end
-    cleanup_actions = quote
-      c.legion_index_iterator_destroy([it])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
   end
 
-  return quote
-    do
+  if ispace_type.dim == 0 then
+    return quote
       [actions]
       while iterator_has_next([it]) do
         var count : c.size_t = 0
@@ -3192,6 +3245,71 @@ function codegen.stat_for_list_vectorized(cx, node)
         end
       end
       [cleanup_actions]
+    end
+  else
+    local fields = ispace_type.index_type.fields
+    if fields then
+      -- XXX: multi-dimensional index spaces are not supported yet
+      local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
+      local rect = terralib.newsymbol("rect")
+      local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
+      local body = quote
+        var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+        do
+          [block]
+        end
+      end
+      for i = ispace_type.dim, 1, -1 do
+        local rect_i = i - 1 -- C is zero-based, Lua is one-based
+        body = quote
+          for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
+            [orig_block]
+          end
+        end
+      end
+      return quote
+        [actions]
+        var [rect] = [domain_get_rect]([domain])
+        [body]
+        [cleanup_actions]
+      end
+    else
+      return quote
+        [actions]
+        var rect = c.legion_domain_get_rect_1d([domain])
+        var alignment = [vector_width]
+        var base = rect.lo.x[0]
+        var count = rect.hi.x[0] - rect.lo.x[0] + 1
+        var start = (base + alignment - 1) and not (alignment - 1)
+        var stop = (base + count) and not (alignment - 1)
+        var final = base + count
+
+        var i = base
+        if count >= [vector_width] then
+          while i < start do
+            var [symbol] = [symbol.type]{ __ptr = i }
+            do
+              [orig_block]
+            end
+            i = i + 1
+          end
+          while i < stop do
+            var [symbol] = [symbol.type]{ __ptr = i }
+            do
+              [block]
+            end
+            i = i + [vector_width]
+          end
+        end
+        while i < final do
+          var [symbol] = [symbol.type]{ __ptr = i }
+          do
+            [orig_block]
+          end
+          i = i + 1
+        end
+        [cleanup_actions]
+      end
     end
   end
 end

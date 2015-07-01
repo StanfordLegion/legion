@@ -642,7 +642,7 @@ function annotate_vectorizability.expr(vars, node)
     annotate_vectorizability.expr(vars, node.value)
     annotate_vectorizability.expr(vars, node.index)
 
-    if node.index.fact ~= S then
+    if node.index.fact ~= S and not std.is_bounded_type(node.index.expr_type) then
       node.vectorizable = false
       node.error_msg = error_prefix .. "an array access with a non-scalar index"
       return
