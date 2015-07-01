@@ -743,6 +743,7 @@ function ref:read(cx, expr_type)
             (expr_type:isvector() or
              std.is_vptr(expr_type) or
              std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
            local align = sizeof(field_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
@@ -778,6 +779,7 @@ function ref:write(cx, value, expr_type)
             (expr_type:isvector() or
              std.is_vptr(expr_type) or
              std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
            local align = sizeof(field_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
@@ -824,6 +826,7 @@ function ref:reduce(cx, value, op, expr_type)
             (expr_type:isvector() or
              std.is_vptr(expr_type) or
              std.is_sov(expr_type)) then
+           if field_type:isvector() then field_type = field_type.type end
            local align = sizeof(field_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
