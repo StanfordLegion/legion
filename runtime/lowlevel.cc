@@ -6065,15 +6065,6 @@ namespace LegionRuntime {
       return 0;
     }
  
-    struct SpawnTaskArgs : public BaseMedium {
-      Event start_event;
-      Event finish_event;
-      Processor::TaskFuncID func_id;
-      Processor proc;
-      size_t user_arglen;
-      short priority;
-    };
-
     void Event::wait(void) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -6140,6 +6131,18 @@ namespace LegionRuntime {
       e->external_wait(gen);
     }
 
+    // Employ some fancy struct packing here to fit in 64 bytes
+    struct SpawnTaskArgs : public BaseMedium {
+      Processor proc;
+      IDType start_id;
+      IDType finish_id;
+      size_t user_arglen;
+      int priority;
+      Processor::TaskFuncID func_id;
+      Event::gen_t start_gen;
+      Event::gen_t finish_gen;
+    };
+
     // can't be static if it's used in a template...
     void handle_spawn_task_message(SpawnTaskArgs args,
 				   const void *data, size_t datalen)
@@ -6147,17 +6150,22 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = args.proc.impl();
       log_task.debug("remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
-	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
-      if (args.user_arglen == int(datalen)) {
+	       args.proc.id, args.func_id, args.start_id, args.start_gen);
+      Event start_event, finish_event;
+      start_event.id = args.start_id;
+      start_event.gen = args.start_gen;
+      finish_event.id = args.finish_id;
+      finish_event.gen = args.finish_gen;
+      if (args.user_arglen == datalen) {
         // Only have user data
         p->spawn_task(args.func_id, data, datalen,
-                      args.start_event, args.finish_event, args.priority);
+                      start_event, finish_event, args.priority);
       } else {
         // Unpack the profiling set
         Realm::ProfilingRequestSet reqs;
         reqs.deserialize(((char*)data)+args.user_arglen);
         p->spawn_task(args.func_id, data, args.user_arglen, reqs,
-                      args.start_event, args.finish_event, args.priority);
+                      start_event, finish_event, args.priority);
       }
     }
 
@@ -6201,9 +6209,11 @@ namespace LegionRuntime {
 	SpawnTaskArgs msgargs;
 	msgargs.proc = me;
 	msgargs.func_id = func_id;
-	msgargs.start_event = start_event;
-	msgargs.finish_event = finish_event;
-        msgargs.priority = short(priority);
+        msgargs.start_id = start_event.id;
+        msgargs.start_gen = start_event.gen;
+        msgargs.finish_id = finish_event.id;
+        msgargs.finish_gen = finish_event.gen;
+        msgargs.priority = priority;
         msgargs.user_arglen = arglen;
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
@@ -6222,9 +6232,11 @@ namespace LegionRuntime {
 	SpawnTaskArgs msgargs;
 	msgargs.proc = me;
 	msgargs.func_id = func_id;
-	msgargs.start_event = start_event;
-	msgargs.finish_event = finish_event;
-        msgargs.priority = short(priority);
+        msgargs.start_id = start_event.id;
+        msgargs.start_gen = start_event.gen;
+        msgargs.finish_id = finish_event.id;
+        msgargs.finish_gen = finish_event.gen;
+        msgargs.priority = priority;
         msgargs.user_arglen = arglen;
         // Make a copy of the arguments and the profiling requests in
         // the same buffer so that we can copy them over
