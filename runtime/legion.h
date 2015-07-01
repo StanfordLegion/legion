@@ -3542,8 +3542,6 @@ namespace LegionRuntime {
        * @return true if an index partition exists with the specified color
        */
       bool has_index_partition(Context ctx, IndexSpace parent,
-                               Color color);
-      bool has_index_partition(Context ctx, IndexSpace parent,
                                const DomainPoint &color);
 
       /**
@@ -3567,8 +3565,6 @@ namespace LegionRuntime {
        * @param color of the index sub-space
        * @return true if an index space exists with the specified color
        */
-      bool has_index_subspace(Context ctx, IndexPartition p,
-                              Color color);
       bool has_index_subspace(Context ctx, IndexPartition p,
                               const DomainPoint &color);
 
@@ -3814,9 +3810,6 @@ namespace LegionRuntime {
        */
       bool has_logical_partition_by_color(Context ctx,
                                           LogicalRegion parent,
-                                          Color c);
-      bool has_logical_partition_by_color(Context ctx,
-                                          LogicalRegion parent,
                                           const DomainPoint &c);
       
       /**
@@ -3868,9 +3861,6 @@ namespace LegionRuntime {
        * @param color for the specified logical region
        * @return true if a logical region exists with the specified color
        */
-      bool has_logical_subregion_by_color(Context ctx,
-                                          LogicalPartition parent,
-                                          Color c);
       bool has_logical_subregion_by_color(Context ctx,
                                           LogicalPartition parent,
                                           const DomainPoint &c);

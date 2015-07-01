@@ -2537,6 +2537,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_index_partition(Context ctx, IndexSpace parent,
+                                               const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace HighLevelRuntime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
@@ -2550,6 +2558,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_subspace(ctx, p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_index_subspace(Context ctx, 
+                                     IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_subspace(ctx, p, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2736,6 +2752,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_logical_partition_by_color(Context ctx,
+                                     LogicalRegion parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_partition_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition HighLevelRuntime::get_logical_partition_by_tree(
                                             Context ctx, IndexPartition handle, 
                                             FieldSpace fspace, RegionTreeID tid) 
@@ -2766,6 +2790,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_logical_subregion_by_color(Context ctx,
+                                  LogicalPartition parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_subregion_by_color(ctx, parent, c);
     }
 
     //--------------------------------------------------------------------------

@@ -212,14 +212,18 @@ namespace LegionRuntime {
     public:
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);
-      LogicalPartition get_logical_partition_by_color(
-                                 LogicalRegion parent, const ColorPoint &color);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent, 
+                                                      const ColorPoint &color);
+      bool has_logical_partition_by_color(LogicalRegion parent,
+                                          const ColorPoint &color);
       LogicalPartition get_logical_partition_by_tree(
           IndexPartition handle, FieldSpace space, RegionTreeID tid);
       LogicalRegion get_logical_subregion(LogicalPartition parent,
                                           IndexSpace handle);
       LogicalRegion get_logical_subregion_by_color(
                               LogicalPartition parent, const ColorPoint &color);
+      bool has_logical_subregion_by_color(LogicalPartition parent,
+                                          const ColorPoint &color);
       LogicalRegion get_logical_subregion_by_tree(
             IndexSpace handle, FieldSpace space, RegionTreeID tid);
       ColorPoint get_logical_region_color(LogicalRegion handle);
@@ -2312,6 +2316,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       bool has_child(const ColorPoint &p);
+      bool has_color(const ColorPoint &p);
       PartitionNode* get_child(const ColorPoint &p);
       void add_child(PartitionNode *child);
       void remove_child(const ColorPoint &p);
@@ -2469,6 +2474,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       bool has_child(const ColorPoint &c);
+      bool has_color(const ColorPoint &c);
       RegionNode* get_child(const ColorPoint &c);
       void add_child(RegionNode *child);
       void remove_child(const ColorPoint &c);
