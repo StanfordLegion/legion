@@ -3967,11 +3967,13 @@ function codegen.stat_task(cx, node)
       var [args]
       if c.legion_task_get_is_index_space(c_task) then
         var arglen = c.legion_task_get_local_arglen(c_task)
-        if arglen ~= terralib.sizeof(params_struct_type) then c.abort() end
+        std.assert(arglen == terralib.sizeof(params_struct_type),
+                   ["arglen mismatch in " .. tostring(task.name) .. " (index task)"])
         args = [&params_struct_type](c.legion_task_get_local_args(c_task))
       else
         var arglen = c.legion_task_get_arglen(c_task)
-        if arglen ~= terralib.sizeof(params_struct_type) then c.abort() end
+        std.assert(arglen == terralib.sizeof(params_struct_type),
+                   ["arglen mismatch " .. tostring(task.name) .. " (single task)"])
         args = [&params_struct_type](c.legion_task_get_args(c_task))
       end
     end)
