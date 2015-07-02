@@ -31,15 +31,53 @@ namespace LegionRuntime {
 
     class LegionProfInstance {
     public:
+      struct TaskVariant {
+      public:
+        Processor::TaskFuncID func_id;
+        const char *variant_name;
+      };
+      struct OperationInstance {
+      public:
+        UniqueID op_id;
+        unsigned op_kind;
+      };
+      struct TaskInfo {
+      public:
+        UniqueID task_id;
+        Processor::TaskFuncID func_id;
+        Processor proc;
+        unsigned long long create, ready, start, stop;
+      };
+      struct MetaInfo {
+      public:
+        UniqueID op_id;
+        unsigned hlr_id;
+        Processor proc;
+        unsigned long long create, ready, start, stop;
+      };
+      struct CopyInfo {
+      public:
+        UniqueID op_id;
+        Memory source, target;
+        unsigned long long create, ready, start, stop;
+      };
+      struct InstInfo {
+      public:
+        UniqueID op_id; 
+        PhysicalInstance inst;
+        Memory mem;
+        size_t total_bytes;
+      };
+    public:
       LegionProfInstance(LegionProfiler *owner);
       LegionProfInstance(const LegionProfInstance &rhs);
       ~LegionProfInstance(void);
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
-      void register_task_variant(TaskVariantCollection::Variant *variant);
+      void register_task_variant(const char *variant_name,
+                                 TaskVariantCollection::Variant *variant);
       void register_operation(Operation *op);
-      void register_task(SingleTask *task);
     public:
       void process_task(size_t id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
@@ -55,6 +93,13 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
     private:
       LegionProfiler *const owner;
+      std::deque<TaskVariant>       task_variants;
+      std::deque<OperationInstance> operation_instances;
+    private:
+      std::deque<TaskInfo> task_infos;
+      std::deque<MetaInfo> meta_infos;
+      std::deque<CopyInfo> copy_infos;
+      std::deque<InstInfo> inst_infos;
     };
 
     class LegionProfiler {
@@ -89,11 +134,10 @@ namespace LegionRuntime {
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
-      void register_task_variant(TaskVariantCollection::Variant *variant);
+      void register_task_variant(const char *variant_name,
+                                 TaskVariantCollection::Variant *variant);
       // Operations
       void register_operation(Operation *op);
-      // Tasks
-      void register_task(SingleTask *task);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             Processor::TaskFuncID tid, SingleTask *task);

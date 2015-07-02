@@ -29,7 +29,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LegionProfInstance::LegionProfInstance(const LegionProfInstance &rhs)
-      : owner(NULL)
+      : owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -53,25 +53,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::register_task_variant(
+    void LegionProfInstance::register_task_variant(const char *variant_name,
                                         TaskVariantCollection::Variant *variant)
     //--------------------------------------------------------------------------
     {
-
+      task_variants.push_back(TaskVariant()); 
+      TaskVariant &var = task_variants.back();
+      var.func_id = variant->low_id;
+      var.variant_name = strdup(variant_name);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::register_task(SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-
+      operation_instances.push_back(OperationInstance());
+      OperationInstance &inst = operation_instances.back();
+      inst.op_id = op->get_unique_op_id();
+      inst.op_kind = op->get_operation_kind();
     }
 
     //--------------------------------------------------------------------------
@@ -80,7 +79,15 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
-
+      task_infos.push_back(TaskInfo()); 
+      TaskInfo &info = task_infos.back();
+      info.task_id = op_id;
+      info.func_id = id;
+      info.proc = usage->proc;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      info.stop = timeline->end_time;
     }
 
     //--------------------------------------------------------------------------
@@ -89,7 +96,15 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
-
+      meta_infos.push_back(MetaInfo());
+      MetaInfo &info = meta_infos.back();
+      info.op_id = op_id;
+      info.hlr_id = id;
+      info.proc = usage->proc;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      info.stop = timeline->end_time;
     }
 
     //--------------------------------------------------------------------------
@@ -98,7 +113,15 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
-
+      copy_infos.push_back(CopyInfo());
+      CopyInfo &info = copy_infos.back();
+      info.op_id = op_id;
+      info.source = usage->source;
+      info.target = usage->target;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      info.stop = timeline->end_time;
     }
 
     //--------------------------------------------------------------------------
@@ -107,7 +130,12 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
-
+      inst_infos.push_back(InstInfo());
+      InstInfo &info = inst_infos.back();
+      info.op_id = op_id;
+      info.inst.id = id;
+      info.mem = usage->mem;
+      info.total_bytes = usage->bytes;
     }
 
     //--------------------------------------------------------------------------
@@ -129,9 +157,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : target_proc(rhs.target_proc), num_meta_tasks(0),
-        task_descriptions(NULL), num_operation_kinds(0),
-        operation_kind_descriptions(NULL), instances(NULL)
+      : target_proc(rhs.target_proc), num_meta_tasks(rhs.num_meta_tasks),
+        task_descriptions(rhs.task_descriptions), 
+        num_operation_kinds(rhs.num_operation_kinds),
+        operation_kind_descriptions(rhs.operation_kind_descriptions), 
+        instances(rhs.instances)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -160,7 +190,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::register_task_variant(
+    void LegionProfiler::register_task_variant(const char *variant_name,
                                         TaskVariantCollection::Variant *variant)
     //--------------------------------------------------------------------------
     {
@@ -171,7 +201,7 @@ namespace LegionRuntime {
 #endif
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
-      instances[local_id]->register_task_variant(variant);
+      instances[local_id]->register_task_variant(variant_name, variant);
     }
 
     //--------------------------------------------------------------------------
@@ -186,20 +216,6 @@ namespace LegionRuntime {
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->register_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::register_task(SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-      Processor current = Processor::get_executing_processor();
-      size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
-      assert(local_id < MAX_NUM_PROCS);
-#endif
-      if (instances[local_id] == NULL)
-        instances[local_id] = new LegionProfInstance(this);
-      instances[local_id]->register_task(task);
     }
 
     //--------------------------------------------------------------------------

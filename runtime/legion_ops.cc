@@ -41,6 +41,9 @@ namespace LegionRuntime {
     // Operation 
     /////////////////////////////////////////////////////////////
 
+    const char *const 
+      Operation::op_names[Operation::LAST_OP_KIND] = OPERATION_NAMES;
+
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), op_lock(Reservation::create_reservation()), 
@@ -1753,7 +1756,14 @@ namespace LegionRuntime {
     const char* MapOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Mapping";
+      return op_names[MAP_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind MapOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return MAP_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -2581,7 +2591,14 @@ namespace LegionRuntime {
     const char* CopyOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Copy";
+      return op_names[COPY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind CopyOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return COPY_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -3439,7 +3456,14 @@ namespace LegionRuntime {
     const char* FenceOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Fence";
+      return op_names[FENCE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind FenceOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return FENCE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -3615,7 +3639,14 @@ namespace LegionRuntime {
     const char* FrameOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Frame Op";
+      return op_names[FRAME_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind FrameOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return FRAME_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -3829,7 +3860,14 @@ namespace LegionRuntime {
     const char* DeletionOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Deletion";
+      return op_names[DELETION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DeletionOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return DELETION_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -4183,7 +4221,14 @@ namespace LegionRuntime {
     const char* InterCloseOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Inter Close Op";
+      return op_names[INTER_CLOSE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind InterCloseOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return INTER_CLOSE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -4425,7 +4470,14 @@ namespace LegionRuntime {
     const char* PostCloseOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Post Close Op";
+      return op_names[POST_CLOSE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind PostCloseOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return POST_CLOSE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -4741,7 +4793,14 @@ namespace LegionRuntime {
     const char* AcquireOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Acquire";
+      return op_names[ACQUIRE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AcquireOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return ACQUIRE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -5298,7 +5357,14 @@ namespace LegionRuntime {
     const char* ReleaseOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Release";
+      return op_names[RELEASE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind ReleaseOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return RELEASE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -5758,7 +5824,14 @@ namespace LegionRuntime {
     const char* DynamicCollectiveOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Dynamic Collective";
+      return op_names[DYNAMIC_COLLECTIVE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DynamicCollectiveOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return DYNAMIC_COLLECTIVE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -5867,7 +5940,14 @@ namespace LegionRuntime {
     const char* FuturePredOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Future Predicate";
+      return op_names[FUTURE_PRED_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind FuturePredOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return FUTURE_PRED_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -6016,7 +6096,14 @@ namespace LegionRuntime {
     const char* NotPredOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Not Predicate";
+      return op_names[NOT_PRED_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind NotPredOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return NOT_PRED_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -6167,7 +6254,14 @@ namespace LegionRuntime {
     const char* AndPredOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "And Predicate";
+      return op_names[AND_PRED_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AndPredOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return AND_PRED_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -6379,7 +6473,14 @@ namespace LegionRuntime {
     const char* OrPredOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Or Predicate";
+      return op_names[OR_PRED_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind OrPredOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return OR_PRED_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -6678,7 +6779,14 @@ namespace LegionRuntime {
     const char* MustEpochOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Must Epoch";
+      return op_names[MUST_EPOCH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind MustEpochOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return MUST_EPOCH_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -7707,7 +7815,14 @@ namespace LegionRuntime {
     const char* PendingPartitionOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Pending Partition";
+      return op_names[PENDING_PARTITION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind PendingPartitionOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return PENDING_PARTITION_OP_KIND;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7949,7 +8064,14 @@ namespace LegionRuntime {
     const char* DependentPartitionOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Dependent Partition";
+      return op_names[DEPENDENT_PARTITION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DependentPartitionOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return DEPENDENT_PARTITION_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -8119,7 +8241,14 @@ namespace LegionRuntime {
     const char* FillOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Fill Op";
+      return op_names[FILL_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind FillOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return FILL_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -8533,7 +8662,14 @@ namespace LegionRuntime {
     const char* AttachOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Attach Op";
+      return op_names[ATTACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AttachOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return ATTACH_OP_KIND;
     }
     
     //--------------------------------------------------------------------------
@@ -8874,7 +9010,14 @@ namespace LegionRuntime {
     const char* DetachOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "Detach Op";
+      return op_names[DETACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DetachOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return DETACH_OP_KIND;
     }
 
     //--------------------------------------------------------------------------

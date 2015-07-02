@@ -4995,7 +4995,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
       : high_level(NULL), machine(rhs.machine), address_space(0), 
-        runtime_stride(0), forest(NULL),
+        runtime_stride(0), profiler(rhs.profiler), forest(NULL),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
 #ifdef SPECIALIZE_UTIL_PROCS
         , cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
