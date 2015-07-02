@@ -1936,10 +1936,13 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void high_level_runtime_task(
                           const void *args, size_t arglen, Processor p);
+      static void profiling_runtime_task(
+                          const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
       void process_schedule_request(Processor p);
+      void process_profiling_task(Processor p, const void *args, size_t arglen);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The HighLevelRuntime wrapper for this class
@@ -1948,6 +1951,7 @@ namespace LegionRuntime {
       const Machine machine;
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
+      LegionProfiler *profiler;
       RegionTreeForest *const forest;
       Processor utility_group;
     protected:

@@ -4773,8 +4773,8 @@ namespace LegionRuntime {
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      Processor cleanup, Processor gc, Processor message)
-      : high_level(new HighLevelRuntime(this)), machine(m), 
-        address_space(unique), runtime_stride(address_spaces.size()),
+      : high_level(new HighLevelRuntime(this)),machine(m),address_space(unique),
+        runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), outstanding_top_level_tasks(1),
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
@@ -12945,6 +12945,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::process_profiling_task(Processor p, 
+                                         const void *args, size_t arglen)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiler != NULL);
+#endif
+      profiler->process_results(p, args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::process_message_task(const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
@@ -16284,6 +16295,7 @@ namespace LegionRuntime {
       table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
       table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
       table[HLR_TASK_ID]           = Runtime::high_level_runtime_task;
+      table[HLR_PROFILING_ID]      = Runtime::profiling_runtime_task;
     }
 
     //--------------------------------------------------------------------------
@@ -16884,6 +16896,15 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::profiling_runtime_task(
+                                   const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->process_profiling_task(p, args, arglen);
     }
 
 #ifdef TRACE_ALLOCATION

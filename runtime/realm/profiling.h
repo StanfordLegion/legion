@@ -28,18 +28,23 @@
 namespace Realm {
   // hacking in references to old namespace for now
   typedef LegionRuntime::LowLevel::Processor Processor;
+  typedef LegionRuntime::LowLevel::Memory Memory;
   typedef LegionRuntime::LowLevel::Processor::TaskFuncID TaskFuncID;
 
   // through the wonders of templates, users should never need to work with 
   //  these IDs directly
   enum ProfilingMeasurementID {
-    PMID_STATUS,    // completion status of operation
-    PMID_TIMELINE,  // when task was ready, started, completed
+    PMID_OP_STATUS,    // completion status of operation
+    PMID_OP_TIMELINE,  // when task was ready, started, completed
+    PMID_OP_PROC_USAGE, // processor used by task
+    PMID_OP_MEM_USAGE, // memories used by a copy
+    PMID_INST_TIMELINE, // timeline for a physical instance
+    PMID_INST_MEM_USAGE, // memory and size used by an instance
   };
 
   namespace ProfilingMeasurements {
     struct OperationStatus {
-      static const ProfilingMeasurementID ID = PMID_STATUS;
+      static const ProfilingMeasurementID ID = PMID_OP_STATUS;
 
       enum Result {
 	COMPLETED_SUCCESSFULLY,
@@ -57,7 +62,7 @@ namespace Realm {
     };
 
     struct OperationTimeline {
-      static const ProfilingMeasurementID ID = PMID_TIMELINE;
+      static const ProfilingMeasurementID ID = PMID_OP_TIMELINE;
           
       // all times reported in nanoseconds from some arbitrary (but fixed, for a given
       //  execution) reference time
@@ -73,6 +78,38 @@ namespace Realm {
       inline void record_ready_time(void);
       inline void record_start_time(void);
       inline void record_end_time(void);
+    };
+
+    // Track processor used for tasks
+    struct OperationProcessorUsage {
+      static const ProfilingMeasurementID ID = PMID_OP_PROC_USAGE;
+      Processor proc;
+    };
+
+    // Track memories used for copies
+    struct OperationMemoryUsage {
+      static const ProfilingMeasurementID ID = PMID_OP_MEM_USAGE;
+      Memory source;
+      Memory target;
+    };
+
+    // Track memories used for instances
+    struct InstanceTimeline {
+      static const ProfilingMeasurementID ID = PMID_INST_TIMELINE;
+
+      // all times reported in nanoseconds from some arbitrary (but fixed, for a given
+      //  execution) reference time
+      typedef unsigned long long timestamp_t;
+      static const timestamp_t INVALID_TIMESTAMP = 0;
+
+      timestamp_t create_time; // when was instance created?
+      timestamp_t delete_time; // when was the instance deleted?
+    };
+
+    struct InstanceMemoryUsage {
+      static const ProfilingMeasurementID ID = PMID_INST_MEM_USAGE;
+      Memory mem;
+      size_t bytes;
     };
   };
 
