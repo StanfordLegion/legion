@@ -134,7 +134,7 @@ namespace LegionRuntime {
       InstInfo &info = inst_infos.back();
       info.op_id = op_id;
       info.inst.id = id;
-      info.mem = usage->mem;
+      info.mem = usage->memory;
       info.total_bytes = usage->bytes;
     }
 

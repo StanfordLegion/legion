@@ -403,6 +403,15 @@ namespace LegionRuntime {
  
     CopyRequest::~CopyRequest(void)
     {
+      if (measurements.wants_measurement<
+          Realm::ProfilingMeasurements::OperationMemoryUsage>() &&
+          !oas_by_inst->empty()) {
+        const InstPair &pair = oas_by_inst->begin()->first; 
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        measurements.add_measurement(usage);
+      }
       delete oas_by_inst;
     }
 

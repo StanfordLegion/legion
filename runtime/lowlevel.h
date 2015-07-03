@@ -1378,6 +1378,17 @@ namespace LegionRuntime {
 				     const std::vector<size_t> &field_sizes,
 				     size_t block_size,
 				     ReductionOpID redop_id = 0) const;
+
+      RegionInstance create_instance(Memory memory, size_t elem_size,
+                                     const Realm::ProfilingRequestSet &reqs,
+                                     ReductionOpID redop_id = 0) const;
+
+      RegionInstance create_instance(Memory memory,
+				     const std::vector<size_t> &field_sizes,
+				     size_t block_size,
+                                     const Realm::ProfilingRequestSet &reqs,
+				     ReductionOpID redop_id = 0) const;
+
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,

@@ -125,6 +125,26 @@ namespace Realm {
             add_measurement<ProfilingMeasurements::OperationTimeline>();
             break;
           }
+        case ProfilingMeasurements::OperationProcessorUsage::ID:
+          {
+            add_measurement<ProfilingMeasurements::OperationProcessorUsage>();
+            break;
+          }
+        case ProfilingMeasurements::OperationMemoryUsage::ID:
+          {
+            add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
+            break;
+          }
+        case ProfilingMeasurements::InstanceTimeline::ID:
+          {
+            add_measurement<ProfilingMeasurements::InstanceTimeline>();
+            break;
+          }
+        case ProfilingMeasurements::InstanceMemoryUsage::ID:
+          {
+            add_measurement<ProfilingMeasurements::InstanceMemoryUsage>();
+            break;
+          }
         default:
           assert(false);
       }
@@ -175,6 +195,11 @@ namespace Realm {
   size_t ProfilingRequestSet::request_count(void) const
   {
     return requests.size();
+  }
+
+  bool ProfilingRequestSet::empty(void) const
+  {
+    return requests.empty();
   }
 
   void ProfilingRequestSet::clear(void)

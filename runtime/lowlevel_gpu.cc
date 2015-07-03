@@ -78,6 +78,8 @@ namespace LegionRuntime {
                                       (void*)this, 0) );
       }
       (*fptr)(task->args, task->arglen, gpu->me);
+      if (task->capture_proc)
+        task->proc = gpu->me;
 #ifdef EVENT_GRAPH_TRACE
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
       finish_enclosing();

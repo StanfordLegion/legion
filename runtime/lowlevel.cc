@@ -1178,6 +1178,7 @@ namespace LegionRuntime {
 
     RegionInstance::Impl::Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
 			       const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
+                               const Realm::ProfilingRequestSet &reqs,
 			       off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/, RegionInstance _parent_inst /*= NO_INST*/)
       : me(_me), memory(_memory)
     {
@@ -1206,6 +1207,15 @@ namespace LegionRuntime {
 
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
+
+      if (!reqs.empty()) {
+        requests = reqs;
+        measurements.import_requests(requests);
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+          timeline.record_create_time();
+        }
+      }
     }
 
     // when we auto-create a remote instance, we don't know region/offset
@@ -1293,6 +1303,28 @@ namespace LegionRuntime {
       }
 
       return true;
+    }
+
+    void RegionInstance::Impl::finalize_instance(void)
+    {
+      if (!requests.empty()) {
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+          timeline.record_delete_time();
+          measurements.add_measurement(timeline);
+        }
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
+          Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+          usage.memory = memory;
+          // Safe to read from meta-data here because we know we are
+          // on the owner node so it has up to date copy
+          usage.bytes = metadata.size;
+          measurements.add_measurement(usage);
+        }
+        measurements.send_responses(requests);
+        requests.clear();
+      }
     }
 
     void *RegionInstance::Impl::Metadata::serialize(size_t& out_size) const
@@ -4040,11 +4072,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_local(r, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 
@@ -4103,11 +4136,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_remote(r, linearization_bits, bytes_needed,
 				      block_size, element_size, field_sizes, redopid,
-				      list_size, parent_inst);
+				      list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 
@@ -4845,16 +4879,17 @@ namespace LegionRuntime {
 						 const std::vector<size_t>& field_sizes,
 						 ReductionOpID redopid,
 						 off_t list_size,
+                                                 const Realm::ProfilingRequestSet &reqs,
 						 RegionInstance parent_inst)
     {
       if(gasnet_mynode() == 0) {
 	return create_instance_local(r, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       } else {
 	return create_instance_remote(r, linearization_bits, bytes_needed,
 				      block_size, element_size, field_sizes, redopid,
-				      list_size, parent_inst);
+				      list_size, reqs, parent_inst);
       }
     }
 
@@ -5062,6 +5097,7 @@ namespace LegionRuntime {
 						       const std::vector<size_t>& field_sizes,
 						       ReductionOpID redopid,
 						       off_t list_size,
+                                                       const Realm::ProfilingRequestSet &reqs,
 						       RegionInstance parent_inst)
     {
       off_t inst_offset = alloc_bytes(bytes_needed);
@@ -5104,9 +5140,12 @@ namespace LegionRuntime {
       DomainLinearization linear;
       linear.deserialize(linearization_bits);
 
-      RegionInstance::Impl *i_impl = new RegionInstance::Impl(i, r, me, inst_offset, bytes_needed, redopid,
-							      linear, block_size, element_size, field_sizes,
-							      count_offset, list_size, parent_inst);
+      RegionInstance::Impl *i_impl = new RegionInstance::Impl(i, r, me, inst_offset, 
+                                                              bytes_needed, redopid,
+							      linear, block_size, 
+                                                              element_size, field_sizes, reqs,
+							      count_offset, list_size, 
+                                                              parent_inst);
 
       // find/make an available index to store this in
       IDType index;
@@ -5185,11 +5224,14 @@ namespace LegionRuntime {
       resp.resp_ptr = args.resp_ptr;
 
       const CreateInstancePayload *payload = (const CreateInstancePayload *)msgdata;
-      assert(msglen == (sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields));
 
       std::vector<size_t> field_sizes(payload->num_fields);
       for(size_t i = 0; i < payload->num_fields; i++)
 	field_sizes[i] = payload->field_size(i);
+
+      size_t req_offset = sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields;
+      Realm::ProfilingRequestSet requests;
+      requests.deserialize(((const char*)msgdata)+req_offset);
 
       resp.i = args.m.impl()->create_instance(args.r, 
 					      payload->linearization_bits,
@@ -5199,6 +5241,7 @@ namespace LegionRuntime {
 					      field_sizes,
 					      payload->redopid,
 					      payload->list_size,
+                                              requests,
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
@@ -5228,9 +5271,11 @@ namespace LegionRuntime {
 							const std::vector<size_t>& field_sizes,
 							ReductionOpID redopid,
 							off_t list_size,
+                                                        const Realm::ProfilingRequestSet &reqs,
 							RegionInstance parent_inst)
     {
-      size_t payload_size = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
+      size_t req_offset = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
+      size_t payload_size = req_offset + reqs.compute_size();
       CreateInstancePayload *payload = (CreateInstancePayload *)malloc(payload_size);
 
       payload->bytes_needed = bytes_needed;
@@ -5246,6 +5291,8 @@ namespace LegionRuntime {
       payload->num_fields = field_sizes.size();
       for(unsigned i = 0; i < field_sizes.size(); i++)
 	payload->field_size(i) = field_sizes[i];
+
+      reqs.serialize(((char*)payload)+req_offset);
 
       CreateInstanceReqArgs args;
       args.srcptr = 0; // gcc 4.4.7 wants this!?
@@ -5271,7 +5318,7 @@ namespace LegionRuntime {
         linear.deserialize(linearization_bits);
 
         RegionInstance::Impl *i_impl = new RegionInstance::Impl(resp.i, r, me, resp.inst_offset, bytes_needed, redopid,
-                                                                linear, block_size, element_size, field_sizes,
+                                                                linear, block_size, element_size, field_sizes, reqs,
                                                                 resp.count_offset, list_size, parent_inst);
 
         unsigned index = ID(resp.i).index_l();
@@ -5333,6 +5380,9 @@ namespace LegionRuntime {
 	// TODO
       }
       
+      // handle any profiling requests
+      iimpl->finalize_instance();
+      
       return; // TODO: free up actual instance record?
       ID id(i);
 
@@ -5383,7 +5433,7 @@ namespace LegionRuntime {
 	       Event _finish_event, int _priority, int expected_count)
       : Realm::Operation(), proc(_proc), func_id(_func_id), arglen(_arglen),
 	finish_event(_finish_event), priority(_priority),
-        run_count(0), finish_count(expected_count)
+        run_count(0), finish_count(expected_count), capture_proc(false)
     {
       if(arglen) {
 	args = malloc(arglen);
@@ -5405,11 +5455,18 @@ namespace LegionRuntime {
 	memcpy(args, _args, arglen);
       } else
 	args = 0;
+      capture_proc = measurements.wants_measurement<
+                        Realm::ProfilingMeasurements::OperationProcessorUsage>();
     }
 
     Task::~Task(void)
     {
       free(args);
+      if (capture_proc) {
+        Realm::ProfilingMeasurements::OperationProcessorUsage usage;
+        usage.proc = proc;
+        measurements.add_measurement(usage);
+      }
     }
 
     ///////////////////////////////////////////////////
@@ -6015,6 +6072,9 @@ namespace LegionRuntime {
         (*fptr)(task->args, task->arglen, 
                 (actual_proc.exists() ? actual_proc : task->proc));
         task->mark_completed();
+        // Capture the actual processor if necessary
+        if (task->capture_proc && actual_proc.exists())
+          task->proc = actual_proc;
         log_task.info("thread finished running task %p for proc " IDFMT "",
                                 task, task->proc.id);
 #ifdef EVENT_GRAPH_TRACE
@@ -6660,8 +6720,30 @@ namespace LegionRuntime {
     }
 
     RegionInstance Domain::create_instance(Memory memory,
+					   size_t elem_size,
+                                           const Realm::ProfilingRequestSet &reqs,
+					   ReductionOpID redop_id) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
+      std::vector<size_t> field_sizes(1);
+      field_sizes[0] = elem_size;
+
+      return create_instance(memory, field_sizes, 1, reqs, redop_id);
+    }
+
+    RegionInstance Domain::create_instance(Memory memory,
 					   const std::vector<size_t> &field_sizes,
 					   size_t block_size,
+					   ReductionOpID redop_id) const
+    {
+      Realm::ProfilingRequestSet requests;
+      return create_instance(memory, field_sizes, block_size, requests, redop_id);
+    }
+
+    RegionInstance Domain::create_instance(Memory memory,
+					   const std::vector<size_t> &field_sizes,
+					   size_t block_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   ReductionOpID redop_id) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
@@ -6770,7 +6852,7 @@ namespace LegionRuntime {
       RegionInstance i = m_impl->create_instance(get_index_space(), linearization_bits, inst_bytes,
 						 block_size, elem_size, field_sizes,
 						 redop_id,
-						 -1 /*list size*/,
+						 -1 /*list size*/, reqs,
 						 RegionInstance::NO_INST);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);

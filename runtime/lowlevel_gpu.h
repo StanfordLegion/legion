@@ -456,11 +456,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_local(is, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 
@@ -512,11 +513,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_local(is, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 

@@ -946,6 +946,7 @@ namespace LegionRuntime {
       Event finish_event;
       int priority;
       int run_count, finish_count;
+      bool capture_proc;
     };
 
     class Processor::Impl {
@@ -1285,6 +1286,7 @@ namespace LegionRuntime {
 					   const std::vector<size_t>& field_sizes,
 					   ReductionOpID redopid,
 					   off_t list_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   RegionInstance parent_inst);
 
       RegionInstance create_instance_remote(IndexSpace is,
@@ -1295,6 +1297,7 @@ namespace LegionRuntime {
 					    const std::vector<size_t>& field_sizes,
 					    ReductionOpID redopid,
 					    off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
 					    RegionInstance parent_inst);
 
       virtual RegionInstance create_instance(IndexSpace is,
@@ -1305,6 +1308,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst) = 0;
 
       void destroy_instance_local(RegionInstance i, bool local_destroy);
@@ -1366,6 +1370,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
@@ -1416,6 +1421,7 @@ namespace LegionRuntime {
                                             const std::vector<size_t>& field_sizes,
                                             ReductionOpID redopid,
                                             off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
                                             RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i,
@@ -1455,6 +1461,7 @@ namespace LegionRuntime {
                                              size_t block_size,
                                              size_t element_size,
                                              const std::vector<size_t>& field_sizes,
+                                             const Realm::ProfilingRequestSet &reqs,
                                              ReductionOpID redopid,
                                              off_t list_size,
                                              RegionInstance parent_inst);
@@ -1541,9 +1548,13 @@ namespace LegionRuntime {
 
     class RegionInstance::Impl {
     public:
-      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
-	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-	   off_t _count_offset = -1, off_t _red_list_size = -1, RegionInstance _parent_inst = NO_INST);
+      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
+          ReductionOpID _redopid,
+	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
+           const std::vector<size_t>& _field_sizes,
+           const Realm::ProfilingRequestSet &reqs,
+	   off_t _count_offset = -1, off_t _red_list_size = -1, 
+           RegionInstance _parent_inst = NO_INST);
 
       // when we auto-create a remote instance, we don't know region/offset/linearization
       Impl(RegionInstance _me, Memory _memory);
@@ -1571,11 +1582,17 @@ namespace LegionRuntime {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).node(), me.id); }
 
+      void finalize_instance(void);
+
     public: //protected:
       friend class RegionInstance;
 
       RegionInstance me;
       Memory memory; // not part of metadata because it's determined from ID alone
+      // Profiling info only needed on creation node
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingMeasurementCollection measurements;
+      Realm::ProfilingMeasurements::InstanceTimeline timeline;
 
       class Metadata : public MetadataBase {
       public:

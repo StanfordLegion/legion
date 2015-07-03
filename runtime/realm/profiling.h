@@ -93,7 +93,7 @@ namespace Realm {
       Memory target;
     };
 
-    // Track memories used for instances
+    // Track the timeline of an instance
     struct InstanceTimeline {
       static const ProfilingMeasurementID ID = PMID_INST_TIMELINE;
 
@@ -104,11 +104,15 @@ namespace Realm {
 
       timestamp_t create_time; // when was instance created?
       timestamp_t delete_time; // when was the instance deleted?
+
+      inline void record_create_time(void);
+      inline void record_delete_time(void);
     };
 
+    // Track properties of an instance
     struct InstanceMemoryUsage {
       static const ProfilingMeasurementID ID = PMID_INST_MEM_USAGE;
-      Memory mem;
+      Memory memory;
       size_t bytes;
     };
   };
@@ -151,6 +155,7 @@ namespace Realm {
 				  const void *payload = 0, size_t payload_size = 0);
 
     size_t request_count(void) const;
+    bool empty(void) const;
 
     void clear(void);
 
