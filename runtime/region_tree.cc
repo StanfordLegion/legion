@@ -23063,6 +23063,7 @@ namespace LegionRuntime {
         if (it->views.find(view) == it->views.end())
         {
           view->add_resource_reference();
+	  view->add_gc_reference();
           view->add_valid_reference();
           it->views.insert(view);
         }
@@ -23074,6 +23075,7 @@ namespace LegionRuntime {
       if (!added)
       {
         view->add_resource_reference();
+	view->add_gc_reference();
         view->add_valid_reference();
         reduction_epochs.push_back(ReductionEpoch(view, redop, valid_mask));
       }
