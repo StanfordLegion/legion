@@ -67,6 +67,7 @@ namespace LegionRuntime {
         PhysicalInstance inst;
         Memory mem;
         size_t total_bytes;
+        unsigned long long create, destroy;
       };
     public:
       LegionProfInstance(LegionProfiler *owner);
@@ -91,6 +92,8 @@ namespace LegionRuntime {
       void process_inst(size_t id, UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+    public:
+      void dump_state(void);
     private:
       LegionProfiler *const owner;
       std::deque<TaskVariant>       task_variants;
@@ -124,9 +127,9 @@ namespace LegionRuntime {
       // so that it can be deduplicated
       LegionProfiler(Processor target_proc,
                      unsigned num_meta_tasks,
-                     const char *meta_task_descriptions,
+                     const char *const *const meta_task_descriptions,
                      unsigned num_operation_kinds,
-                     const char *operation_kind_descriptions);
+                     const char *const *const operation_kind_descriptions);
       LegionProfiler(const LegionProfiler &rhs);
       ~LegionProfiler(void);
     public:
@@ -151,12 +154,15 @@ namespace LegionRuntime {
       // Process low-level runtime profiling results
       void process_results(Processor p, const void *buffer, size_t size);
     public:
+      // Dump all the results
+      void finalize(void);
+    public:
       const Processor target_proc;
     private:
       const unsigned num_meta_tasks;
-      const char *const task_descriptions;
+      const char *const *const task_descriptions;
       const unsigned num_operation_kinds;
-      const char *const operation_kind_descriptions;
+      const char *const *const operation_kind_descriptions;
     private:
       LegionProfInstance **const instances;
     };

@@ -35,6 +35,7 @@ namespace LegionRuntime {
     Logger::Category log_variant("variants");
     Logger::Category log_allocation("allocation");
     Logger::Category log_directory("directory");
+    Logger::Category log_prof("legion_prof");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");

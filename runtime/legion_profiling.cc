@@ -17,8 +17,13 @@
 #include "legion_tasks.h"
 #include "legion_profiling.h"
 
+#include <cstring>
+#include <cstdlib>
+
 namespace LegionRuntime {
   namespace HighLevel {
+
+    extern Logger::Category log_prof;
 
     //--------------------------------------------------------------------------
     LegionProfInstance::LegionProfInstance(LegionProfiler *own)
@@ -136,14 +141,67 @@ namespace LegionRuntime {
       info.inst.id = id;
       info.mem = usage->memory;
       info.total_bytes = usage->bytes;
+      info.create = timeline->create_time;
+      info.destroy = timeline->delete_time;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::dump_state(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
+            it != task_variants.end(); it++)
+      {
+        log_prof.info("Prof Task Variant %u %s", it->func_id, it->variant_name);
+        free(const_cast<char*>(it->variant_name));
+      }
+      for (std::deque<OperationInstance>::const_iterator it = 
+            operation_instances.begin(); it != operation_instances.end(); it++)
+      {
+        log_prof.info("Prof Operation %llu %u", it->op_id, it->op_kind);
+      }
+      for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
+            it != task_infos.end(); it++)
+      {
+        log_prof.info("Prof Task Info %llu %u " IDFMT " %llu %llu %llu %llu",
+                      it->task_id, it->func_id, it->proc.id, 
+                      it->create, it->ready, it->start, it->stop);
+      }
+      for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
+            it != meta_infos.end(); it++)
+      {
+        log_prof.info("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
+                      it->op_id, it->hlr_id, it->proc.id,
+                      it->create, it->ready, it->start, it->stop);
+      }
+      for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
+            it != copy_infos.end(); it++)
+      {
+        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT 
+                      " %llu %llu %llu %llu", it->op_id, it->source.id,
+                    it->target.id, it->create, it->ready, it->start, it->stop);
+      }
+      for (std::deque<InstInfo>::const_iterator it = inst_infos.begin();
+            it != inst_infos.end(); it++)
+      {
+        log_prof.info("Prof Inst Info %llu " IDFMT " " IDFMT " %lu %llu %llu",
+                      it->op_id, it->inst.id, it->mem.id, it->total_bytes,
+                      it->create, it->destroy);
+      }
+      task_variants.clear();
+      operation_instances.clear();
+      task_infos.clear();
+      meta_infos.clear();
+      copy_infos.clear();
+      inst_infos.clear();
     }
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(Processor target,
                                    unsigned num_meta,
-                                   const char *meta_descs,
+                                   const char *const *const meta_descs,
                                    unsigned num_kinds,
-                                   const char *op_descs)
+                                   const char *const *const op_descs)
       : target_proc(target), num_meta_tasks(num_meta), 
         task_descriptions(meta_descs), num_operation_kinds(num_kinds), 
         operation_kind_descriptions(op_descs), instances((LegionProfInstance**)
@@ -153,6 +211,15 @@ namespace LegionRuntime {
       // Allocate space for all the instances and null it out
       for (unsigned idx = 0; idx < MAX_NUM_PROCS; idx++)
         instances[idx] = NULL;
+      for (unsigned idx = 0; idx < num_meta_tasks; idx++)
+      {
+        log_prof.info("Prof Meta Desc %u %s", idx, task_descriptions[idx]);
+      }
+      for (unsigned idx = 0; idx < num_operation_kinds; idx++)
+      {
+        log_prof.info("Prof Op Desc %u %s", 
+                        idx, operation_kind_descriptions[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -384,6 +451,17 @@ namespace LegionRuntime {
           }
         default:
           assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (instances[idx] != NULL)
+          instances[idx]->dump_state();
       }
     }
 
