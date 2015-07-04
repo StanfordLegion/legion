@@ -69,13 +69,13 @@ namespace Realm {
 
     inline void InstanceTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_micros() - 
+      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
                      InitialTime::get_initial_time();
     }
 
     inline void InstanceTimeline::record_delete_time(void)
     {
-      delete_time = LegionRuntime::TimeStamp::get_current_time_in_micros() - 
+      delete_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
                       InitialTime::get_initial_time();
     }
 
