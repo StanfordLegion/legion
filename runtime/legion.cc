@@ -60,7 +60,7 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
     namespace LegionProf {
       Logger::Category log_prof("legion_prof");
       unsigned long long legion_prof_init_time;
@@ -3808,7 +3808,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::enable_profiling();
 #endif
     }
@@ -3817,7 +3817,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::disable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::disable_profiling();
 #endif
     }
@@ -3826,7 +3826,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::dump_profiling();
 #endif
     }

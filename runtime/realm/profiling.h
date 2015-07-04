@@ -30,6 +30,7 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::Processor Processor;
   typedef LegionRuntime::LowLevel::Memory Memory;
   typedef LegionRuntime::LowLevel::Processor::TaskFuncID TaskFuncID;
+  typedef LegionRuntime::LowLevel::RegionInstance RegionInstance;
 
   // through the wonders of templates, users should never need to work with 
   //  these IDs directly
@@ -64,8 +65,10 @@ namespace Realm {
     struct OperationTimeline {
       static const ProfilingMeasurementID ID = PMID_OP_TIMELINE;
           
-      // all times reported in nanoseconds from some arbitrary (but fixed, for a given
-      //  execution) reference time
+      // all times reported in nanoseconds from the start of program execution
+      // on some node. This is necessary because clients can't know where the
+      // measurement times were recorded and therefore have no reference. There
+      // may be skews between the start times of different nodes.
       typedef unsigned long long timestamp_t;
       static const timestamp_t INVALID_TIMESTAMP = 0;
 
@@ -97,11 +100,14 @@ namespace Realm {
     struct InstanceTimeline {
       static const ProfilingMeasurementID ID = PMID_INST_TIMELINE;
 
-      // all times reported in nanoseconds from some arbitrary (but fixed, for a given
-      //  execution) reference time
+      // all times reported in nanoseconds from the start of program execution
+      // on some node. This is necessary because clients can't know where the
+      // measurement times were recorded and therefore have no reference. There
+      // may be skews between the start times of different nodes.
       typedef unsigned long long timestamp_t;
       static const timestamp_t INVALID_TIMESTAMP = 0;
 
+      RegionInstance instance;      
       timestamp_t create_time; // when was instance created?
       timestamp_t delete_time; // when was the instance deleted?
 
@@ -112,9 +118,16 @@ namespace Realm {
     // Track properties of an instance
     struct InstanceMemoryUsage {
       static const ProfilingMeasurementID ID = PMID_INST_MEM_USAGE;
+      RegionInstance instance;
       Memory memory;
       size_t bytes;
     };
+  };
+
+  // A helper class for the runtime to use in creating an initial time on a node
+  class InitialTime {
+  public:
+    static inline unsigned long long get_initial_time(void);
   };
 
   class ProfilingRequest {
@@ -123,6 +136,8 @@ namespace Realm {
     ProfilingRequest(const ProfilingRequest& to_copy);
 
     ~ProfilingRequest(void);
+
+    ProfilingRequest& operator=(const ProfilingRequest &rhs);
 
     ProfilingRequest& add_user_data(const void *payload, size_t payload_size);
 
@@ -151,6 +166,8 @@ namespace Realm {
 
     ~ProfilingRequestSet(void);
 
+    ProfilingRequestSet& operator=(const ProfilingRequestSet &rhs);
+
     ProfilingRequest& add_request(Processor response_proc, TaskFuncID response_task_id,
 				  const void *payload = 0, size_t payload_size = 0);
 
@@ -176,6 +193,7 @@ namespace Realm {
 
     void import_requests(const ProfilingRequestSet& prs);
     void send_responses(const ProfilingRequestSet& prs) const;
+    void clear(void);
 
     template <typename T>
     bool wants_measurement(void) const;

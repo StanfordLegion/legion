@@ -59,12 +59,12 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_task_variant(const char *variant_name,
-                                        TaskVariantCollection::Variant *variant)
+                                  const TaskVariantCollection::Variant &variant)
     //--------------------------------------------------------------------------
     {
       task_variants.push_back(TaskVariant()); 
       TaskVariant &var = task_variants.back();
-      var.func_id = variant->low_id;
+      var.func_id = variant.low_id;
       var.variant_name = strdup(variant_name);
     }
 
@@ -130,7 +130,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_inst(size_t id, UniqueID op_id,
+    void LegionProfInstance::process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage)
     //--------------------------------------------------------------------------
@@ -138,7 +138,7 @@ namespace LegionRuntime {
       inst_infos.push_back(InstInfo());
       InstInfo &info = inst_infos.back();
       info.op_id = op_id;
-      info.inst.id = id;
+      info.inst = usage->instance;
       info.mem = usage->memory;
       info.total_bytes = usage->bytes;
       info.create = timeline->create_time;
@@ -197,14 +197,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LegionProfiler::LegionProfiler(Processor target,
-                                   unsigned num_meta,
-                                   const char *const *const meta_descs,
-                                   unsigned num_kinds,
-                                   const char *const *const op_descs)
-      : target_proc(target), num_meta_tasks(num_meta), 
-        task_descriptions(meta_descs), num_operation_kinds(num_kinds), 
-        operation_kind_descriptions(op_descs), instances((LegionProfInstance**)
+    LegionProfiler::LegionProfiler(Processor target, const Machine &machine,
+                                   unsigned num_meta_tasks,
+                                   const char *const *const task_descriptions,
+                                   unsigned num_operation_kinds,
+                                   const char *const *const 
+                                                  operation_kind_descriptions)
+      : target_proc(target), instances((LegionProfInstance**)
             malloc(MAX_NUM_PROCS*sizeof(LegionProfInstance*)))
     //--------------------------------------------------------------------------
     {
@@ -220,15 +219,26 @@ namespace LegionRuntime {
         log_prof.info("Prof Op Desc %u %s", 
                         idx, operation_kind_descriptions[idx]);
       }
+      // Log all the processors and memories
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
+      for (std::set<Processor>::const_iterator it = all_procs.begin();
+            it != all_procs.end(); it++)
+      {
+        log_prof.info("Prof Proc Desc " IDFMT " %d", it->id, it->kind());
+      }
+      std::set<Memory> all_mems;
+      machine.get_all_memories(all_mems);
+      for (std::set<Memory>::const_iterator it = all_mems.begin();
+            it != all_mems.end(); it++)
+      {
+        log_prof.info("Prof Mem Desc " IDFMT " %d", it->id, it->kind());
+      }
     }
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : target_proc(rhs.target_proc), num_meta_tasks(rhs.num_meta_tasks),
-        task_descriptions(rhs.task_descriptions), 
-        num_operation_kinds(rhs.num_operation_kinds),
-        operation_kind_descriptions(rhs.operation_kind_descriptions), 
-        instances(rhs.instances)
+      : target_proc(rhs.target_proc), instances(rhs.instances)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -258,7 +268,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::register_task_variant(const char *variant_name,
-                                        TaskVariantCollection::Variant *variant)
+                                  const TaskVariantCollection::Variant &variant)
     //--------------------------------------------------------------------------
     {
       Processor current = Processor::get_executing_processor();
@@ -338,11 +348,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_inst_request(Realm::ProfilingRequestSet &requests,
-                                          PhysicalInstance inst, Operation *op)
+                                          Operation *op)
     //--------------------------------------------------------------------------
     {
       ProfilingInfo info(LEGION_PROF_INST); 
-      info.id = inst.id;
+      // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
                         ? target_proc : Processor::get_executing_processor(),
@@ -409,6 +419,7 @@ namespace LegionRuntime {
                                               timeline, usage);
             delete timeline;
             delete usage;
+            break;
           }
         case LEGION_PROF_COPY:
           {
@@ -428,6 +439,7 @@ namespace LegionRuntime {
                                               timeline, usage);
             delete timeline;
             delete usage;
+            break;
           }
         case LEGION_PROF_INST:
           {
@@ -443,7 +455,7 @@ namespace LegionRuntime {
             Realm::ProfilingMeasurements::InstanceMemoryUsage *usage = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-            instances[local_id]->process_inst(info->id, info->op_id,
+            instances[local_id]->process_inst(info->op_id,
                                               timeline, usage);
             delete timeline;
             delete usage;
@@ -458,7 +470,7 @@ namespace LegionRuntime {
     void LegionProfiler::finalize(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < MAX_NUM_PROCS; idx++)
       {
         if (instances[idx] != NULL)
           instances[idx]->dump_state();

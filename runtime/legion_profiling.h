@@ -77,7 +77,7 @@ namespace LegionRuntime {
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
       void register_task_variant(const char *variant_name,
-                                 TaskVariantCollection::Variant *variant);
+                                 const TaskVariantCollection::Variant &variant);
       void register_operation(Operation *op);
     public:
       void process_task(size_t id, UniqueID op_id, 
@@ -89,7 +89,7 @@ namespace LegionRuntime {
       void process_copy(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
-      void process_inst(size_t id, UniqueID op_id,
+      void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
     public:
@@ -125,7 +125,7 @@ namespace LegionRuntime {
     public:
       // Statically known information passed through the constructor
       // so that it can be deduplicated
-      LegionProfiler(Processor target_proc,
+      LegionProfiler(Processor target_proc, const Machine &machine,
                      unsigned num_meta_tasks,
                      const char *const *const meta_task_descriptions,
                      unsigned num_operation_kinds,
@@ -138,7 +138,7 @@ namespace LegionRuntime {
       // Dynamically created things must be registered at runtime
       // Tasks
       void register_task_variant(const char *variant_name,
-                                 TaskVariantCollection::Variant *variant);
+                                 const TaskVariantCollection::Variant &variant);
       // Operations
       void register_operation(Operation *op);
     public:
@@ -149,7 +149,7 @@ namespace LegionRuntime {
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
-                            PhysicalInstance inst, Operation *op);
+                            Operation *op);
     public:
       // Process low-level runtime profiling results
       void process_results(Processor p, const void *buffer, size_t size);
@@ -158,11 +158,6 @@ namespace LegionRuntime {
       void finalize(void);
     public:
       const Processor target_proc;
-    private:
-      const unsigned num_meta_tasks;
-      const char *const *const task_descriptions;
-      const unsigned num_operation_kinds;
-      const char *const *const operation_kind_descriptions;
     private:
       LegionProfInstance **const instances;
     };
@@ -596,28 +591,22 @@ namespace LegionRuntime {
 
       static inline void register_userevent(UniqueID uid, const char* name)
       {
-#ifdef LEGION_PROF
         if (profiling_enabled)
         {
           Processor proc = Processor::get_executing_processor();
           log_prof.info("Prof User Event " IDFMT " %llu %s",
               proc.id, uid, name);
         }
-#endif
       }
 
       static inline void begin_userevent(UniqueID uid)
       {
-#ifdef LEGION_PROF
         register_event(uid, PROF_BEGIN_USER_EVENT);
-#endif
       }
 
       static inline void end_userevent(UniqueID uid)
       {
-#ifdef LEGION_PROF
         register_event(uid, PROF_END_USER_EVENT);
-#endif
       }
 
       static inline void enable_profiling(void)

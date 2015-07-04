@@ -99,6 +99,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
+#ifdef LEGION_PROF
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
+#endif
     }
     
     //--------------------------------------------------------------------------
@@ -117,6 +121,13 @@ namespace LegionRuntime {
       logical_records.clear();
       if (need_completion_trigger && !completion_event.has_triggered())
         completion_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable* Operation::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -635,8 +646,9 @@ namespace LegionRuntime {
             args.proxy_this = this;
             args.must_epoch = must_epoch;
             args.must_epoch_gen = must_epoch_gen;
-            Processor util = runtime->find_utility_group();
-            util.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+            runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                             HLR_DEFERRED_MAPPING_ID,
+                                             this, wait_on);
           }
           else
             trigger_now = true;
@@ -948,8 +960,9 @@ namespace LegionRuntime {
             args.proxy_this = this;
             args.must_epoch = must_epoch;
             args.must_epoch_gen = must_epoch_gen;
-            Processor util = runtime->find_utility_group();
-            util.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+            runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                             HLR_DEFERRED_MAPPING_ID,
+                                             this, wait_on);
           }
           else
             trigger_now = true;
@@ -1586,7 +1599,7 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
@@ -1653,7 +1666,7 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
@@ -1710,7 +1723,7 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
@@ -1767,6 +1780,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Mappable* MapOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
     void MapOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -1774,7 +1794,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS); 
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // First compute our parent region requirement
@@ -1789,7 +1809,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
@@ -1802,7 +1822,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
@@ -1936,7 +1956,7 @@ namespace LegionRuntime {
           result.get_handle().get_view()->get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
@@ -1969,16 +1989,13 @@ namespace LegionRuntime {
         // triggering our completion event
         completion_event.trigger(map_complete_event);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), map_complete_event);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, map_complete_event);
       }
       else
         deferred_complete();
@@ -2520,7 +2537,7 @@ namespace LegionRuntime {
                                         req.privilege_fields);
       }
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_copy(unique_op_id,
                                 parent_ctx->get_unique_task_id());
 #endif
@@ -2602,6 +2619,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Mappable* CopyOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -2609,7 +2633,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // First compute the parent indexes
@@ -2637,7 +2661,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
@@ -2678,7 +2702,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       bool map_success = true;
@@ -2943,7 +2967,7 @@ namespace LegionRuntime {
             }
             // Now issue the copies from source to destination
             copy_complete_events.insert(
-             runtime->forest->copy_across(src_contexts[idx],
+             runtime->forest->copy_across(this, src_contexts[idx],
                                           dst_contexts[idx],
                                           src_requirements[idx],
                                           dst_requirements[idx],
@@ -2959,7 +2983,7 @@ namespace LegionRuntime {
         LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                         unique_op_id, END_MAPPING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
         LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
         // Launch the complete task if necessary 
@@ -3042,23 +3066,20 @@ namespace LegionRuntime {
           // triggering our completion event.
           completion_event.trigger(copy_complete_event);
           need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-          Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-          Processor util = runtime->find_utility_group();
-#endif
           DeferredCompleteArgs deferred_complete_args;
           deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
           deferred_complete_args.proxy_this = this;
-          util.spawn(HLR_TASK_ID, &deferred_complete_args, 
-                      sizeof(deferred_complete_args), copy_complete_event);
+          runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                           sizeof(deferred_complete_args),
+                                           HLR_DEFERRED_COMPLETE_ID,
+                                           this, copy_complete_event);
         }
         else
           deferred_complete();
       }
       else
       {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
         LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
         // We failed to map, so notify the mapper
@@ -3533,17 +3554,13 @@ namespace LegionRuntime {
             Event wait_on = Event::merge_events(trigger_events);
             if (!wait_on.has_triggered())
             {
-#ifdef SPECIALIZED_UTIL_PROCS
-              Processor util = runtime->get_cleanup_proc(
-                                parent_ctx->get_executing_processor());
-#else
-              Processor util = runtime->find_utility_group();
-#endif
               DeferredCompleteArgs deferred_complete_args;
               deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
               deferred_complete_args.proxy_this = this;
-              util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                         sizeof(deferred_complete_args), wait_on);
+              runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                               sizeof(deferred_complete_args),
+                                               HLR_DEFERRED_COMPLETE_ID,
+                                               this, wait_on);
             }
             else
               deferred_complete();
@@ -4052,7 +4069,7 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_close(unique_op_id, 
                                  parent_ctx->get_unique_task_id());
 #endif
@@ -4106,10 +4123,10 @@ namespace LegionRuntime {
     void CloseOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
-#if defined(LEGION_PROF) || defined(LEGION_LOGGING)
+#if defined(OLD_LEGION_PROF) || defined(LEGION_LOGGING)
       UniqueID local_id = unique_op_id;
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
 #endif
 #ifdef LEGION_LOGGING
@@ -4118,7 +4135,7 @@ namespace LegionRuntime {
                                       BEGIN_POST_EXEC);
 #endif
       complete_execution();
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(local_id, PROF_END_POST);
 #endif
 #ifdef LEGION_LOGGING
@@ -4284,7 +4301,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
@@ -4295,7 +4312,7 @@ namespace LegionRuntime {
       {
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, 
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
@@ -4352,7 +4369,7 @@ namespace LegionRuntime {
           reference.get_handle().get_view()->get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
@@ -4378,17 +4395,13 @@ namespace LegionRuntime {
         // when we are complete.
         completion_event.trigger(close_event);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(
-                          parent_ctx->get_executing_processor());
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args, 
-                   sizeof(deferred_complete_args), close_event);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, close_event);
       }
       else
         deferred_complete();
@@ -4491,7 +4504,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // This stage is only done for close operations issued
@@ -4509,7 +4522,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
@@ -4525,7 +4538,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
@@ -4536,7 +4549,7 @@ namespace LegionRuntime {
       {
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, 
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
@@ -4550,7 +4563,7 @@ namespace LegionRuntime {
       // to a specific physical instance, so we can issue that without
       // worrying about failing.
       Event close_event = runtime->forest->close_physical_context(physical_ctx,
-                                            requirement, parent_ctx, 
+                                            requirement, this, 
                                             local_proc, reference
 #ifdef DEBUG_HIGH_LEVEL
                                             , 0 /*idx*/ 
@@ -4569,7 +4582,7 @@ namespace LegionRuntime {
           reference.get_handle().get_view()->get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
@@ -4601,17 +4614,13 @@ namespace LegionRuntime {
         // when we are complete.
         completion_event.trigger(close_event);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(
-                          parent_ctx->get_executing_processor());
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args, 
-                   sizeof(deferred_complete_args), close_event);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, close_event);
       }
       else
         deferred_complete();
@@ -4804,6 +4813,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Mappable* AcquireOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
     void AcquireOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     { 
@@ -4979,16 +4995,13 @@ namespace LegionRuntime {
       {
         completion_event.trigger(acquire_complete);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                    sizeof(deferred_complete_args), acquire_complete);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, acquire_complete);
       }
       else
         deferred_complete();
@@ -5368,6 +5381,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Mappable* ReleaseOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
     void ReleaseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     { 
@@ -5546,16 +5566,13 @@ namespace LegionRuntime {
       {
         completion_event.trigger(release_complete);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), release_complete);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, release_complete);
       }
       else
         deferred_complete();
@@ -5841,16 +5858,13 @@ namespace LegionRuntime {
       Barrier barrier = collective.phase_barrier.get_previous_phase();
       if (!barrier.has_triggered())
       {
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), barrier);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, barrier);
       }
       else
         deferred_complete();
@@ -6007,9 +6021,9 @@ namespace LegionRuntime {
         ResolveFuturePredArgs args;
         args.hlr_id = HLR_RESOLVE_FUTURE_PRED_ID;
         args.future_pred_op = this;
-        Processor util_proc = runtime->find_utility_group();
-        util_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
-                        future.impl->get_ready_event());
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_RESOLVE_FUTURE_PRED_ID,
+                                         this, future.impl->get_ready_event());
       }
       // Mark that we completed mapping this operation
       complete_mapping();
@@ -7240,28 +7254,28 @@ namespace LegionRuntime {
       // Now do the launches
       if (!needed_indiv.empty())
       {
-        Processor util_proc = owner->runtime->find_utility_group();
         MustEpochIndivArgs args;
         args.hlr_id = HLR_MUST_INDIV_ID;
         args.triggerer = this;
         for (unsigned idx = 0; idx < needed_indiv.size(); idx++)
         {
           args.task = needed_indiv[idx];
-          Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
+          Event wait = owner->runtime->issue_runtime_meta_task(&args, 
+                                sizeof(args), HLR_MUST_INDIV_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
       }
       if (!needed_index.empty())
       {
-        Processor util_proc = owner->runtime->find_utility_group();
         MustEpochIndexArgs args;
         args.hlr_id = HLR_MUST_INDEX_ID;
         args.triggerer = this;
         for (unsigned idx = 0; idx < needed_index.size(); idx++)
         {
           args.task = needed_index[idx];
-          Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
+          Event wait = owner->runtime->issue_runtime_meta_task(&args,
+                                sizeof(args), HLR_MUST_INDEX_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -7384,7 +7398,6 @@ namespace LegionRuntime {
       MustEpochMapArgs args;
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
-      Processor util_proc = owner->runtime->find_utility_group();
       std::map<SingleTask*,Event> mapping_events;
       for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
             it != single_tasks.end(); it++)
@@ -7409,8 +7422,8 @@ namespace LegionRuntime {
         Event precondition = Event::NO_EVENT;
         if (!preconditions.empty())
           precondition = Event::merge_events(preconditions);
-        Event wait = util_proc.spawn(HLR_TASK_ID, &args, 
-                                     sizeof(args), precondition);
+        Event wait = owner->runtime->issue_runtime_meta_task(&args, 
+                            sizeof(args), HLR_MUST_MAP_ID, owner, precondition);
         if (wait.exists())
         {
           mapping_events[*it] = wait;
@@ -7502,23 +7515,22 @@ namespace LegionRuntime {
       MustEpochLauncherArgs launch_args;
       launch_args.hlr_id = HLR_MUST_LAUNCH_ID;
       std::set<Event> wait_events;
-      Processor util_proc = runtime->find_utility_group();
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
-          Event wait = util_proc.spawn(HLR_TASK_ID, 
-                                       &dist_args, sizeof(dist_args));
+          Event wait = runtime->issue_runtime_meta_task(&dist_args,
+                          sizeof(dist_args), HLR_MUST_DIST_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
         else
         {
           launch_args.task = *it;
-          Event wait = util_proc.spawn(HLR_TASK_ID,
-                                       &launch_args, sizeof(launch_args));
+          Event wait = runtime->issue_runtime_meta_task(&launch_args,
+                          sizeof(launch_args), HLR_MUST_LAUNCH_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -7529,16 +7541,16 @@ namespace LegionRuntime {
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
-          Event wait = util_proc.spawn(HLR_TASK_ID,
-                                       &dist_args, sizeof(dist_args));
+          Event wait = runtime->issue_runtime_meta_task(&dist_args,
+                          sizeof(dist_args), HLR_MUST_DIST_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
         else
         {
           launch_args.task = *it;
-          Event wait = util_proc.spawn(HLR_TASK_ID,
-                                       &launch_args, sizeof(launch_args));
+          Event wait = runtime->issue_runtime_meta_task(&launch_args,
+                          sizeof(launch_args), HLR_MUST_LAUNCH_ID, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -7768,16 +7780,13 @@ namespace LegionRuntime {
         // triggering our completion event
         completion_event.trigger(ready_event);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), ready_event);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, ready_event);
       }
       else
         deferred_complete();
@@ -7941,7 +7950,7 @@ namespace LegionRuntime {
       {
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement,
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
@@ -8006,16 +8015,13 @@ namespace LegionRuntime {
         // triggering our completion event
         completion_event.trigger(ready_event);
         need_completion_trigger = false;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-        Processor util = runtime->find_utility_group();
-#endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), ready_event);
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, ready_event);
       }
       else
         deferred_complete();
@@ -8259,7 +8265,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // First compute the parent index
@@ -8279,7 +8285,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
@@ -8323,7 +8329,7 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement,
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
@@ -8355,16 +8361,13 @@ namespace LegionRuntime {
         if (!future_ready_event.has_triggered())
         {
           // Launch a task to handle the deferred complete
-#ifdef SPECIALIZED_UTIL_PROCS
-          Processor util = runtime->get_cleanup_proc(local_proc);
-#else
-          Processor util = runtime->find_utility_group();
-#endif
           DeferredCompleteArgs deferred_complete_args;
           deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
           deferred_complete_args.proxy_this = this;
-          util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                     sizeof(deferred_complete_args), future_ready_event);
+          runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                           sizeof(deferred_complete_args),
+                                           HLR_DEFERRED_COMPLETE_ID,
+                                           this, future_ready_event);
         }
         else
           deferred_complete(); // can do the completion now
@@ -8680,7 +8683,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // First compute the parent index
@@ -8715,7 +8718,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
@@ -8731,7 +8734,7 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement,
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
@@ -9028,7 +9031,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       // First compute the parent index
@@ -9047,7 +9050,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
 
@@ -9064,7 +9067,7 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement,
-                  parent_ctx, parent_ctx, local_proc
+                  this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif

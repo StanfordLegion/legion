@@ -24,6 +24,13 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
 
 namespace Realm {
 
+  /*static*/ inline unsigned long long InitialTime::get_initial_time(void)
+  {
+    static const unsigned long long initial_time = 
+      LegionRuntime::TimeStamp::get_current_time_in_nanos();
+    return initial_time;
+  }
+
   namespace ProfilingMeasurements {
 
     TYPE_IS_SERIALIZABLE(OperationStatus::Result);
@@ -38,32 +45,38 @@ namespace Realm {
 
     inline void OperationTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos();
+      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
+                     InitialTime::get_initial_time();
     }
 
     inline void OperationTimeline::record_ready_time(void)
     {
-      ready_time = LegionRuntime::TimeStamp::get_current_time_in_nanos();
+      ready_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
+                    InitialTime::get_initial_time();
     }
 
     inline void OperationTimeline::record_start_time(void)
     {
-      start_time = LegionRuntime::TimeStamp::get_current_time_in_nanos();
+      start_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
+                    InitialTime::get_initial_time();
     }
 
     inline void OperationTimeline::record_end_time(void)
     {
-      end_time = LegionRuntime::TimeStamp::get_current_time_in_nanos();
+      end_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
+                  InitialTime::get_initial_time();
     }
 
     inline void InstanceTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_micros();
+      create_time = LegionRuntime::TimeStamp::get_current_time_in_micros() - 
+                     InitialTime::get_initial_time();
     }
 
     inline void InstanceTimeline::record_delete_time(void)
     {
-      delete_time = LegionRuntime::TimeStamp::get_current_time_in_micros();
+      delete_time = LegionRuntime::TimeStamp::get_current_time_in_micros() - 
+                      InitialTime::get_initial_time();
     }
 
   }; // namespace ProfilingMeasurements

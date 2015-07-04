@@ -49,6 +49,25 @@ namespace Realm {
     }
   }
 
+  ProfilingRequest& ProfilingRequest::operator=(const ProfilingRequest &rhs)
+  {
+    if(user_data) {
+      free(user_data);
+      user_data = 0;
+    }
+    response_proc = rhs.response_proc;
+    response_task_id = rhs.response_task_id;
+    requested_measurements = rhs.requested_measurements;
+    user_data_size = rhs.user_data_size;
+    if (rhs.user_data)
+    {
+      user_data = malloc(rhs.user_data_size);
+      assert(user_data != 0);
+      memcpy(user_data, rhs.user_data, user_data_size);
+    }
+    return *this;
+  }
+
   ProfilingRequest& ProfilingRequest::add_user_data(const void *payload, size_t payload_size)
   {
     assert(user_data == 0);
@@ -179,6 +198,21 @@ namespace Realm {
       delete *it;
   }
 
+  ProfilingRequestSet& ProfilingRequestSet::operator=(const ProfilingRequestSet &rhs)
+  {
+    for(std::vector<ProfilingRequest *>::iterator it = requests.begin();
+	it != requests.end();
+	it++)
+      delete *it;
+    requests.clear();
+    // deep copy
+    for(std::vector<ProfilingRequest *>::const_iterator it = rhs.requests.begin();
+	it != rhs.requests.end();
+	it++)
+      requests.push_back(new ProfilingRequest(**it));
+    return *this;
+  }
+
   ProfilingRequest& ProfilingRequestSet::add_request(Processor response_proc, TaskFuncID response_task_id,
 						     const void *payload /*= 0*/, size_t payload_size /*= 0*/)
   {
@@ -270,10 +304,7 @@ namespace Realm {
   ProfilingMeasurementCollection::~ProfilingMeasurementCollection(void)
   {
     // have to delete any serialized measurements we have
-    for(std::map<ProfilingMeasurementID, MeasurementData>::iterator it = measurements.begin();
-	it != measurements.end();
-	it++)
-      free(it->second.base);
+    clear(); 
   }
 
   void ProfilingMeasurementCollection::import_requests(const ProfilingRequestSet& prs)
@@ -367,6 +398,13 @@ namespace Realm {
     }
   }
 
+  void ProfilingMeasurementCollection::clear(void) {
+    for(std::map<ProfilingMeasurementID, MeasurementData>::iterator it = measurements.begin();
+	it != measurements.end();
+	it++)
+      free(it->second.base);
+    measurements.clear();
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //

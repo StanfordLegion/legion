@@ -270,7 +270,7 @@ namespace LegionRuntime {
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   RegionRequirement &req,
-                                  Mappable *mappable,
+                                  Operation *op,
                                   SingleTask *parent_ctx,
                                   Processor local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -283,7 +283,7 @@ namespace LegionRuntime {
                                      RegionTreePath &path,
                                      RegionRequirement &req,
                                      unsigned idx,
-                                     Mappable *mappable,
+                                     Operation *op,
                                      Processor local_proc,
                                      Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -330,7 +330,7 @@ namespace LegionRuntime {
                                            const MappingRef &ref,
                                            RegionRequirement &req,
                                            unsigned idx,
-                                           Mappable *mappable,
+                                           Operation *op,
                                            Processor local_proc,
                                            Event term_event
 #ifdef DEBUG_HIGH_LEVEL
@@ -365,7 +365,7 @@ namespace LegionRuntime {
 
       Event close_physical_context(RegionTreeContext ctx,
                                    RegionRequirement &req,
-                                   Mappable *mappable,
+                                   Operation *op,
                                    Processor local_proc,
                                    const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
@@ -374,7 +374,7 @@ namespace LegionRuntime {
                                    , UniqueID uid
 #endif
                                    );
-      Event copy_across(Mappable *mappable,
+      Event copy_across(Operation *op,
                         Processor local_proc,
                         RegionTreeContext src_ctx,
                         RegionTreeContext dst_ctx,
@@ -382,7 +382,8 @@ namespace LegionRuntime {
                         const RegionRequirement &dst_req,
                         const InstanceRef &dst_ref,
                         Event precondition);
-      Event copy_across(RegionTreeContext src_ctx, 
+      Event copy_across(Operation *op,
+                        RegionTreeContext src_ctx, 
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
                         const RegionRequirement &dst_req,
@@ -500,6 +501,31 @@ namespace LegionRuntime {
                            RegionTreePath &path);
       void initialize_path(IndexPartition child, IndexPartition parent,
                            RegionTreePath &path);
+    public:
+      // Interfaces to the low-level runtime
+      Event issue_copy(const Domain &dom, Operation *op,
+                       const std::vector<Domain::CopySrcDstField> &src_fields,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       Event precondition = Event::NO_EVENT);
+      Event issue_reduction_copy(const Domain &dom, Operation *op,
+                       ReductionOpID redop, bool reduction_fold,
+                       const std::vector<Domain::CopySrcDstField> &src_fields,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       Event precondition = Event::NO_EVENT);
+      Event issue_indirect_copy(const Domain &dom, Operation *op,
+                       const Domain::CopySrcDstField &idx,
+                       ReductionOpID redop, bool reduction_fold,
+                       const std::vector<Domain::CopySrcDstField> &src_fields,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       Event precondition = Event::NO_EVENT);
+      PhysicalInstance create_instance(const Domain &dom, Memory target, 
+                                       size_t field_size, Operation *op);
+      PhysicalInstance create_instance(const Domain &dom, Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, Operation *op);
+      PhysicalInstance create_instance(const Domain &dom, Memory target,
+                                       size_t field_size, ReductionOpID redop,
+                                       Operation *op);
     public:
       void register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(DistributedID did);
@@ -1342,10 +1368,11 @@ namespace LegionRuntime {
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
                                        size_t blocking_factor, unsigned depth,
-                                       RegionNode *node);
+                                       RegionNode *node, Operation *op);
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
-                                        RegionNode *node, ReductionOpID redop);
+                                        RegionNode *node, ReductionOpID redop,
+                                        Operation *op);
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
@@ -1555,12 +1582,12 @@ namespace LegionRuntime {
      */
     struct MappableInfo {
     public:
-      MappableInfo(ContextID ctx, Mappable *mappable,
+      MappableInfo(ContextID ctx, Operation *op,
                    Processor local_proc, RegionRequirement &req,
                    const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
-      Mappable *const mappable;
+      Operation *const op;
       const Processor local_proc;
       RegionRequirement &req;
       const FieldMask traversal_mask;
@@ -2133,7 +2160,8 @@ namespace LegionRuntime {
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
       // Issue copies for fields with the same event preconditions
-      static void issue_grouped_copies(const MappableInfo &info,
+      static void issue_grouped_copies(RegionTreeForest *context,
+                                       const MappableInfo &info,
                                        MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
@@ -2146,13 +2174,14 @@ namespace LegionRuntime {
       static void compute_event_sets(FieldMask update_mask,
           const LegionMap<Event,FieldMask>::aligned &preconditions,
           LegionList<EventSet>::aligned &event_sets);
-      Event perform_copy_operation(Event precondition,
+      Event perform_copy_operation(Operation *op, Event precondition,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    Processor local_proc,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
+                                   Operation *op,
                                    CopyTracker *tracker = NULL);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask, 
@@ -2239,11 +2268,13 @@ namespace LegionRuntime {
       virtual MaterializedView * create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth) = 0;
+                                                unsigned depth, 
+                                                Operation *op) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
-                                              ReductionOpID redop) = 0;
+                                              ReductionOpID redop,
+                                              Operation *op) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
@@ -2370,11 +2401,13 @@ namespace LegionRuntime {
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth);
+                                                unsigned depth,
+                                                Operation *op);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
-                                              ReductionOpID redop);
+                                              ReductionOpID redop,
+                                              Operation *op);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -2528,11 +2561,13 @@ namespace LegionRuntime {
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth);
+                                                unsigned depth,
+                                                Operation *op);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
-                                              ReductionOpID redop);
+                                              ReductionOpID redop,
+                                              Operation *op);
       virtual void send_node(AddressSpaceID target);
     public:
       virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
@@ -2860,7 +2895,7 @@ namespace LegionRuntime {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask,
-                      Processor local_proc);
+                      Processor local_proc, Operation *op);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -2874,6 +2909,7 @@ namespace LegionRuntime {
       ReductionView *const target;
       const FieldMask close_mask;
       const Processor local_proc;
+      Operation *const op;
     };
 
     /**
@@ -3319,7 +3355,7 @@ namespace LegionRuntime {
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(
+      virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
           Domain space, Event precondition, bool reduction_fold,
@@ -3377,7 +3413,7 @@ namespace LegionRuntime {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(
+      virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
           Domain space, Event precondition, bool reduction_fold,
@@ -3419,7 +3455,7 @@ namespace LegionRuntime {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(
+      virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
           Domain space, Event precondition, bool reduction_fold,
@@ -4326,19 +4362,22 @@ namespace LegionRuntime {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       void perform_reduction(LogicalView *target, const FieldMask &copy_mask, 
-                             Processor local_proc, CopyTracker *tracker = NULL);
+                             Processor local_proc, Operation *op,
+                             CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const std::set<Event> &preconditions,
                                         const std::set<Domain> &reduce_domains,
-                                        Event domain_precondition);
+                                        Event domain_precondition,
+                                        Operation *op);
       Event perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
                                               FieldID src_field,
                                               unsigned src_index,
                                        const std::set<Event> &preconditions,
                                        const std::set<Domain> &reduce_domains,
-                                       Event domain_precondition);
+                                       Event domain_precondition,
+                                       Operation *op);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;

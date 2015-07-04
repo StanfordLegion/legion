@@ -17,7 +17,7 @@
 #include "lowlevel.h"
 #include "accessor.h"
 #include "legion_logging.h"
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
 #include "legion_utilities.h"
 #endif
 #include "realm/profiling.h"
@@ -813,7 +813,7 @@ namespace LegionRuntime {
               args = malloc(arglen);
               memcpy(args, _args, arglen);
             }
-            measurements.import_requests(reqs);
+            measurements.import_requests(requests);
             capture_timeline = measurements.wants_measurement<
                                 Realm::ProfilingMeasurements::OperationTimeline>(); 
             capture_usage = measurements.wants_measurement<
@@ -3774,10 +3774,11 @@ namespace LegionRuntime {
 		reservation = Runtime::Impl::get_runtime()->get_free_reservation();
                 if (!reqs.empty()) {
                     requests = reqs;
-                    measurements.import_requests(reqs);
+                    measurements.import_requests(requests);
                     if (measurements.wants_measurement<
                                       Realm::ProfilingMeasurements::InstanceTimeline>()) {
                       capture_timeline = true;
+                      timeline.instance.id = index;
                       timeline.record_create_time();
                     } else {
                       capture_timeline = false;
@@ -3785,6 +3786,7 @@ namespace LegionRuntime {
                     if (measurements.wants_measurement<
                                       Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
                       Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+                      usage.instance.id = index;
                       usage.memory = memory;
                       usage.bytes = allocation_size;
                       measurements.add_measurement(usage);
@@ -3823,6 +3825,7 @@ namespace LegionRuntime {
 	reservation->deactivate();
 	reservation = NULL;
         requests.clear();
+        measurements.clear();
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
         Runtime::Impl::get_runtime()->free_instance(this);
     }
@@ -5783,7 +5786,7 @@ namespace LegionRuntime {
     DMAOperation::DMAOperation(const Realm::ProfilingRequestSet &reqs)
       : requests(reqs)
     {
-      measurements.import_requests(reqs);
+      measurements.import_requests(requests);
       capture_timeline = measurements.wants_measurement<
                           Realm::ProfilingMeasurements::OperationTimeline>(); 
       capture_usage = measurements.wants_measurement<
@@ -5835,7 +5838,7 @@ namespace LegionRuntime {
                                     Processor::NO_PROC,
                                     done_event->get_event(), COPY_BEGIN);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       HighLevel::LegionProf::register_copy_event(
             done_event->get_event().id, LegionRuntime::HighLevel::PROF_BEGIN_COPY);
 #endif
@@ -5891,7 +5894,7 @@ namespace LegionRuntime {
                                       Processor::NO_PROC,
                                       done_event->get_event(), COPY_END);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       HighLevel::LegionProf::register_copy_event(
             done_event->get_event().id, LegionRuntime::HighLevel::PROF_END_COPY);
 #endif
@@ -6182,7 +6185,7 @@ namespace LegionRuntime {
 
     void DMAQueue::start(void)
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       pthread_key_create(&HighLevel::LegionProf::copy_profiler_key, 0);
 #endif
       pthread_attr_t attr;
@@ -6649,6 +6652,7 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
+        Realm::InitialTime::get_initial_time();
         unsigned num_cpus = NUM_PROCS;
         unsigned num_utility_cpus = NUM_UTIL_PROCS;
         unsigned num_dma_threads = NUM_DMA_THREADS;

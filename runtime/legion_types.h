@@ -135,8 +135,8 @@ namespace LegionRuntime {
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
-#define HLR_TASK_DESCRIPTIONS                                     \
-      const char *hlr_task_descriptions[HLR_LAST_TASK_ID] = {     \
+#define HLR_TASK_DESCRIPTIONS(name)                               \
+      const char *name[HLR_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Remote Message",                                         \
         "Post-Task Execution",                                    \

@@ -599,7 +599,6 @@ namespace LegionRuntime {
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      const Processor utility_proc;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
       // Is stealing disabled 
@@ -956,7 +955,7 @@ namespace LegionRuntime {
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
       void add_collection(LogicalView *view, Event term_event);
-      void launch(Processor utility, int priority);
+      void launch(int priority);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;
@@ -1806,8 +1805,13 @@ namespace LegionRuntime {
                                const TaskArgument &arg);
       void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
-      inline Processor find_utility_group(void) { return utility_group; }
+      //inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);
+      Event issue_runtime_meta_task(const void *args, size_t arglen,
+                                    HLRTaskID tid, Operation *op = NULL,
+                                    Event precondition = Event::NO_EVENT, 
+                                    int priority = 0,
+                                    Processor proc = Processor::NO_PROC);
     public:
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
@@ -1954,6 +1958,7 @@ namespace LegionRuntime {
       LegionProfiler *profiler;
       RegionTreeForest *const forest;
       Processor utility_group;
+      const bool has_explicit_utility_procs;
     protected:
       unsigned outstanding_top_level_tasks;
 #ifdef SPECIALIZED_UTIL_PROCS

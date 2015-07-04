@@ -1213,6 +1213,7 @@ namespace LegionRuntime {
         measurements.import_requests(requests);
         if (measurements.wants_measurement<
                           Realm::ProfilingMeasurements::InstanceTimeline>()) {
+          timeline.instance = me;
           timeline.record_create_time();
         }
       }
@@ -1316,6 +1317,7 @@ namespace LegionRuntime {
         if (measurements.wants_measurement<
                           Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
           Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+          usage.instance = me;
           usage.memory = memory;
           // Safe to read from meta-data here because we know we are
           // on the owner node so it has up to date copy
@@ -9285,6 +9287,7 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
+      Realm::InitialTime::get_initial_time();
       // have to register domain mappings too
       Arrays::Mapping<1,1>::register_mapping<Arrays::CArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::CArrayLinearization<2> >();
