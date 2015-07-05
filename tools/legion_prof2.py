@@ -284,11 +284,11 @@ class Processor(object):
         self.full_range.sort_range()
 
     def emit_svg(self, printer):
-        # First figure out the max number of levels + 1 for padding
-        max_levels = self.full_range.max_levels() + 1
+        max_levels = self.full_range.max_levels()
         # Skip any empty processors
         if max_levels > 1:
-            printer.init_chunk(max_levels)
+            # First figure out the max number of levels + 1 for padding
+            printer.init_chunk(max_levels+1)
             self.full_range.emit_svg_range(printer)
 
     def print_stats(self):
