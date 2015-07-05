@@ -232,7 +232,8 @@ namespace LegionRuntime {
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
-        log_prof.info("Prof Mem Desc " IDFMT " %d", it->id, it->kind());
+        log_prof.info("Prof Mem Desc " IDFMT " %d %ld", 
+                      it->id, it->kind(), it->capacity());
       }
     }
 
