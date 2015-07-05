@@ -218,7 +218,10 @@ class TaskRange(TimeRange):
     def emit_svg(self, printer, level):
         assert self.task.is_task
         assert self.task.variant is not None
-        title = repr(self.task)+' '+self.task.get_timing()
+        title = repr(self.task)
+        if self.task.is_meta:
+            title += self.task.get_initiation()
+        title += (' '+self.task.get_timing())
         printer.emit_timing_range(self.task.variant.color, level,
                                   self.start_time, self.stop_time, title)
         for subrange in self.subranges:
@@ -601,6 +604,9 @@ class MetaTask(object):
         return 'total='+str(self.stop - self.start)+' us start='+ \
                 str(self.start)+' us stop='+str(self.stop)+' us'
 
+    def get_initiation(self):
+        return 'initiated by="'+repr(self.op)+'"'
+
     def __repr__(self):
         return 'Meta '+self.variant.name
 
@@ -648,7 +654,7 @@ class Instance(object):
         elif self.size > 1024:
             unit = 'KB'
             unit_size /= 1024
-        return 'Instance '+str(self.inst_id)+' Size='+str(unit_size)+unit+ \
+        return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
                 ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
                 ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
 
