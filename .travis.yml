@@ -20,7 +20,7 @@ before_install:
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then sudo apt-get update -qq; fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then sudo apt-get install -qq g++-4.9; fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
-  - export TERRA_CXX="$(CXX)"
-  - export TERRA_CC="$(CC)"
-  - export TERRA_LINK="$(CXX)"
+  - export TERRA_CXX="$CXX"
+  - export TERRA_CC="$CC"
+  - export TERRA_LINK="$CXX"
 script: ./language/travis.py
