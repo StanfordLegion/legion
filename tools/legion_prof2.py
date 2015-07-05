@@ -220,7 +220,7 @@ class TaskRange(TimeRange):
         assert self.task.variant is not None
         title = repr(self.task)
         if self.task.is_meta:
-            title += self.task.get_initiation()
+            title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
         printer.emit_timing_range(self.task.variant.color, level,
                                   self.start_time, self.stop_time, title)
