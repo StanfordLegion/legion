@@ -6802,6 +6802,7 @@ namespace LegionRuntime {
         for (std::set<Processor>::iterator it = procs.begin(); it != procs.end(); it++)
         {
           // Give all processors 32 GB/s to the global memory
+          if (cpu_mem_size_in_mb > 0)
           {
 	    Machine::ProcessorMemoryAffinity global_affin;
             global_affin.p = *it;
@@ -6811,54 +6812,63 @@ namespace LegionRuntime {
             machine->proc_mem_affinities.push_back(global_affin);
           }
           // Give the processor good affinity to its L1, but not to other L1
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if (cpu_l1_size_in_kb > 0)
           {
-            if (id == (it->id+1))
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
             {
-              // Our L1, high bandwidth with low latency
-              Machine::ProcessorMemoryAffinity local_affin;
-              local_affin.p = *it;
-              local_affin.m.id = id;
-              local_affin.bandwidth = 100;
-              local_affin.latency = 1; /* small latency */
-              machine->proc_mem_affinities.push_back(local_affin);
-            }
-            else
-            {
-              // Other L1, low bandwidth with long latency
-              Machine::ProcessorMemoryAffinity other_affin;
-              other_affin.p = *it;
-              other_affin.m.id = id;
-              other_affin.bandwidth = 10;
-              other_affin.latency = 100; /* high latency */
-              machine->proc_mem_affinities.push_back(other_affin);
+              if (id == (it->id+1))
+              {
+                // Our L1, high bandwidth with low latency
+                Machine::ProcessorMemoryAffinity local_affin;
+                local_affin.p = *it;
+                local_affin.m.id = id;
+                local_affin.bandwidth = 100;
+                local_affin.latency = 1; /* small latency */
+                machine->proc_mem_affinities.push_back(local_affin);
+              }
+              else
+              {
+                // Other L1, low bandwidth with long latency
+                Machine::ProcessorMemoryAffinity other_affin;
+                other_affin.p = *it;
+                other_affin.m.id = id;
+                other_affin.bandwidth = 10;
+                other_affin.latency = 100; /* high latency */
+                machine->proc_mem_affinities.push_back(other_affin);
+              }
             }
           }
         }
         // Set up the affinities between the different memories
         {
           // Global to all others
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if ((cpu_mem_size_in_mb > 0) && (cpu_l1_size_in_kb > 0))
           {
-            Machine::MemoryMemoryAffinity global_affin;
-            global_affin.m1.id = 1;
-            global_affin.m2.id = id;
-            global_affin.bandwidth = 32;
-            global_affin.latency = 50;
-            machine->mem_mem_affinities.push_back(global_affin);
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
+            {
+              Machine::MemoryMemoryAffinity global_affin;
+              global_affin.m1.id = 1;
+              global_affin.m2.id = id;
+              global_affin.bandwidth = 32;
+              global_affin.latency = 50;
+              machine->mem_mem_affinities.push_back(global_affin);
+            }
           }
 
           // From any one to any other one
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if (cpu_l1_size_in_kb > 0)
           {
-            for (unsigned other=id+1; other <= (num_cpus+1); other++)
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
             {
-              Machine::MemoryMemoryAffinity pair_affin;
-              pair_affin.m1.id = id;
-              pair_affin.m2.id = other;
-              pair_affin.bandwidth = 10;
-              pair_affin.latency = 100;
-              machine->mem_mem_affinities.push_back(pair_affin);
+              for (unsigned other=id+1; other <= (num_cpus+1); other++)
+              {
+                Machine::MemoryMemoryAffinity pair_affin;
+                pair_affin.m1.id = id;
+                pair_affin.m2.id = other;
+                pair_affin.bandwidth = 10;
+                pair_affin.latency = 100;
+                machine->mem_mem_affinities.push_back(pair_affin);
+              }
             }
           }
         }
