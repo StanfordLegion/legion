@@ -124,6 +124,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual void trigger_dependence_analysis(void);
     };
 
@@ -150,6 +151,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual void trigger_dependence_analysis(void);
     };
 

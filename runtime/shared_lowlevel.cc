@@ -17,9 +17,10 @@
 #include "lowlevel.h"
 #include "accessor.h"
 #include "legion_logging.h"
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
 #include "legion_utilities.h"
 #endif
+#include "realm/profiling.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -45,6 +46,7 @@ using namespace LegionRuntime::Accessor;
 #include <unistd.h>
 #ifdef LEGION_BACKTRACE
 #include <execinfo.h>
+#include <cxxabi.h>
 #endif
 
 #define BASE_EVENTS	  1024	
@@ -200,7 +202,8 @@ namespace LegionRuntime {
 					       size_t elmt_size, size_t block_size,
 					       const DomainLinearization& linearization,
 					       char *ptr, const ReductionOpUntyped *redop,
-					       RegionInstance::Impl *parent);
+					       RegionInstance::Impl *parent,
+                                               const Realm::ProfilingRequestSet &reqs);
       ProcessorGroup *get_free_proc_group(const std::vector<Processor>& members);
 
       const ReductionOpUntyped* get_reduction_op(ReductionOpID redop);
@@ -303,10 +306,19 @@ namespace LegionRuntime {
 
     class DMAOperation : public EventWaiter {
     public:
-      virtual ~DMAOperation(void) { }
+      DMAOperation(void) : capture_timeline(false), capture_usage(false) { }
+      DMAOperation(const Realm::ProfilingRequestSet &reqs);
+      virtual ~DMAOperation(void);
       virtual bool event_triggered(void);
       virtual void print_info(FILE *f) = 0;
       virtual void perform(void) = 0;
+    public:
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingMeasurementCollection measurements;
+      Realm::ProfilingMeasurements::OperationTimeline timeline;
+      Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+      bool capture_timeline;
+      bool capture_usage;
     };
 
     class DMAQueue {
@@ -767,7 +779,9 @@ namespace LegionRuntime {
     public:
         virtual Event spawn(Processor::TaskFuncID func_id, const void * args,
                             size_t arglen, Event wait_on, int priority);
-    
+        virtual Event spawn(Processor::TaskFuncID func_id, const void * args,
+                            size_t arglen, const Realm::ProfilingRequestSet &requests,
+                            Event wait_on, int priority);
     protected:
 	class TaskDesc {
         public:
@@ -777,7 +791,7 @@ namespace LegionRuntime {
             : func_id(id), args(0), arglen(_arglen),
               complete(_complete), priority(_priority), 
               start_arrivals(_start_arrivals), finish_arrivals(_finish_arrivals),
-              expected(_expected)
+              expected(_expected), capture_timeline(false), capture_usage(false)
           {
             if (arglen > 0)
             {
@@ -785,8 +799,37 @@ namespace LegionRuntime {
               memcpy(args, _args, arglen);
             }
           }
+          TaskDesc(Processor::TaskFuncID id, const void *_args, size_t _arglen,
+                   EventImpl *_complete, int _priority,
+                   int _start_arrivals, int _finish_arrivals, int _expected,
+                   const Realm::ProfilingRequestSet &reqs)
+            : func_id(id), args(0), arglen(_arglen),
+              complete(_complete), priority(_priority), 
+              start_arrivals(_start_arrivals), finish_arrivals(_finish_arrivals),
+              expected(_expected), requests(reqs)
+          {
+            if (arglen > 0)
+            {
+              args = malloc(arglen);
+              memcpy(args, _args, arglen);
+            }
+            measurements.import_requests(requests);
+            capture_timeline = measurements.wants_measurement<
+                                Realm::ProfilingMeasurements::OperationTimeline>(); 
+            capture_usage = measurements.wants_measurement<
+                                Realm::ProfilingMeasurements::OperationProcessorUsage>();
+            if (capture_timeline)
+              timeline.record_create_time();
+          }
           ~TaskDesc(void)
           {
+            if (requests.request_count() > 0) {
+              if (capture_timeline)
+                measurements.add_measurement(timeline);
+              if (capture_usage)
+                measurements.add_measurement(usage);
+              measurements.send_responses(requests);
+            }
             if (args)
               free(args);
           }
@@ -800,6 +843,12 @@ namespace LegionRuntime {
           int start_arrivals;
           int finish_arrivals;
           int expected;
+          Realm::ProfilingRequestSet requests;
+          Realm::ProfilingMeasurementCollection measurements;
+          Realm::ProfilingMeasurements::OperationTimeline timeline;
+          Realm::ProfilingMeasurements::OperationProcessorUsage usage;
+          bool capture_timeline;
+          bool capture_usage;
 	};
         class DeferredTask : public EventWaiter {
         public:
@@ -921,7 +970,9 @@ namespace LegionRuntime {
 
       virtual Event spawn(Processor::TaskFuncID func_id, const void * args,
 			  size_t arglen, Event wait_on, int priority);
-
+      virtual Event spawn(Processor::TaskFuncID func_id, const void * args,
+                            size_t arglen, const Realm::ProfilingRequestSet &requests,
+                            Event wait_on, int priority);
     protected:
       std::vector<ProcessorImpl *> members;
       size_t next_target;
@@ -1969,9 +2020,17 @@ namespace LegionRuntime {
     Event Processor::spawn(Processor::TaskFuncID func_id, const void * args,
                             size_t arglen, Event wait_on, int priority) const
     {
-        DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-	ProcessorImpl *p = Runtime::Impl::get_runtime()->get_processor_impl(*this);
-	return p->spawn(func_id, args, arglen, wait_on, priority);
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      ProcessorImpl *p = Runtime::Impl::get_runtime()->get_processor_impl(*this);
+      return p->spawn(func_id, args, arglen, wait_on, priority);
+    }
+
+    Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
+                           const Realm::ProfilingRequestSet &requests,
+                           Event wait_on, int priority) const
+    {
+      ProcessorImpl *p = Runtime::Impl::get_runtime()->get_processor_impl(*this);
+      return p->spawn(func_id, args, arglen, requests, wait_on, priority);
     }
 
     AddressSpace Processor::address_space(void) const
@@ -2011,13 +2070,26 @@ namespace LegionRuntime {
     Event ProcessorImpl::spawn(Processor::TaskFuncID func_id, const void * args,
 				size_t arglen, Event wait_on, int priority)
     {
-	TaskDesc *task = new TaskDesc(func_id, args, arglen,
-                                      Runtime::Impl::get_runtime()->get_free_event(),
-                                      priority, 0, 0, 1);
-	Event result = task->complete->get_event();
+      TaskDesc *task = new TaskDesc(func_id, args, arglen,
+                                    Runtime::Impl::get_runtime()->get_free_event(),
+                                    priority, 0, 0, 1);
+      Event result = task->complete->get_event();
 
-        enqueue_task(task, wait_on);	
-	return result;
+      enqueue_task(task, wait_on);	
+      return result;
+    }
+
+    Event ProcessorImpl::spawn(Processor::TaskFuncID func_id, const void * args,
+			       size_t arglen, const Realm::ProfilingRequestSet &reqs,
+                               Event wait_on, int priority)
+    {
+      TaskDesc *task = new TaskDesc(func_id, args, arglen,
+                                    Runtime::Impl::get_runtime()->get_free_event(),
+                                    priority, 0, 0, 1, reqs);
+      Event result = task->complete->get_event();
+
+      enqueue_task(task, wait_on);	
+      return result;
     }
 
     void ProcessorImpl::enqueue_task(TaskDesc *task, Event wait_on)
@@ -2034,6 +2106,8 @@ namespace LegionRuntime {
 
     void ProcessorImpl::add_to_ready_queue(TaskDesc *task)
     {
+      if (task->capture_timeline)
+        task->timeline.record_ready_time();
       ProcessorThread *to_wake = NULL;
       ProcessorThread *to_start = NULL;
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -2140,8 +2214,13 @@ namespace LegionRuntime {
           assert(it != task_table.end());
 #endif
           Processor::TaskFuncPtr func = it->second;
+          if (task->capture_timeline)
+            task->timeline.record_start_time();
+          if (task->capture_usage)
+            task->usage.proc = proc;
           func(task->args, task->arglen, proc);
-          
+          if (task->capture_timeline)
+            task->timeline.record_end_time();
         } else {
           process_kill();
         }
@@ -2477,6 +2556,24 @@ namespace LegionRuntime {
       TaskDesc *task = new TaskDesc(func_id, args, arglen,
                                     Runtime::Impl::get_runtime()->get_free_event(),
                                     priority, 0, 0, members.size());
+      Event result = task->complete->get_event();
+
+      for (std::vector<ProcessorImpl*>::const_iterator it = members.begin();
+            it != members.end(); it++)
+      {
+        (*it)->enqueue_task(task, wait_on);
+      }
+      return result;
+    }
+
+    Event ProcessorGroup::spawn(Processor::TaskFuncID func_id, const void * args,
+				size_t arglen, const Realm::ProfilingRequestSet &reqs,
+                                Event wait_on, int priority)
+    {
+      // Create a new task description and enqueue it for all the members
+      TaskDesc *task = new TaskDesc(func_id, args, arglen,
+                                    Runtime::Impl::get_runtime()->get_free_event(),
+                                    priority, 0, 0, members.size(), reqs);
       Event result = task->complete->get_event();
 
       for (std::vector<ProcessorImpl*>::const_iterator it = members.begin();
@@ -3035,10 +3132,24 @@ namespace LegionRuntime {
                     const Domain _domain,
                     ReductionOpID _redop_id, bool _red_fold,
                     EventImpl *_done_event)
-        : srcs(_srcs), dsts(_dsts), 
-          domain(_domain),
+        : DMAOperation(), srcs(_srcs), dsts(_dsts), domain(_domain),
           redop_id(_redop_id), red_fold(_red_fold),
-          done_event(_done_event) 
+          done_event(_done_event)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex,NULL));    
+        // If we don't have a done event, make one
+        if (!done_event)
+          done_event = Runtime::Impl::get_runtime()->get_free_event();
+      }
+
+      CopyOperation(const std::vector<Domain::CopySrcDstField>& _srcs,
+                    const std::vector<Domain::CopySrcDstField>& _dsts,
+                    const Realm::ProfilingRequestSet &reqs,
+                    const Domain _domain, ReductionOpID _redop_id, bool _red_fold,
+                    EventImpl *_done_event)
+        : DMAOperation(reqs), srcs(_srcs), dsts(_dsts), domain(_domain),
+          redop_id(_redop_id), red_fold(_red_fold),
+          done_event(_done_event)
       {
         PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex,NULL));    
         // If we don't have a done event, make one
@@ -3068,7 +3179,7 @@ namespace LegionRuntime {
       ReductionOpID redop_id;
       bool red_fold;
       EventImpl *done_event;
-      pthread_mutex_t mutex;
+      pthread_mutex_t mutex; 
     };
 
     class FillOperation : public DMAOperation {
@@ -3077,6 +3188,16 @@ namespace LegionRuntime {
                     const void *value, size_t size, 
                     const Domain &dom, EventImpl *_done_event)
         : dsts(_dsts), fill_value_size(size), domain(dom), done_event(_done_event)
+      {
+        fill_value = malloc(fill_value_size);
+        memcpy(fill_value, value, fill_value_size);
+      }
+      FillOperation(const std::vector<Domain::CopySrcDstField> &_dsts,
+                    const Realm::ProfilingRequestSet &reqs,
+                    const void *value, size_t size, 
+                    const Domain &dom, EventImpl *_done_event)
+        : DMAOperation(reqs), dsts(_dsts), fill_value_size(size), 
+          domain(dom), done_event(_done_event)
       {
         fill_value = malloc(fill_value_size);
         memcpy(fill_value, value, fill_value_size);
@@ -3106,6 +3227,10 @@ namespace LegionRuntime {
       ComputeIndexSpaces(const std::vector<IndexSpace::BinaryOpDescriptor> &p,
                          EventImpl *d)
         : pairs(p), done_event(d) { }
+      ComputeIndexSpaces(const std::vector<IndexSpace::BinaryOpDescriptor> &p,
+                         const Realm::ProfilingRequestSet &reqs,
+                         EventImpl *d)
+        : DMAOperation(reqs), pairs(p), done_event(d) { }
       virtual ~ComputeIndexSpaces(void) { }
     public:
       virtual void perform(void);  
@@ -3122,6 +3247,12 @@ namespace LegionRuntime {
                         IndexSpace::Impl *r,
                         EventImpl *d)
         : op(o), spaces(s), result(r), done_event(d) { }
+      ReduceIndexSpaces(IndexSpace::IndexSpaceOperation o,
+                        const std::vector<IndexSpace> &s,
+                        const Realm::ProfilingRequestSet &reqs,
+                        IndexSpace::Impl *r,
+                        EventImpl *d)
+        : DMAOperation(reqs), op(o), spaces(s), result(r), done_event(d) { }
       virtual ~ReduceIndexSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3138,6 +3269,10 @@ namespace LegionRuntime {
       DeferredEqualSpaces(const std::vector<IndexSpace::Impl*> &subs,
                           IndexSpace::Impl *t, size_t g, EventImpl *d)
         : target(t), subspaces(subs), granularity(g), done_event(d) { }
+      DeferredEqualSpaces(const std::vector<IndexSpace::Impl*> &subs,
+                          const Realm::ProfilingRequestSet &reqs,
+                          IndexSpace::Impl *t, size_t g, EventImpl *d)
+        : DMAOperation(reqs), target(t), subspaces(subs), granularity(g), done_event(d) { }
       virtual ~DeferredEqualSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3155,6 +3290,12 @@ namespace LegionRuntime {
                              IndexSpace::Impl *t, size_t g, EventImpl *d,
                              const std::vector<int> &w)
         : target(t), subspaces(subs), granularity(g), done_event(d), weights(w) { }
+      DeferredWeightedSpaces(const std::vector<IndexSpace::Impl*> &subs,
+                             const Realm::ProfilingRequestSet &reqs,
+                             IndexSpace::Impl *t, size_t g, EventImpl *d,
+                             const std::vector<int> &w)
+        : DMAOperation(reqs), target(t), subspaces(subs), granularity(g), 
+          done_event(d), weights(w) { }
       virtual ~DeferredWeightedSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3173,6 +3314,11 @@ namespace LegionRuntime {
                           const std::map<DomainPoint,IndexSpace> &s,
                           EventImpl *d, IndexSpace::Impl *t)
         : target(t), field_data(f), subspaces(s), done_event(d) { }
+      DeferredFieldSpaces(const std::vector<IndexSpace::FieldDataDescriptor> &f,
+                          const std::map<DomainPoint,IndexSpace> &s,
+                          const Realm::ProfilingRequestSet &reqs,
+                          EventImpl *d, IndexSpace::Impl *t)
+        : DMAOperation(reqs), target(t), field_data(f), subspaces(s), done_event(d) { }
       virtual ~DeferredFieldSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3190,6 +3336,11 @@ namespace LegionRuntime {
                           const std::map<IndexSpace,IndexSpace> &s,
                           EventImpl *d, IndexSpace::Impl *t)
         : target(t), field_data(f), subspaces(s), done_event(d) { }
+      DeferredImageSpaces(const std::vector<IndexSpace::FieldDataDescriptor> &f,
+                          const std::map<IndexSpace,IndexSpace> &s,
+                          const Realm::ProfilingRequestSet &reqs,
+                          EventImpl *d, IndexSpace::Impl *t)
+        : DMAOperation(reqs), target(t), field_data(f), subspaces(s), done_event(d) { }
       virtual ~DeferredImageSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3207,6 +3358,11 @@ namespace LegionRuntime {
                              const std::map<IndexSpace,IndexSpace> &s,
                              EventImpl *d, IndexSpace::Impl *t)
         : target(t), field_data(f), subspaces(s), done_event(d) { }
+      DeferredPreimageSpaces(const std::vector<IndexSpace::FieldDataDescriptor> &f,
+                             const std::map<IndexSpace,IndexSpace> &s,
+                             const Realm::ProfilingRequestSet &reqs,
+                             EventImpl *d, IndexSpace::Impl *t)
+        : DMAOperation(reqs), target(t), field_data(f), subspaces(s), done_event(d) { }
       virtual ~DeferredPreimageSpaces(void) { }
     public:
       virtual void perform(void);
@@ -3275,6 +3431,7 @@ namespace LegionRuntime {
 				       size_t block_size, 
 				       const DomainLinearization& dl,
 				       size_t num_elements,
+                                       const Realm::ProfilingRequestSet &reqs,
 				       ReductionOpID redopid = 0);
 
 	void destroy_instance(RegionInstance i);
@@ -3290,7 +3447,7 @@ namespace LegionRuntime {
                                     size_t granularity);
         void create_weighted_subspaces(const std::vector<IndexSpace::Impl*> &subspaces,
                                     size_t granularity,
-                                    const std::vector<int> &weights);
+                                    std::vector<int> &weights);
 
         void create_subspaces_by_field(const std::vector<FieldDataDescriptor> &field_data,
                                        const std::map<DomainPoint,IndexSpace> &subspaces);
@@ -3303,6 +3460,11 @@ namespace LegionRuntime {
                           const void *fill_value, size_t fill_value_size,
                           Event wait_on, const Domain &domain);
 
+        static Event fill(const std::vector<Domain::CopySrcDstField> &dsts,
+                          const Realm::ProfilingRequestSet &reqs,
+                          const void *fill_value, size_t fill_value_size,
+                          Event wait_on, const Domain &domain);
+
         static Event copy(RegionInstance src_inst, RegionInstance dst_inst,
 		   size_t elem_size, const Domain domain, Event wait_on = Event::NO_EVENT,
 		   ReductionOpID redop_id = 0, bool red_fold = false);
@@ -3311,6 +3473,11 @@ namespace LegionRuntime {
 		   const std::vector<Domain::CopySrcDstField>& dsts,
 		   const Domain domain,
 		   Event wait_on,
+		   ReductionOpID redop_id = 0, bool red_fold = false);
+        static Event copy(const std::vector<Domain::CopySrcDstField>& srcs,
+		   const std::vector<Domain::CopySrcDstField>& dsts,
+                   const Realm::ProfilingRequestSet &requests,
+		   const Domain domain, Event wait_on,
 		   ReductionOpID redop_id = 0, bool red_fold = false);
     public:
         // Traverse up the tree to the parent region that owns the master allocator
@@ -3437,7 +3604,8 @@ namespace LegionRuntime {
         bool activate(Memory m, size_t num_elmts, size_t alloc,
 		      const std::vector<size_t>& _field_sizes, size_t elem_size, size_t _block_size,
 		      const DomainLinearization& _dl,
-                      char *base, const ReductionOpUntyped *op, RegionInstance::Impl *parent);
+                      char *base, const ReductionOpUntyped *op, RegionInstance::Impl *parent,
+                      const Realm::ProfilingRequestSet &reqs);
 	void deactivate(void);
 	RegionInstance get_instance(void) const;
         Reservation get_reservation(void);
@@ -3477,6 +3645,10 @@ namespace LegionRuntime {
 	const int index;
 	// Fields for the copy operation
 	ReservationImpl *reservation;
+        Realm::ProfilingRequestSet requests;
+        Realm::ProfilingMeasurementCollection measurements;
+        Realm::ProfilingMeasurements::InstanceTimeline timeline;
+        bool capture_timeline;
     };
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
@@ -3572,7 +3744,9 @@ namespace LegionRuntime {
 					const std::vector<size_t>& _field_sizes,
 					size_t elem_size, size_t _block_size,
 					const DomainLinearization& _dl,
-					char *base, const ReductionOpUntyped *op, RegionInstance::Impl *parent)
+					char *base, const ReductionOpUntyped *op, 
+                                        RegionInstance::Impl *parent,
+                                        const Realm::ProfilingRequestSet &reqs)
     {
 	bool result = false;
         PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -3598,6 +3772,28 @@ namespace LegionRuntime {
 		assert(base_ptr != NULL);
 #endif
 		reservation = Runtime::Impl::get_runtime()->get_free_reservation();
+                if (!reqs.empty()) {
+                    requests = reqs;
+                    measurements.import_requests(requests);
+                    if (measurements.wants_measurement<
+                                      Realm::ProfilingMeasurements::InstanceTimeline>()) {
+                      capture_timeline = true;
+                      timeline.instance.id = index;
+                      timeline.record_create_time();
+                    } else {
+                      capture_timeline = false;
+                    }
+                    if (measurements.wants_measurement<
+                                      Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
+                      Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+                      usage.instance.id = index;
+                      usage.memory = memory;
+                      usage.bytes = allocation_size;
+                      measurements.add_measurement(usage);
+                    }
+                } else {
+                  capture_timeline = false;
+                }
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
 	return result;
@@ -3605,6 +3801,13 @@ namespace LegionRuntime {
 
     void RegionInstance::Impl::deactivate(void)
     {
+        if (!requests.empty()) {
+          if (capture_timeline) {
+            timeline.record_delete_time();
+            measurements.add_measurement(timeline);
+          }
+          measurements.send_responses(requests);
+        }
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
 	active = false;
 	MemoryImpl *mem = Runtime::Impl::get_runtime()->get_memory_impl(memory);
@@ -3621,6 +3824,8 @@ namespace LegionRuntime {
         list = false;
 	reservation->deactivate();
 	reservation = NULL;
+        requests.clear();
+        measurements.clear();
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
         Runtime::Impl::get_runtime()->free_instance(this);
     }
@@ -3869,12 +4074,22 @@ namespace LegionRuntime {
       size_t bytes = find_field(get_field_sizes(), fill_offset, fill_size,
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
-      for (Domain::DomainPointIterator itr(domain); itr; itr++)
-      {
-        int index = linearization.get_image(itr.p);
-        void *raw_addr = get_address(index, field_start,
-                                     field_size, within_field);
-        memcpy(raw_addr, fill_value, fill_value_size);
+      if (domain.get_dim() == 0) {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          int index = itr.p.get_index();
+          void *raw_addr = get_address(index, field_start,
+                                       field_size, within_field);
+          memcpy(raw_addr, fill_value, fill_value_size);
+        }
+      } else {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          int index = linearization.get_image(itr.p);
+          void *raw_addr = get_address(index, field_start,
+                                       field_size, within_field);
+          memcpy(raw_addr, fill_value, fill_value_size);
+        }
       }
     }
 
@@ -4105,6 +4320,33 @@ namespace LegionRuntime {
       return result;
     }
 
+    Event IndexSpace::create_equal_subspaces(size_t count, size_t granularity,
+                                             std::vector<IndexSpace>& subspaces,
+                                             const Realm::ProfilingRequestSet &reqs,
+                                             bool mutable_results, Event wait_on) const
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_impl = rt->get_free_event();
+      Event result = done_impl->get_event();
+      IndexSpace::Impl *impl = rt->get_metadata_impl(*this);
+      // Make each of the resulting subspaces
+      subspaces.resize(count);
+      std::vector<IndexSpace::Impl*> subspace_impls(count);
+      for (unsigned idx = 0; idx < count; idx++) {
+        subspace_impls[idx] = rt->get_free_metadata(impl);
+        subspaces[idx] = subspace_impls[idx]->get_metadata();
+      }
+      DeferredEqualSpaces *op = new DeferredEqualSpaces(subspace_impls, reqs, impl,
+                                                        granularity, done_impl);
+      if (wait_on.exists()) {
+        EventImpl *source = rt->get_event_impl(wait_on);
+        source->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
     Event IndexSpace::create_weighted_subspaces(size_t count, size_t granularity,
                                                 const std::vector<int> &weights,
                                                 std::vector<IndexSpace> &subspaces,
@@ -4122,6 +4364,34 @@ namespace LegionRuntime {
         subspaces[idx] = subspace_impls[idx]->get_metadata();
       }
       DeferredWeightedSpaces *op = new DeferredWeightedSpaces(subspace_impls, impl,
+                                                  granularity, done_impl, weights);
+      if (wait_on.exists()) {
+        EventImpl *source = rt->get_event_impl(wait_on);
+        source->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
+    Event IndexSpace::create_weighted_subspaces(size_t count, size_t granularity,
+                                                const std::vector<int> &weights,
+                                                std::vector<IndexSpace> &subspaces,
+                                                const Realm::ProfilingRequestSet &reqs,
+                                                bool mutable_results, Event wait_on) const
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_impl = rt->get_free_event();
+      Event result = done_impl->get_event();
+      IndexSpace::Impl *impl = rt->get_metadata_impl(*this);
+      // Make each of the resulting subspaces
+      subspaces.resize(count);
+      std::vector<IndexSpace::Impl*> subspace_impls(count);
+      for (unsigned idx = 0; idx < count; idx++) {
+        subspace_impls[idx] = rt->get_free_metadata(impl);
+        subspaces[idx] = subspace_impls[idx]->get_metadata();
+      }
+      DeferredWeightedSpaces *op = new DeferredWeightedSpaces(subspace_impls, reqs, impl,
                                                   granularity, done_impl, weights);
       if (wait_on.exists()) {
         EventImpl *source = rt->get_event_impl(wait_on);
@@ -4159,6 +4429,34 @@ namespace LegionRuntime {
       return result;
     }
 
+    Event IndexSpace::create_subspaces_by_field(
+                                        const std::vector<FieldDataDescriptor> &field_data,
+                                        std::map<DomainPoint, IndexSpace> &subspaces,
+                                        const Realm::ProfilingRequestSet &reqs,
+                                        bool mutable_results, Event wait_on) const
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_impl = rt->get_free_event();
+      Event result = done_impl->get_event();
+      IndexSpace::Impl *impl = rt->get_metadata_impl(*this);
+      // Fill in the subspaces
+      for (std::map<DomainPoint,IndexSpace>::iterator it = subspaces.begin();
+            it != subspaces.end(); it++)
+      {
+        IndexSpace::Impl *child = rt->get_free_metadata(impl);
+        it->second = child->get_metadata();
+      }
+      DeferredFieldSpaces *op = new DeferredFieldSpaces(field_data, subspaces, reqs,
+                                                        done_impl, impl);
+      if (wait_on.exists()) {
+        EventImpl *source = rt->get_event_impl(wait_on);
+        source->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
     Event IndexSpace::create_subspaces_by_image(
                                         const std::vector<FieldDataDescriptor> &field_data,
                                         std::map<IndexSpace, IndexSpace> &subspaces,
@@ -4176,6 +4474,34 @@ namespace LegionRuntime {
         it->second = child->get_metadata();
       }
       DeferredImageSpaces *op = new DeferredImageSpaces(field_data, subspaces,
+                                                        done_impl, impl);
+      if (wait_on.exists()) {
+        EventImpl *source = rt->get_event_impl(wait_on);
+        source->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
+    Event IndexSpace::create_subspaces_by_image(
+                                        const std::vector<FieldDataDescriptor> &field_data,
+                                        std::map<IndexSpace, IndexSpace> &subspaces,
+                                        const Realm::ProfilingRequestSet &reqs,
+                                        bool mutable_results, Event wait_on) const
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_impl = rt->get_free_event();
+      Event result = done_impl->get_event();
+      IndexSpace::Impl *impl = rt->get_metadata_impl(*this);
+      // Fill in the subspaces
+      for (std::map<IndexSpace,IndexSpace>::iterator it = subspaces.begin();
+            it != subspaces.end(); it++)
+      {
+        IndexSpace::Impl *child = rt->get_free_metadata(impl);
+        it->second = child->get_metadata();
+      }
+      DeferredImageSpaces *op = new DeferredImageSpaces(field_data, subspaces, reqs,
                                                         done_impl, impl);
       if (wait_on.exists()) {
         EventImpl *source = rt->get_event_impl(wait_on);
@@ -4213,6 +4539,34 @@ namespace LegionRuntime {
       return result;
     }
 
+    Event IndexSpace::create_subspaces_by_preimage(
+                                        const std::vector<FieldDataDescriptor> &field_data,
+                                        std::map<IndexSpace, IndexSpace> &subspaces,
+                                        const Realm::ProfilingRequestSet &reqs,
+                                        bool mutable_results, Event wait_on) const
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_impl = rt->get_free_event();
+      Event result = done_impl->get_event();
+      IndexSpace::Impl *impl = rt->get_metadata_impl(*this);
+      // Fill in the subspaces
+      for (std::map<IndexSpace,IndexSpace>::iterator it = subspaces.begin();
+            it != subspaces.end(); it++)
+      {
+        IndexSpace::Impl *child = rt->get_free_metadata(impl);
+        it->second = child->get_metadata();
+      }
+      DeferredPreimageSpaces *op = new DeferredPreimageSpaces(field_data, subspaces, reqs,
+                                                              done_impl, impl);
+      if (wait_on.exists()) {
+        EventImpl *source = rt->get_event_impl(wait_on);
+        source->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
     /*static*/ Event IndexSpace::compute_index_spaces(
                                           std::vector<BinaryOpDescriptor> &pairs,
                                           bool mutable_results, Event wait_on)
@@ -4228,6 +4582,31 @@ namespace LegionRuntime {
       EventImpl *done_event = rt->get_free_event();
       Event result = done_event->get_event();
       ComputeIndexSpaces *op = new ComputeIndexSpaces(pairs, done_event);
+      if (wait_on.exists()) {
+        EventImpl *event_impl = rt->get_event_impl(wait_on);
+        event_impl->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
+    /*static*/ Event IndexSpace::compute_index_spaces(
+                                          std::vector<BinaryOpDescriptor> &pairs,
+                                          const Realm::ProfilingRequestSet &reqs,
+                                          bool mutable_results, Event wait_on)
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      // Fill in the index space output
+      for (unsigned idx = 0; idx < pairs.size(); idx++) {
+        IndexSpace::Impl *parent = rt->get_metadata_impl(pairs[idx].parent);
+        IndexSpace::Impl *result = rt->get_free_metadata(parent);
+        pairs[idx].result = result->get_metadata();
+      }
+      // Construct an operation to compute the result
+      EventImpl *done_event = rt->get_free_event();
+      Event result = done_event->get_event();
+      ComputeIndexSpaces *op = new ComputeIndexSpaces(pairs, reqs, done_event);
       if (wait_on.exists()) {
         EventImpl *event_impl = rt->get_event_impl(wait_on);
         event_impl->add_waiter(wait_on.gen, op);
@@ -4259,6 +4638,29 @@ namespace LegionRuntime {
       return ready;
     }
 
+    /*static*/ Event IndexSpace::reduce_index_spaces(IndexSpaceOperation op,
+                                      const std::vector<IndexSpace> &spaces,
+                                      const Realm::ProfilingRequestSet &reqs,
+                                      IndexSpace &result, bool mutable_results,
+                                      IndexSpace parent, Event wait_on)
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      IndexSpace::Impl *parent_impl = rt->get_metadata_impl(parent);
+      IndexSpace::Impl *result_impl = rt->get_free_metadata(parent_impl);
+      result = result_impl->get_metadata();
+      EventImpl *done_event = rt->get_free_event();
+      Event ready = done_event->get_event();
+      ReduceIndexSpaces *reduce_op = 
+        new ReduceIndexSpaces(op, spaces, reqs, result_impl, done_event);
+      if (wait_on.exists()) {
+        EventImpl *event_impl = rt->get_event_impl(wait_on);
+        event_impl->add_waiter(wait_on.gen, reduce_op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(reduce_op);
+      }
+      return ready;
+    }
+
     IndexSpaceAllocator IndexSpace::create_allocator(void) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -4276,9 +4678,30 @@ namespace LegionRuntime {
       return create_instance(m, field_sizes, 1, redop_id);
     }
 
+    RegionInstance Domain::create_instance(Memory m, size_t elmt_size,
+                                           const Realm::ProfilingRequestSet &reqs,
+					   ReductionOpID redop_id) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      std::vector<size_t> field_sizes(1);
+      field_sizes[0] = elmt_size;
+      // for an instance with a single field, block size should be a don't care
+      return create_instance(m, field_sizes, 1, reqs, redop_id);
+    }
+
     RegionInstance Domain::create_instance(Memory memory,
 					   const std::vector<size_t> &field_sizes,
 					   size_t block_size,
+					   ReductionOpID redop_id) const
+    {
+      Realm::ProfilingRequestSet requests;
+      return create_instance(memory, field_sizes, block_size, requests, redop_id);
+    }
+
+    RegionInstance Domain::create_instance(Memory memory,
+					   const std::vector<size_t> &field_sizes,
+					   size_t block_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   ReductionOpID redop_id) const
     {
         if (!memory.exists())
@@ -4319,7 +4742,7 @@ namespace LegionRuntime {
 	  default: assert(0);
 	  }
 	  return IndexSpace::Impl::create_instance(memory, field_sizes, block_size, dl, 
-                                                   int(inst_extent.hi) + 1, redop_id);
+                                                   int(inst_extent.hi) + 1, reqs, redop_id);
 	} else {
 	  IndexSpace::Impl *r = Runtime::Impl::get_runtime()->get_metadata_impl(get_index_space());
 
@@ -4344,7 +4767,7 @@ namespace LegionRuntime {
 	  }
 #endif
 	  return IndexSpace::Impl::create_instance(memory, field_sizes, block_size, 
-				                   dl, count, redop_id);
+				                   dl, count, reqs, redop_id);
 	}
     }
 
@@ -4471,6 +4894,25 @@ namespace LegionRuntime {
       // TODO: Sean needs to implement this
       assert(false);
       return Event::NO_EVENT;
+    }
+
+    Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
+                       const Realm::ProfilingRequestSet &reqs,
+                       const void *fill_value, size_t fill_value_size,
+                       Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      return IndexSpace::Impl::fill(dsts, reqs, fill_value, fill_value_size,
+                                    wait_on, *this);
+    }
+
+    Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
+                       const std::vector<CopySrcDstField>& dsts,
+                       const Realm::ProfilingRequestSet &requests,
+                       Event wait_on, ReductionOpID redop_id, bool red_fold) const
+    {
+      return IndexSpace::Impl::copy(srcs, dsts, requests, *this,
+                                    wait_on, redop_id, red_fold);
     }
 
     bool IndexSpace::Impl::activate(size_t num)
@@ -4668,26 +5110,68 @@ namespace LegionRuntime {
 
     void IndexSpace::Impl::create_weighted_subspaces(
               const std::vector<IndexSpace::Impl*> &subspaces, size_t granularity,
-              const std::vector<int> &weights)
+              std::vector<int> &weights)
     {
-      // Count how many elements we have in our mask
-      size_t elem_count = mask.pop_count();
+      assert(weights.size() == subspaces.size());
       // Count the sum of all the weights
       int total_weight = 0;
       for (std::vector<int>::const_iterator it = weights.begin();
             it != weights.end(); it++)
         total_weight += *it;
-      // Compute the weight fraction
-      size_t weight_fraction = (elem_count + weights.size() - 1) / weights.size();
+      if (total_weight == 0) {
+        // If total granularity is zero fall back to equal partition
+        create_equal_subspaces(subspaces, granularity);
+        return;
+      }
+      // Count how many elements we have in our mask
+      size_t elem_count = mask.pop_count();
+#if 0
+      if ((elem_count <= size_t(total_weight)) && (granularity > 0)) {
+        // More weight than elements, if granularity is greater than zero
+        // then scale any non-zero weights so they will at least get the
+        // minimum number of elements ensured by granularity
+        size_t weight_per_element = (total_weight + elem_count - 1) / elem_count;
+        size_t minimum_weight = granularity * weight_per_element;
+        for (std::vector<int>::iterator it = weights.begin(); 
+              it != weights.end(); it++)
+        {
+          if (size_t(*it) < minimum_weight) {
+            total_weight += (minimum_weight - (*it));
+            (*it) = minimum_weight;
+          }
+        }
+      }
+#endif
       int current = 0;
-      assert(weights.size() == subspaces.size());
       unsigned weight_idx = 0;
+      float float_count = elem_count; // convert to floating point
+      float float_total_inv = 1.f / total_weight;
+      // Keep track of the accumulated rounding error, and once
+      // it gets to be larger than 1.0 add an element to the next value
+      float accumulated_error = 0.f;
       for (std::vector<IndexSpace::Impl*>::const_iterator it = subspaces.begin();
             it != subspaces.end(); it++, weight_idx++)
       {
-        // Figure out how many elements to assign to this child 
-        size_t subspace_count = weights[weight_idx] * weight_fraction;
-        // Clamp if necessary
+        // Skip any entries with zero weight
+        if (weights[weight_idx] == 0)
+          continue;
+        float local_elems = float_count * float(weights[weight_idx]) * float_total_inv;
+        // Convert back to an integer by rounding
+        float rounded = (local_elems + 0.5);
+        size_t subspace_count = rounded; // truncate back to integer
+        // See the error that we got
+        accumulated_error += (local_elems - float(subspace_count));
+        // If we have accumulated too much round-off error, add an extra element
+        if (accumulated_error >= 1.f) {
+          subspace_count++;
+          accumulated_error -= 1.f;
+        }
+        // If we are on the last iteration and we have round-off error
+        // then increment our count by one
+        if ((weight_idx == (subspaces.size()-1)) && (accumulated_error > 0.f)) {
+          subspace_count++;
+        }
+        // If we are less than the minimum granularity, increase that now
         if (subspace_count < granularity)
           subspace_count = granularity;
         bool done_early = false;
@@ -4945,6 +5429,7 @@ namespace LegionRuntime {
 						     size_t block_size, 
 						     const DomainLinearization& dl,
 						     size_t num_elements,
+                                                     const Realm::ProfilingRequestSet &reqs,
 						     ReductionOpID redop_id /*=0*/)
     {
         if (!m.exists())
@@ -4991,7 +5476,8 @@ namespace LegionRuntime {
 									       block_size, dl,
 									       ptr, 
 									       redop,
-									       NULL/*parent instance*/);
+                                                                     NULL/*parent instance*/,
+                                                                               reqs);
 	RegionInstance inst = impl->get_instance();
 	return inst;
     }
@@ -5297,6 +5783,29 @@ namespace LegionRuntime {
       };
     };
 
+    DMAOperation::DMAOperation(const Realm::ProfilingRequestSet &reqs)
+      : requests(reqs)
+    {
+      measurements.import_requests(requests);
+      capture_timeline = measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::OperationTimeline>(); 
+      capture_usage = measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::OperationMemoryUsage>();
+      if (capture_timeline)
+        timeline.record_create_time();
+    }
+
+    DMAOperation::~DMAOperation(void)
+    {
+      if (requests.request_count() > 0) {
+        if (capture_timeline)
+          measurements.add_measurement(timeline);
+        if (capture_usage)
+          measurements.add_measurement(usage);
+        measurements.send_responses(requests);
+      }
+    }
+
     bool DMAOperation::event_triggered(void)
     {
       Runtime::Impl::get_dma_queue()->enqueue_dma(this);
@@ -5329,10 +5838,15 @@ namespace LegionRuntime {
                                     Processor::NO_PROC,
                                     done_event->get_event(), COPY_BEGIN);
 #endif
-#ifdef LEGION_PROF
-      LegionRuntime::HighLevel::LegionProf::register_copy_event(
-            LegionRuntime::HighLevel::PROF_BEGIN_COPY);
+#ifdef OLD_LEGION_PROF
+      HighLevel::LegionProf::register_copy_event(
+            done_event->get_event().id, LegionRuntime::HighLevel::PROF_BEGIN_COPY);
 #endif
+      // A little bit of a hack for the shared lowlevel profiling
+      if (capture_usage && !srcs.empty() && !dsts.empty()) {
+        usage.source = srcs[0].inst.get_location();
+        usage.target = dsts[0].inst.get_location();
+      }
 
       if (redop_id == 0)
       {
@@ -5380,9 +5894,9 @@ namespace LegionRuntime {
                                       Processor::NO_PROC,
                                       done_event->get_event(), COPY_END);
 #endif
-#ifdef LEGION_PROF
-      LegionRuntime::HighLevel::LegionProf::register_copy_event(
-            LegionRuntime::HighLevel::PROF_END_COPY);
+#ifdef OLD_LEGION_PROF
+      HighLevel::LegionProf::register_copy_event(
+            done_event->get_event().id, LegionRuntime::HighLevel::PROF_END_COPY);
 #endif
       // Trigger the event indicating that we are done
       done_event->trigger();
@@ -5585,6 +6099,26 @@ namespace LegionRuntime {
     }
 
     /*static*/
+    Event IndexSpace::Impl::fill(const std::vector<Domain::CopySrcDstField> &dsts,
+                                 const Realm::ProfilingRequestSet &requests,
+                                 const void *fill_value, size_t fill_value_size,
+                                 Event wait_on, const Domain &domain)
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_event = rt->get_free_event();
+      Event result = done_event->get_event();
+      FillOperation *op = new FillOperation(dsts, requests, fill_value, 
+                                            fill_value_size, domain, done_event);
+      if (wait_on.exists()) {
+        EventImpl *event_impl = rt->get_event_impl(wait_on);
+        event_impl->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
+    }
+
+    /*static*/
     Event IndexSpace::Impl::copy(RegionInstance src_inst, RegionInstance dst_inst, size_t elem_size,
 				 const Domain domain, Event wait_on /*= Event::NO_EVENT*/,
 				 ReductionOpID redop_id /*= 0*/, bool red_fold /*= false*/)
@@ -5617,6 +6151,26 @@ namespace LegionRuntime {
       return co->register_copy(wait_on);
     }
 
+    /*static*/
+    Event IndexSpace::Impl::copy(const std::vector<Domain::CopySrcDstField>& srcs,
+                                 const std::vector<Domain::CopySrcDstField>& dsts,
+                                 const Realm::ProfilingRequestSet &requests,
+                                 const Domain domain, Event wait_on,
+                                 ReductionOpID redop_id, bool red_fold)
+    {
+      EventImpl *done_event = NULL;
+#ifdef LEGION_LOGGING
+      done_event = Runtime::Impl::get_runtime()->get_free_event(); 
+      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                      Processor::get_executing_processor(),
+                                      done_event->get_event(), COPY_INIT);
+#endif
+      CopyOperation *co = new CopyOperation(srcs, dsts, requests, 
+					    domain, redop_id, red_fold,
+					    done_event);
+      return co->register_copy(wait_on);
+    }
+
     ////////////////////////////////////////////////////////
     // DMA Queue 
     ////////////////////////////////////////////////////////
@@ -5631,6 +6185,9 @@ namespace LegionRuntime {
 
     void DMAQueue::start(void)
     {
+#ifdef OLD_LEGION_PROF
+      pthread_key_create(&HighLevel::LegionProf::copy_profiler_key, 0);
+#endif
       pthread_attr_t attr;
       PTHREAD_SAFE_CALL(pthread_attr_init(&attr));
       for (unsigned idx = 0; idx < num_dma_threads; idx++)
@@ -5684,7 +6241,11 @@ namespace LegionRuntime {
         // If we have a copy perform it and then delete it
         if (op != NULL)
         {
+          if (op->capture_timeline)
+            op->timeline.record_start_time();
           op->perform();
+          if (op->capture_timeline)
+            op->timeline.record_end_time();
           delete op;
         }
       }
@@ -5692,6 +6253,8 @@ namespace LegionRuntime {
 
     void DMAQueue::enqueue_dma(DMAOperation *op)
     {
+      if (op->capture_timeline)
+        op->timeline.record_ready_time();
       if (num_dma_threads > 0)
       {
         PTHREAD_SAFE_CALL(pthread_mutex_lock(&dma_lock));
@@ -5702,7 +6265,11 @@ namespace LegionRuntime {
       else
       {
         // If we don't have any dma threads, just do the copy now
+        if (op->capture_timeline)
+          op->timeline.record_start_time();
         op->perform();
+        if (op->capture_timeline)
+          op->timeline.record_end_time();
         delete op;
       }
     }
@@ -5723,16 +6290,59 @@ namespace LegionRuntime {
       void *bt[256];
       int bt_size = backtrace(bt, 256);
       char **bt_syms = backtrace_symbols(bt, bt_size);
-      size_t buffer_size = 1;
-      for (int i = 0; i < bt_size; i++)
-        buffer_size += (strlen(bt_syms[i]) + 1);
+      size_t buffer_size = 2048; // default buffer size
       char *buffer = (char*)malloc(buffer_size);
-      int offset = 0;
-      for (int i = 0; i < bt_size; i++)
-        offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+      size_t offset = 0;
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        // If offset is within half of the buffer size, double the buffer
+        if (offset >= (buffer_size / 2)) {
+          buffer_size *= 2;
+          buffer = (char*)realloc(buffer, buffer_size);
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function with no arguments.
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += snprintf(buffer+offset,buffer_size-offset,
+                             "%s\n",bt_syms[i]);
+        }
+      }
       fprintf(stderr,"BACKTRACE\n----------\n%s\n----------\n", buffer);
       fflush(stderr);
       free(buffer);
+      free(funcname);
     }
 #endif
 
@@ -6042,6 +6652,7 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
+        Realm::InitialTime::get_initial_time();
         unsigned num_cpus = NUM_PROCS;
         unsigned num_utility_cpus = NUM_UTIL_PROCS;
         unsigned num_dma_threads = NUM_DMA_THREADS;
@@ -6729,7 +7340,8 @@ namespace LegionRuntime {
 						     size_t elmt_size, size_t block_size,
 						     const DomainLinearization& linearization,
 						     char *ptr, const ReductionOpUntyped *redop,
-						     RegionInstance::Impl *parent)
+						     RegionInstance::Impl *parent,
+                                                     const Realm::ProfilingRequestSet &reqs)
     {
         PTHREAD_SAFE_CALL(pthread_mutex_lock(&free_inst_lock));
         if (!free_instances.empty())
@@ -6739,7 +7351,7 @@ namespace LegionRuntime {
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_inst_lock));
           bool activated = result->activate(m, num_elmts, alloc_size, 
                                             field_sizes, elmt_size, block_size, 
-                                            linearization, ptr, redop, parent);
+                                            linearization, ptr, redop, parent, reqs);
 #ifdef DEBUG_LOW_LEVEL
           assert(activated);
 #else
@@ -6802,7 +7414,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6823,7 +7435,7 @@ namespace LegionRuntime {
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6846,7 +7458,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6867,7 +7479,7 @@ namespace LegionRuntime {
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6887,7 +7499,7 @@ namespace LegionRuntime {
       int index = ((impl->get_linearization().get_dim() == 1) ?
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes = 
 #endif
@@ -6915,7 +7527,7 @@ namespace LegionRuntime {
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
       // TODO: trim subrect in HybridSOA case
-      size_t field_start, field_size, within_field;
+      size_t field_start = 0, field_size = 0, within_field = 0;
 #ifndef NDEBUG
       size_t bytes2 = 
 #endif
@@ -6924,7 +7536,7 @@ namespace LegionRuntime {
       assert(bytes2 == 1);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = (strides[i] * 
+	offsets[i].offset = (strides[i][0] * 
 			     ((impl->get_block_size() > 1) ? field_size : impl->get_elmt_size()));
       return dst;
     }

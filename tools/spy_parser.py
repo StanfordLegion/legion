@@ -81,6 +81,7 @@ copy_field_pat          = re.compile(prefix+"Copy Field (?P<startid>[0-9a-f]+) (
 # Logger calls for physical instance usage 
 physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 physical_reduc_pat      = re.compile(prefix+"Reduction Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<fold>[0-1]) (?P<indirect>[0-9]+)")
+inst_field_pat          = re.compile(prefix+"Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_user_pat             = re.compile(prefix+"Op Instance User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+)")
 op_proc_user_pat        = re.compile(prefix+"Op Processor User (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+)")
 
@@ -264,6 +265,10 @@ def parse_log_line(line, state):
     m = physical_reduc_pat.match(line)
     if m <> None:
         if state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
+            return True
+    m = inst_field_pat.match(line)
+    if m <> None:
+        if state.add_instance_field(int(m.group('iid'),16), int(m.group('fid'))):
             return True
     m = op_user_pat.match(line)
     if m <> None:

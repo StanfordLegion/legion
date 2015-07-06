@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,14 @@
 
 #ifndef __LEGION_TERRA_PARTITIONS_H__
 #define __LEGION_TERRA_PARTITIONS_H__
+
+// C declarations for legion_terra_partitions.cc
+
+// ******************** IMPORTANT **************************
+//
+// This file is PURE C, **NOT** C++.
+//
+// ******************** IMPORTANT **************************
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +45,13 @@ legion_terra_index_cross_product_create(
   legion_context_t ctx,
   legion_index_partition_t lhs,
   legion_index_partition_t rhs);
+
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_create_multi(
+  legion_runtime_t runtime,
+  legion_context_t ctx,
+  legion_index_partition_t *partitions,
+  size_t npartitions);
 
 legion_index_partition_t
 legion_terra_index_cross_product_get_partition(

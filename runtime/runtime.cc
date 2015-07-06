@@ -446,11 +446,6 @@ namespace LegionRuntime {
                               producer_op->get_parent()->get_unique_task_id(),
                               producer_op->get_unique_op_id());
 #endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_BEGIN_WAIT);
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
@@ -458,11 +453,6 @@ namespace LegionRuntime {
         LegionLogging::log_future_wait_end(exec_proc,
                                producer_op->get_parent()->get_unique_task_id(),
                                producer_op->get_unique_op_id());
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
@@ -498,11 +488,6 @@ namespace LegionRuntime {
                                producer_op->get_parent()->get_unique_task_id(),
                                producer_op->get_unique_op_id());
 #endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_BEGIN_WAIT);
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
@@ -510,11 +495,6 @@ namespace LegionRuntime {
         LegionLogging::log_future_wait_end(exec_proc,
                                producer_op->get_parent()->get_unique_task_id(),
                                producer_op->get_unique_op_id());
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
@@ -560,11 +540,6 @@ namespace LegionRuntime {
                                producer_op->get_parent()->get_unique_task_id(),
                                producer_op->get_unique_op_id());
 #endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_BEGIN_WAIT);
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
@@ -572,11 +547,6 @@ namespace LegionRuntime {
         LegionLogging::log_future_wait_end(exec_proc,
                                producer_op->get_parent()->get_unique_task_id(),
                                producer_op->get_unique_op_id());
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(
-                              producer_op->get_parent()->get_unique_task_id(), 
-                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
@@ -920,9 +890,10 @@ namespace LegionRuntime {
         args.impl = this;
         args.barrier = bar;
         args.count = count;
-        Processor proc = runtime->find_utility_group();
         // Spawn the task dependent on the future being ready
-        proc.spawn(HLR_TASK_ID, &args, sizeof(args), ready_event);
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_CONTRIBUTE_COLLECTIVE_ID,
+                                         NULL, ready_event);
       }
       else // If we've already triggered, then we can do the arrival now
         bar.arrive(count, Event::NO_EVENT, result, result_size);
@@ -1072,10 +1043,6 @@ namespace LegionRuntime {
                                           context->get_unique_task_id(),
                                           task->get_unique_task_id());
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(context->get_unique_task_id(), 
-                                     PROF_BEGIN_WAIT);
-#endif
           runtime->pre_wait(proc);
           ready_event.wait();
           runtime->post_wait(proc);
@@ -1083,10 +1050,6 @@ namespace LegionRuntime {
           LegionLogging::log_future_wait_end(exec_proc,
                                           context->get_unique_task_id(),
                                           task->get_unique_task_id());
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(context->get_unique_task_id(), 
-                                     PROF_END_WAIT);
 #endif
         }
       }
@@ -1218,10 +1181,6 @@ namespace LegionRuntime {
                                              context->get_unique_task_id(),
                                              ready_event);
 #endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(context->get_unique_task_id(),
-                                   PROF_BEGIN_WAIT);
-#endif
         runtime->pre_wait(proc);
         ready_event.wait();
         runtime->post_wait(proc);
@@ -1229,10 +1188,6 @@ namespace LegionRuntime {
         LegionLogging::log_inline_wait_end(proc,
                                            context->get_unique_task_id(),
                                            ready_event);
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(context->get_unique_task_id(),
-                                   PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
@@ -1253,10 +1208,6 @@ namespace LegionRuntime {
         LegionLogging::log_inline_wait_begin(proc,
                                              context->get_unique_task_id(),
                                              ref_ready);
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(context->get_unique_task_id(),
-                                   PROF_BEGIN_WAIT);
 #endif
         runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
@@ -1280,10 +1231,6 @@ namespace LegionRuntime {
         LegionLogging::log_inline_wait_end(proc,
                                            context->get_unique_task_id(),
                                            ref_ready);
-#endif
-#ifdef LEGION_PROF
-        LegionProf::register_event(context->get_unique_task_id(),
-                                   PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
@@ -1375,7 +1322,7 @@ namespace LegionRuntime {
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
         log_inst.error("Requested field accessor for field %d "
-            "without privleges!", fid);
+            "without privileges!", fid);
         assert(false);
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
@@ -1738,7 +1685,7 @@ namespace LegionRuntime {
                                        unsigned def_mappers, bool no_steal, 
                                        unsigned max_steals)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        utility_proc(rt->find_utility_group()), superscalar_width(width), 
+        superscalar_width(width), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         next_local_index(0),
         task_scheduler_enabled(false), pending_shutdown(false),
@@ -1771,7 +1718,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
-        proc_kind(Processor::LOC_PROC), utility_proc(Processor::NO_PROC),
+        proc_kind(Processor::LOC_PROC),
         superscalar_width(0), stealing_disabled(false), 
         max_outstanding_steals(0), next_local_index(0),
         task_scheduler_enabled(false), pending_shutdown(false),
@@ -2665,7 +2612,8 @@ namespace LegionRuntime {
       SchedulerArgs sched_args;
       sched_args.hlr_id = HLR_SCHEDULER_ID;
       sched_args.proc = local_proc;
-      utility_proc.spawn(HLR_TASK_ID, &sched_args, sizeof(sched_args));
+      runtime->issue_runtime_meta_task(&sched_args, sizeof(sched_args),
+                                       HLR_SCHEDULER_ID);
     } 
 
     //--------------------------------------------------------------------------
@@ -2916,8 +2864,9 @@ namespace LegionRuntime {
       args.op = op;
       ContextID ctx_id = op->get_parent()->get_context_id();
       AutoLock d_lock(dependence_lock);
-      Event next = utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
-                                      dependence_preconditions[ctx_id]);
+      Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                       HLR_TRIGGER_DEPENDENCE_ID, op,
+                                       dependence_preconditions[ctx_id]);
       dependence_preconditions[ctx_id] = next;
     }
 
@@ -2962,14 +2911,16 @@ namespace LegionRuntime {
       if (!prev_failure)
       {
         AutoLock l_lock(local_queue_lock); 
-        Event next = utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
+        Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                      HLR_TRIGGER_OP_ID, op,
                               local_scheduler_preconditions[next_local_index]);
         local_scheduler_preconditions[next_local_index++] = next;
         if (next_local_index == superscalar_width)
           next_local_index = 0;
       }
       else
-        utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
+        runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                         HLR_TRIGGER_OP_ID, op);
     }
 
     //--------------------------------------------------------------------------
@@ -3180,8 +3131,9 @@ namespace LegionRuntime {
           // Give priority to things which are getting sent remotely
           args.op = *vis_it;
           int priority = ((*vis_it)->target_proc != local_proc) ? 2 : 1;
-          utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
-                             wait_on, priority);
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                           HLR_TRIGGER_TASK_ID, *vis_it,
+                                           wait_on, priority);
         }
       }
 
@@ -4139,8 +4091,9 @@ namespace LegionRuntime {
       *((unsigned*)(sending_buffer + sizeof(HLRTaskID) +
             sizeof(local_address_space) + sizeof(header))) = packaged_messages;
       // Send the message
-      Event next_event = target.spawn(HLR_TASK_ID, sending_buffer,
-                                      sending_index, last_message_event);
+      Event next_event = runtime->issue_runtime_meta_task(sending_buffer, 
+                                      sending_index, HLR_MESSAGE_ID, NULL,
+                                      last_message_event, 0/*priority*/,target);
       // Update the event
       last_message_event = next_event;
       // Reset the state of the buffer
@@ -4697,7 +4650,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::launch(Processor utility, int priority)
+    void GarbageCollectionEpoch::launch(int priority)
     //--------------------------------------------------------------------------
     {
       // Set remaining to the total number of collections
@@ -4714,7 +4667,9 @@ namespace LegionRuntime {
         // before launching the task
         it++;
         bool done = (it == collections.end());
-        utility.spawn(HLR_TASK_ID, &args, sizeof(args), precondition, priority);
+        runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                         HLR_DEFERRED_COLLECT_ID, NULL,
+                                         precondition, priority);
         if (done)
           break;
       }
@@ -4746,9 +4701,11 @@ namespace LegionRuntime {
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      Processor cleanup, Processor gc, Processor message)
-      : high_level(new HighLevelRuntime(this)), machine(m), 
-        address_space(unique), runtime_stride(address_spaces.size()),
-        forest(new RegionTreeForest(this)), outstanding_top_level_tasks(1),
+      : high_level(new HighLevelRuntime(this)),machine(m),address_space(unique),
+        runtime_stride(address_spaces.size()), profiler(NULL),
+        forest(new RegionTreeForest(this)), 
+        has_explicit_utility_procs(!local_utilities.empty()), 
+        outstanding_top_level_tasks(1),
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
 #endif
@@ -4814,8 +4771,9 @@ namespace LegionRuntime {
         LegionLogging::initialize_legion_logging(unique, all_locals);
       }
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       {
+        LegionProf::init_timestamp();
         // See if we should disable profiling on this node
         if (Runtime::num_profiling_nodes == 0)
           LegionProf::disable_profiling();
@@ -4867,7 +4825,6 @@ namespace LegionRuntime {
           Memory::Kind kind = it->kind();
           LegionProf::initialize_memory(*it, kind);
         } 
-        LegionProf::initialize_copy_processor();
       }
 #endif
       // Construct a local utility processor group
@@ -4957,6 +4914,39 @@ namespace LegionRuntime {
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
+#ifdef LEGION_PROF
+      // If it is less than zero, all nodes enabled by default, otherwise
+      // we have to be less than the maximum number to enable profiling
+      if ((Runtime::num_profiling_nodes < 0) || 
+          (int(address_space) < Runtime::num_profiling_nodes))
+      {
+        HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
+        profiler = new LegionProfiler((local_utils.empty() ? 
+                                      Processor::NO_PROC : utility_group), 
+                                      machine, HLR_LAST_TASK_ID,
+                                      hlr_task_descriptions, 
+                                      Operation::LAST_OP_KIND, 
+                                      Operation::op_names); 
+        // We also have to register any statically registered task
+        // variants here since the profiler didn't exist before
+        const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
+          &collections = Runtime::get_collection_table();
+        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
+              const_iterator cit = collections.begin(); cit != 
+              collections.end(); cit++) 
+        {
+          const std::map<VariantID,TaskVariantCollection::Variant> 
+            &variants = cit->second->variants;  
+          for (std::map<VariantID,TaskVariantCollection::Variant>::
+                const_iterator it = variants.begin(); it != 
+                variants.end(); it++)
+          {
+            profiler->register_task_variant(cit->second->name,
+                                            it->second);
+          }
+        }
+      }
+#endif
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -4968,7 +4958,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
       : high_level(NULL), machine(rhs.machine), address_space(0), 
-        runtime_stride(0), forest(NULL),
+        runtime_stride(0), profiler(NULL), forest(NULL),
+        has_explicit_utility_procs(false),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
 #ifdef SPECIALIZE_UTIL_PROCS
         , cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
@@ -4992,7 +4983,7 @@ namespace LegionRuntime {
         LegionLogging::finalize_legion_logging(all_procs);
       }
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       {
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
@@ -5013,6 +5004,14 @@ namespace LegionRuntime {
           LegionProf::finalize_processor(*it);
         }
         LegionProf::finalize_copy_profiler();
+      }
+#endif
+#ifdef LEGION_PROF
+      if (profiler != NULL)
+      {
+        profiler->finalize();
+        delete profiler;
+        profiler = NULL;
       }
 #endif
       delete high_level;
@@ -5359,7 +5358,9 @@ namespace LegionRuntime {
           Processor::Kind kind = it->kind();
           if (kind != Processor::LOC_PROC)
             continue;
-          it->spawn(HLR_TASK_ID, &args, sizeof(args));
+          issue_runtime_meta_task(&args, sizeof(args), 
+                                  HLR_MPI_RANK_ID, NULL,
+                                  Event::NO_EVENT, 0/*priority*/, *it);
           sent_targets.insert(target_space);
         }
         // Now set our own value, update the count, and see if we're done
@@ -5466,9 +5467,9 @@ namespace LegionRuntime {
       args.map_id = map_id;
       args.proc = proc;
       args.event = result;
-      Processor util = find_utility_group();
       Event pre = f.impl->get_ready_event();
-      Event post = util.spawn(HLR_TASK_ID, &args, sizeof(args), pre);
+      Event post = issue_runtime_meta_task(&args, sizeof(args), 
+                                           HLR_MAPPER_TASK_ID, NULL, pre);
       // Chain the events properly
       result.trigger(post);
       // Mark that we have another outstanding top level task
@@ -5561,7 +5562,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Creating index space " IDFMT " in task %s "
+      log_index.debug("Creating index space %x in task %s "
                             "(ID %lld) with %ld maximum elements", handle.id, 
                             ctx->variants->name, ctx->get_unique_task_id(), 
                             max_num_elmts); 
@@ -5604,7 +5605,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
@@ -5719,7 +5720,7 @@ namespace LegionRuntime {
           assert(false);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      log_index.debug("Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
@@ -5750,7 +5751,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index.debug("Destroying index space " IDFMT " in task %s "
+      log_index.debug("Destroying index space %x in task %s "
                              "(ID %lld)", 
                       handle.id, ctx->variants->name, 
                       ctx->get_unique_task_id());
@@ -5806,7 +5807,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -5873,7 +5874,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6018,7 +6019,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6059,7 +6060,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6134,7 +6135,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6185,7 +6186,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6264,7 +6265,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6687,7 +6688,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating equal partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6742,7 +6743,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating weighted partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6797,7 +6798,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating union partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", 
+                            "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6874,7 +6875,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating intersection partition %d with parent "
-                            "index space " IDFMT " in task %s (ID %lld)", 
+                            "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -6951,7 +6952,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating difference partition %d with parent "
-                            "index space " IDFMT " in task %s (ID %lld)", 
+                            "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -7148,10 +7149,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -7159,10 +7156,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
       }
@@ -7253,10 +7246,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -7264,10 +7253,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
       }
@@ -7359,10 +7344,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -7370,10 +7351,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
       }
@@ -7693,6 +7670,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(Context ctx,
+                                    IndexSpace parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition result = forest->get_index_partition(parent, 
+                                                          ColorPoint(color));
+#ifdef DEBUG_HIGH_LEVEL
+      if (!result.exists())
+      {
+        switch (color.get_dim())
+        {
+          case 0:
+          case 1:
+            log_index.error("Invalid color %d for get index partitions", 
+                                    color.point_data[0]);
+            break;
+          case 2:
+            log_index.error("Invalid color (%d,%d) for get index partitions", 
+                                    color.point_data[0], color.point_data[1]);
+            break;
+          case 3:
+            log_index.error("Invalid color (%d,%d,%d) for get index "
+                            "partitions", color.point_data[0], 
+                            color.point_data[1], color.point_data[2]);
+            break;
+        }
+        assert(false);
+        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
+                                      const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition result = forest->get_index_partition(parent, 
+                                                          ColorPoint(color));
+      return result.exists();
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace Runtime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
@@ -7718,6 +7739,55 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(Context ctx, IndexPartition p, 
+                                           const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return get_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, 
+                                           const DomainPoint &color) 
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
+#ifdef DEBUG_HIGH_LEVEL
+      if (!result.exists())
+      {
+        switch (color.get_dim())
+        {
+          case 0:
+          case 1:
+            log_index.error("Invalid color %d for get index subspace", 
+                                    color.point_data[0]);
+            break;
+          case 2:
+            log_index.error("Invalid color (%d,%d) for get index subspace", 
+                                    color.point_data[0], color.point_data[1]);
+            break;
+          case 3:
+            log_index.error("Invalid color (%d,%d,%d) for get index subspace",
+              color.point_data[0], color.point_data[1], color.point_data[2]);
+            break;
+        }
+        assert(false);
+        exit(ERROR_INVALID_INDEX_PART_COLOR); 
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace(Context ctx, IndexPartition p,
+                                     const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
+      return result.exists();
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7739,7 +7809,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index.error("Invalid handle " IDFMT " for get index space "
+        log_index.error("Invalid handle %x for get index space "
                                "domain", 
                                 handle.id);
         assert(false);
@@ -7826,6 +7896,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ColorPoint> color_points;
+      forest->get_index_space_partition_colors(sp, color_points);
+      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
+            it != color_points.end(); it++)
+      {
+        colors.insert(it->get_point());
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
@@ -7854,6 +7938,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(Context ctx, 
+                                                     IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_index_partition_color(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -7866,6 +7958,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color(handle).get_index();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_partition_color_point(Context ctx,
+                                                         IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color(handle).get_point();
     }
 
     //--------------------------------------------------------------------------
@@ -8056,7 +8156,7 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_region.debug("Creating logical region in task %s (ID %lld) "
-                              "with index space " IDFMT " and field space %x "
+                              "with index space %x and field space %x "
                               "in new tree %d",
                               ctx->variants->name,ctx->get_unique_task_id(), 
                               index_space.id, field_space.id, tid);
@@ -8094,7 +8194,7 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_region.debug("Deleting logical region (" IDFMT ",%x) in "
+      log_region.debug("Deleting logical region (%x,%x) in "
                               "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
                               ctx->variants->name,ctx->get_unique_task_id());
@@ -8206,11 +8306,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_color(
+                        Context ctx, LogicalRegion parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_by_color(parent, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition_by_color(LogicalRegion par,
                                                              Color c)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_partition_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_partition_by_color(Context ctx, 
+                                 LogicalRegion parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_partition_by_color(parent, ColorPoint(color));
     }
 
     //--------------------------------------------------------------------------
@@ -8256,11 +8372,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx,
+                                  LogicalPartition parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
                                                           Color c)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_subregion_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_subregion_by_color(Context ctx,
+                              LogicalPartition parent, const DomainPoint &color) 
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
     }
 
     //--------------------------------------------------------------------------
@@ -8554,7 +8686,9 @@ namespace LegionRuntime {
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            utility_group.spawn(HLR_TASK_ID, &args, sizeof(args), ready_event);
+            issue_runtime_meta_task(&args, sizeof(args), 
+                                    HLR_DEFERRED_FUTURE_MAP_SET_ID, 
+                                    NULL, ready_event); 
           }
           return FutureMap(result);
         }
@@ -8898,8 +9032,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
-      log_run.debug("Registering a map operation for region (" IDFMT 
-                           ",%x,%x) in task %s (ID %lld)",
+      log_run.debug("Registering a map operation for region "
+                           "(%x,%x,%x) in task %s (ID %lld)",
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
                            launcher.requirement.region.tree_id, 
@@ -8913,9 +9047,9 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" IDFMT 
-                            ",%x,%x) that conflicts with mapped region (" 
-                            IDFMT ",%x,%x) at index %d of parent task %s "
+        log_run.error("Attempted an inline mapping of region "
+                            "(%x,%x,%x) that conflicts with mapped region " 
+                            "(%x,%x,%x) at index %d of parent task %s "
                             "(ID %lld) that would ultimately result in "
                             "deadlock. Instead you receive this error "
                             "message.",
@@ -8934,8 +9068,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -8970,8 +9104,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
-      log_run.debug("Registering a map operation for region (" 
-                            IDFMT ",%x,%x) "
+      log_run.debug("Registering a map operation for region " 
+                           "(%x,%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id, 
                            req.region.tree_id, ctx->variants->name, 
@@ -8985,10 +9119,10 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
-                            "that conflicts with mapped region (" 
-                            IDFMT ",%x,%x) at "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
+                            "that conflicts with mapped region " 
+		            "(%x,%x,%x) at "
                             "index %d of parent task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
                             "receive this error message.",
@@ -9007,8 +9141,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (" 
-                            IDFMT ",%x,%x) "
+        log_run.error("Attempted an inline mapping of region " 
+                            "(%x,%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -9181,10 +9315,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -9193,9 +9323,99 @@ namespace LegionRuntime {
                                              ctx->get_unique_task_id(),
                                              mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_field(Context ctx, LogicalRegion handle,
+                             LogicalRegion parent, FieldID fid,
+                             Future f, const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fid, f,
+                          pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fid, f,
+                          pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -9285,10 +9505,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -9297,9 +9513,100 @@ namespace LegionRuntime {
                                              ctx->get_unique_task_id(),
                                              mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
+                              LogicalRegion parent,
+                              const std::set<FieldID> &fields,
+                              Future f, const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fields, f, 
+                          pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fields, f,
+                          pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -9355,9 +9662,9 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region (" 
-                      IDFMT ",%x,%x) that conflicts with mapped region (" 
-                      IDFMT ",%x,%x) at index %d of parent task %s (ID %lld) "
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
                       "before invoking attach_hdf5 on file %s",
@@ -9374,8 +9681,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region (" 
-                      IDFMT ",%x,%x) that conflicts with previous inline "
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
@@ -9508,10 +9815,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -9519,10 +9822,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -10038,10 +10337,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -10049,10 +10344,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -10137,10 +10428,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -10148,10 +10435,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -10417,10 +10700,6 @@ namespace LegionRuntime {
                                                ctx->get_unique_task_id(), 
                                                mapped_event);
 #endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_BEGIN_WAIT);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
@@ -10428,10 +10707,6 @@ namespace LegionRuntime {
           LegionLogging::log_inline_wait_end(proc,
                                              ctx->get_unique_task_id(),
                                              mapped_event);
-#endif
-#ifdef LEGION_PROF
-          LegionProf::register_event(ctx->get_unique_task_id(),
-                                     PROF_END_WAIT);
 #endif
         }
 #ifdef LEGION_LOGGING
@@ -12504,7 +12779,7 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, BEGIN_SCHEDULING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(0/*unique id*/, PROF_BEGIN_SCHEDULER);
 #endif
       log_run.debug("Running scheduler on processor " IDFMT "", proc.id);
@@ -12520,16 +12795,27 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, END_SCHEDULING);
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(0/*unique id*/, PROF_END_SCHEDULER);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::process_profiling_task(Processor p, 
+                                         const void *args, size_t arglen)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiler != NULL);
+#endif
+      profiler->process_results(p, args, arglen);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::process_message_task(const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(0, PROF_BEGIN_MESSAGE);
 #endif
       const char *buffer = (const char*)args;
@@ -12537,7 +12823,7 @@ namespace LegionRuntime {
       buffer += sizeof(sender);
       arglen -= sizeof(sender);
       find_messenger(sender)->process_message(buffer,arglen);
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::register_event(0, PROF_END_MESSAGE);
 #endif
     }
@@ -12620,10 +12906,6 @@ namespace LegionRuntime {
                                                  ctx->get_unique_task_id(), 
                                                  mapped_event);
 #endif
-#ifdef LEGION_PROF
-            LegionProf::register_event(ctx->get_unique_task_id(),
-                                       PROF_BEGIN_WAIT);
-#endif
             pre_wait(proc);
             mapped_event.wait();
             post_wait(proc);
@@ -12631,10 +12913,6 @@ namespace LegionRuntime {
             LegionLogging::log_inline_wait_end(proc,
                                                ctx->get_unique_task_id(),
                                                mapped_event);
-#endif
-#ifdef LEGION_PROF
-            LegionProf::register_event(ctx->get_unique_task_id(),
-                                       PROF_END_WAIT);
 #endif
           }
 #ifdef LEGION_LOGGING
@@ -13069,6 +13347,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Event Runtime::issue_runtime_meta_task(const void *args, size_t arglen,
+                                           HLRTaskID tid, Operation *op,
+                                           Event precondition, int priority,
+                                           Processor target)
+    //--------------------------------------------------------------------------
+    {
+      if (!target.exists())
+      {
+        // If we don't have a processor to explicitly target, figure
+        // out which of our utility processors to use
+#ifdef SPECIALIZED_UTIL_PROCS
+        if (tid == HLR_DEFERRED_COLLECT_ID)
+          target = gc_proc;
+        else
+          target = cleanup_proc;
+#else
+        target = utility_group;
+#endif
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(target.exists());
+#endif
+      if (profiler != NULL)
+      {
+        Realm::ProfilingRequestSet requests;
+        profiler->add_meta_request(requests, tid, op);
+        return target.spawn(HLR_TASK_ID, args, arglen,
+                            requests, precondition, priority);
+      }
+      else
+        return target.spawn(HLR_TASK_ID, args, arglen, precondition, priority);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::allocate_context(SingleTask *task)
     //--------------------------------------------------------------------------
     {
@@ -13176,9 +13488,9 @@ namespace LegionRuntime {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
         deferred_recycle_args.did = did;
-        Processor proc = Processor::get_executing_processor(); 
-        proc.spawn(HLR_TASK_ID, &deferred_recycle_args,
-                  sizeof(deferred_recycle_args), recycle_event);
+        issue_runtime_meta_task(&deferred_recycle_args,
+                                sizeof(deferred_recycle_args),
+                                HLR_DEFERRED_RECYCLE_ID, NULL, recycle_event);
       }
       else
         free_distributed_id(did);
@@ -13339,14 +13651,7 @@ namespace LegionRuntime {
         }
       }
       if (to_trigger != NULL)
-      {
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = get_gc_proc(Processor::get_executing_processor());
-#else
-        Processor util = find_utility_group();
-#endif
-        to_trigger->launch(util, 0/*priority*/);
-      }
+        to_trigger->launch(0/*priority*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13403,12 +13708,7 @@ namespace LegionRuntime {
         it->second->notify_pending_shutdown();
       }
       // Launch our last garbage collection epoch
-#ifdef SPECIALIZED_UTIL_PROCS
-      Processor util = get_gc_proc(Processor::get_executing_processor());
-#else
-      Processor util = find_utility_group();
-#endif
-      current_gc_epoch->launch(util, 0/*priority*/);
+      current_gc_epoch->launch(0/*priority*/);
       // Make sure any messages that we have sent anywhere are handled
       std::set<Event> shutdown_preconditions;
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
@@ -15865,6 +16165,7 @@ namespace LegionRuntime {
       table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
       table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
       table[HLR_TASK_ID]           = Runtime::high_level_runtime_task;
+      table[HLR_PROFILING_ID]      = Runtime::profiling_runtime_task;
     }
 
     //--------------------------------------------------------------------------
@@ -16465,6 +16766,15 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::profiling_runtime_task(
+                                   const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->process_profiling_task(p, args, arglen);
     }
 
 #ifdef TRACE_ALLOCATION

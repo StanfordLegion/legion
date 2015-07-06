@@ -101,7 +101,6 @@ local terra init_cuda() : int32
     r = DeviceAPI.cuCtxGetDevice(&d)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    C.printf("new cuda context created\n")
     r = DeviceAPI.cuDeviceGet(&d, 0)
     assert(r == 0, "CUDA error in cuDeviceGet")
     r = DeviceAPI.cuCtxCreate_v2(&cx, 0, d)
@@ -125,10 +124,8 @@ local terra compile_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : 
   var cubin : &opaque
   var cubinSize : uint64
   var options = arrayof(CUjit_option, CU_JIT_TARGET, CU_JIT_ERROR_LOG_BUFFER, CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES)
-  var error_str : rawstring
-  var error_sz : uint64
-  var option_values = arrayof([&opaque], [&opaque](version), error_str, [&opaque](error_sz))
-  var r = DeviceAPI.cuLinkCreate_v2(3, options, option_values, &linkState)
+  var option_values = arrayof([&opaque], [&opaque](version))
+  var r = DeviceAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
   assert(r == 0, "CUDA error in creating linker")
   r = DeviceAPI.cuLinkAddData_v2(linkState, CU_JIT_INPUT_PTX, ptxc, ptxSize, nil, 0, nil, nil)
   assert(r == 0, "CUDA error in adding PTX")

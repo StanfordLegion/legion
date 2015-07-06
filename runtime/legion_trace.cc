@@ -394,7 +394,14 @@ namespace LegionRuntime {
     const char* TraceCaptureOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "TraceCapture"; 
+      return op_names[TRACE_CAPTURE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TraceCaptureOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_CAPTURE_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
@@ -474,7 +481,14 @@ namespace LegionRuntime {
     const char* TraceCompleteOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return "TraceComplete";
+      return op_names[TRACE_COMPLETE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TraceCompleteOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_COMPLETE_OP_KIND; 
     }
 
     //--------------------------------------------------------------------------

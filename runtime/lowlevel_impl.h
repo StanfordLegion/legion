@@ -35,6 +35,8 @@
 #include "realm/dynamic_set.h"
 #endif
 
+#include "realm/operation.h"
+
 #include <assert.h>
 
 #include "activemsg.h"
@@ -70,6 +72,8 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 
 namespace Realm {
   class Module;
+  class Operation;
+  class ProfilingRequestSet;
 };
 
 namespace LegionRuntime {
@@ -919,11 +923,17 @@ namespace LegionRuntime {
     class ProcessorGroup;
 
     // information for a task launch
-    class Task {
+    class Task : public Realm::Operation {
     public:
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
 	   const void *_args, size_t _arglen,
+	   Event _finish_event, int _priority,
+           int expected_count);
+      Task(Processor _proc,
+	   Processor::TaskFuncID _func_id,
+	   const void *_args, size_t _arglen,
+           const Realm::ProfilingRequestSet &reqs,
 	   Event _finish_event, int _priority,
            int expected_count);
 
@@ -936,6 +946,7 @@ namespace LegionRuntime {
       Event finish_event;
       int priority;
       int run_count, finish_count;
+      bool capture_proc;
     };
 
     class Processor::Impl {
@@ -954,6 +965,12 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority) = 0;
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority) = 0;
 
@@ -1072,6 +1089,13 @@ namespace LegionRuntime {
 			      //std::set<RegionInstance> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+
 
     public: //protected:
       bool members_valid;
@@ -1209,6 +1233,11 @@ namespace LegionRuntime {
 			      //std::set<RegionInstance> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
     protected:
       const int core_id;
       const size_t stack_size;
@@ -1257,6 +1286,7 @@ namespace LegionRuntime {
 					   const std::vector<size_t>& field_sizes,
 					   ReductionOpID redopid,
 					   off_t list_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   RegionInstance parent_inst);
 
       RegionInstance create_instance_remote(IndexSpace is,
@@ -1267,6 +1297,7 @@ namespace LegionRuntime {
 					    const std::vector<size_t>& field_sizes,
 					    ReductionOpID redopid,
 					    off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
 					    RegionInstance parent_inst);
 
       virtual RegionInstance create_instance(IndexSpace is,
@@ -1277,6 +1308,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst) = 0;
 
       void destroy_instance_local(RegionInstance i, bool local_destroy);
@@ -1338,6 +1370,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
@@ -1388,6 +1421,7 @@ namespace LegionRuntime {
                                             const std::vector<size_t>& field_sizes,
                                             ReductionOpID redopid,
                                             off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
                                             RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i,
@@ -1427,6 +1461,7 @@ namespace LegionRuntime {
                                              size_t block_size,
                                              size_t element_size,
                                              const std::vector<size_t>& field_sizes,
+                                             const Realm::ProfilingRequestSet &reqs,
                                              ReductionOpID redopid,
                                              off_t list_size,
                                              RegionInstance parent_inst);
@@ -1513,9 +1548,13 @@ namespace LegionRuntime {
 
     class RegionInstance::Impl {
     public:
-      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
-	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-	   off_t _count_offset = -1, off_t _red_list_size = -1, RegionInstance _parent_inst = NO_INST);
+      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
+          ReductionOpID _redopid,
+	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
+           const std::vector<size_t>& _field_sizes,
+           const Realm::ProfilingRequestSet &reqs,
+	   off_t _count_offset = -1, off_t _red_list_size = -1, 
+           RegionInstance _parent_inst = NO_INST);
 
       // when we auto-create a remote instance, we don't know region/offset/linearization
       Impl(RegionInstance _me, Memory _memory);
@@ -1543,11 +1582,17 @@ namespace LegionRuntime {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).node(), me.id); }
 
+      void finalize_instance(void);
+
     public: //protected:
       friend class RegionInstance;
 
       RegionInstance me;
       Memory memory; // not part of metadata because it's determined from ID alone
+      // Profiling info only needed on creation node
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingMeasurementCollection measurements;
+      Realm::ProfilingMeasurements::InstanceTimeline timeline;
 
       class Metadata : public MetadataBase {
       public:

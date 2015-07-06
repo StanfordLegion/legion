@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -193,6 +193,7 @@ ast.unspecialized("ExprRawContext", {"span"})
 ast.unspecialized("ExprRawFields", {"region", "span"})
 ast.unspecialized("ExprRawPhysical", {"region", "span"})
 ast.unspecialized("ExprRawRuntime", {"span"})
+ast.unspecialized("ExprRawValue", {"value", "span"})
 ast.unspecialized("ExprIsnull", {"pointer", "span"})
 ast.unspecialized("ExprNew", {"pointer_type_expr", "span"})
 ast.unspecialized("ExprNull", {"pointer_type_expr", "span"})
@@ -203,8 +204,7 @@ ast.unspecialized("ExprIspace", {"index_type_expr", "extent",
 ast.unspecialized("ExprRegion", {"ispace", "fspace_type_expr", "span"})
 ast.unspecialized("ExprPartition", {"disjointness_expr", "region_type_expr",
                                     "coloring", "span"})
-ast.unspecialized("ExprCrossProduct", {"lhs_type_expr", "rhs_type_expr",
-                                       "span"})
+ast.unspecialized("ExprCrossProduct", {"arg_type_exprs", "span"})
 ast.unspecialized("ExprUnary", {"op", "rhs", "span"})
 ast.unspecialized("ExprBinary", {"op", "lhs", "rhs", "span"})
 ast.unspecialized("ExprDeref", {"value", "span"})
@@ -260,6 +260,7 @@ ast.specialized("ExprRawContext", {"span"})
 ast.specialized("ExprRawFields", {"region", "span"})
 ast.specialized("ExprRawPhysical", {"region", "span"})
 ast.specialized("ExprRawRuntime", {"span"})
+ast.specialized("ExprRawValue", {"value", "span"})
 ast.specialized("ExprIsnull", {"pointer", "span"})
 ast.specialized("ExprNew", {"pointer_type", "region", "span"})
 ast.specialized("ExprNull", {"pointer_type", "span"})
@@ -270,7 +271,7 @@ ast.specialized("ExprIspace", {"index_type", "extent", "start",
 ast.specialized("ExprRegion", {"ispace", "ispace_symbol", "fspace_type", "expr_type", "span"})
 ast.specialized("ExprPartition", {"disjointness", "region",
                                   "coloring", "expr_type", "span"})
-ast.specialized("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})
+ast.specialized("ExprCrossProduct", {"args", "expr_type", "span"})
 ast.specialized("ExprFunction", {"value", "span"})
 ast.specialized("ExprUnary", {"op", "rhs", "span"})
 ast.specialized("ExprBinary", {"op", "lhs", "rhs", "span"})
@@ -322,6 +323,7 @@ ast.typed("ExprRawContext", {"expr_type", "span"})
 ast.typed("ExprRawFields", {"region", "fields", "expr_type", "span"})
 ast.typed("ExprRawPhysical", {"region", "fields", "expr_type", "span"})
 ast.typed("ExprRawRuntime", {"expr_type", "span"})
+ast.typed("ExprRawValue", {"value", "expr_type", "span"})
 ast.typed("ExprIsnull", {"pointer", "expr_type", "span"})
 ast.typed("ExprNew", {"pointer_type", "region", "expr_type", "span"})
 ast.typed("ExprNull", {"pointer_type", "expr_type", "span"})
@@ -332,7 +334,7 @@ ast.typed("ExprIspace", {"index_type", "extent", "start",
 ast.typed("ExprRegion", {"ispace", "fspace_type", "expr_type", "span"})
 ast.typed("ExprPartition", {"disjointness", "region",
                             "coloring", "expr_type", "span"})
-ast.typed("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})
+ast.typed("ExprCrossProduct", {"args", "expr_type", "span"})
 ast.typed("ExprConstant", {"value", "expr_type", "span"})
 ast.typed("ExprFunction", {"value", "expr_type", "span"})
 ast.typed("ExprUnary", {"op", "rhs", "expr_type", "span"})

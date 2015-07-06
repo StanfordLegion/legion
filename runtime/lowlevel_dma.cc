@@ -37,7 +37,7 @@ using namespace LegionRuntime::Accessor;
 
 using namespace LegionRuntime::HighLevel::LegionLogging;
 #endif
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
 #include "legion_profiling.h"
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::HighLevel::LegionProf;
@@ -86,10 +86,16 @@ namespace LegionRuntime {
       bool shutdown_flag;
     };
 
-    class DmaRequest {
+    class DmaRequest : public Realm::Operation {
     public:
       DmaRequest(int _priority, Event _after_copy) 
-	: state(STATE_INIT), priority(_priority), after_copy(_after_copy) {}
+	: Operation(), state(STATE_INIT), priority(_priority), 
+          after_copy(_after_copy) {}
+
+      DmaRequest(int _priority, Event _after_copy,
+                 const Realm::ProfilingRequestSet &reqs)
+        : Realm::Operation(reqs), state(STATE_INIT), priority(_priority), 
+          after_copy(_after_copy) {}
 
       virtual ~DmaRequest(void) {}
 
@@ -135,20 +141,22 @@ namespace LegionRuntime {
 
     class CopyRequest : public DmaRequest {
     public:
-      CopyRequest(const Domain& _domain,
-		  OASByInst *_oas_by_inst,
-		  Event _before_copy,
-		  Event _after_copy,
-		  int _priority);
-
       CopyRequest(const void *data, size_t datalen,
 		  Event _before_copy,
 		  Event _after_copy,
 		  int _priority);
 
+      CopyRequest(const Domain& _domain,
+		  OASByInst *_oas_by_inst,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority,
+                  const Realm::ProfilingRequestSet &reqs);
+
       virtual ~CopyRequest(void);
 
-      size_t serialize(void *buffer, size_t maxlen);
+      size_t compute_size(void) const;
+      void serialize(void *buffer);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -169,6 +177,13 @@ namespace LegionRuntime {
 
     class ReduceRequest : public DmaRequest {
     public:
+      ReduceRequest(const void *data, size_t datalen,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority);
+
       ReduceRequest(const Domain& _domain,
 		    const std::vector<Domain::CopySrcDstField>& _srcs,
 		    const Domain::CopySrcDstField& _dst,
@@ -177,18 +192,13 @@ namespace LegionRuntime {
 		    bool _red_fold,
 		    Event _before_copy,
 		    Event _after_copy,
-		    int _priority);
-
-      ReduceRequest(const void *data, size_t datalen,
-		    ReductionOpID _redop_id,
-		    bool _red_fold,
-		    Event _before_copy,
-		    Event _after_copy,
-		    int _priority);
+		    int _priority,
+                    const Realm::ProfilingRequestSet &reqs);
 
       virtual ~ReduceRequest(void);
 
-      size_t serialize(void *buffer, size_t maxlen);
+      size_t compute_size(void);
+      void serialize(void *buffer);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -236,6 +246,8 @@ namespace LegionRuntime {
 
     void DmaRequestQueue::enqueue_request(DmaRequest *r)
     {
+      // Record that it is ready
+      r->mark_ready();
       gasnet_hsl_lock(&queue_mutex);
 
       // there's a queue per priority level
@@ -292,33 +304,7 @@ namespace LegionRuntime {
       gasnet_hsl_unlock(&queue_mutex);
       
       return r;
-    }
-
-    CopyRequest::CopyRequest(const Domain& _domain,
-			     OASByInst *_oas_by_inst,
-			     Event _before_copy,
-			     Event _after_copy,
-			     int _priority)
-      : DmaRequest(_priority, _after_copy),
-	domain(_domain), oas_by_inst(_oas_by_inst),
-	before_copy(_before_copy)
-    {
-      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   after_copy.id, after_copy.gen);
-
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
-    }
+    } 
 
     CopyRequest::CopyRequest(const void *data, size_t datalen,
 			     Event _before_copy,
@@ -370,9 +356,10 @@ namespace LegionRuntime {
 	  oasvec.push_back(oas);
 	}
       }
-
+      // Unpack any profiling requests 
+      const void *result = requests.deserialize(idata);
       // better have consumed exactly the right amount of data
-      assert(((idata - ((const IDType *)data))*sizeof(IDType)) == datalen);
+      assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -387,12 +374,59 @@ namespace LegionRuntime {
 		   after_copy.id, after_copy.gen);
     }
 
+    CopyRequest::CopyRequest(const Domain& _domain,
+			     OASByInst *_oas_by_inst,
+			     Event _before_copy,
+			     Event _after_copy,
+			     int _priority,
+                             const Realm::ProfilingRequestSet &reqs)
+      : DmaRequest(_priority, _after_copy, reqs),
+	domain(_domain), oas_by_inst(_oas_by_inst),
+	before_copy(_before_copy)
+    {
+      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+		   this,
+		   oas_by_inst->begin()->first.first.id, 
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id, 
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->begin()->second.size() - 1,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
+#endif
+    }
+ 
     CopyRequest::~CopyRequest(void)
     {
+      if (measurements.wants_measurement<
+          Realm::ProfilingMeasurements::OperationMemoryUsage>() &&
+          !oas_by_inst->empty()) {
+        const InstPair &pair = oas_by_inst->begin()->first; 
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        measurements.add_measurement(usage);
+      }
       delete oas_by_inst;
     }
 
-    size_t CopyRequest::serialize(void *buffer, size_t maxlen)
+    size_t CopyRequest::compute_size(void) const
+    {
+      size_t result = domain.compute_size();
+      for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
+        OASVec& oasvec = it2->second;
+        result += (3 + oasvec.size() * 3) * sizeof(IDType);
+      }
+      result += requests.compute_size();
+      return result;
+    }
+
+    void CopyRequest::serialize(void *buffer)
     {
       // domain info goes first
       IDType *msgptr = domain.serialize((IDType *)buffer);
@@ -412,11 +446,7 @@ namespace LegionRuntime {
 	  *msgptr++ = it3->size;
 	}
       }
-
-      size_t msglen = ((const char *)msgptr) - ((const char *)buffer);
-      assert(msglen <= maxlen); // TODO: maybe detect _before_ overrunning?
-
-      return msglen;
+      requests.serialize(msgptr); 
     }
 
     void DmaRequest::Waiter::sleep_on_event(Event e, 
@@ -2704,7 +2734,7 @@ namespace LegionRuntime {
 
 		//for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
 		for (unsigned idx = 0; idx < oasvec.size(); idx++)
-		  ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+		  ipc->copy_field(irect.lo, orect.lo, irect.hi[0] - irect.lo[0] + 1, idx);
 		//it2->src_offset, it2->dst_offset, it2->size);
 	      }
 	    }
@@ -2739,7 +2769,7 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
     class CopyCompletionProfiler : public EventWaiter {
       public:
         CopyCompletionProfiler(Event _event) : event(_event) {}
@@ -2748,7 +2778,7 @@ namespace LegionRuntime {
 
         virtual bool event_triggered(void)
         {
-          register_copy_event(PROF_END_COPY);
+          register_copy_event(event.id, PROF_END_COPY);
           return true;
         }
 
@@ -2774,8 +2804,8 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef BUGGY_LEGION_PROF
-      register_copy_event(PROF_BEGIN_COPY);
+#ifdef OLD_LEGION_PROF
+      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));
 #endif
@@ -3103,41 +3133,7 @@ namespace LegionRuntime {
 
       log_dma.debug("finished copy " IDFMT " (%d) -> " IDFMT " (%d) - %zd bytes (%zd), event=" IDFMT "/%d", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size, after_copy.id, after_copy.gen);
 #endif
-    }
-    
-    ReduceRequest::ReduceRequest(const Domain& _domain,
-				 const std::vector<Domain::CopySrcDstField>& _srcs,
-				 const Domain::CopySrcDstField& _dst,
-				 bool _inst_lock_needed,
-				 ReductionOpID _redop_id,
-				 bool _red_fold,
-				 Event _before_copy,
-				 Event _after_copy,
-				 int _priority)
-      : DmaRequest(_priority, _after_copy),
-	domain(_domain),
-	dst(_dst), 
-	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
-	redop_id(_redop_id), red_fold(_red_fold),
-	before_copy(_before_copy)
-    {
-      srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
-
-      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   srcs[0].inst.id, srcs[0].offset,
-		   dst.inst.id, dst.offset, dst.size,
-		   srcs.size() - 1,
-		   (red_fold ? "fold" : "apply"),
-		   redop_id,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   after_copy.id, after_copy.gen);
-
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
-    }
+    } 
 
     ReduceRequest::ReduceRequest(const void *data, size_t datalen,
 				 ReductionOpID _redop_id,
@@ -3173,8 +3169,10 @@ namespace LegionRuntime {
 
       inst_lock_needed = *idata++;
 
+      // Unpack any requests that we have
+      const void *result = requests.deserialize(idata);
       // better have consumed exactly the right amount of data
-      assert(((idata - ((const IDType *)data))*sizeof(IDType)) == datalen);
+      assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -3188,11 +3186,54 @@ namespace LegionRuntime {
 		   after_copy.id, after_copy.gen);
     }
 
+    ReduceRequest::ReduceRequest(const Domain& _domain,
+				 const std::vector<Domain::CopySrcDstField>& _srcs,
+				 const Domain::CopySrcDstField& _dst,
+				 bool _inst_lock_needed,
+				 ReductionOpID _redop_id,
+				 bool _red_fold,
+				 Event _before_copy,
+				 Event _after_copy,
+				 int _priority, 
+                                 const Realm::ProfilingRequestSet &reqs)
+      : DmaRequest(_priority, _after_copy, reqs),
+	domain(_domain),
+	dst(_dst), 
+	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
+	redop_id(_redop_id), red_fold(_red_fold),
+	before_copy(_before_copy)
+    {
+      srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
+
+      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+		   this,
+		   srcs[0].inst.id, srcs[0].offset,
+		   dst.inst.id, dst.offset, dst.size,
+		   srcs.size() - 1,
+		   (red_fold ? "fold" : "apply"),
+		   redop_id,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
+#endif
+    }
+
     ReduceRequest::~ReduceRequest(void)
     {
     }
 
-    size_t ReduceRequest::serialize(void *buffer, size_t maxlen)
+    size_t ReduceRequest::compute_size(void)
+    {
+      size_t result = domain.compute_size();
+      result += (4 + 3 * srcs.size()) * sizeof(IDType);
+      result += requests.compute_size();
+      return result;
+    }
+
+    void ReduceRequest::serialize(void *buffer)
     {
       // domain info goes first
       IDType *msgptr = domain.serialize((IDType *)buffer);
@@ -3214,10 +3255,7 @@ namespace LegionRuntime {
 
       *msgptr++ = inst_lock_needed;
 
-      size_t msglen = ((const char *)msgptr) - ((const char *)buffer);
-      assert(msglen <= maxlen); // TODO: maybe detect _before_ overrunning?
-
-      return msglen;
+      requests.serialize(msgptr);
     }
 
     bool ReduceRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -3449,7 +3487,7 @@ namespace LegionRuntime {
 	      
 	      //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
 	      for (unsigned idx = 0; idx < oasvec.size(); idx++)
-		ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+		ipc->copy_field(irect.lo, orect.lo, irect.hi[0] - irect.lo[0] + 1, idx);
 	      //it2->src_offset, it2->dst_offset, it2->size);
 	    }
 	  }
@@ -3471,8 +3509,8 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef BUGGY_LEGION_PROF
-      register_copy_event(PROF_BEGIN_COPY);
+#ifdef OLD_LEGION_PROF
+      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));
 #endif
@@ -3745,7 +3783,9 @@ namespace LegionRuntime {
 	DmaRequest *r = rq->dequeue_request(true);
 
 	if(r) {
+          r->mark_started();
 	  r->perform_dma();
+          r->mark_completed();
 	  delete r;
 	}
       }
@@ -3757,6 +3797,9 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count)
     {
+#ifdef OLD_LEGION_PROF
+      CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
+#endif
       dma_queue = new DmaRequestQueue;
       num_threads = count;
 
@@ -3795,6 +3838,16 @@ namespace LegionRuntime {
     }
 
     Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
+                       const void *fill_value, size_t fill_value_size,
+                       Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
+                       const Realm::ProfilingRequestSet &requests,
                        const void *fill_value, size_t fill_value_size,
                        Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -3873,6 +3926,16 @@ namespace LegionRuntime {
 
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
 		       const std::vector<CopySrcDstField>& dsts,
+		       Event wait_on,
+		       ReductionOpID redop_id, bool red_fold) const
+    {
+      Realm::ProfilingRequestSet reqs;
+      return Domain::copy(srcs, dsts, reqs, wait_on, redop_id, red_fold);
+    }
+
+    Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
+		       const std::vector<CopySrcDstField>& dsts,
+                       const Realm::ProfilingRequestSet &requests,
 		       Event wait_on,
 		       ReductionOpID redop_id, bool red_fold) const
     {
@@ -3957,7 +4020,7 @@ namespace LegionRuntime {
 #endif
 
 	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
-					   wait_on, ev, priority);
+					   wait_on, ev, priority, requests);
 
 	  // ask which node should perform the copy
 	  int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
@@ -3977,13 +4040,13 @@ namespace LegionRuntime {
 	    args.after_copy = ev;
 	    args.priority = priority;
 
-	    static const size_t MAX_MESSAGE_SIZE = 16384;
-	    int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
+            size_t msglen = r->compute_size();
+            void *msgdata = malloc(msglen);
 
-	    size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
+            r->serialize(msgdata);
 
 	    log_dma.info("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
-	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
+	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  
 	    finish_events.insert(ev);
 
@@ -4027,7 +4090,7 @@ namespace LegionRuntime {
 					     inst_lock_needed,
 					     redop_id, red_fold,
 					     wait_on, ev,
-					     0 /*priority*/);
+					     0 /*priority*/, requests);
 
 	if(((unsigned)src_node) == gasnet_mynode()) {
 	  log_dma.info("performing reduction on local node");
@@ -4041,21 +4104,20 @@ namespace LegionRuntime {
 	  args.after_copy = ev;
 	  args.priority = 0 /*priority*/;
 
-	  static const size_t MAX_MESSAGE_SIZE = 16384;
-	  IDType msgdata[MAX_MESSAGE_SIZE / sizeof(IDType)];
-
-	  size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
+          size_t msglen = r->compute_size();
+          void *msgdata = malloc(msglen);
+          r->serialize(msgdata);
 
 	  log_dma.info("performing reduction on remote node (%d), event=" IDFMT "/%d",
 		       src_node, args.after_copy.id, args.after_copy.gen);
-	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_COPY);
+	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  // done with the local copy of the request
 	  delete r;
 	}
 
 	return ev;
       }
-    }
+    } 
 
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
 		       const std::vector<CopySrcDstField>& dsts,

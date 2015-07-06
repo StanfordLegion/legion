@@ -1311,7 +1311,7 @@ do
   var dtfac = conf.dtfac
   var dtinit = conf.dtinit
   var dtmax = conf.dtmax
-  var gamma = conf.qgamma
+  var gamma = conf.gamma
   var q1 = conf.q1
   var q2 = conf.q2
   var qgamma = conf.qgamma
@@ -1334,7 +1334,7 @@ do
   var dthydro = dtmax
   while warmup or (cycle < cstop and time < tstop) do
     if warmup and cycle > 0 then
-      wait_for(dt)
+      wait_for(dthydro)
       enable = true
       warmup = false
       time = 0.0
@@ -1434,7 +1434,7 @@ do
   end
 
   if enable then
-    wait_for(dt)
+    wait_for(dthydro)
     var end_time = c.legion_get_current_time_in_micros()/1.e6
     c.printf("Elapsed time = %.6e\n", end_time - start_time)
   end

@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -48,18 +48,39 @@ task main()
   c.legion_coloring_destroy(colors1)
 
   var prod = cross_product(part0, part1)
+
   var r0 = prod[0]
   var r1 = prod[1]
+
+  -- Check static constraints
   assert_disjoint(r0, r1)
+
   var r00 = prod[0].partition[0]
   var r01 = prod[0].partition[1]
   var r10 = prod[1].partition[0]
   var r11 = prod[1].partition[1]
+
+  -- Check static constraints
   assert_disjoint(r00, r01)
   assert_disjoint(r00, r10)
   assert_disjoint(r00, r11)
   assert_disjoint(r01, r10)
   assert_disjoint(r01, r11)
   assert_disjoint(r10, r11)
+
+  -- Check that regions were actually computed correctly
+  for x in r do @x = 0 end
+
+  for x in r00 do @x += 1 end
+  for x in r01 do @x += 1 end
+  for x in r10 do @x += 1 end
+  for x in r11 do @x += 1 end
+
+  var s = 0
+  for x in r do
+    legionlib.assert(@x == 1, "test failed")
+    s += @x
+  end
+  legionlib.assert(s == 4, "test failed")
 end
 legionlib.start(main)

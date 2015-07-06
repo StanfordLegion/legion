@@ -36,6 +36,59 @@ namespace LegionRuntime {
      */
     class Operation {
     public:
+      enum OpKind {
+        MAP_OP_KIND,
+        COPY_OP_KIND,
+        FENCE_OP_KIND,
+        FRAME_OP_KIND,
+        DELETION_OP_KIND,
+        INTER_CLOSE_OP_KIND,
+        POST_CLOSE_OP_KIND,
+        ACQUIRE_OP_KIND,
+        RELEASE_OP_KIND,
+        DYNAMIC_COLLECTIVE_OP_KIND,
+        FUTURE_PRED_OP_KIND,
+        NOT_PRED_OP_KIND,
+        AND_PRED_OP_KIND,
+        OR_PRED_OP_KIND,
+        MUST_EPOCH_OP_KIND,
+        PENDING_PARTITION_OP_KIND,
+        DEPENDENT_PARTITION_OP_KIND,
+        FILL_OP_KIND,
+        ATTACH_OP_KIND,
+        DETACH_OP_KIND,
+        TRACE_CAPTURE_OP_KIND,
+        TRACE_COMPLETE_OP_KIND,
+        TASK_OP_KIND,
+        LAST_OP_KIND,
+      };
+      static const char *const op_names[LAST_OP_KIND];
+#define OPERATION_NAMES {           \
+        "Mapping",                  \
+        "Copy",                     \
+        "Fence",                    \
+        "Frame",                    \
+        "Deletion",                 \
+        "Inter Close",              \
+        "Post Close",               \
+        "Acquire",                  \
+        "Release",                  \
+        "Dynamic Collective",       \
+        "Future Predicate",         \
+        "Not Predicate",            \
+        "And Predicate",            \
+        "Or Predicate",             \
+        "Must Epoch",               \
+        "Pending Partition",        \
+        "Dependent Partition",      \
+        "Fill",                     \
+        "Attach",                   \
+        "Detach",                   \
+        "Trace Capture",            \
+        "Trace Complete",           \
+        "Task",                     \
+      }
+    public:
       struct DeferredMappingArgs {
       public:
         HLRTaskID hlr_id;
@@ -55,6 +108,8 @@ namespace LegionRuntime {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
+      virtual Mappable* get_mappable(void);
     protected:
       // Base call
       void activate_operation(void);
@@ -450,6 +505,8 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+      virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -501,6 +558,8 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+      virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -566,6 +625,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -597,6 +657,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
@@ -646,6 +707,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_commit(void);
@@ -688,6 +750,7 @@ namespace LegionRuntime {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
       virtual bool is_close_op(void) const { return true; }
     public:
       virtual void deferred_complete(void);
@@ -732,6 +795,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
     protected:
@@ -773,6 +837,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -803,6 +868,8 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void); 
+      virtual OpKind get_operation_kind(void);
+      virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -856,6 +923,8 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+      virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -909,6 +978,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
@@ -943,6 +1013,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       const char* get_logging_name(void);
+      OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -969,6 +1040,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -997,6 +1069,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1031,6 +1104,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1089,6 +1163,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -1431,6 +1506,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     protected:
       UserEvent handle_ready;
       PendingPartitionThunk *thunk;
@@ -1481,6 +1557,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     protected:
       void compute_parent_index(void);
     protected:
@@ -1516,9 +1593,16 @@ namespace LegionRuntime {
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid, const Future &f,
+                      const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields,
                       const void *ptr, size_t size,
+                      const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, 
+                      const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
@@ -1526,9 +1610,11 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
@@ -1545,6 +1631,7 @@ namespace LegionRuntime {
       unsigned parent_req_index;
       void *value;
       size_t value_size;
+      Future future;
     };
 
     /**
@@ -1571,6 +1658,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -1612,6 +1700,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);

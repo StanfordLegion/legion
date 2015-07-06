@@ -93,7 +93,7 @@ end
 
 function analyze_noninterference_self(cx, task, region_type,
                                       partition_type, mapping)
-  if partition_type and partition_type.disjoint then
+  if partition_type and partition_type:is_disjoint() then
     return true
   end
 
@@ -551,7 +551,8 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     mapping[arg_type] = param_types[i]
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.ExprIndexAccess) and
-        std.is_partition(std.as_read(arg.value.expr_type)) and
+        (std.is_partition(std.as_read(arg.value.expr_type)) or
+           std.is_cross_product(std.as_read(arg.value.expr_type))) and
         arg.index:is(ast.typed.ExprID) and
         arg.index.value == node.symbol
       then

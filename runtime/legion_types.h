@@ -91,7 +91,8 @@ namespace LegionRuntime {
       INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
       SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       HLR_TASK_ID           = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
-      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
+      HLR_PROFILING_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
+      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -129,7 +130,42 @@ namespace LegionRuntime {
       HLR_PART_INDEPENDENCE_TASK_ID,
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
+      HLR_LAST_TASK_ID, // This one should always be last
     };
+
+    // Make this a macro so we can keep it close to 
+    // declaration of the task IDs themselves
+#define HLR_TASK_DESCRIPTIONS(name)                               \
+      const char *name[HLR_LAST_TASK_ID] = {                      \
+        "Scheduler",                                              \
+        "Remote Message",                                         \
+        "Post-Task Execution",                                    \
+        "Deferred Mapping",                                       \
+        "Deferred Complete",                                      \
+        "Reclaim Local Field",                                    \
+        "Garbage Collection",                                     \
+        "Logical Dependence Analysis",                            \
+        "Operation Physical Dependence Analysis",                 \
+        "Task Physical Dependence Analysis",                      \
+        "Deferred Recycle",                                       \
+        "Deferred Slice",                                         \
+        "Must Individual Task Dependence Analysis",               \
+        "Must Index Task Dependence Analysis",                    \
+        "Must Task Physical Dependence Analysis",                 \
+        "Must Task Distribution",                                 \
+        "Must Task Launch",                                       \
+        "Deferred Future Set",                                    \
+        "Deferred Future Map Set",                                \
+        "Resolve Future Predicate",                               \
+        "Update MPI Rank Info",                                   \
+        "Contribute Collective",                                  \
+        "Check State",                                            \
+        "Mapper Task",                                            \
+        "Disjointness Test",                                      \
+        "Partition Independence Test",                            \
+        "Index Space Independence Test",                          \
+        "Remove Pending Child",                                   \
+      };
 
     // Forward declarations for user level objects
     // legion.h
@@ -325,6 +361,10 @@ namespace LegionRuntime {
 
     // legion_logging.h
     class TreeStateLogger;
+
+    // legion_profiling.h
+    class LegionProfiler;
+    class LegionProfInstance;
 
     typedef LowLevel::Runtime LLRuntime;
     typedef LowLevel::Machine Machine;
