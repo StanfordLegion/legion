@@ -196,12 +196,12 @@ def install():
     check_luabind(luabind_dir)
 
     terra_dir = os.path.join(root_dir, 'terra')
-    install_terra(terra_dir, args.terra, args.thread_count)
+    install_terra(terra_dir, args.terra, thread_count)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, terra_dir, args.debug,
                      args.general_llr, args.cuda, args.gasnet,
-                     args.thread_count)
+                     thread_count)
 
 if __name__ == '__main__':
     install()
