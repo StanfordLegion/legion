@@ -46,7 +46,7 @@ def install_dependencies():
 
 def test(root_dir, install_args, install_env):
     subprocess.check_call(
-        ['./install.py'] + install_args,
+        ['./install.py', '-j2'] + install_args,
         env = install_env,
         cwd = root_dir)
     subprocess.check_call(
