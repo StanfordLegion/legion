@@ -1978,10 +1978,14 @@ namespace LegionRuntime {
       void operator delete[](void *ptr);
     public:
       void update_physical_state(PhysicalState *state, 
-                                 const FieldMask &mask, bool premap_only);
-      void merge_physical_state(PhysicalState *state, const FieldMask &mask);
-    protected:
+                                 const FieldMask &update_mask, 
+                                 bool premap_only) const;
+      void merge_physical_state(const PhysicalState *state, 
+                                const FieldMask &merge_mask);
+    public:
       const VersionID version_number;
+    protected:
+      Reservation state_lock;
       // Fields which have been directly written to
       FieldMask dirty_mask;
       // Fields which have reductions

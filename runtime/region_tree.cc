@@ -11489,13 +11489,71 @@ namespace LegionRuntime {
       free(ptr);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalState::add_version_state(VersionState *state, FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionStateInfo &info = version_states[state->version_number];
+      LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+        info.states.find(state);
+      if (finder == info.states.end())
+        info.states[state] = mask;
+      else
+        finder->second |= mask;
+      info.valid_fields |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::capture_state(bool premap_only)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
+            version_states.begin(); vit != version_states.end(); vit++)
+      {
+        const VersionStateInfo &info = vit->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          it->first->update_physical_state(this, it->second, premap_only);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::apply_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
+            version_states.begin(); vit != version_states.end(); vit++)
+      {
+        const VersionStateInfo &info = vit->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          it->first->merge_physical_state(this, it->second); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::apply_state(
+            const LegionMap<VersionState*,FieldMask>::aligned &adv_states) const
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            adv_states.begin(); it != adv_states.end(); it++)
+      {
+        it->first->merge_physical_state(this, it->second);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Version State 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid)
-      : version_number(vid)
+      : version_number(vid), state_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
     }
@@ -11513,6 +11571,8 @@ namespace LegionRuntime {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
+      state_lock.destroy_reservation();
+      state_lock = Reservation::NO_RESERVATION;
       // When we get deleted, remove all references to instance views
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
@@ -11574,6 +11634,175 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::update_physical_state(PhysicalState *state,
+                                             const FieldMask &update_mask,
+                                             bool premap_only) const
+    //--------------------------------------------------------------------------
+    {
+      // We're reading so we only the need the lock in read-only mode
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      if (premap_only)
+      {
+        // If we are premapping, we only need to update the dirty bits
+        // and the valid instance views 
+        if (!!dirty_mask)
+          state->dirty_mask |= (dirty_mask & update_mask);
+        for (LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::const_iterator it = valid_views.begin();
+              it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & update_mask;
+          if (!overlap)
+            continue;
+          LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+            iterator finder = state->valid_views.find(it->first);
+          if (finder == state->valid_views.end())
+          {
+            it->first->add_valid_reference();
+            state->valid_views[it->first] = overlap;
+          }
+          else
+            finder->second |= overlap;
+        }
+      }
+      else
+      {
+        if (!!dirty_mask)
+          state->dirty_mask |= (dirty_mask & update_mask);
+        FieldMask reduction_update = reduction_mask & update_mask;
+        if (!!reduction_update)
+          state->reduction_mask |= reduction_update;
+        FieldMask child_overlap = children.valid_fields & update_mask;
+        if (!!child_overlap)
+        {
+          state->children.valid_fields |= child_overlap;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                children.open_children.begin(); it != 
+                children.open_children.end(); it++)
+          {
+            FieldMask overlap = it->second & update_mask;
+            if (!overlap)
+              continue;
+            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder =
+              state->children.open_children.find(it->first);
+            if (finder == state->children.open_children.end())
+              state->children.open_children[it->first] = overlap;
+            else
+              finder->second |= overlap;
+          }
+        }
+        for (LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::const_iterator it = valid_views.begin();
+              it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & update_mask;
+          if (!overlap)
+            continue;
+          LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+            iterator finder = state->valid_views.find(it->first);
+          if (finder == state->valid_views.end())
+          {
+            it->first->add_valid_reference();
+            state->valid_views[it->first] = overlap;
+          }
+          else
+            finder->second |= overlap;
+        }
+        if (!!reduction_update)
+        {
+          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                track_aligned::const_iterator it = reduction_views.begin();
+                it != reduction_views.end(); it++)
+          {
+            FieldMask overlap = it->second & update_mask; 
+            if (!overlap)
+              continue;
+            LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::iterator finder = 
+                state->reduction_views.find(it->first);
+            if (finder == state->reduction_views.end())
+            {
+              it->first->add_valid_reference();
+              state->reduction_views[it->first] = overlap;
+            }
+            else
+              finder->second |= overlap;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::merge_physical_state(const PhysicalState *state,
+                                            const FieldMask &merge_mask)
+    //--------------------------------------------------------------------------
+    {
+      // We're writing so we need the lock in exclusive mode
+      AutoLock s_lock(state_lock);
+      if (!!state->dirty_mask)
+        dirty_mask |= (state->dirty_mask & merge_mask);
+      FieldMask reduction_merge = state->reduction_mask & merge_mask;
+      if (!!reduction_merge)
+        reduction_mask |= reduction_merge;
+      FieldMask child_overlap = state->children.valid_fields & merge_mask;
+      if (!!child_overlap)
+      {
+        children.valid_fields |= child_overlap;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
+        {
+          FieldMask overlap = it->second & merge_mask;
+          if (!overlap)
+            continue;
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            children.open_children.find(it->first);
+          if (finder == children.open_children.end())
+            children.open_children[it->first] = overlap;
+          else
+            finder->second |= overlap;
+        }
+      }
+      for (LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::const_iterator it = state->valid_views.begin();
+            it != state->valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & merge_mask;
+        if (!overlap)
+          continue;
+        LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::
+          track_aligned::iterator finder = valid_views.find(it->first);
+        if (finder == valid_views.end())
+        {
+          it->first->add_valid_reference();
+          valid_views[it->first] = overlap;
+        }
+        else
+          finder->second |= overlap;
+      }
+      if (!!reduction_merge)
+      {
+        for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::const_iterator it = state->reduction_views.begin();
+              it != state->reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & merge_mask;
+          if (!overlap)
+            continue;
+          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+            track_aligned::iterator finder = reduction_views.find(it->first);
+          if (finder == reduction_views.end())
+          {
+            it->first->add_valid_reference();
+            reduction_views[it->first] = overlap;
+          }
+          else
+            finder->second |= overlap;
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -11843,6 +12072,16 @@ namespace LegionRuntime {
         // its updates to its pre-recorded version states
         state->apply_state();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::check_init(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_version_infos.empty());
+      assert(previous_version_infos.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
