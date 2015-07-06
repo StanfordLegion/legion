@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2015 Stanford University
+# Copyright 2015 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -764,7 +764,7 @@ class LFSR(object):
           15 : (15,14),
           16 : (16,14,13,11),
         }
-        # If we need more than 16 bits that it a lot tasks
+        # If we need more than 16 bits that is a lot tasks
         assert needed_bits in polynomials
         self.taps = polynomials[needed_bits]
 
