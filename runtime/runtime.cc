@@ -1322,7 +1322,7 @@ namespace LegionRuntime {
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
         log_inst.error("Requested field accessor for field %d "
-            "without privleges!", fid);
+            "without privileges!", fid);
         assert(false);
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
