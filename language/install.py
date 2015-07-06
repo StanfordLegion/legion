@@ -63,12 +63,12 @@ def check_luabind(luabind_dir):
         print('(Or you can continue to use the old bindings with ./install_old.py.)')
         sys.exit(1)
 
-def build_terra(terra_dir):
+def build_terra(terra_dir, thread_count):
     subprocess.check_call(
-        ['make', 'all', '-j', str(multiprocessing.cpu_count())],
+        ['make', 'all', '-j', str(thread_count)],
         cwd = terra_dir)
 
-def install_terra(terra_dir, external_terra_dir):
+def install_terra(terra_dir, external_terra_dir, thread_count):
     if external_terra_dir is not None:
         external_terra_dir = os.path.expanduser(external_terra_dir)
         if not os.path.isdir(external_terra_dir):
@@ -101,13 +101,14 @@ def install_terra(terra_dir, external_terra_dir):
         git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
     else:
         git_update(terra_dir)
-    build_terra(terra_dir)
+    build_terra(terra_dir, thread_count)
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet):
+def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet,
+                     thread_count):
     luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
         ('LUAJIT_DIR', luajit_dir),                         # for bindings
@@ -131,7 +132,7 @@ def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet):
     subprocess.check_call(
         ['make'] +
         flags +
-        ['-j', str(multiprocessing.cpu_count())],
+        ['-j', str(thread_count)],
         cwd = bindings_dir,
         env = env)
     symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
@@ -173,6 +174,9 @@ def install():
     parser.add_argument(
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
         help = 'Build Legion with CUDA.')
+    parser.add_argument(
+        '-j', dest = 'thread_count', nargs = '?', type = int,
+        help = 'Number threads used to compile.')
     args = parser.parse_args()
 
     if args.gasnet and not args.general_llr:
@@ -181,6 +185,10 @@ def install():
     if args.cuda and not args.general_llr:
         raise Exception('General LLR is required for CUDA.')
 
+    thread_count = args.thread_count
+    if thread_count is None:
+        thread_count = multiprocessing.cpu_count()
+
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
 
@@ -188,11 +196,12 @@ def install():
     check_luabind(luabind_dir)
 
     terra_dir = os.path.join(root_dir, 'terra')
-    install_terra(terra_dir, args.terra)
+    install_terra(terra_dir, args.terra, args.thread_count)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, terra_dir, args.debug,
-                     args.general_llr, args.cuda, args.gasnet)
+                     args.general_llr, args.cuda, args.gasnet,
+                     args.thread_count)
 
 if __name__ == '__main__':
     install()
