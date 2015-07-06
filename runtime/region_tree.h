@@ -1894,6 +1894,17 @@ namespace LegionRuntime {
       FieldMask set_mask;
       std::set<Event> preconditions;
     };
+
+    /**
+     * \struct VersionStateInfo
+     * A small helper class for tracking collections of 
+     * version state objects and their sets of fields
+     */
+    struct VersionStateInfo {
+    public:
+      FieldMask valid_fields;
+      LegionMap<VersionState*,FieldMask>::aligned states;
+    };
     
     /**
      * \class PhysicalState
@@ -1920,8 +1931,11 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void merge_version_state(VersionState *state);
-      void merge_version_state(VersionState *state, const FieldMask &mask);
+      void add_version_state(VersionState *state, FieldMask &mask);
+      void capture_state(bool premap_only);
+      void apply_state(void) const;
+      void apply_state(const LegionMap<VersionState*,FieldMask>::aligned 
+                                                &advanced_version_states) const;
     public:
       // Fields which have dirty data
       FieldMask dirty_mask;
@@ -1936,7 +1950,7 @@ namespace LegionRuntime {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     public:
-      LegionMap<VersionState*,FieldMask>::aligned version_states;
+      LegionMap<VersionID,VersionStateInfo>::aligned version_states;
 #ifdef DEBUG_HIGH_LEVEL
     public:
       RegionTreeNode *node;
@@ -1963,6 +1977,10 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
+      void update_physical_state(PhysicalState *state, 
+                                 const FieldMask &mask, bool premap_only);
+      void merge_physical_state(PhysicalState *state, const FieldMask &mask);
+    protected:
       const VersionID version_number;
       // Fields which have been directly written to
       FieldMask dirty_mask;
@@ -1988,12 +2006,7 @@ namespace LegionRuntime {
      * the version state objection can be collected once no
      * additional operations need to have access to it.
      */
-    class VersionManager {
-    public:
-      struct StateInfo {
-        VersionState *state;
-        FieldMask valid_fields;
-      };
+    class VersionManager { 
     public:
       VersionManager(void);
       VersionManager(const VersionManager &rhs);
@@ -2004,16 +2017,19 @@ namespace LegionRuntime {
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
                                      bool premap_only);
-      void apply_updates(const FieldMask &update_mask, 
-                         const PhysicalState *state);
+      void apply_updates(const PhysicalState *state, bool advance);
+      void filter_states(const FieldMask &filter_mask);
       void check_init(void);
       void clear(void);
       void sanity_check(void);
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
+      void capture_version_states(VersionID vid, FieldMask &remaining,
+                                  PhysicalState *state);
+    protected:
       Reservation version_lock;
-      LegionMap<VersionID,StateInfo>::aligned current_version_infos;
-      LegionMap<VersionID,StateInfo>::aligned previous_version_infos;
+      LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
+      LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
