@@ -1635,6 +1635,10 @@ namespace LegionRuntime {
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
                     bool validates);
+      LogicalCloser(const LogicalCloser &rhs);
+      ~LogicalCloser(void);
+    public:
+      LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
       inline bool has_closed_fields(void) const { return !!closed_mask; }
       const FieldMask& get_closed_mask(void) const { return closed_mask; }
@@ -1925,6 +1929,7 @@ namespace LegionRuntime {
       void apply_state(void) const;
       void apply_state(const LegionMap<VersionState*,FieldMask>::aligned 
                                                 &advanced_version_states) const;
+      void reset(void);
     public:
       // Fields which were closed and can be ignored when applying
       FieldMask closed_mask;
@@ -1944,7 +1949,7 @@ namespace LegionRuntime {
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
 #ifdef DEBUG_HIGH_LEVEL
     public:
-      RegionTreeNode *node;
+      RegionTreeNode *const node;
 #endif
     };
 

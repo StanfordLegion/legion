@@ -5397,6 +5397,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
+      this->version_infos.resize(rhs->version_infos.size());
+      for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
+        this->version_infos[idx] = rhs->version_infos[idx];
       this->index_domain = d;
       this->must_parallelism = rhs->must_parallelism;
       this->sliced = !recurse;
@@ -6085,7 +6088,7 @@ namespace LegionRuntime {
         // If not then we need to do it now
         if (!regions[idx].premapped)
         {
-          runtime->forest->premap_physical_region(
+          regions[idx].premapped = runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
                                        version_infos[idx], this, parent_ctx,
@@ -6921,6 +6924,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_single();
+      version_infos.clear();
       runtime->free_point_task(this);
     }
 
@@ -7033,7 +7037,7 @@ namespace LegionRuntime {
     VersionInfo& PointTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->get_version_info(idx);
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -8437,7 +8441,7 @@ namespace LegionRuntime {
         // If not then we need to do it now
         if (!regions[idx].premapped)
         {
-          runtime->forest->premap_physical_region(
+          regions[idx].premapped = runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
                                        version_infos[idx], this, parent_ctx,
@@ -9750,6 +9754,9 @@ namespace LegionRuntime {
                                    this->task_id);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
+      result->version_infos.resize(this->version_infos.size());
+      for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
+        result->version_infos[idx] = this->version_infos[idx];
       result->enclosing_physical_contexts = this->enclosing_physical_contexts;
       result->is_index_space = true;
       result->must_parallelism = this->must_parallelism;

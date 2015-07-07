@@ -2773,6 +2773,20 @@ namespace LegionRuntime {
       // Easy, check to see if we have a tree with right ID
       return has_tree(req.parent.get_tree_id());
     } 
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_remote_state(const RegionRequirement &req,
+                                              RegionTreeContext ctx,
+                                              VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef UNIMPLEMENTED_VERSIONING
+
+#else
+      assert(false);
+      return false;
+#endif
+    }
  
     //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
@@ -8948,9 +8962,8 @@ namespace LegionRuntime {
           {
             // apply the result and indicate whether we advanced or not
             it->first->apply_update(ctx, it->second.physical_state, advance);
-            // Then we can delete the physical instance because we are done
-            legion_delete(it->second.physical_state);
-            it->second.physical_state = NULL;
+            // Don't delete it because we need to hold onto the 
+            // version managers in case this operation restarts
           }
           else
           {
@@ -8970,11 +8983,15 @@ namespace LegionRuntime {
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
+        // Skip anything that was premapping only
+        if (it->second.premap_only)
+          continue;
         if (it->second.physical_state != NULL)
         {
           it->first->apply_update(ctx, it->second.physical_state, advance);
-          legion_delete(it->second.physical_state);
-          it->second.physical_state = NULL;
+          // Don't delete it because we need to hold onto the 
+          // version manager references in case this operation
+          // fails to complete
         }
       }
     }
@@ -8995,14 +9012,14 @@ namespace LegionRuntime {
     void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      // All the physical states should be gone at this point
+      // Now it is safe to go through and delete all the physical states
+      // which will free up all the references on all the version managers
       for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
-        assert(it->second.physical_state == NULL);
+        if (it->second.physical_state != NULL)
+          legion_delete(it->second.physical_state);
       }
-#endif
       node_infos.clear();
       projection = false;
     }
@@ -9022,6 +9039,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(finder->second.physical_state != NULL);
 #endif
+        // First reset the physical state
+        finder->second.physical_state->reset();
         // Recapture the state if we had to be reset
         finder->second.physical_state->capture_state(
                                         finder->second.premap_only);
@@ -10875,6 +10894,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
+      : user(rhs.user)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalCloser::~LogicalCloser(void)
+    //--------------------------------------------------------------------------
+    {
+      // Clear out our version infos
+      close_versions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalCloser& LogicalCloser::operator=(const LogicalCloser &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::record_closed_child(const ColorPoint &child, 
                                             const FieldMask &mask,
                                             bool leave_open)
@@ -11634,6 +11679,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(void)
+#ifdef DEBUG_HIGH_LEVEL
+      : node(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -11652,6 +11700,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(const PhysicalState &rhs)
+#ifdef DEBUG_HIGH_LEVEL
+      : node(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11807,6 +11858,20 @@ namespace LegionRuntime {
           it->first->merge_physical_state(this, it->second);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::reset(void)
+    //--------------------------------------------------------------------------
+    {
+      closed_mask.clear();
+      dirty_mask.clear();
+      reduction_mask.clear();
+      children.valid_fields.clear();
+      children.open_children.clear();
+      valid_views.clear();
+      reduction_views.clear();
+      // Don't clear version states, we need those
     }
 
     /////////////////////////////////////////////////////////////
@@ -12467,6 +12532,18 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void VersionManager::detach_instance(const FieldMask &mask, 
+                                         PhysicalManager *target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef UNIMPLEMENTED_VERSIONING
+
+#else
+      assert(false);
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Region Tree Node 
     /////////////////////////////////////////////////////////////
@@ -12754,7 +12831,7 @@ namespace LegionRuntime {
         // advance the version numbers for those fields.
         if (version_info.will_advance())
         {
-          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
             advance_version_numbers(state, new_dirty_fields);
@@ -15596,11 +15673,11 @@ namespace LegionRuntime {
       manager->detach_instance(detach_mask, target);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::clear_physical_states(const FieldMask &clear_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       for (size_t idx = 0; idx < physical_states.max_entries(); idx++)
       {
         if (physical_states.has_entry(idx))
@@ -15610,6 +15687,9 @@ namespace LegionRuntime {
           release_physical_state(state);
         }
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15619,6 +15699,7 @@ namespace LegionRuntime {
                              std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // Acquire our state in read only mode
       PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
       RezCheck z(rez);
@@ -15674,6 +15755,10 @@ namespace LegionRuntime {
       // Release our hold on this node
       release_physical_state(state);
       return result;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15682,6 +15767,7 @@ namespace LegionRuntime {
                               std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // This method is the same as the one above, but instead calls
       // send_back_state on instance and reduction views.  Since what is
       // sent is the same, we can use the same unpack_send_state method
@@ -15740,6 +15826,10 @@ namespace LegionRuntime {
       // Release our hold on the state
       release_physical_state(state);
       return result;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15747,6 +15837,7 @@ namespace LegionRuntime {
                                   FieldSpaceNode *column, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       DerezCheck z(derez);
       // Dirty mask
@@ -15818,8 +15909,10 @@ namespace LegionRuntime {
       }
       // Release our hold on the physical state
       release_physical_state(state);
-    }
+#else
+      assert(false);
 #endif
+    }
 
     //--------------------------------------------------------------------------
     template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
@@ -16811,13 +16904,13 @@ namespace LegionRuntime {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::seed_state(ContextID ctx, PhysicalUser &user,
                                        LogicalView *new_view,
                                        Processor local_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       if (new_view->is_reduction_view())
       {
@@ -16834,8 +16927,11 @@ namespace LegionRuntime {
       }
       release_physical_state(state);
       return InstanceRef(Event::NO_EVENT, new_view);
-    } 
+#else
+      assert(false);
+      return InstanceRef();
 #endif
+    } 
 
     //--------------------------------------------------------------------------
     Event RegionNode::close_state(const MappableInfo &info, PhysicalUser &user,
@@ -17026,7 +17122,6 @@ namespace LegionRuntime {
 #endif
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool RegionNode::send_state(ContextID ctx, UniqueID remote_owner_uid, 
                                 AddressSpaceID target,
@@ -17035,6 +17130,7 @@ namespace LegionRuntime {
                                 std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       bool continue_traversal;
       Serializer rez;
       {
@@ -17051,6 +17147,10 @@ namespace LegionRuntime {
       if (invalidate)
         invalidate_physical_state(ctx, send_mask, false/*force*/);
       return continue_traversal;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17059,6 +17159,7 @@ namespace LegionRuntime {
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       DerezCheck z(derez);
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
@@ -17070,6 +17171,9 @@ namespace LegionRuntime {
       RegionNode *node = context->get_node(handle);
       // Now do the unpack
       node->unpack_send_state(ctx.get_id(), derez, node->column_source, source);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17079,6 +17183,7 @@ namespace LegionRuntime {
                                     std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       bool continue_traversal;
       Serializer rez;
       {
@@ -17093,6 +17198,10 @@ namespace LegionRuntime {
       }
       context->runtime->send_back_region_state(target, rez);
       return continue_traversal;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17100,6 +17209,7 @@ namespace LegionRuntime {
           RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       DerezCheck z(derez);
       ContextID ctx;
       derez.deserialize(ctx);
@@ -17120,8 +17230,10 @@ namespace LegionRuntime {
       
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
-    }
+#else
+      assert(false);
 #endif
+    }
 
     //--------------------------------------------------------------------------
     void RegionNode::send_semantic_info(const NodeSet &targets,
@@ -17338,14 +17450,14 @@ namespace LegionRuntime {
       }
     }
     
-#if 0
     //--------------------------------------------------------------------------
-    void RegionNode::print_physical_state(PhysicalState *state,
+    void RegionNode::print_physical_state(VersionManager *manager,
                                          const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                          TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // Dirty Mask
       {
         FieldMask overlap = state->dirty_mask & capture_mask;
@@ -17462,8 +17574,10 @@ namespace LegionRuntime {
         }
         logger->up();
       }
-    }
+#else
+      assert(false);
 #endif
+    }
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
@@ -18185,7 +18299,6 @@ namespace LegionRuntime {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool PartitionNode::send_state(ContextID ctx, UniqueID remote_owner_uid,
                                  AddressSpaceID target,
@@ -18194,6 +18307,7 @@ namespace LegionRuntime {
                                  std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       bool continue_traversal;
       Serializer rez;
       {
@@ -18208,6 +18322,10 @@ namespace LegionRuntime {
       if (invalidate)
         invalidate_physical_state(ctx, send_mask, false/*force*/);
       return continue_traversal;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18216,6 +18334,7 @@ namespace LegionRuntime {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       DerezCheck z(derez);
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
@@ -18227,6 +18346,9 @@ namespace LegionRuntime {
       PartitionNode *node = context->get_node(handle);
       // Now do the unpack
       node->unpack_send_state(ctx.get_id(), derez, node->column_source, source);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18237,6 +18359,7 @@ namespace LegionRuntime {
                                     std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       bool continue_traversal;
       Serializer rez;
       {
@@ -18252,6 +18375,10 @@ namespace LegionRuntime {
       }
       context->runtime->send_back_partition_state(target, rez);
       return continue_traversal;
+#else
+      assert(false);
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18259,6 +18386,7 @@ namespace LegionRuntime {
           RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       DerezCheck z(derez);
       ContextID ctx;
       derez.deserialize(ctx);
@@ -18279,8 +18407,10 @@ namespace LegionRuntime {
       
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
-    }
+#else
+      assert(false);
 #endif
+    }
 
     //--------------------------------------------------------------------------
     void PartitionNode::send_semantic_info(const NodeSet &targets,
@@ -18510,7 +18640,6 @@ namespace LegionRuntime {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void PartitionNode::print_physical_state(VersionManager *manager,
                                          const FieldMask &capture_mask,
@@ -18518,6 +18647,7 @@ namespace LegionRuntime {
                                          TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // Dirty Mask
       {
         FieldMask overlap = state->dirty_mask & capture_mask;
@@ -18634,8 +18764,10 @@ namespace LegionRuntime {
         }
         logger->up();
       }
-    }
+#else
+      assert(false);
 #endif
+    }
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------

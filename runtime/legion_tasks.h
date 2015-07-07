@@ -806,8 +806,9 @@ namespace LegionRuntime {
                                    std::set<PhysicalManager*> &needed_managers);
     protected:
       friend class SliceTask;
-      SliceTask *slice_owner;
-      UserEvent point_termination;
+      SliceTask                   *slice_owner;
+      UserEvent                   point_termination;
+      std::vector<VersionInfo>    version_infos;
     };
 
     /**
