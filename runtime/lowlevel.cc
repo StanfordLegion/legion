@@ -40,6 +40,7 @@ using namespace LegionRuntime::Accessor;
 #include <unistd.h>
 #if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE) || defined(DEADLOCK_TRACE)
 #include <execinfo.h>
+#include <cxxabi.h>
 #endif
 
 #ifdef __SSE2__
@@ -1177,6 +1178,7 @@ namespace LegionRuntime {
 
     RegionInstance::Impl::Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
 			       const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
+                               const Realm::ProfilingRequestSet &reqs,
 			       off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/, RegionInstance _parent_inst /*= NO_INST*/)
       : me(_me), memory(_memory)
     {
@@ -1205,6 +1207,16 @@ namespace LegionRuntime {
 
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
+
+      if (!reqs.empty()) {
+        requests = reqs;
+        measurements.import_requests(requests);
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+          timeline.instance = me;
+          timeline.record_create_time();
+        }
+      }
     }
 
     // when we auto-create a remote instance, we don't know region/offset
@@ -1292,6 +1304,29 @@ namespace LegionRuntime {
       }
 
       return true;
+    }
+
+    void RegionInstance::Impl::finalize_instance(void)
+    {
+      if (!requests.empty()) {
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+          timeline.record_delete_time();
+          measurements.add_measurement(timeline);
+        }
+        if (measurements.wants_measurement<
+                          Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
+          Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+          usage.instance = me;
+          usage.memory = memory;
+          // Safe to read from meta-data here because we know we are
+          // on the owner node so it has up to date copy
+          usage.bytes = metadata.size;
+          measurements.add_measurement(usage);
+        }
+        measurements.send_responses(requests);
+        requests.clear();
+      }
     }
 
     void *RegionInstance::Impl::Metadata::serialize(size_t& out_size) const
@@ -1614,7 +1649,7 @@ namespace LegionRuntime {
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             finish_event.id, finish_event.gen,
+                             finish_event->me.id(), finish_event->generation,
                              it->id, it->gen);
 #endif
       }
@@ -1684,25 +1719,25 @@ namespace LegionRuntime {
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
-               finish_event.id, finish_event.gen, existential_count);
+               finish_event->me.id(), finish_event->generation, existential_count);
       if (ev1.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev1.id, ev1.gen);
+            finish_event->me.id(), finish_event->generation, ev1.id, ev1.gen);
       if (ev2.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev2.id, ev2.gen);
+            finish_event->me.id(), finish_event->generation, ev2.id, ev2.gen);
       if (ev3.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev3.id, ev3.gen);
+            finish_event->me.id(), finish_event->generation, ev3.id, ev3.gen);
       if (ev4.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev4.id, ev4.gen);
+            finish_event->me.id(), finish_event->generation, ev4.id, ev4.gen);
       if (ev5.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev5.id, ev5.gen);
+            finish_event->me.id(), finish_event->generation, ev5.id, ev5.gen);
       if (ev6.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event.id, finish_event.gen, ev6.id, ev6.gen);
+            finish_event->me.id(), finish_event->generation, ev6.id, ev6.gen);
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)
@@ -2882,7 +2917,7 @@ namespace LegionRuntime {
       b.timestamp = 0;
 
 #ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Barrier Creation: " IDFMT " %d", e.id, expected_arrivals);
+      log_event_graph.info("Barrier Creation: " IDFMT " %d", b.id, expected_arrivals);
 #endif
 
       return b;
@@ -4039,11 +4074,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_local(r, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 
@@ -4102,11 +4138,12 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst)
       {
 	return create_instance_remote(r, linearization_bits, bytes_needed,
 				      block_size, element_size, field_sizes, redopid,
-				      list_size, parent_inst);
+				      list_size, reqs, parent_inst);
       }
 
       virtual void destroy_instance(RegionInstance i, 
@@ -4844,16 +4881,17 @@ namespace LegionRuntime {
 						 const std::vector<size_t>& field_sizes,
 						 ReductionOpID redopid,
 						 off_t list_size,
+                                                 const Realm::ProfilingRequestSet &reqs,
 						 RegionInstance parent_inst)
     {
       if(gasnet_mynode() == 0) {
 	return create_instance_local(r, linearization_bits, bytes_needed,
 				     block_size, element_size, field_sizes, redopid,
-				     list_size, parent_inst);
+				     list_size, reqs, parent_inst);
       } else {
 	return create_instance_remote(r, linearization_bits, bytes_needed,
 				      block_size, element_size, field_sizes, redopid,
-				      list_size, parent_inst);
+				      list_size, reqs, parent_inst);
       }
     }
 
@@ -5061,6 +5099,7 @@ namespace LegionRuntime {
 						       const std::vector<size_t>& field_sizes,
 						       ReductionOpID redopid,
 						       off_t list_size,
+                                                       const Realm::ProfilingRequestSet &reqs,
 						       RegionInstance parent_inst)
     {
       off_t inst_offset = alloc_bytes(bytes_needed);
@@ -5103,9 +5142,12 @@ namespace LegionRuntime {
       DomainLinearization linear;
       linear.deserialize(linearization_bits);
 
-      RegionInstance::Impl *i_impl = new RegionInstance::Impl(i, r, me, inst_offset, bytes_needed, redopid,
-							      linear, block_size, element_size, field_sizes,
-							      count_offset, list_size, parent_inst);
+      RegionInstance::Impl *i_impl = new RegionInstance::Impl(i, r, me, inst_offset, 
+                                                              bytes_needed, redopid,
+							      linear, block_size, 
+                                                              element_size, field_sizes, reqs,
+							      count_offset, list_size, 
+                                                              parent_inst);
 
       // find/make an available index to store this in
       IDType index;
@@ -5184,11 +5226,14 @@ namespace LegionRuntime {
       resp.resp_ptr = args.resp_ptr;
 
       const CreateInstancePayload *payload = (const CreateInstancePayload *)msgdata;
-      assert(msglen == (sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields));
 
       std::vector<size_t> field_sizes(payload->num_fields);
       for(size_t i = 0; i < payload->num_fields; i++)
 	field_sizes[i] = payload->field_size(i);
+
+      size_t req_offset = sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields;
+      Realm::ProfilingRequestSet requests;
+      requests.deserialize(((const char*)msgdata)+req_offset);
 
       resp.i = args.m.impl()->create_instance(args.r, 
 					      payload->linearization_bits,
@@ -5198,6 +5243,7 @@ namespace LegionRuntime {
 					      field_sizes,
 					      payload->redopid,
 					      payload->list_size,
+                                              requests,
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
@@ -5227,9 +5273,11 @@ namespace LegionRuntime {
 							const std::vector<size_t>& field_sizes,
 							ReductionOpID redopid,
 							off_t list_size,
+                                                        const Realm::ProfilingRequestSet &reqs,
 							RegionInstance parent_inst)
     {
-      size_t payload_size = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
+      size_t req_offset = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
+      size_t payload_size = req_offset + reqs.compute_size();
       CreateInstancePayload *payload = (CreateInstancePayload *)malloc(payload_size);
 
       payload->bytes_needed = bytes_needed;
@@ -5245,6 +5293,8 @@ namespace LegionRuntime {
       payload->num_fields = field_sizes.size();
       for(unsigned i = 0; i < field_sizes.size(); i++)
 	payload->field_size(i) = field_sizes[i];
+
+      reqs.serialize(((char*)payload)+req_offset);
 
       CreateInstanceReqArgs args;
       args.srcptr = 0; // gcc 4.4.7 wants this!?
@@ -5270,7 +5320,7 @@ namespace LegionRuntime {
         linear.deserialize(linearization_bits);
 
         RegionInstance::Impl *i_impl = new RegionInstance::Impl(resp.i, r, me, resp.inst_offset, bytes_needed, redopid,
-                                                                linear, block_size, element_size, field_sizes,
+                                                                linear, block_size, element_size, field_sizes, reqs,
                                                                 resp.count_offset, list_size, parent_inst);
 
         unsigned index = ID(resp.i).index_l();
@@ -5332,6 +5382,9 @@ namespace LegionRuntime {
 	// TODO
       }
       
+      // handle any profiling requests
+      iimpl->finalize_instance();
+      
       return; // TODO: free up actual instance record?
       ID id(i);
 
@@ -5380,9 +5433,9 @@ namespace LegionRuntime {
     Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
 	       const void *_args, size_t _arglen,
 	       Event _finish_event, int _priority, int expected_count)
-      : proc(_proc), func_id(_func_id), arglen(_arglen),
+      : Realm::Operation(), proc(_proc), func_id(_func_id), arglen(_arglen),
 	finish_event(_finish_event), priority(_priority),
-        run_count(0), finish_count(expected_count)
+        run_count(0), finish_count(expected_count), capture_proc(false)
     {
       if(arglen) {
 	args = malloc(arglen);
@@ -5391,9 +5444,31 @@ namespace LegionRuntime {
 	args = 0;
     }
 
+    Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
+	       const void *_args, size_t _arglen,
+               const Realm::ProfilingRequestSet &reqs,
+	       Event _finish_event, int _priority, int expected_count)
+      : Realm::Operation(reqs), proc(_proc), func_id(_func_id), arglen(_arglen),
+	finish_event(_finish_event), priority(_priority),
+        run_count(0), finish_count(expected_count)
+    {
+      if(arglen) {
+	args = malloc(arglen);
+	memcpy(args, _args, arglen);
+      } else
+	args = 0;
+      capture_proc = measurements.wants_measurement<
+                        Realm::ProfilingMeasurements::OperationProcessorUsage>();
+    }
+
     Task::~Task(void)
     {
       free(args);
+      if (capture_proc) {
+        Realm::ProfilingMeasurements::OperationProcessorUsage usage;
+        usage.proc = proc;
+        measurements.add_measurement(usage);
+      }
     }
 
     ///////////////////////////////////////////////////
@@ -5500,6 +5575,22 @@ namespace LegionRuntime {
     {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, 
+                            finish_event, priority, members.size());
+
+      if (start_event.has_triggered())
+        enqueue_task(task);
+      else
+        start_event.impl()->add_waiter(start_event.gen, new DeferredTaskSpawn(this, task));
+    }
+
+    /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
+						const void *args, size_t arglen,
+                                                const Realm::ProfilingRequestSet &reqs,
+						Event start_event, Event finish_event,
+						int priority)
+    {
+      // create a task object and insert it into the queue
+      Task *task = new Task(me, func_id, args, arglen, reqs,
                             finish_event, priority, members.size());
 
       if (start_event.has_triggered())
@@ -5675,25 +5766,29 @@ namespace LegionRuntime {
       // pill. If we didn't then wait for it. This is how
       // we distinguish deadlock from just normal termination
       // from all the processors being idle
+      std::vector<LocalThread*> to_shutdown;
       gasnet_hsl_lock(&mutex);
       if (!shutdown_trigger)
         gasnett_cond_wait(&condvar, &mutex.lock);
       assert(shutdown_trigger);
       shutdown = true;
-      assert(running_thread == 0);
+      to_shutdown = available_threads;
+      if (running_thread)
+        to_shutdown.push_back(running_thread);
       assert(resumable_threads.empty());
       assert(paused_threads.empty());
       gasnet_hsl_unlock(&mutex);
       //printf("Processor " IDFMT " needed %ld threads\n", 
-      //        proc.id, available_threads.size());
+      //        proc.id, to_shutdown.size());
       // We can now read this outside the lock since we know
       // that the threads are all asleep and are all about to exit
-      for (unsigned idx = 0; idx < available_threads.size(); idx++)
+      assert(!to_shutdown.empty());
+      for (unsigned idx = 0; idx < to_shutdown.size(); idx++)
       {
         if (idx == 0)
-          available_threads[idx]->do_finalize();
-        available_threads[idx]->shutdown();
-        delete available_threads[idx];
+          to_shutdown[idx]->do_finalize();
+        to_shutdown[idx]->shutdown();
+        delete to_shutdown[idx];
       }
     }
 
@@ -5852,6 +5947,8 @@ namespace LegionRuntime {
 
     void LocalProcessor::enqueue_task(Task *task)
     {
+      // Mark this task as ready
+      task->mark_ready();
       LocalThread *to_wake = 0;
       LocalThread *to_start = 0;
       gasnet_hsl_lock(&mutex);
@@ -5882,6 +5979,31 @@ namespace LegionRuntime {
       // create task object to hold args, etc.
       Task *task = new Task(me, func_id, args, arglen, finish_event, 
                             priority, 1/*users*/);
+
+      // early out - if the event has obviously triggered (or is NO_EVENT)
+      //  don't build up continuation
+      if(start_event.has_triggered()) {
+        log_task.info("new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
+        enqueue_task(task);
+      } else {
+        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen);
+        start_event.impl()->add_waiter(start_event.gen, 
+                                new DeferredTaskSpawn(this, task));
+      }
+    }
+
+    void LocalProcessor::spawn_task(Processor::TaskFuncID func_id,
+                                    const void *args, size_t arglen,
+                                    const Realm::ProfilingRequestSet &reqs,
+                                    Event start_event, Event finish_event,
+                                    int priority)
+    {
+      // create task object to hold args, etc.
+      Task *task = new Task(me, func_id, args, arglen, reqs,
+                            finish_event, priority, 1/*users*/);
 
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
@@ -5948,8 +6070,13 @@ namespace LegionRuntime {
 #endif
         log_task.info("thread running ready task %p for proc " IDFMT "",
                                 task, task->proc.id);
+        task->mark_started();
         (*fptr)(task->args, task->arglen, 
                 (actual_proc.exists() ? actual_proc : task->proc));
+        task->mark_completed();
+        // Capture the actual processor if necessary
+        if (task->capture_proc && actual_proc.exists())
+          task->proc = actual_proc;
         log_task.info("thread finished running task %p for proc " IDFMT "",
                                 task, task->proc.id);
 #ifdef EVENT_GRAPH_TRACE
@@ -6000,14 +6127,6 @@ namespace LegionRuntime {
       return 0;
     }
  
-    struct SpawnTaskArgs : public BaseMedium {
-      Processor proc;
-      Event start_event;
-      Event finish_event;
-      Processor::TaskFuncID func_id;
-      int priority;
-    };
-
     void Event::wait(void) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -6074,6 +6193,18 @@ namespace LegionRuntime {
       e->external_wait(gen);
     }
 
+    // Employ some fancy struct packing here to fit in 64 bytes
+    struct SpawnTaskArgs : public BaseMedium {
+      Processor proc;
+      IDType start_id;
+      IDType finish_id;
+      size_t user_arglen;
+      int priority;
+      Processor::TaskFuncID func_id;
+      Event::gen_t start_gen;
+      Event::gen_t finish_gen;
+    };
+
     // can't be static if it's used in a template...
     void handle_spawn_task_message(SpawnTaskArgs args,
 				   const void *data, size_t datalen)
@@ -6081,9 +6212,23 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = args.proc.impl();
       log_task.debug("remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
-	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
-      p->spawn_task(args.func_id, data, datalen,
-		    args.start_event, args.finish_event, args.priority);
+	       args.proc.id, args.func_id, args.start_id, args.start_gen);
+      Event start_event, finish_event;
+      start_event.id = args.start_id;
+      start_event.gen = args.start_gen;
+      finish_event.id = args.finish_id;
+      finish_event.gen = args.finish_gen;
+      if (args.user_arglen == datalen) {
+        // Only have user data
+        p->spawn_task(args.func_id, data, datalen,
+                      start_event, finish_event, args.priority);
+      } else {
+        // Unpack the profiling set
+        Realm::ProfilingRequestSet reqs;
+        reqs.deserialize(((char*)data)+args.user_arglen);
+        p->spawn_task(args.func_id, data, args.user_arglen, reqs,
+                      start_event, finish_event, args.priority);
+      }
     }
 
     typedef ActiveMessageMediumNoReply<SPAWN_TASK_MSGID,
@@ -6126,11 +6271,43 @@ namespace LegionRuntime {
 	SpawnTaskArgs msgargs;
 	msgargs.proc = me;
 	msgargs.func_id = func_id;
-	msgargs.start_event = start_event;
-	msgargs.finish_event = finish_event;
+        msgargs.start_id = start_event.id;
+        msgargs.start_gen = start_event.gen;
+        msgargs.finish_id = finish_event.id;
+        msgargs.finish_gen = finish_event.gen;
         msgargs.priority = priority;
+        msgargs.user_arglen = arglen;
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
+      }
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority)
+      {
+        log_task.debug("spawning remote task: proc=" IDFMT " task=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
+		 me.id, func_id, 
+		 start_event.id, start_event.gen,
+		 finish_event.id, finish_event.gen);
+	SpawnTaskArgs msgargs;
+	msgargs.proc = me;
+	msgargs.func_id = func_id;
+        msgargs.start_id = start_event.id;
+        msgargs.start_gen = start_event.gen;
+        msgargs.finish_id = finish_event.id;
+        msgargs.finish_gen = finish_event.gen;
+        msgargs.priority = priority;
+        msgargs.user_arglen = arglen;
+        // Make a copy of the arguments and the profiling requests in
+        // the same buffer so that we can copy them over
+        size_t msg_buffer_size = arglen + reqs.compute_size();
+        void *msg_buffer = malloc(msg_buffer_size);
+        memcpy(msg_buffer,args,arglen);
+        reqs.serialize(((char*)msg_buffer)+arglen);
+        SpawnTaskMessage::request(ID(me).node(), msgargs, msg_buffer,
+                                  msg_buffer_size, PAYLOAD_FREE);
       }
     };
 
@@ -6207,6 +6384,31 @@ namespace LegionRuntime {
 #endif
 
       p->spawn_task(func_id, args, arglen, //instances_needed, 
+		    wait_on, e, priority);
+      return e;
+    }
+
+    Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
+                           const Realm::ProfilingRequestSet &reqs,
+			   Event wait_on, int priority) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      Processor::Impl *p = impl();
+
+      GenEventImpl *finish_event = GenEventImpl::create_genevent();
+      Event e = finish_event->current_event();
+#ifdef EVENT_GRAPH_TRACE
+      Event enclosing = find_enclosing_termination_event();
+      log_event_graph.info("Task Request: %d " IDFMT 
+                            " (" IDFMT ",%d) (" IDFMT ",%d)"
+                            " (" IDFMT ",%d) %d %p %ld",
+                            func_id, id, e.id, e.gen,
+                            wait_on.id, wait_on.gen,
+                            enclosing.id, enclosing.gen,
+                            priority, args, arglen);
+#endif
+
+      p->spawn_task(func_id, args, arglen, reqs,
 		    wait_on, e, priority);
       return e;
     }
@@ -6520,8 +6722,30 @@ namespace LegionRuntime {
     }
 
     RegionInstance Domain::create_instance(Memory memory,
+					   size_t elem_size,
+                                           const Realm::ProfilingRequestSet &reqs,
+					   ReductionOpID redop_id) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
+      std::vector<size_t> field_sizes(1);
+      field_sizes[0] = elem_size;
+
+      return create_instance(memory, field_sizes, 1, reqs, redop_id);
+    }
+
+    RegionInstance Domain::create_instance(Memory memory,
 					   const std::vector<size_t> &field_sizes,
 					   size_t block_size,
+					   ReductionOpID redop_id) const
+    {
+      Realm::ProfilingRequestSet requests;
+      return create_instance(memory, field_sizes, block_size, requests, redop_id);
+    }
+
+    RegionInstance Domain::create_instance(Memory memory,
+					   const std::vector<size_t> &field_sizes,
+					   size_t block_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   ReductionOpID redop_id) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
@@ -6630,7 +6854,7 @@ namespace LegionRuntime {
       RegionInstance i = m_impl->create_instance(get_index_space(), linearization_bits, inst_bytes,
 						 block_size, elem_size, field_sizes,
 						 redop_id,
-						 -1 /*list size*/,
+						 -1 /*list size*/, reqs,
 						 RegionInstance::NO_INST);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
@@ -6854,6 +7078,17 @@ namespace LegionRuntime {
       return Event::NO_EVENT;
     }
 
+    Event IndexSpace::create_equal_subspaces(size_t count, size_t granularity,
+                                             std::vector<IndexSpace>& subspaces,
+                                             const Realm::ProfilingRequestSet &reqs,
+                                             bool mutable_results,
+                                             Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
     Event IndexSpace::create_weighted_subspaces(size_t count, size_t granularity,
                                                 const std::vector<int>& weights,
                                                 std::vector<IndexSpace>& subspaces,
@@ -6865,8 +7100,31 @@ namespace LegionRuntime {
       return Event::NO_EVENT;
     }
 
+    Event IndexSpace::create_weighted_subspaces(size_t count, size_t granularity,
+                                                const std::vector<int>& weights,
+                                                std::vector<IndexSpace>& subspaces,
+                                                const Realm::ProfilingRequestSet &reqs,
+                                                bool mutable_results,
+                                                Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
     /*static*/
     Event IndexSpace::compute_index_spaces(std::vector<BinaryOpDescriptor>& pairs,
+                                           bool mutable_results,
+					   Event wait_on /*= Event::NO_EVENT*/)
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    /*static*/
+    Event IndexSpace::compute_index_spaces(std::vector<BinaryOpDescriptor>& pairs,
+                                           const Realm::ProfilingRequestSet &reqs,
                                            bool mutable_results,
 					   Event wait_on /*= Event::NO_EVENT*/)
     {
@@ -6888,9 +7146,35 @@ namespace LegionRuntime {
       return Event::NO_EVENT;
     }
 
+    /*static*/
+    Event IndexSpace::reduce_index_spaces(IndexSpaceOperation op,
+                                          const std::vector<IndexSpace>& spaces,
+                                          const Realm::ProfilingRequestSet &reqs,
+                                          IndexSpace& result,
+                                          bool mutable_results,
+                                          IndexSpace parent /*= IndexSpace::NO_SPACE*/,
+				          Event wait_on /*= Event::NO_EVENT*/)
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
     Event IndexSpace::create_subspaces_by_field(
                                 const std::vector<FieldDataDescriptor>& field_data,
                                 std::map<DomainPoint, IndexSpace>& subspaces,
+                                bool mutable_results,
+                                Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    Event IndexSpace::create_subspaces_by_field(
+                                const std::vector<FieldDataDescriptor>& field_data,
+                                std::map<DomainPoint, IndexSpace>& subspaces,
+                                const Realm::ProfilingRequestSet &reqs,
                                 bool mutable_results,
                                 Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -6910,9 +7194,33 @@ namespace LegionRuntime {
       return Event::NO_EVENT;
     }
 
+    Event IndexSpace::create_subspaces_by_image(
+                                const std::vector<FieldDataDescriptor>& field_data,
+                                std::map<IndexSpace, IndexSpace>& subspaces,
+                                const Realm::ProfilingRequestSet &reqs,
+                                bool mutable_results,
+                                Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
     Event IndexSpace::create_subspaces_by_preimage(
                                  const std::vector<FieldDataDescriptor>& field_data,
                                  std::map<IndexSpace, IndexSpace>& subspaces,
+                                 bool mutable_results,
+                                 Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    Event IndexSpace::create_subspaces_by_preimage(
+                                 const std::vector<FieldDataDescriptor>& field_data,
+                                 std::map<IndexSpace, IndexSpace>& subspaces,
+                                 const Realm::ProfilingRequestSet &reqs,
                                  bool mutable_results,
                                  Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -8375,6 +8683,7 @@ namespace LegionRuntime {
 
     static std::vector<LocalProcessor *> local_cpus;
     static std::vector<LocalProcessor *> local_util_procs;
+    static std::vector<LocalProcessor *> local_io_procs;
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
@@ -8657,17 +8966,60 @@ namespace LegionRuntime {
       void *bt[256];
       int bt_size = backtrace(bt, 256);
       char **bt_syms = backtrace_symbols(bt, bt_size);
-      size_t buffer_size = 1;
-      for (int i = 0; i < bt_size; i++)
-        buffer_size += (strlen(bt_syms[i]) + 1);
+      size_t buffer_size = 2048; // default buffer size
       char *buffer = (char*)malloc(buffer_size);
-      int offset = 0;
-      for (int i = 0; i < bt_size; i++)
-        offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+      size_t offset = 0;
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        // If offset is within half of the buffer size, double the buffer
+        if (offset >= (buffer_size / 2)) {
+          buffer_size *= 2;
+          buffer = (char*)realloc(buffer, buffer_size);
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function with no arguments.
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                               "  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += snprintf(buffer+offset,buffer_size-offset,
+                             "%s\n",bt_syms[i]);
+        }
+      }
       fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
               gasnet_mynode(), pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
+      free(funcname);
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit
@@ -8935,6 +9287,7 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
+      Realm::InitialTime::get_initial_time();
       // have to register domain mappings too
       Arrays::Mapping<1,1>::register_mapping<Arrays::CArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::CArrayLinearization<2> >();
@@ -8961,6 +9314,7 @@ namespace LegionRuntime {
       stack_size_in_mb = 2;
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
+      unsigned num_io_procs = 0;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -9005,6 +9359,7 @@ namespace LegionRuntime {
         INT_ARG("-ll:stack", stack_size_in_mb);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
+        INT_ARG("-ll:io", num_io_procs);
 	//INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
@@ -9253,7 +9608,7 @@ namespace LegionRuntime {
       unsigned apos = 0;
 
       announce_data.node_id = gasnet_mynode();
-      announce_data.num_procs = num_local_cpus + num_util_procs;
+      announce_data.num_procs = num_local_cpus + num_util_procs + num_io_procs;
       announce_data.num_memories = (1 + 
 				    (reg_mem_size_in_mb > 0 ? 1 : 0) +
 				    (disk_mem_size_in_mb > 0 ? 1 : 0));
@@ -9278,6 +9633,21 @@ namespace LegionRuntime {
           adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = up->me.id;
           adata[apos++] = Processor::UTIL_PROC;
+        }
+      }
+      // create i/o processors (if any)
+      if (num_io_procs > 0)
+      {
+        for (unsigned i = 0; i < num_io_procs; i++) {
+          LocalProcessor *io = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
+                                            n->processors.size()).convert<Processor>(),
+                                            Processor::IO_PROC,
+                                            stack_size_in_mb << 20, "io worker");
+          n->processors.push_back(io);
+          local_io_procs.push_back(io);
+          adata[apos++] = NODE_ANNOUNCE_PROC;
+          adata[apos++] = io->me.id;
+          adata[apos++] = Processor::IO_PROC;
         }
       }
 
@@ -9416,6 +9786,51 @@ namespace LegionRuntime {
 	  it != local_util_procs.end();
 	  it++) {
 	if(cpu_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = cpumem->me.id;
+	  adata[apos++] = 100;  // "large" bandwidth
+	  adata[apos++] = 1;    // "small" latency
+	}
+
+	if(reg_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = regmem->me.id;
+	  adata[apos++] = 80;  // "large" bandwidth
+	  adata[apos++] = 5;    // "small" latency
+	}
+
+        if(disk_mem_size_in_mb > 0) {
+          adata[apos++] = NODE_ANNOUNCE_PMA;
+          adata[apos++] = (*it)->me.id;
+          adata[apos++] = diskmem->me.id;
+          adata[apos++] = 5;  // "low" bandwidth
+          adata[apos++] = 100;  // "high" latency
+        }
+
+#ifdef USE_HDF
+         adata[apos++] = NODE_ANNOUNCE_PMA;
+         adata[apos++] = (*it)->me.id;
+         adata[apos++] = hdfmem->me.id;
+         adata[apos++] = 5; // "low" bandwidth
+         adata[apos++] = 100; // "high" latency
+#endif
+
+	if(global_memory) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = global_memory->me.id;
+	  adata[apos++] = 10;  // "lower" bandwidth
+	  adata[apos++] = 50;    // "higher" latency
+	}
+      }
+
+      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+          it != local_io_procs.end();
+          it++)
+      {
+        if(cpu_mem_size_in_mb > 0) {
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
 	  adata[apos++] = (*it)->me.id;
 	  adata[apos++] = cpumem->me.id;
@@ -9794,6 +10209,11 @@ namespace LegionRuntime {
 	  it++)
 	(*it)->start_processor();
 
+      for (std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+            it != local_io_procs.end();
+            it++)
+        (*it)->start_processor();
+
       for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
@@ -9854,8 +10274,8 @@ namespace LegionRuntime {
 #endif
 #ifdef EVENT_GRAPH_TRACE
       {
-        FILE *log_file = Logger::get_log_file();
-        show_event_waiters(log_file);
+        //FILE *log_file = Logger::get_log_file();
+        show_event_waiters(/*log_file*/);
       }
 #endif
 
@@ -9864,6 +10284,11 @@ namespace LegionRuntime {
 	  it != local_util_procs.end();
 	  it++)
 	(*it)->shutdown_processor();
+
+      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+          it != local_io_procs.end();
+          it++)
+        (*it)->shutdown_processor();
 
       for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
@@ -10312,7 +10737,7 @@ namespace LegionRuntime {
       if(!dst) return 0;
 
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = strides[i] * elmt_stride;
+	offsets[i].offset = strides[i][0] * elmt_stride;
 
       return dst;
     }

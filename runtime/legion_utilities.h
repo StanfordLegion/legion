@@ -214,15 +214,7 @@ namespace LegionRuntime {
       {
         Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
-        {
-#ifdef LEGION_PROF
-          LegionProf::register_event(0, PROF_BEGIN_WAIT);
-#endif
           lock_event.wait();
-#ifdef LEGION_PROF
-          LegionProf::register_event(0, PROF_END_WAIT);
-#endif
-        }
       }
       AutoLock(ImmovableLock l)
         : is_low(false), immov_lock(l)

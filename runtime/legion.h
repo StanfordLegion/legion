@@ -2664,6 +2664,8 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(IndexSpace parent, Color color) const;
 
       IndexSpace get_index_subspace(IndexPartition p, Color c) const;
+      IndexSpace get_index_subspace(IndexPartition p, 
+                                    const DomainPoint &color) const;
 
       bool has_multiple_domains(IndexSpace handle) const;
 
@@ -3531,6 +3533,16 @@ namespace LegionRuntime {
                                          Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      /**
+       * Return true if the index space has an index partition
+       * with the specified color.
+       * @param ctx enclosing task context
+       * @param parent index space
+       * @param color of index partition
+       * @return true if an index partition exists with the specified color
+       */
+      bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
 
       /**
        * Return the index subspace of an index partitioning
@@ -3544,6 +3556,17 @@ namespace LegionRuntime {
                                     Color color); 
       IndexSpace get_index_subspace(Context ctx, IndexPartition p,
                                     const DomainPoint &color);
+
+      /**
+       * Return true if the index partition has an index subspace
+       * with the specified color.
+       * @param ctx enclosing task context
+       * @param p parent index partitioning
+       * @param color of the index sub-space
+       * @return true if an index space exists with the specified color
+       */
+      bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
 
       /**
        * Return if the given index space is represented by 
@@ -3776,6 +3799,18 @@ namespace LegionRuntime {
       LogicalPartition get_logical_partition_by_color(Context ctx,
                                                       LogicalRegion parent,
                                                       const DomainPoint &c);
+
+      /**
+       * Return true if the logical region has a logical partition with
+       * the specified color.
+       * @param ctx enclosing task context
+       * @param parent logical region
+       * @param color for the specified logical partition
+       * @return true if the logical partition exists with the specified color
+       */
+      bool has_logical_partition_by_color(Context ctx,
+                                          LogicalRegion parent,
+                                          const DomainPoint &c);
       
       /**
        * Return the logical partition identified by the triple of index
@@ -3817,6 +3852,18 @@ namespace LegionRuntime {
       LogicalRegion get_logical_subregion_by_color(Context ctx,
                                                    LogicalPartition parent,
                                                    const DomainPoint &c);
+
+      /**
+       * Return true if the logical partition has a logical region with
+       * the specified color.
+       * @param ctx enclosing task context
+       * @param parent logical partition
+       * @param color for the specified logical region
+       * @return true if a logical region exists with the specified color
+       */
+      bool has_logical_subregion_by_color(Context ctx,
+                                          LogicalPartition parent,
+                                          const DomainPoint &c);
 
       /**
        * Return the logical partition identified by the triple of index
@@ -4149,6 +4196,22 @@ namespace LegionRuntime {
                       Predicate pred = Predicate::TRUE_PRED);
 
       /**
+       * This version of fill field is exactly the same as the one above,
+       * but uses a future value. This operation requires read-write privileges 
+       * on the field.
+       * @param ctx enclosing task context
+       * @param handle the logical region on which to fill the field
+       * @param parent the parent region from which privileges are derived
+       * @param fid the field to fill 
+       * @param value pointer to the buffer containing the value to be used
+       * @param value_size size of the buffer in bytes
+       * @param pred the predicate for this operation
+       */
+      void fill_field(Context ctx, LogicalRegion handle, LogicalRegion parent,
+                      FieldID fid, Future f, 
+                      Predicate pred = Predicate::TRUE_PRED);
+
+      /**
        * Fill multiple fields of a logical region with the same value.
        * This operation requires read-write privileges on the fields.
        * @param ctx enclosing task context
@@ -4179,6 +4242,20 @@ namespace LegionRuntime {
                        const std::set<FieldID> &fields, 
                        const void *value, size_t value_size,
                        Predicate pred = Predicate::TRUE_PRED);
+
+      /**
+       * Fill multiple fields of a logical region with the same future value.
+       * This operation requires read-write privileges on the fields.
+       * @param ctx enclosing task context
+       * @param handle the logical region on which to fill the field
+       * @param parent the parent region from which privileges are derived
+       * @param fields the set of fields to fill
+       * @param future the future value to use for filling the fields
+       * @param pred the predicate for this operation
+       */
+      void fill_fields(Context ctx, LogicalRegion handle, LogicalRegion parent,
+                       const std::set<FieldID> &fields,
+                       Future f, Predicate pred = Predicate::TRUE_PRED);
     public:
       //------------------------------------------------------------------------
       // File Operations
@@ -6549,8 +6626,7 @@ namespace LegionRuntime {
       Arrays::Rect<T::IDIM> parent_rect = 
         get_index_space_domain(ctx, parent).get_rect<T::IDIM>();
       Arrays::Rect<T::ODIM> color_space = mapping.image_convex(parent_rect);
-      Arrays::CArrayLinearization<T::ODIM> color_space_lin(color_space);
-      DomainColoring c;
+      DomainPointColoring c;
       for (typename T::PointInOutputRectIterator pir(color_space); 
           pir; pir++) 
       {
@@ -6558,21 +6634,22 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(mapping.preimage_is_dense(pir.p));
 #endif
-        c[color_space_lin.image(pir.p)] = Domain::from_rect<T::IDIM>(preimage);
+        c[DomainPoint::from_point<T::IDIM>(pir.p)] =
+          Domain::from_rect<T::IDIM>(preimage);
       }
       IndexPartition result = create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
-              true/*disjoint*/, part_color);
+              DISJOINT_KIND, part_color);
 #ifdef DEBUG_HIGH_LEVEL
       // We don't actually know if we're supposed to check disjointness
       // so if we're in debug mode then just do it.
       {
-        std::set<Color> current_colors;  
-        for (DomainColoring::const_iterator it1 = c.begin();
+        std::set<DomainPoint> current_colors;  
+        for (DomainPointColoring::const_iterator it1 = c.begin();
               it1 != c.end(); it1++)
         {
           current_colors.insert(it1->first);
-          for (DomainColoring::const_iterator it2 = c.begin();
+          for (DomainPointColoring::const_iterator it2 = c.begin();
                 it2 != c.end(); it2++)
           {
             if (current_colors.find(it2->first) != current_colors.end())
@@ -6581,9 +6658,33 @@ namespace LegionRuntime {
             Arrays::Rect<T::IDIM> rect2 = it2->second.get_rect<T::IDIM>();
             if (rect1.overlaps(rect2))
             {
-              fprintf(stderr,"ERROR: colors %d and %d of partition %d are "
-                             "not disjoint rectangles as they should be!",
-                              it1->first, it2->first, result.id);
+              switch (it1->first.dim)
+              {
+                case 1:
+                  fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
+                                  "not disjoint rectangles as they should be!",
+                                   (it1->first)[0], (it2->first)[0], result.id);
+                  break;
+                case 2:
+                  fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
+                                  "partition %d are not disjoint rectangles "
+                                  "as they should be!",
+                                  (it1->first)[0], (it1->first)[1],
+                                  (it2->first)[0], (it2->first)[1],
+                                  result.id);
+                  break;
+                case 3:
+                  fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
+                                  "of partition %d are not disjoint rectangles "
+                                  "as they should be!",
+                                  (it1->first)[0], (it1->first)[1],
+                                  (it1->first)[2], (it2->first)[0],
+                                  (it2->first)[1], (it2->first)[2],
+                                  result.id);
+                  break;
+                default:
+                  assert(false);
+              }
               assert(false);
               exit(ERROR_DISJOINTNESS_TEST_FAILURE);
             }
@@ -6600,11 +6701,8 @@ namespace LegionRuntime {
                               IndexPartition p, Arrays::Point<DIM> color_point)
     //--------------------------------------------------------------------------
     {
-      Arrays::Rect<DIM> color_space = 
-        get_index_partition_color_space(ctx, p).get_rect<DIM>();
-      Arrays::CArrayLinearization<DIM> color_space_lin(color_space);
-      return get_index_subspace(ctx, p, 
-                                  (Color)(color_space_lin.image(color_point)));
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
+      return get_index_subspace(ctx, p, dom_point);
     }
 
     //--------------------------------------------------------------------------
@@ -6686,10 +6784,8 @@ namespace LegionRuntime {
                                           Arrays::Point<DIM> &color_point) const
     //--------------------------------------------------------------------------
     {
-      Arrays::Rect<DIM> color_space = 
-        get_index_partition_color_space(p).get_rect<DIM>();
-      Arrays::CArrayLinearization<DIM> color_space_lin(color_space);
-      return get_index_subspace(p, (Color)(color_space_lin.image(color_point)));
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
+      return get_index_subspace(p, dom_point);
     }
     
     //--------------------------------------------------------------------------

@@ -116,7 +116,10 @@ function traverse_symbols.expr(defined, undefined, node)
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
-    traverse_symbols.expr(defined, undefined, node.value)
+    local defined_local = defined:new_local_scope()
+    local code = codegen(node)
+    local actions = code.actions
+    traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
     traverse_symbols.expr(defined, undefined, node.index)
 
   elseif node:is(ast.typed.ExprUnary) then
@@ -215,6 +218,11 @@ function traverse_symbols.terra_expr(defined, undefined, exp)
   elseif exp:is "operator" then
     exp.operands:map(function(operand)
       traverse_symbols.terra_expr(defined, undefined, operand)
+    end)
+
+  elseif exp:is "apply" then
+    exp.arguments:map(function(argument)
+      traverse_symbols.terra_expr(defined, undefined, argument)
     end)
 
   elseif exp:is "constant" then

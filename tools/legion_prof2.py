@@ -1,0 +1,1227 @@
+#!/usr/bin/env python
+
+# Copyright 2015 Stanford University, NVIDIA Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import sys, os, shutil
+import string, re
+from math import sqrt, log
+from getopt import getopt
+
+prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
+task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
+meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
+op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
+proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
+mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[0-9]+) (?P<size>[0-9]+)')
+
+# Make sure this is up to date with lowlevel.h
+processor_kinds = {
+    0 : 'GPU',
+    1 : 'CPU',
+    2 : 'Utility',
+    3 : 'I/O',
+}
+
+# Make sure this is up to date with lowlevel.h
+memory_kinds = {
+    0 : 'GASNet Global',
+    1 : 'System',
+    2 : 'Registered',
+    3 : 'Socket',
+    4 : 'Zero-Copy',
+    5 : 'Framebuffer',
+    6 : 'Disk',
+    7 : 'HDF5',
+    8 : 'L3 Cache',
+    9 : 'L2 Cache',
+    10 : 'L1 Cache',
+}
+
+# Micro-seconds per pixel
+US_PER_PIXEL = 100
+# Pixels per level of the picture
+PIXELS_PER_LEVEL = 40
+# Pixels per tick mark
+PIXELS_PER_TICK = 200
+
+# Helper function for computing nice colors
+def color_helper(step, num_steps):
+    assert step <= num_steps
+    h = float(step)/float(num_steps)
+    i = ~~int(h * 6)
+    f = h * 6 - i
+    q = 1 - f
+    rem = i % 6
+    r = 0
+    g = 0
+    b = 0
+    if rem == 0:
+      r = 1
+      g = f
+      b = 0
+    elif rem == 1:
+      r = q
+      g = 1
+      b = 0
+    elif rem == 2:
+      r = 0
+      g = 1
+      b = f
+    elif rem == 3:
+      r = 0
+      g = q
+      b = 1
+    elif rem == 4:
+      r = f
+      g = 0
+      b = 1
+    elif rem == 5:
+      r = 1
+      g = 0
+      b = q
+    else:
+      assert False
+    r = (~~int(r*255))
+    g = (~~int(g*255))
+    b = (~~int(b*255))
+    r = "%02x" % r
+    g = "%02x" % g
+    b = "%02x" % b
+    return ("#"+r+g+b)
+
+def read_time(string):
+    return long(string)/1000
+
+class TimeRange(object):
+    def __init__(self, start_time, stop_time):
+        self.start_time = start_time
+        self.stop_time = stop_time
+        self.subranges = list()
+
+    def __cmp__(self, other):
+        # The order chosen here is critical for sort_range. Ranges are
+        # sorted by start_event first, and then by *reversed*
+        # end_event, so that each range will precede any ranges they
+        # contain in the order.
+        if self.start_time < other.start_time:
+            return -1
+        if self.start_time > other.start_time:
+            return 1
+
+        if self.stop_time > other.stop_time:
+            return -1
+        if self.stop_time < other.stop_time:
+            return 1
+        return 0
+
+    def contains(self, other):
+        if self.start_time <= other.start_time and \
+            other.stop_time <= self.stop_time:
+            return True
+        return False
+
+    def add_range(self, other):
+        assert self.contains(other)
+        self.subranges.append(other)
+
+    def sort_range(self):
+        self.subranges.sort()
+
+        removed = set()
+        stack = []
+        for subrange in self.subranges:
+            while len(stack) > 0 and not stack[-1].contains(subrange):
+                stack.pop()
+            if len(stack) > 0:
+                stack[-1].add_range(subrange)
+                removed.add(subrange)
+            stack.append(subrange)
+
+        self.subranges = [s for s in self.subranges if s not in removed]
+
+    def total_time(self):
+        return self.stop_time - self.start_time
+
+    def max_levels(self):
+        max_lev = 0
+        for idx in range(len(self.subranges)):
+            levels = self.subranges[idx].max_levels()
+            if levels > max_lev:
+                max_lev = levels
+        return max_lev+1
+
+    def emit_svg_range(self, printer):
+        self.emit_svg(printer, 0)
+
+    def __repr__(self):
+        return "Start: %d us  Stop: %d us  Total: %d us" % (
+            self.start_time,
+            self.end_time,
+            self.total_time())
+
+class BaseRange(TimeRange):
+    def __init__(self, start_time, stop_time, proc):
+        TimeRange.__init__(self, start_time, stop_time)
+        self.proc = proc
+
+    def emit_svg(self, printer, level):
+        title = repr(self.proc)
+        printer.emit_time_line(level, self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level + 1)
+
+    def update_task_stats(self, stat):
+        for r in self.subranges:
+            r.update_task_stats(stat)
+
+    def active_time(self):
+        total = 0
+        for subrange in self.subranges:
+            total = total + subrange.active_time()
+        return total
+
+    def application_time(self):
+        total = 0
+        for subrange in self.subranges:
+            total = total + subrange.application_time()
+        return total
+
+    def meta_time(self):
+        total = 0
+        for subrange in self.subranges:
+            total = total + subrange.meta_time()
+        return total
+
+class TaskRange(TimeRange):
+    def __init__(self, task):
+        TimeRange.__init__(self, task.start, task.stop)
+        self.task = task
+
+    def emit_svg(self, printer, level):
+        assert self.task.is_task
+        assert self.task.variant is not None
+        title = repr(self.task)
+        if self.task.is_meta:
+            title += (' '+self.task.get_initiation())
+        title += (' '+self.task.get_timing())
+        printer.emit_timing_range(self.task.variant.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def update_task_stats(self, stat):
+        exec_time = self.total_time()
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+            exec_time -= subrange.total_time()
+        stat.record_task(self.task, exec_time)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        if self.task.is_meta:
+            # Add up the application time from all subranges
+            total = 0
+            for subrange in self.subranges:
+                total += subrange.application_time()
+            return total
+        else:
+            # Take our total minus meta time plus application time
+            total = self.total_time()
+            for subrange in self.subranges:
+                total += subrange.application_time()
+                total -= subrange.meta_time()
+                assert total >= 0
+            return total
+
+    def meta_time(self):
+        if self.task.is_meta:
+            total = self.total_time()
+            for subrange in self.subranges:
+                total += subrange.meta_time()
+                total -= subrange.application_time()
+                assert total >= 0
+            return total
+        else:
+            total = 0
+            for subrange in self.subranges:
+                total += subrange.meta_time()
+            return total
+        
+
+class Processor(object):
+    def __init__(self, proc_id, kind):
+        self.proc_id = proc_id
+        self.kind = kind
+        self.task_ranges = list()
+        self.full_range = None
+
+    def add_task(self, task):
+        self.task_ranges.append(TaskRange(task))
+
+    def init_time_range(self, last_time):
+        self.full_range = BaseRange(0L, last_time, self)
+
+    def sort_time_range(self):
+        for r in self.task_ranges:
+            self.full_range.add_range(r)
+        self.full_range.sort_range()
+
+    def emit_svg(self, printer):
+        max_levels = self.full_range.max_levels()
+        # Skip any empty processors
+        if max_levels > 1:
+            # First figure out the max number of levels + 1 for padding
+            printer.init_chunk(max_levels+1)
+            self.full_range.emit_svg_range(printer)
+
+    def print_stats(self):
+        total_time = self.full_range.total_time()
+        active_time = self.full_range.active_time()
+        application_time = self.full_range.application_time()
+        meta_time = self.full_range.meta_time()
+        active_ratio = 100.0*float(active_time)/float(total_time)
+        application_ratio = 100.0*float(application_time)/float(total_time)
+        meta_ratio = 100.0*float(meta_time)/float(total_time)
+        print self
+        print "    Total time: %d us" % total_time
+        print "    Active time: %d us (%.3f%%)" % (active_time, active_ratio)
+        print "    Application time: %d us (%.3f%%)" % (application_time, application_ratio)
+        print "    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio)
+        print
+
+    def update_task_stats(self, stat):
+        self.full_range.update_task_stats(stat)
+
+    def __repr__(self):
+        return '%s Processor %s' % (self.kind, hex(self.proc_id))
+
+class TimePoint(object):
+    def __init__(self, time, thing, first):
+        self.time = time
+        self.thing = thing
+        self.first = first
+        self.time_key = 2*time + (0 if first is True else 1)
+
+class Memory(object):
+    def __init__(self, mem_id, kind, size):
+        self.mem_id = mem_id
+        self.kind = kind
+        self.total_size = size
+        self.instances = set()
+        self.time_points = list()
+        self.max_live_instances = None
+        self.last_time = None
+
+    def add_instance(self, inst):
+        self.instances.add(inst)
+
+    def init_time_range(self, last_time):
+        self.last_time = last_time 
+
+    def sort_time_range(self):
+        self.max_live_instances = 0
+        for inst in self.instances:
+            self.time_points.append(TimePoint(inst.create, inst, True))
+            self.time_points.append(TimePoint(inst.destroy, inst, False))
+        # Keep track of which levels are free
+        free_levels = set()
+        # Iterate over all the points in sorted order
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                # Find a level to assign this to
+                if len(free_levels) > 0:
+                    point.thing.level = free_levels.pop()
+                else:
+                    point.thing.level = self.max_live_instances + 1
+                    self.max_live_instances += 1
+            else:
+                # Finishing this instance so restore its point
+                free_levels.add(point.thing.level)
+
+    def emit_svg(self, printer):
+        assert self.last_time is not None
+        max_levels = self.max_live_instances + 1       
+        if max_levels > 1:
+            printer.init_chunk(max_levels)
+            title = repr(self) 
+            printer.emit_time_line(0, 0, self.last_time, title) 
+            for instance in self.instances:
+                assert instance.level is not None
+                assert instance.create is not None
+                assert instance.destroy is not None
+                inst_name = repr(instance)
+                printer.emit_timing_range(instance.get_color(), instance.level,
+                                          instance.create, instance.destroy, inst_name)
+
+    def print_stats(self):
+        # Compute total and average utilization of memory
+        assert self.last_time is not None
+        average_usage = 0.0
+        max_usage = 0.0
+        current_size = 0
+        previous_time = 0
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            # First do the math for the previous interval
+            usage = float(current_size)/float(self.total_size)
+            if usage > max_usage:
+                max_usage = usage
+            duration = point.time - previous_time
+            # Update the average usage
+            average_usage += usage * float(duration)
+            # Update the size
+            if point.first:
+                current_size += point.thing.size  
+            else:
+                current_size -= point.thing.size
+            # Save the time for the next round through
+            previous_time = point.time
+        # Last interval is empty so don't worry about it
+        average_usage /= float(self.last_time) 
+        print self
+        print "    Total Instances: %d" % len(self.instances)
+        print "    Maximum Utilization: %.3f%%" % (100.0 * max_usage)
+        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
+        print
+  
+    def __repr__(self):
+        return '%s Memory %s' % (self.kind, hex(self.mem_id))
+
+class Channel(object):
+    def __init__(self, src, dst):
+        self.src = src
+        self.dst = dst
+        self.copies = set()
+        self.time_points = list()
+        self.max_live_copies = None 
+        self.last_time = None
+
+    def add_copy(self, copy):
+        self.copies.add(copy)
+
+    def init_time_range(self, last_time):
+        self.last_time = last_time
+
+    def sort_time_range(self):
+        self.max_live_copies = 0 
+        for copy in self.copies:
+            self.time_points.append(TimePoint(copy.start, copy, True))
+            self.time_points.append(TimePoint(copy.stop, copy, False))
+        # Keep track of which levels are free
+        free_levels = set()
+        # Iterate over all the points in sorted order
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                if len(free_levels) > 0:
+                    point.thing.level = free_levels.pop()
+                else:
+                    point.thing.level = self.max_live_copies + 1
+                    self.max_live_copies += 1
+            else:
+                # Finishing this instance so restore its point
+                free_levels.add(point.thing.level)
+
+    def emit_svg(self, printer):
+        assert self.last_time is not None
+        max_levels = self.max_live_copies + 1
+        if max_levels > 1:
+            printer.init_chunk(max_levels)
+            title = repr(self)
+            printer.emit_time_line(0, 0, self.last_time, title)
+            for copy in self.copies:
+                assert copy.level is not None
+                assert copy.start is not None
+                assert copy.stop is not None
+                copy_name = repr(copy)
+                printer.emit_timing_range(copy.get_color(), copy.level,
+                                          copy.start, copy.stop, copy_name)
+
+    def print_stats(self):
+        assert self.last_time is not None 
+        total_usage_time = 0
+        max_transfers = 0
+        current_transfers = 0
+        previous_time = 0
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                if current_transfers == 0:
+                    previous_time = point.time
+                current_transfers += 1
+                if current_transfers > max_transfers:
+                    max_transfers = current_transfers
+            else:
+                current_transfers -= 1
+                if current_transfers == 0:
+                    total_usage_time += (point.time - previous_time)
+        average_usage = float(total_usage_time)/float(self.last_time)
+        print self
+        print "    Total Transfers: %d" % len(self.copies)
+        print "    Maximum Executing Transfers: %d" % (max_transfers)
+        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
+        print
+        
+    def __repr__(self):
+        return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+
+class Variant(object):
+    def __init__(self, func_id, name):
+        self.func_id = func_id
+        if name <> None:
+            self.name = 'Task "'+name+'"'
+        else:
+            self.name = 'Task "'+str(func_id)+'"'
+        self.tasks = list()
+        self.color = None
+        self.total_calls = 0
+        self.total_execution_time = 0
+        self.all_calls = list()
+        self.max_call = None
+        self.min_call = None
+
+    def add_task(self, task):
+        self.tasks.append(task)
+
+    def compute_color(self, step, num_steps):
+        assert self.color is None
+        self.color = color_helper(step, num_steps)
+
+    def assign_color(self, color):
+        assert self.color is None
+        self.color = color
+
+    def total_time(self):
+        return self.total_execution_time
+
+    def increment_calls(self, exec_time):
+        self.total_calls += 1
+        self.total_execution_time += exec_time
+        self.all_calls.append(exec_time)
+        if self.max_call is None:
+            self.max_call = exec_time
+        elif exec_time > self.max_call:
+            self.max_call = exec_time
+        if self.min_call is None:
+            self.min_call = exec_time
+        elif exec_time < self.min_call:
+            self.min_call = exec_time
+
+    def print_stats(self):
+        avg = float(self.total_execution_time)/float(self.total_calls)
+        stddev = 0
+        for call in self.all_calls:
+            diff = float(call) - avg
+            stddev += sqrt(diff * diff)
+        stddev /= float(self.total_calls)
+        stddev = sqrt(stddev)
+        max_dev = (float(self.max_call) - avg) / stddev if stddev != 0.0 else 0.0
+        min_dev = (float(self.min_call) - avg) / stddev if stddev != 0.0 else 0.0
+        print '  '+self.name
+        print '       Total Invocations: '+str(self.total_calls)
+        print '       Total Time: '+str(self.total_execution_time)+' us'
+        print '       Average Time: %.2f us' % (avg)
+        print '       Maximum Time: %d us (%.3f sig)' % (self.max_call,max_dev)
+        print '       Minimum Time: %d us (%.3f sig)' % (self.min_call,min_dev)
+        print
+
+class Operation(object):
+    def __init__(self, op_id):
+        self.op_id = op_id
+        self.kind_num = None
+        self.kind = None
+        self.is_task = False
+        self.is_meta = False
+        self.name = 'Operation '+str(op_id)
+        self.variant = None
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+        self.color = None
+
+    def assign_color(self, color_map):
+        assert self.color is None
+        if self.is_task:
+            assert self.variant is not None
+            self.color = self.variant.color
+        else:
+            if self.kind is None:
+                self.color = '#000000' # Black
+            else:
+                assert self.kind_num in color_map
+                self.color = color_map[self.kind_num]
+
+    def get_color(self):
+        assert self.color is not None
+        return self.color
+
+    def get_info(self):
+        return 'UID='+str(self.op_id)
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        if self.is_task:
+            return self.variant.name+' '+self.get_info()
+        else:
+            if self.kind is None:
+                return 'Operation '+self.get_info()
+            else:
+                return self.kind+' Operation '+self.get_info()
+
+class MetaTask(object):
+    def __init__(self, variant, op):
+        self.variant = variant
+        self.op = op
+        self.is_task = True
+        self.is_meta = True
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def get_initiation(self):
+        return 'initiated by="'+repr(self.op)+'"'
+
+    def __repr__(self):
+        return 'Meta '+self.variant.name
+
+class Copy(object):
+    def __init__(self, src, dst, op):
+        self.src = src
+        self.dst = dst
+        self.op = op
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_color(self):
+        # Get the color from the operation
+        return self.op.get_color()
+
+    def __repr__(self):
+        return 'Copy initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+
+class Instance(object):
+    def __init__(self, inst_id, mem, op, size):
+        self.inst_id = inst_id
+        self.mem = mem
+        self.op = op
+        self.size = size
+        self.create = None
+        self.destroy = None
+        self.level = None
+
+    def get_color(self):
+        # Get the color from the operation
+        return self.op.get_color()
+
+    def __repr__(self):
+        unit = 'B'
+        unit_size = self.size;
+        if self.size > (1024*1024*1024):
+            unit = 'GB'
+            unit_size /= (1024*1024*1024)
+        elif self.size > (1024*1024):
+            unit = 'MB'
+            unit_size /= (1024*1024)
+        elif self.size > 1024:
+            unit = 'KB'
+            unit_size /= 1024
+        return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
+                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
+                ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
+
+class SVGPrinter(object):
+    def __init__(self, file_name, html_file):
+        self.target = open(file_name,'w')
+        self.file_name = file_name
+        self.html_file = html_file
+        assert self.target is not None
+        self.offset = 0
+        self.target.write('<svg xmlns="http://www.w3.org/2000/svg">\n')
+        self.max_width = 0
+        self.max_height = 0
+
+    def close(self):
+        self.emit_time_scale()
+        self.target.write('</svg>\n')
+        self.target.close()
+        # Round up the max width and max height to a multiple of 100
+        while ((self.max_width % 100) != 0):
+            self.max_width = self.max_width + 1
+        while ((self.max_height % 100) != 0):
+            self.max_height = self.max_height + 1
+        # Also emit the html file
+        html_target = open(self.html_file,'w')
+        html_target.write('<!DOCTYPE HTML PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"\n')
+        html_target.write('"DTD?xhtml1-transitional.dtd">\n')
+        html_target.write('<html>\n')
+        html_target.write('<head>\n')
+        html_target.write('<title>Legion Prof</title>\n')
+        html_target.write('</head>\n')
+        html_target.write('<body leftmargin="0" marginwidth="0" topmargin="0" marginheight="0" bottommargin="0">\n')
+        html_target.write('<embed src="'+self.file_name+'" width="'+str(self.max_width)+'px" height="'+str(self.max_height)+'px" type="image/svg+xml" />')
+        html_target.write('</body>\n')
+        html_target.write('</html>\n')
+        html_target.close()
+
+    def init_chunk(self, total_levels):
+        self.offset = self.offset + total_levels
+
+    def emit_timing_range(self, color, level, start, finish, title):
+        self.target.write('  <g>\n')
+        self.target.write('    <title>'+title+'</title>\n')
+        assert level <= self.offset
+        x_start = start//US_PER_PIXEL
+        x_length = (finish-start)//US_PER_PIXEL
+        y_start = (self.offset-level)*PIXELS_PER_LEVEL
+        y_length = PIXELS_PER_LEVEL
+        self.target.write('    <rect x="'+str(x_start)+'" y="'+str(y_start)+'" width="'+str(x_length)+'" height="'+str(y_length)+'"\n')
+        self.target.write('     fill="'+str(color)+'" stroke="black" stroke-width="1" />')
+        self.target.write('</g>\n')
+        if (x_start+x_length) > self.max_width:
+            self.max_width = x_start + x_length
+        if (y_start+y_length) > self.max_height:
+            self.max_height = y_start + y_length
+
+    def emit_time_scale(self):
+        x_end = self.max_width
+        y_val = int(float(self.offset + 1.5)*PIXELS_PER_LEVEL)
+        self.target.write('    <line x1="'+str(0)+'" y1="'+str(y_val)+'" x2="'+str(x_end)+'" y2="'+str(y_val)+'" stroke-width="2" stroke="black" />\n')
+        y_tick_max = y_val + int(0.2*PIXELS_PER_LEVEL)
+        y_tick_min = y_val - int(0.2*PIXELS_PER_LEVEL)
+        us_per_tick  = US_PER_PIXEL * PIXELS_PER_TICK
+        # Compute the number of tick marks
+        for idx in range(x_end // PIXELS_PER_TICK):
+            x_tick = idx*PIXELS_PER_TICK
+            self.target.write('    <line x1="'+str(x_tick)+'" y1="'+str(y_tick_min)+'" x2="'+str(x_tick)+'" y2="'+str(y_tick_max)+'" stroke-width="2" stroke="black" />\n')
+            title = "%d us" % (idx*us_per_tick)
+            self.target.write('    <text x="'+str(x_tick)+'" y="'+str(y_tick_max+int(0.2*PIXELS_PER_LEVEL))+'" fill="black">'+title+'</text>\n')
+        if (y_val+PIXELS_PER_LEVEL) > self.max_height:
+            self.max_height = y_val + PIXELS_PER_LEVEL
+
+    def emit_time_line(self, level, start, finish, title):
+        x_start = start//US_PER_PIXEL
+        x_end = finish//US_PER_PIXEL
+        y_val = int(float(self.offset-level + 0.7)*PIXELS_PER_LEVEL)
+        self.target.write('    <line x1="'+str(x_start)+'" y1="'+str(y_val)+'" x2="'+str(x_end)+'" y2="'+str(y_val)+'" stroke-width="2" stroke="black"/>')
+        self.target.write('    <text x="'+str(x_start)+'" y="'+str(y_val-int(0.2*PIXELS_PER_LEVEL))+'" fill="black">'+title+'</text>')
+        if ((self.offset-level)+1)*PIXELS_PER_LEVEL > self.max_height:
+            self.max_height = ((self.offset-level)+1)*PIXELS_PER_LEVEL
+
+class LFSR(object):
+    def __init__(self, size):
+        self.register = ''
+        # Initialize the register with all zeros
+        needed_bits = int(log(size,2))+1
+        self.max_value = pow(2,needed_bits)
+        # We'll use a deterministic seed here so that
+        # our results are repeatable
+        seed_configuration = '1010010011110011'
+        for i in range(needed_bits):
+            self.register += seed_configuration[i]
+        polynomials = {
+          2 : (2,1),
+          3 : (3,2),
+          4 : (4,3),
+          5 : (5,3),
+          6 : (6,5),
+          7 : (7,6),
+          8 : (8,6,5,4),
+          9 : (9,5),
+          10 : (10,7),
+          11 : (11,9),
+          12 : (12,11,10,4),
+          13 : (13,12,11,8),
+          14 : (14,13,12,2),
+          15 : (15,14),
+          16 : (16,14,13,11),
+        }
+        # If we need more than 16 bits that is a lot tasks
+        assert needed_bits in polynomials
+        self.taps = polynomials[needed_bits]
+
+    def get_max_value(self):
+        return self.max_value
+        
+    def get_next(self):
+        xor = 0
+        for t in self.taps:
+            xor += int(self.register[t-1])
+        if xor % 2 == 0:
+            xor = 0
+        else:
+            xor = 1
+        self.register = str(xor) + self.register[:-1]
+        return int(self.register,2)
+
+class StatGatherer(object):
+    def __init__(self, state):
+        self.state = state
+        self.application_tasks = set()
+        self.meta_tasks = set()
+
+    def record_task(self, task, exec_time):
+        assert task.variant is not None
+        if task.is_meta:
+            if task.variant not in self.meta_tasks:
+                self.meta_tasks.add(task.variant)
+            task.variant.increment_calls(exec_time)
+        else:
+            if task.variant not in self.application_tasks:
+                self.application_tasks.add(task.variant)
+            task.variant.increment_calls(exec_time)
+
+    def print_stats(self):
+        print "  -------------------------"
+        print "  Task Statistics"
+        print "  -------------------------"
+        for variant in sorted(self.application_tasks,
+                                key=lambda v: v.total_time(),reverse=True):
+            variant.print_stats()
+        print "  -------------------------"
+        print "  Meta-Task Statistics"
+        print "  -------------------------"
+        for variant in sorted(self.meta_tasks,
+                                key=lambda v: v.total_time(),reverse=True):
+            variant.print_stats()
+
+class State(object):
+    def __init__(self):
+        self.processors = {}
+        self.memories = {}
+        self.channels = {}
+        self.variants = {}
+        self.meta_variants = {}
+        self.op_kinds = {}
+        self.operations = {}
+        self.first_times = {}
+        self.last_times = {}
+        self.last_time = 0L
+
+    def parse_log_file(self, file_name):
+        with open(file_name, 'rb') as log:  
+            matches = 0
+            # Keep track of the first and last times
+            first_time = 0L
+            last_time = 0L
+            for line in log:
+                matches += 1  
+                m = task_info_pat.match(line)
+                if m is not None:
+                    self.log_task_info(long(m.group('tid')),
+                                       int(m.group('fid')),
+                                       int(m.group('pid'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = meta_info_pat.match(line)
+                if m is not None:
+                    self.log_meta_info(long(m.group('opid')),
+                                       int(m.group('hlr')),
+                                       int(m.group('pid'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = copy_info_pat.match(line)
+                if m is not None:
+                    self.log_copy_info(long(m.group('opid')),
+                                       int(m.group('src'),16),
+                                       int(m.group('dst'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = inst_info_pat.match(line)
+                if m is not None:
+                    self.log_inst_info(long(m.group('opid')),
+                                       int(m.group('inst'),16),
+                                       int(m.group('mem'),16),
+                                       long(m.group('bytes')),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('destroy')))
+                    continue
+                m = variant_pat.match(line)
+                if m is not None:
+                    self.log_variant(int(m.group('fid')),
+                                     m.group('name'))
+                    continue
+                m = operation_pat.match(line)
+                if m is not None:
+                    self.log_operation(long(m.group('opid')),
+                                       int(m.group('kind')))
+                    continue
+                m = meta_desc_pat.match(line)
+                if m is not None:
+                    self.log_meta_desc(int(m.group('hlr')),
+                                       m.group('kind'))
+                    continue
+                m = op_desc_pat.match(line)
+                if m is not None:
+                    self.log_op_desc(int(m.group('opkind')),
+                                     m.group('kind'))
+                    continue
+                m = proc_desc_pat.match(line)
+                if m is not None:
+                    kind = int(m.group('kind'))
+                    assert kind in processor_kinds
+                    self.log_proc_desc(int(m.group('pid'),16),
+                                       processor_kinds[kind])
+                    continue
+                m = mem_desc_pat.match(line)
+                if m is not None:
+                    kind = int(m.group('kind'))
+                    assert kind in memory_kinds
+                    self.log_mem_desc(int(m.group('mid'),16),
+                                      memory_kinds[kind],
+                                      long(m.group('size')))
+                    continue
+                # If we made it here then we failed to match
+                matches -= 1 
+                print 'Skipping line: %s' % line.strip()
+        return matches
+
+    def log_task_info(self, task_id, func_id, proc_id,
+                      create, ready, start, stop):
+        variant = self.find_variant(func_id)
+        task = self.find_task(task_id, variant)
+        task.create = create
+        task.ready = ready
+        task.start = start
+        task.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
+
+    def log_meta_info(self, op_id, hlr, proc_id, 
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        variant = self.find_meta_variant(hlr)
+        meta = self.create_meta(variant, op)
+        meta.create = create
+        meta.ready = ready
+        meta.start = start
+        meta.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(meta)
+
+    def log_copy_info(self, op_id, src_mem, dst_mem,
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        src = self.find_memory(src_mem)
+        dst = self.find_memory(dst_mem)
+        copy = self.create_copy(src, dst, op)
+        copy.create = create
+        copy.ready = ready
+        copy.start = start
+        copy.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        pair = self.find_mem_pair(src, dst)
+        pair.add_copy(copy)
+
+    def log_inst_info(self, op_id, inst_id, mem_id, size, 
+                      create, destroy):
+        op = self.find_op(op_id)
+        mem = self.find_memory(mem_id)
+        inst = self.create_instance(inst_id, mem, op, size)
+        inst.create = create
+        inst.destroy = destroy
+        if destroy > self.last_time:
+            self.last_time = destroy 
+        mem.add_instance(inst)
+
+    def log_variant(self, func_id, name):
+        if func_id not in self.variants:
+            self.variants[func_id] = Variant(func_id, name)
+        else:
+            self.variants[func_id].name = name
+
+    def log_operation(self, op_id, kind):
+        op = self.find_op(op_id)
+        assert kind in self.op_kinds
+        op.kind_num = kind
+        op.kind = self.op_kinds[kind]
+
+    def log_meta_desc(self, hlr, name):
+        if hlr not in self.meta_variants:
+            self.meta_variants[hlr] = Variant(hlr, name)
+        else:
+            self.meta_variants[hlr].name = name
+
+    def log_proc_desc(self, proc_id, kind):
+        if proc_id not in self.processors:
+            self.processors[proc_id] = Processor(proc_id, kind)
+        else:
+            self.processors[proc_id].kind = kind
+
+    def log_mem_desc(self, mem_id, kind, size):
+        if mem_id not in self.memories:
+            self.memories[mem_id] = Memory(mem_id, kind, size)
+        else:
+            self.memories[mem_id].kind = kind
+
+    def log_op_desc(self, kind, name):
+        if kind not in self.op_kinds:
+            self.op_kinds[kind] = name
+
+    def find_processor(self, proc_id):
+        if proc_id not in self.processors:
+            self.processors[proc_id] = Processor(proc_id, None)
+        return self.processors[proc_id]
+
+    def find_memory(self, mem_id):
+        if mem_id not in self.memories:
+            self.memories[mem_id] = Memory(mem_id, None)
+        return self.memories[mem_id]
+
+    def find_mem_pair(self, src, dst):
+        key = (src,dst)
+        if key not in self.channels:
+            self.channels[key] = Channel(src,dst)
+        return self.channels[key]
+
+    def find_variant(self, func_id):
+        if func_id not in self.variants:
+            self.variants[func_id] = Variant(func_id, None)
+        return self.variants[func_id]
+
+    def find_meta_variant(self, hlr_id):
+        if hlr_id not in self.meta_variants:
+            self.meta_variants[hlr_id] = Variant(hlr_id, None)
+        return self.meta_variants[hlr_id]
+
+    def find_op(self, op_id):
+        if op_id not in self.operations:
+            self.operations[op_id] = Operation(op_id) 
+        return self.operations[op_id]
+
+    def find_task(self, task_id, variant):
+        task = self.find_op(task_id)
+        # Upgrade this operation to a task if necessary
+        if not task.is_task:
+            task.is_task = True
+            task.name = 'Task '+str(task_id) 
+            task.variant = variant
+            variant.add_task(task)
+        return task
+
+    def create_meta(self, variant, op):
+        result = MetaTask(variant, op)
+        variant.add_task(result)
+        return result
+
+    def create_copy(self, src, dst, op):
+        return Copy(src, dst, op)
+
+    def create_instance(self, inst_id, mem, op, size):
+        return Instance(inst_id, mem, op, size)
+
+    def build_time_ranges(self):
+        assert self.last_time is not None 
+        # Processors first
+        for proc in self.processors.itervalues():
+            proc.init_time_range(self.last_time)
+            proc.sort_time_range()
+        for mem in self.memories.itervalues():
+            mem.init_time_range(self.last_time)
+            mem.sort_time_range()
+        for channel in self.channels.itervalues():
+            channel.init_time_range(self.last_time)
+            channel.sort_time_range()
+
+    def print_processor_stats(self):
+        print '****************************************************'
+        print '   PROCESSOR STATS'
+        print '****************************************************'
+        for p,proc in sorted(self.processors.iteritems()):
+            proc.print_stats()
+        print
+
+    def print_memory_stats(self):
+        print '****************************************************'
+        print '   MEMORY STATS'
+        print '****************************************************'
+        for m,mem in sorted(self.memories.iteritems()):
+            mem.print_stats()
+        print
+
+    def print_channel_stats(self):
+        print '****************************************************'
+        print '   CHANNEL STATS'
+        print '****************************************************'
+        for c,channel in sorted(self.channels.iteritems()):
+            channel.print_stats()
+        print
+
+    def print_task_stats(self):
+        print '****************************************************'
+        print '   TASK STATS'
+        print '****************************************************'
+        stat = StatGatherer(self)
+        for proc in self.processors.itervalues():
+            proc.update_task_stats(stat)
+        stat.print_stats()
+        print
+
+    def print_stats(self, verbose):
+        if verbose:
+            self.print_processor_stats()
+            self.print_memory_stats()
+            self.print_channel_stats()
+        self.print_task_stats()
+
+    def emit_visualization(self, output_prefix, show_procs,
+                           show_channels, show_instances):
+        svg_file = output_prefix + '.svg'
+        html_file = output_prefix + '.html'
+        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
+        # Subtract out some colors for which we have special colors
+        num_colors = len(self.variants)+len(self.meta_variants)+len(self.op_kinds)
+       # Use a LFSR to randomize these colors
+        lsfr = LFSR(num_colors)
+        num_colors = lsfr.get_max_value()
+        op_colors = {}
+        for variant in self.variants.itervalues():
+            variant.compute_color(lsfr.get_next(), num_colors)
+        for variant in self.meta_variants.itervalues():
+            if variant.func_id == 1: # Remote message
+                variant.assign_color('#006600') # Evergreen
+            elif variant.func_id == 2: # Post-Execution
+                variant.assign_color('#333399') # Deep Purple
+            elif variant.func_id == 6: # Garbage Collection
+                variant.assign_color('#990000') # Crimson
+            elif variant.func_id == 7: # Logical Dependence Analysis
+                variant.assign_color('#0000FF') # Duke Blue
+            elif variant.func_id == 8: # Operation Physical Analysis
+                variant.assign_color('#009900') # Green
+            elif variant.func_id == 9: # Task Physical Analysis
+                variant.assign_color('#009900') #Green
+            else:
+                variant.compute_color(lsfr.get_next(), num_colors)
+        for kind in self.op_kinds.iterkeys():
+            op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
+        # Now we need to assign all the operations colors
+        for op in self.operations.itervalues():
+            op.assign_color(op_colors)
+        # Make a printer and emit the files
+        printer = SVGPrinter(svg_file, html_file)
+        if show_procs:
+            for p,proc in sorted(self.processors.iteritems()):
+                proc.emit_svg(printer)
+        if show_channels:
+            for c,channel in sorted(self.channels.iteritems()):
+                channel.emit_svg(printer)
+        if show_instances:
+            for m,memory in sorted(self.memories.iteritems()):
+                memory.emit_svg(printer)
+        printer.close()
+
+def usage():
+    print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
+    print '  -p : include processors in visualization'
+    print '  -i : include instances in visualization'
+    print '  -c : include channels in visualization'
+    print '  -s : print statistics'
+    print '  -v : print verbose profiling information'
+    print '  -o <out_file> : give a prefix for the output file'
+    print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
+    sys.exit(1)
+
+def main():
+    opts, args = getopt(sys.argv[1:],'pcivm:o:s')
+    opts = dict(opts)
+    if len(args) == 0:
+      usage()
+    file_names = args
+    # By default we show all
+    # If options are specified we only show what the user wants
+    show_all = True
+    show_procs = False
+    show_channels = False
+    show_instances = False
+    output_prefix = 'legion_prof'
+    print_stats = False
+    verbose = False
+    if '-p' in opts:
+        show_procs = True
+        show_all = False
+    if '-c' in opts:
+        show_channels = True
+        show_all = False
+    if '-i' in opts:
+        show_instances = True
+        show_all = False
+    if '-s' in opts:
+        print_stats = True
+    if '-v' in opts:
+        verbose = True
+    if '-m' in opts:
+        global US_PER_PIXEL
+        US_PER_PIXEL = int(opts['-m'])
+    if '-o' in opts:
+        output_prefix = opts['-o']
+    if show_all:
+        show_procs = True
+        show_channels = True
+        show_instances = True
+
+    state = State()
+    has_matches = False
+    for file_name in file_names:
+        print 'Reading log file %s...' % file_name
+        total_matches = state.parse_log_file(file_name)
+        print 'Matched %s lines' % total_matches
+        if total_matches > 0:
+            has_matches = True
+    if not has_matches:
+        print 'No matches found! Exiting...'
+        return
+
+    # Once we are done loading everything, do the sorting
+    state.build_time_ranges()
+
+    if print_stats:
+        state.print_stats(verbose) 
+
+    state.emit_visualization(output_prefix, show_procs, 
+                             show_channels, show_instances) 
+
+if __name__ == '__main__':
+    main()
+

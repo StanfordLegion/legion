@@ -191,16 +191,28 @@ namespace LegionRuntime {
          * complete for that variant. The default number is one.
          */
         void set_needed_profiling_samples(unsigned num_samples);
+        void set_needed_profiling_samples(Processor::TaskFuncID task_id,
+                                          unsigned num_samples);
         /**
          * Set the maximum number of profiling samples to keep 
          * around for any variant. By default it is 32.
          */
         void set_max_profiling_samples(unsigned max_samples);
+        void set_max_profiling_samples(Processor::TaskFuncID task_id,
+                                       unsigned max_samples);
+        /**
+         * Set the profiling samples to be gathered in the profiler
+         * of the processor that triggered the task. By default it is false.
+         */
+        void set_gather_in_original_processor(Processor::TaskFuncID task_id,
+                                              bool flag);
+
         /**
          * Check to see if profiling is complete for all the 
          * variants of this task.
          */
         bool profiling_complete(const Task *task) const;
+        bool profiling_complete(const Task *task, Processor::Kind kind) const;
         /**
          * Return the processor kind for the best performing 
          * variant of this task.
@@ -211,27 +223,69 @@ namespace LegionRuntime {
          * profiling.  If all are complete the best variant will be returned.
          */
         Processor::Kind next_processor_kind(const Task *task) const;
-        /**
-         * Update the profiling kind for the variants of the task on 
-         * the given processor kind.
-         */
-        void update_profiling_info(const Task *task, Processor target, 
-                                   Processor::Kind kind,
-                                   const Mapper::ExecutionProfile &profile);
-      protected:
+
+      public:
+        struct Profile {
+          long long execution_time;
+          Processor target_processor;
+          DomainPoint index_point;
+        };
+
         struct VariantProfile {
         public:
           VariantProfile(void);
         public:
           long long total_time;
-          std::list<long long> execution_times;
+          std::list<Profile> samples;
         };
-      protected:
+
         typedef std::map<Processor::Kind,VariantProfile> VariantMap;
         typedef std::map<Processor::TaskFuncID,VariantMap> TaskMap;
+
+        void add_profiling_sample(Processor::TaskFuncID task_id,
+                                  const Profile& sample);
+
+        TaskMap get_task_profiles() const;
+        VariantMap get_variant_profiles(Processor::TaskFuncID tid) const;
+        VariantProfile get_variant_profile(Processor::TaskFuncID tid,
+                                           Processor::Kind kind) const;
+
+        void clear_samples(Processor::TaskFuncID task_id);
+        void clear_samples(Processor::TaskFuncID task_id, Processor::Kind kind);
+
+        typedef std::list<DomainPoint> PointList;
+        typedef std::map<Processor, PointList> AssignmentMap;
+
+        /**
+         * Return a balanced assignment of point tasks to processors by LPT
+         * (Lognest-Processing Time) scheduling based on the average
+         * execution times. Assume that processors of the same kind are
+         * homogeneous and only the workload of point tasks can be skwed.
+         */
+        AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id,
+                                               Processor::Kind kind) const;
+
+        AssignmentMap get_balanced_assignments(Processor::TaskFuncID task_id)
+                                                                          const;
+
+
+        struct ProfilingOption {
+          ProfilingOption(void);
+          ProfilingOption(unsigned, unsigned);
+          unsigned needed_samples;
+          unsigned max_samples;
+          bool gather_in_orig_proc;
+        };
+
+        typedef std::map<Processor::TaskFuncID,ProfilingOption> OptionMap;
+
+        ProfilingOption get_profiling_option(Processor::TaskFuncID tid) const;
+
+      protected:
         unsigned needed_samples;
-        unsigned max_samples; 
+        unsigned max_samples;
         TaskMap task_profiles;
+        OptionMap profiling_options;
       };
 
     };

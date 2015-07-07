@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
  */
 
 #include "legion_terra_partitions.h"
+#include "legion_terra_partitions_cxx.h"
 
 #include "arrays.h"
 #include "legion.h"
@@ -21,9 +22,6 @@
 #include "legion_utilities.h"
 #include "lowlevel.h"
 #include "utilities.h"
-
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
 
 #ifdef SHARED_LOWLEVEL
 #define USE_LEGION_CROSS_PRODUCT 1
@@ -159,6 +157,85 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
+void
+create_cross_product(HighLevelRuntime *runtime,
+                     Context ctx,
+                     IndexPartition lhs,
+                     IndexPartition rhs,
+                     Color rhs_color /* = -1 */)
+{
+  if (rhs_color == (Color)-1) {
+    rhs_color = runtime->get_index_partition_color(ctx, rhs);
+  }
+
+#if USE_LEGION_CROSS_PRODUCT
+  std::map<DomainPoint, IndexPartition> handles;
+  runtime->create_cross_product_partitions(
+    ctx, lhs, rhs, handles,
+    (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
+    rhs_color, true);
+#else
+  // FIXME: Validate: same index tree
+
+  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
+  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
+
+  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
+    Color lh_color = lh_dp.p.get_point<1>()[0];
+    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
+
+    std::set<ptr_t> lh_points;
+    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+      lh_points.insert(lh_it.next());
+    }
+
+    Coloring lh_coloring;
+
+    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
+      Color rh_color = rh_dp.p.get_point<1>()[0];
+      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+
+      // Ensure the color exists.
+      lh_coloring[rh_color];
+
+      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
+        ptr_t rh_ptr = rh_it.next();
+
+        if (lh_points.count(rh_ptr)) {
+          lh_coloring[rh_color].points.insert(rh_ptr);
+        }
+      }
+    }
+
+    runtime->create_index_partition(
+      ctx, lh_space, lh_coloring,
+      runtime->is_index_partition_disjoint(ctx, rhs),
+      rhs_color);
+  }
+#endif
+}
+static void
+create_cross_product_multi(HighLevelRuntime *runtime,
+                           Context ctx,
+                           size_t npartitions,
+                           IndexPartition next,
+                           std::vector<IndexPartition>::iterator rest,
+                           std::vector<IndexPartition>::iterator end,
+                           int level)
+{
+  if (rest != end) {
+    create_cross_product(runtime, ctx, next, *rest);
+    Domain colors = runtime->get_index_partition_color_space(ctx, next);
+    Color color2 = runtime->get_index_partition_color(ctx, *rest);
+    for (Domain::DomainPointIterator dp(colors); dp; dp++) {
+      Color color = dp.p.get_point<1>()[0];
+      IndexSpace is = runtime->get_index_subspace(ctx, next, color);
+      IndexPartition ip = runtime->get_index_partition(ctx, is, color2);
+      create_cross_product_multi(runtime, ctx, npartitions - 1, ip, rest+1, end, level + 1);
+    }
+  }
+}
+
 legion_terra_index_cross_product_t
 legion_terra_index_cross_product_create(legion_runtime_t runtime_,
                                         legion_context_t ctx_,
@@ -170,58 +247,38 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
   IndexPartition lhs = CObjectWrapper::unwrap(lhs_);
   IndexPartition rhs = CObjectWrapper::unwrap(rhs_);
 
-  legion_terra_index_cross_product_t prod;
-  prod.partition = CObjectWrapper::wrap(lhs);
-  prod.other = CObjectWrapper::wrap(rhs);
+  create_cross_product(runtime, ctx, lhs, rhs);
 
-#if USE_LEGION_CROSS_PRODUCT
-  std::map<DomainPoint, IndexPartition> handles;
-  runtime->create_cross_product_partitions(
-    ctx, lhs, rhs, handles,
-    (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
-    runtime->get_index_partition_color(ctx, rhs),
-    true);
-#else
-  // FIXME: Validate: same index tree
+  legion_terra_index_cross_product_t result;
+  result.partition = CObjectWrapper::wrap(lhs);
+  result.other = CObjectWrapper::wrap(rhs);
+  return result;
+}
 
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_create_multi(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t *partitions_,
+  size_t npartitions)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
 
-  for (Domain::DomainPointIterator lhs_dp(lhs_colors); lhs_dp; lhs_dp++) {
-    Color lhs_color = lhs_dp.p.get_point<1>()[0];
-    IndexSpace lhs_space = runtime->get_index_subspace(ctx, lhs, lhs_color);
-
-    std::set<ptr_t> lhs_points;
-    for (IndexIterator lhs_it(runtime, ctx, lhs_space); lhs_it.has_next();) {
-      lhs_points.insert(lhs_it.next());
-    }
-
-    Coloring lhs_coloring;
-
-    for (Domain::DomainPointIterator rhs_dp(rhs_colors); rhs_dp; rhs_dp++) {
-      Color rhs_color = rhs_dp.p.get_point<1>()[0];
-      IndexSpace rhs_space = runtime->get_index_subspace(ctx, rhs, rhs_color);
-
-      // Ensure the color exists.
-      lhs_coloring[rhs_color];
-
-      for (IndexIterator rhs_it(runtime, ctx, rhs_space); rhs_it.has_next();) {
-        ptr_t rhs_ptr = rhs_it.next();
-
-        if (lhs_points.count(rhs_ptr)) {
-          lhs_coloring[rhs_color].points.insert(rhs_ptr);
-        }
-      }
-    }
-
-    runtime->create_index_partition(
-      ctx, lhs_space, lhs_coloring,
-      runtime->is_index_partition_disjoint(ctx, rhs),
-      runtime->get_index_partition_color(ctx, rhs));
+  std::vector<IndexPartition> partitions;
+  for (size_t i = 0; i < npartitions; i++) {
+    partitions.push_back(CObjectWrapper::unwrap(partitions_[i]));
   }
-#endif
 
-  return prod;
+  assert(npartitions >= 2);
+  create_cross_product_multi(runtime, ctx, npartitions,
+                             partitions[0],
+                             partitions.begin() + 1, partitions.end(), 0);
+
+  legion_terra_index_cross_product_t result;
+  result.partition = CObjectWrapper::wrap(partitions[0]);
+  result.other = CObjectWrapper::wrap(partitions[1]);
+  return result;
 }
 
 legion_index_partition_t

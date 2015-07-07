@@ -30,6 +30,7 @@ task saxpy(is : ispace(int1d), x: region(is, float), y: region(is, float), a: fl
 where
   reads(x, y), writes(y)
 do
+  __demand(__vectorize)
   for i in is do
     y[i] += a*x[i]
   end

@@ -100,7 +100,7 @@ ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR)
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
 ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
 else
@@ -259,7 +259,9 @@ else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc 
 endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
+		   $(LG_RT_DIR)/realm/profiling.cc \
+		   $(LG_RT_DIR)/realm/operation.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
@@ -277,6 +279,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
 		    $(LG_RT_DIR)/legion_tasks.cc \
 		    $(LG_RT_DIR)/legion_trace.cc \
 		    $(LG_RT_DIR)/legion_spy.cc \
+		    $(LG_RT_DIR)/legion_profiling.cc \
 		    $(LG_RT_DIR)/region_tree.cc \
 		    $(LG_RT_DIR)/runtime.cc \
 		    $(LG_RT_DIR)/garbage_collection.cc

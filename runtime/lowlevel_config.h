@@ -45,6 +45,7 @@ typedef enum legion_lowlevel_processor_kind_t {
   TOC_PROC, // Throughput core
   LOC_PROC, // Latency core
   UTIL_PROC, // Utility core
+  IO_PROC, // I/O core
   PROC_GROUP, // Processor group
 } legion_lowlevel_processor_kind_t;
 
