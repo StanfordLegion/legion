@@ -1840,10 +1840,11 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
       MappingRef map_ref;
       bool notify = false;
       // If we are restricted we know the answer
@@ -1908,6 +1909,8 @@ namespace LegionRuntime {
           requirement.selected_memory = Memory::NO_MEMORY;
           // Tell the mapper that we failed to map
           runtime->invoke_mapper_failed_mapping(local_proc, this);
+          // clear the version info
+          version_info.reset();
           return false;
         }
       }
@@ -1929,6 +1932,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
+      // We're done so apply our mapping changes
+      version_info.apply_mapping(physical_ctx.get_id());
       // We succeeded in mapping, so set up our physical region with
       // the reference information.  Note that the physical region
       // becomes responsible for triggering the termination event
@@ -2738,9 +2743,11 @@ namespace LegionRuntime {
                   , idx, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(src_requirements[idx].premapped);
+#endif
+          src_versions[idx].apply_premapping(src_contexts[idx].get_id());
         }
-        if (!src_requirements[idx].premapped)
-          premapped = false;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -2758,9 +2765,11 @@ namespace LegionRuntime {
                   , get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(dst_requirements[idx].premapped);
+#endif
+          dst_versions[idx].apply_premapping(dst_contexts[idx].get_id());
         }
-        if (!dst_requirements[idx].premapped)
-          premapped = false;
       }
       // If we couldn't premap, then we need to try again later
       if (!premapped)
@@ -2980,6 +2989,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(src_ref.has_ref());
 #endif
+            // Apply our changes to the state
+            src_versions[idx].apply_mapping(src_contexts[idx].get_id());
+            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id());
             if (notify)
             {
               src_requirements[idx].mapping_failed = false;
@@ -3108,6 +3120,10 @@ namespace LegionRuntime {
         // again next time.
         src_mapping_refs.clear();
         dst_mapping_refs.clear();
+        for (unsigned idx = 0; idx < src_versions.size(); idx++)
+          src_versions[idx].reset();
+        for (unsigned idx = 0; idx < dst_versions.size(); idx++)
+          dst_versions[idx].reset();
       }
       return map_success;
     }
@@ -4343,10 +4359,11 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
  
       Event close_event = Event::NO_EVENT;
       // If our requirement is restricted, then we already know what
@@ -4384,7 +4401,12 @@ namespace LegionRuntime {
                                               );
       // If we didn't succeed, then return
       if (!success)
+      {
+        version_info.reset();
         return false;
+      }
+      else
+        version_info.apply_mapping(physical_ctx.get_id());
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
@@ -4582,10 +4604,11 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
  
       // If we have a reference then we know we are closing a context
       // to a specific physical instance, so we can issue that without
@@ -4599,6 +4622,7 @@ namespace LegionRuntime {
                                             , unique_op_id
 #endif
                                             );
+      // No need to apply our mapping because we are done!
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
@@ -4913,10 +4937,12 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
+      
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       MappingRef map_ref = runtime->forest->map_restricted_region(physical_ctx,
@@ -4950,6 +4976,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
+      version_info.apply_mapping(physical_ctx.get_id());
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
@@ -5485,10 +5512,12 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
+      
 #ifdef LEGION_SPY
       LegionSpy::IDType inst_id;
       {
@@ -5527,6 +5556,11 @@ namespace LegionRuntime {
                                                             , mapping_path
 #endif
                                                             );
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result.has_ref());
+#endif
+      version_info.apply_mapping(physical_ctx.get_id());
+
       Event release_event = result.get_ready_event();
       std::set<Event> release_preconditions;
 #ifdef LEGION_SPY
@@ -7992,10 +8026,11 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      // If we couldn't premap, then we need to try again later
-      if (!requirement.premapped)
-        return false;
 
       Event ready_event = Event::NO_EVENT;
       switch (partition_kind)
@@ -8377,9 +8412,12 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      if (!requirement.premapped)
-        return false;
+      
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -8389,6 +8427,7 @@ namespace LegionRuntime {
 #endif
         runtime->forest->fill_fields(physical_ctx, requirement,
                                      value, value_size, version_info);
+        version_info.apply_mapping(physical_ctx.get_id());
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
@@ -8398,7 +8437,6 @@ namespace LegionRuntime {
       }
       else
       {
-        complete_mapping();
         // If we have a future value see if its event has triggered
         Event future_ready_event = future.impl->get_ready_event();
         if (!future_ready_event.has_triggered())
@@ -8432,6 +8470,8 @@ namespace LegionRuntime {
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       runtime->forest->fill_fields(physical_ctx, requirement, 
                                    result, result_size, version_info);
+      version_info.apply_mapping(physical_ctx.get_id());
+      complete_mapping();
       complete_execution();
     }
     
@@ -8784,12 +8824,16 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      if (!requirement.premapped)
-        return false;
+      
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
                                                         requirement, this,
                                                         version_info);
+      version_info.apply_mapping(physical_ctx.get_id());
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
@@ -9120,10 +9164,13 @@ namespace LegionRuntime {
                   , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
                   );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!requirement.premapped);
+#endif
+        version_info.apply_premapping(physical_ctx.get_id());
       }
-      if (!requirement.premapped)
-        return false;
       runtime->forest->detach_file(physical_ctx, requirement, reference);
+      version_info.apply_mapping(physical_ctx.get_id());
       complete_mapping();
       complete_execution();
       // This should always succeed

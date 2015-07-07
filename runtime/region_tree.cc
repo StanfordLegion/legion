@@ -8936,12 +8936,74 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionInfo::apply_premapping(ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (it->second.physical_state != NULL)
+        {
+          if (it->second.premap_only)
+          {
+            // apply the result and indicate whether we advanced or not
+            it->first->apply_update(ctx, it->second.physical_state, advance);
+            // Then we can delete the physical instance because we are done
+            legion_delete(it->second.physical_state);
+            it->second.physical_state = NULL;
+          }
+          else
+          {
+            // apply the update but don't advance yet, this will actually
+            // get advanced when we apply the actual mapping
+            it->first->apply_update(ctx,it->second.physical_state,false/*adv*/);
+            // Don't delete it since we will need it later
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::apply_mapping(ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (it->second.physical_state != NULL)
+        {
+          it->first->apply_update(ctx, it->second.physical_state, advance);
+          legion_delete(it->second.physical_state);
+          it->second.physical_state = NULL;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::reset(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it =
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (it->second.physical_state != NULL)
+          it->second.needs_reset = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(node_infos.empty()); // should already have cleared these
+      // All the physical states should be gone at this point
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        assert(it->second.physical_state == NULL);
+      }
 #endif
+      node_infos.clear();
       projection = false;
     }
 
@@ -8949,11 +9011,22 @@ namespace LegionRuntime {
     PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != node_infos.end());
 #endif
+      // Check to see if we need a reset
+      if (finder->second.needs_reset)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder->second.physical_state != NULL);
+#endif
+        // Recapture the state if we had to be reset
+        finder->second.physical_state->capture_state(
+                                        finder->second.premap_only);
+        finder->second.needs_reset = false;
+      }
       return finder->second.physical_state;
     }
 
@@ -10619,70 +10692,6 @@ namespace LegionRuntime {
       outstanding_reductions.clear();
     } 
 
-#if 0
-    //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(void)
-      : acquired_count(0), exclusive(false), ctx(0)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(ContextID c)
-      : acquired_count(0), exclusive(false), ctx(c)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(ContextID c, RegionTreeNode *n)
-      : acquired_count(0), exclusive(false), ctx(c), node(n)
-    //--------------------------------------------------------------------------
-    { 
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(const PhysicalState &rhs)
-    //--------------------------------------------------------------------------
-    {
-      dirty_mask = rhs.dirty_mask;
-      reduction_mask = rhs.reduction_mask;
-      children = rhs.children;
-      valid_views = rhs.valid_views;
-      reduction_views = rhs.reduction_views;
-      pending_updates = rhs.pending_updates;
-      acquired_count = rhs.acquired_count;
-      exclusive = rhs.exclusive;
-      requests = rhs.requests;
-      ctx = rhs.ctx;
-#ifdef DEBUG_HIGH_LEVEL
-      node = rhs.node;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalState& PhysicalState::operator=(const PhysicalState &rhs)
-    //--------------------------------------------------------------------------
-    {
-      dirty_mask = rhs.dirty_mask;
-      reduction_mask = rhs.reduction_mask;
-      children = rhs.children;
-      valid_views = rhs.valid_views;
-      reduction_views = rhs.reduction_views;
-      pending_updates = rhs.pending_updates;
-      acquired_count = rhs.acquired_count;
-      exclusive = rhs.exclusive;
-      requests = rhs.requests;
-      ctx = rhs.ctx;
-#ifdef DEBUG_HIGH_LEVEL
-      node = rhs.node;
-#endif
-      return *this;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            const ColorPoint &c)
@@ -11739,14 +11748,37 @@ namespace LegionRuntime {
     void PhysicalState::apply_state(void) const
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
-            version_states.begin(); vit != version_states.end(); vit++)
+      // We can skip any state that was closed
+      if (!!closed_mask)
       {
-        const VersionStateInfo &info = vit->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-              info.states.begin(); it != info.states.end(); it++)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit
+              = version_states.begin(); vit != version_states.end(); vit++)
         {
-          it->first->merge_physical_state(this, it->second); 
+          // Skip anything for which all the fields are already closed
+          if (!(vit->second.valid_fields - closed_mask))
+            continue;
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            FieldMask non_closed = it->second - closed_mask;
+            if (!non_closed)
+              continue;
+            it->first->merge_physical_state(this, non_closed); 
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit
+              = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->merge_physical_state(this, it->second); 
+          }
         }
       }
     }
@@ -11756,10 +11788,24 @@ namespace LegionRuntime {
             const LegionMap<VersionState*,FieldMask>::aligned &adv_states) const
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-            adv_states.begin(); it != adv_states.end(); it++)
+      if (!!closed_mask)
       {
-        it->first->merge_physical_state(this, it->second);
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              adv_states.begin(); it != adv_states.end(); it++)
+        {
+          FieldMask non_closed = it->second - closed_mask;
+          if (!non_closed)
+            continue;
+          it->first->merge_physical_state(this, non_closed);
+        }
+      }
+      else
+      {
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              adv_states.begin(); it != adv_states.end(); it++)
+        {
+          it->first->merge_physical_state(this, it->second);
+        }
       }
     }
 
@@ -12179,8 +12225,8 @@ namespace LegionRuntime {
           // Iterate over all the old version state objects and make sure
           // they have been moved back to the previous version infos, and
           // at the same time either create or record the new versions
-          for (std::map<VersionID,VersionStateInfo>::const_iterator vit = 
-                state->version_states.begin(); vit != 
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+                vit = state->version_states.begin(); vit != 
                 state->version_states.end(); vit++)
           {
             VersionStateInfo &curr_info = current_version_infos[vit->first];
@@ -12190,7 +12236,46 @@ namespace LegionRuntime {
                                               curr_info.valid_fields; 
             if (!!current_overlap)
             {
-              // Move back the old state
+              // Move back the old state, first invalidate any fields on the
+              // old version in the previous version infos
+              if (vit->first > 0)
+              {
+                // See if there is an old version
+                LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
+                  finder = previous_version_infos.find(vit->first-1);
+                if (finder != previous_version_infos.end())
+                {
+                  FieldMask previous_overlap = 
+                    finder->second.valid_fields & current_overlap; 
+                  if (!!previous_overlap)
+                  {
+                    std::vector<VersionState*> to_release; 
+                    for (LegionMap<VersionState*,FieldMask>::aligned::iterator
+                          it = finder->second.states.begin();
+                          it != finder->second.states.end(); it++)
+                    {
+                      it->second -= previous_overlap;
+                      if (!it->second)
+                        to_release.push_back(it->first);
+                    }
+                    for (std::vector<VersionState*>::const_iterator it = 
+                          to_release.begin(); it != to_release.end(); it++)
+                    {
+                      finder->second.states.erase(*it);
+                      if ((*it)->remove_reference())
+                        legion_delete(*it);
+                    }
+                    finder->second.valid_fields -= previous_overlap;
+                    if (!finder->second.valid_fields)
+                    {
+#ifdef DEBUG_HIGH_LEVEL
+                      assert(finder->second.states.empty());
+#endif
+                      previous_version_infos.erase(finder);
+                    }
+                  }
+                }
+              }
               VersionStateInfo &prev_info = previous_version_infos[vit->first];
               for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                     it = vit->second.states.begin(); 
@@ -13815,6 +13900,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::apply_update(ContextID ctx, 
+                                      const PhysicalState *state, bool advance)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+      manager->apply_updates(state, advance);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::close_physical_node(PhysicalCloser &closer,
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
@@ -13867,8 +13961,6 @@ namespace LegionRuntime {
           }
         }
       }
-      if (!!reduc_fields)
-        invalidate_reduction_views(state, reduc_fields);
       if (is_region() && !!dirty_fields)
       {
         const std::vector<MaterializedView*> &targets = 
@@ -13914,9 +14006,6 @@ namespace LegionRuntime {
         // Update the closer's dirty mask
         const FieldMask &dirty_below = next_closer.get_dirty_mask();
         closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
-
-        // No longer need to invalidate or unmark dirty data
-        // because versioning handles that automatically
       }
       // Apply any reductions that we might have for the closing
       // fields back to the target instances
@@ -13934,6 +14023,9 @@ namespace LegionRuntime {
                                   valid_reductions, closer.info.op, &closer);
         }
       }
+      // We no longer need to invalidate anything, 
+      // we can just mark this state closed
+      state->closed_mask |= closing_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -14197,17 +14289,6 @@ namespace LegionRuntime {
       }
       // Need to get this value before the iterator is invalidated
       RegionTreeNode *child_node = get_tree_child(finder->first);
-      // Now we need to actually close up this child
-      // Mark that when we are done we will have successfully
-      // closed up this child.  Do this now before we
-      // release the lock and someone invalidates our iterator
-      if (!closer.permit_leave_open)
-      {
-        finder->second -= close_mask;
-        if (!finder->second)
-          state->children.open_children.erase(finder);
-      }
-      // Release our lock on the current state before going down
       if (!update_views.empty())
       {
         // Issue any update copies, and then release any
@@ -14327,8 +14408,8 @@ namespace LegionRuntime {
                                      closer, dirty_mask, complete_mask);
       dirty_mask |= dirty_below;
       complete_mask |= complete_below;
-      // No longer need to update dirty data or remove instances
-      // because versioning handles this automatically
+      // Mark that we closed these fields on this instance
+      state->closed_mask |= closing_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -14433,13 +14514,6 @@ namespace LegionRuntime {
       FieldMask close_mask = finder->second & closing_mask;
       // Need to get this value before the iterator is invalidated
       RegionTreeNode *child_node = get_tree_child(finder->first);
-      if (!closer.permit_leave_open)
-      {
-        finder->second -= close_mask;
-        if (!finder->second)
-          state->children.open_children.erase(finder);
-      }
-      // Release our lock on the current state before going down
       CompositeNode *child_composite = 
                                 closer.get_composite_node(child_node, node);
       child_node->close_physical_node(closer, child_composite, 
@@ -15279,9 +15353,6 @@ namespace LegionRuntime {
           new_view->as_materialized_view()->manager->layout->allocated_fields));
       assert(new_view->logical_node == this);
 #endif
-      // Add our reference first in case the new view is also currently in
-      // the list of valid views.  We don't want it to be prematurely deleted
-      new_view->add_valid_reference();
       if (dirty)
       {
         invalidate_instance_views(state, valid_mask); 
@@ -15298,10 +15369,6 @@ namespace LegionRuntime {
       {
         // It already existed update the valid mask
         finder->second |= valid_mask;
-        // Remove the reference that we added since it already was referenced
-        // Since we know it already had a reference no need to
-        // check for the deletion condition
-        new_view->remove_valid_reference();
       }
     } 
 
@@ -15318,15 +15385,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
-      // Add our references first to avoid any premature free operations
-      for (std::vector<InstanceView*>::const_iterator it = new_views.begin();
-            it != new_views.end(); it++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert((*it)->logical_node == this);
-#endif
-        (*it)->add_valid_reference();
-      }
       if (!!dirty_mask)
       {
         invalidate_instance_views(state, dirty_mask); 
@@ -15346,10 +15404,6 @@ namespace LegionRuntime {
         {
           // It already existed update the valid mask
           finder->second |= valid_mask;
-          // Remove the reference that we added since it already was referenced
-          // Since we know it already had a reference there is no
-          // need to check for the deletion condition
-          (*it)->remove_valid_reference();
         }
 #ifdef DEBUG_HIGH_LEVEL
         finder = state->valid_views.find(*it);
@@ -15373,15 +15427,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
-      // Add our references first to avoid any premature free operations
-      for (std::vector<MaterializedView*>::const_iterator it = 
-            new_views.begin(); it != new_views.end(); it++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert((*it)->logical_node == this);
-#endif
-        (*it)->add_valid_reference();
-      }
       if (!!dirty_mask)
       {
         invalidate_instance_views(state, dirty_mask); 
@@ -15401,10 +15446,6 @@ namespace LegionRuntime {
         {
           // It already existed update the valid mask
           finder->second |= valid_mask;
-          // Remove the reference that we added since it already was referenced
-          // Since we know it already had a reference there is no
-          // need to check for the deletion condition
-          (*it)->remove_valid_reference();
         }
 #ifdef DEBUG_HIGH_LEVEL
         finder = state->valid_views.find(*it);
@@ -15429,7 +15470,6 @@ namespace LegionRuntime {
         state->reduction_views.find(new_view);
       if (finder == state->reduction_views.end())
       {
-        new_view->add_valid_reference();
         state->reduction_views[new_view] = valid_mask;
       }
       else

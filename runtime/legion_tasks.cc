@@ -1656,12 +1656,13 @@ namespace LegionRuntime {
               assert(req.handle_type == SINGULAR);
               initialize_mapping_path(mapping_path, req, req.region);
 #endif
+              VersionInfo &version_info = get_version_info(idx);
               early_mapped_regions[idx] = 
                 runtime->forest->register_physical_region(
                                            enclosing_physical_contexts[idx],
                                                           mapping_refs[idx],
                                                           req, idx, 
-                                                          get_version_info(idx),
+                                                          version_info, 
                                                           this, current_proc,
                                                           term_event
 #ifdef DEBUG_HIGH_LEVEL
@@ -1679,6 +1680,9 @@ namespace LegionRuntime {
                 regions[idx].selected_memory = 
                   early_mapped_regions[idx].get_memory();
               }
+              // Apply any version info updates
+              version_info.apply_mapping(
+                            enclosing_physical_contexts[idx].get_id());
             }
           }
           if (notify)
@@ -1688,6 +1692,11 @@ namespace LegionRuntime {
         {
           runtime->invoke_mapper_failed_mapping(current_proc, this);
           mapping_refs.clear(); 
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            VersionInfo &version_info = get_version_info(idx);
+            version_info.reset();
+          }
         }
       }
       return success;
@@ -4225,6 +4234,11 @@ namespace LegionRuntime {
         num_virtual_mappings = 0;
         // Finally notify the mapper about the failed mapping
         runtime->invoke_mapper_failed_mapping(current_proc, this);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          VersionInfo &version_info = get_version_info(idx);
+          version_info.reset();
+        }
       }
       else 
       {
@@ -4278,13 +4292,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(mapping_refs[idx].has_ref());
 #endif
+          VersionInfo &version_info = get_version_info(idx);
           physical_instances[idx] = 
                   runtime->forest->register_physical_region(
                                            enclosing_physical_contexts[idx],
                                                           mapping_refs[idx],
                                                           regions[idx],
-                                                          idx,
-                                                          get_version_info(idx),
+                                                          idx, version_info,
                                                           this,
                                                           current_proc,
                                                           user_event
@@ -4301,6 +4315,8 @@ namespace LegionRuntime {
           // All these better succeed since we already made the instances
           assert(physical_instances[idx].has_ref());
 #endif
+          // Flush out the physical regions
+          version_info.apply_mapping(enclosing_physical_contexts[idx].get_id());
         }
         executing_processor = target;
         if (notify)
@@ -6069,7 +6085,7 @@ namespace LegionRuntime {
         // If not then we need to do it now
         if (!regions[idx].premapped)
         {
-          if (!runtime->forest->premap_physical_region(
+          runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
                                        version_infos[idx], this, parent_ctx,
@@ -6077,16 +6093,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                        , idx, get_logging_name(), unique_op_id
 #endif
-                                       ))
-          {
-            // Failed to premap, break out and try again later
-            premapped = false;
-            break;
-          }
-          else
-          {
-            regions[idx].premapped = true;
-          }
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[idx].premapped);
+#endif
+          version_infos[idx].apply_premapping(
+                              enclosing_physical_contexts[idx].get_id());
         }
       }
       if (premapped)
@@ -8425,7 +8437,7 @@ namespace LegionRuntime {
         // If not then we need to do it now
         if (!regions[idx].premapped)
         {
-          if (!runtime->forest->premap_physical_region(
+          runtime->forest->premap_physical_region(
                                        enclosing_physical_contexts[idx],
                                        privilege_paths[idx], regions[idx], 
                                        version_infos[idx], this, parent_ctx,
@@ -8433,16 +8445,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                        , idx, get_logging_name(), unique_op_id
 #endif
-                                       ))
-          {
-            // Failed to premap, break out and try again later
-            premapped = false;
-            break;
-          }
-          else
-          {
-            regions[idx].premapped = true;
-          }
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[idx].premapped);
+#endif
+          version_infos[idx].apply_premapping(
+                              enclosing_physical_contexts[idx].get_id());
         }
       }
       if (premapped)

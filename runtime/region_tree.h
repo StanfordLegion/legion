@@ -1363,11 +1363,12 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : premap_only(false), physical_state(NULL) { }
+          : physical_state(NULL), premap_only(false), needs_reset(false) { }
       public:
-        bool premap_only; // state needed for premapping only
         PhysicalState *physical_state;
         RegionVersions version_numbers;
+        bool premap_only; // state needed for premapping only
+        bool needs_reset;
       };
     public:
       VersionInfo(void);
@@ -1384,6 +1385,9 @@ namespace LegionRuntime {
       inline bool will_advance(void) { return advance; }
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
+      void apply_premapping(ContextID ctx);
+      void apply_mapping(ContextID ctx);
+      void reset(void);
       void clear(void);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
@@ -1684,54 +1688,6 @@ namespace LegionRuntime {
       VersionInfo close_versions;
     }; 
 
-    /**
-     * \struct PhysicalState
-     * Track the physical state of a logical region
-     * including which fields have dirty data,
-     * which children are open, and the valid
-     * reduction and instance views.
-     */
-#if 0
-    struct PhysicalState {
-    public:
-      static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC; 
-    public:
-      PhysicalState(void);
-      PhysicalState(ContextID ctx);
-#ifdef DEBUG_HIGH_LEVEL
-      PhysicalState(ContextID ctx, RegionTreeNode *node);
-#endif
-      PhysicalState(const PhysicalState &rhs);
-    public:
-      PhysicalState& operator=(const PhysicalState &rhs);
-      void* operator new(size_t count);
-      void* operator new[](size_t count);
-      void operator delete(void *ptr);
-      void operator delete[](void *ptr);
-    public:
-      FieldMask dirty_mask;
-      FieldMask reduction_mask;
-      FieldMask remote_mask; // which fields are valid remote copies
-      ChildState children;
-      LegionMap<InstanceView*, FieldMask,
-                VALID_VIEW_ALLOC>::track_aligned valid_views;
-      LegionMap<ReductionView*, FieldMask,
-                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-      LegionMap<MaterializedView*, LegionMap<Event,FieldMask>::aligned,
-                PENDING_UPDATES_ALLOC>::tracked pending_updates;
-    public:
-      // These are used for managing access to the physical state
-      unsigned acquired_count;
-      bool exclusive;
-      std::deque<std::pair<UserEvent,bool/*exclusive*/> > requests;
-    public:
-      ContextID ctx;
-#ifdef DEBUG_HIGH_LEVEL
-      RegionTreeNode *node;
-#endif
-    }; 
-#endif
-
     struct CopyTracker {
     public:
       CopyTracker(void);
@@ -1970,6 +1926,8 @@ namespace LegionRuntime {
       void apply_state(const LegionMap<VersionState*,FieldMask>::aligned 
                                                 &advanced_version_states) const;
     public:
+      // Fields which were closed and can be ignored when applying
+      FieldMask closed_mask;
       // Fields which have dirty data
       FieldMask dirty_mask;
       // Fields with outstanding reductions
@@ -2172,6 +2130,7 @@ namespace LegionRuntime {
     public:
       // Physical traversal operations
       // Entry
+      void apply_update(ContextID ctx,const PhysicalState *state,bool advance);
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
