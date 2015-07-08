@@ -10661,7 +10661,7 @@ namespace LegionRuntime {
     void AccessorType::verify_access(void *impl_ptr, unsigned ptr)
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
-      internal->verify_access(ptr);
+      impl->verify_access(ptr);
     }
 #endif
 
