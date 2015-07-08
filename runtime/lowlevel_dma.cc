@@ -324,7 +324,9 @@ namespace LegionRuntime {
       int priority = 0;
 #endif
 
-      while(((idata - ((const IDType *)data))*sizeof(IDType)) < datalen) {
+      size_t num_pairs = *idata++;
+
+      for (unsigned idx = 0; idx < num_pairs; idx++) {
 	RegionInstance src_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
@@ -418,6 +420,7 @@ namespace LegionRuntime {
     size_t CopyRequest::compute_size(void) const
     {
       size_t result = domain.compute_size();
+      result += sizeof(IDType); // number of requests;
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
         OASVec& oasvec = it2->second;
         result += (3 + oasvec.size() * 3) * sizeof(IDType);
@@ -430,6 +433,8 @@ namespace LegionRuntime {
     {
       // domain info goes first
       IDType *msgptr = domain.serialize((IDType *)buffer);
+
+      *msgptr++ = oas_by_inst->size();
 
       // now OAS vectors
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
