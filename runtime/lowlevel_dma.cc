@@ -3234,6 +3234,7 @@ namespace LegionRuntime {
     {
       size_t result = domain.compute_size();
       result += (4 + 3 * srcs.size()) * sizeof(IDType);
+      result += sizeof(IDType); // for inst_lock_needed
       result += requests.compute_size();
       return result;
     }
