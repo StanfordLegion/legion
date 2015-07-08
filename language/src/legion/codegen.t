@@ -2304,7 +2304,7 @@ function codegen.expr_ispace(cx, node)
       actions = quote
         [actions]
         var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
   else
