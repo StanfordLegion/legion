@@ -406,8 +406,8 @@ namespace LegionRuntime {
     CopyRequest::~CopyRequest(void)
     {
       if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>() &&
-          !oas_by_inst->empty()) {
+          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        assert(!oas_by_inst->empty());
         const InstPair &pair = oas_by_inst->begin()->first; 
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
@@ -3228,6 +3228,15 @@ namespace LegionRuntime {
 
     ReduceRequest::~ReduceRequest(void)
     {
+      if (measurements.wants_measurement<
+          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
+        // Not precise, but close enough for now
+        assert(!srcs.empty());
+        usage.source = srcs[0].inst.get_location();
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
     }
 
     size_t ReduceRequest::compute_size(void)

@@ -2261,10 +2261,8 @@ namespace LegionRuntime {
     public:
       static unsigned long long perf_trace_tolerance;
 #endif
-#ifdef LEGION_PROF
     public:
-      static int num_profiling_nodes;
-#endif
+      static unsigned num_profiling_nodes;
     public:
       // The baseline time for profiling
       static const long long init_time;

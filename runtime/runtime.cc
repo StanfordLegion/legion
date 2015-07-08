@@ -4941,11 +4941,10 @@ namespace LegionRuntime {
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
-#ifdef LEGION_PROF
+      // Set up the profiler if it was requested
       // If it is less than zero, all nodes enabled by default, otherwise
       // we have to be less than the maximum number to enable profiling
-      if ((Runtime::num_profiling_nodes < 0) || 
-          (int(address_space) < Runtime::num_profiling_nodes))
+      if (address_space < Runtime::num_profiling_nodes)
       {
         HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
         profiler = new LegionProfiler((local_utils.empty() ? 
@@ -4973,7 +4972,6 @@ namespace LegionRuntime {
           }
         }
       }
-#endif
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -5033,14 +5031,12 @@ namespace LegionRuntime {
         LegionProf::finalize_copy_profiler();
       }
 #endif
-#ifdef LEGION_PROF
       if (profiler != NULL)
       {
         profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
-#endif
       delete high_level;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -15448,9 +15444,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
     /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
 #endif
-#ifdef LEGION_PROF
-    /*static*/ int Runtime::num_profiling_nodes = -1;
-#endif
+    /*static*/ unsigned Runtime::num_profiling_nodes = 0;
 
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
@@ -15550,9 +15544,7 @@ namespace LegionRuntime {
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
 #endif
-#ifdef LEGION_PROF
-        num_profiling_nodes = -1;
-#endif
+        num_profiling_nodes = 0;
 #ifdef DEBUG_HIGH_LEVEL
         logging_region_tree_state = false;
         verbose_logging = false;
@@ -15608,17 +15600,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
           INT_ARG("-hl:perf_tol", perf_trace_tolerance);
 #endif
-#ifdef LEGION_PROF
           INT_ARG("-hl:prof", num_profiling_nodes);
-#else
-          if (!strcmp(argv[i],"-hl:prof"))
-          {
-            log_run.warning("WARNING: Legion Prof is disabled.  The "
-                                  "-hl:prof flag will be ignored.  Recompile "
-                                  "with the -DLEGION_PROF flag to enable "
-                                  "profiling.");
-          }
-#endif
         }
 #undef INT_ARG
 #undef BOOL_ARG

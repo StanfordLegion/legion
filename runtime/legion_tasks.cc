@@ -4846,10 +4846,8 @@ namespace LegionRuntime {
         launch_processor = runtime->find_processor_group(additional_procs);
       }
       Realm::ProfilingRequestSet profiling_requests;
-#ifdef LEGION_PROF
       if (runtime->profiler != NULL)
         runtime->profiler->add_task_request(profiling_requests, low_id, this);
-#endif
       Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
                                     sizeof(proxy_this), profiling_requests,
                                     start_condition, task_priority);

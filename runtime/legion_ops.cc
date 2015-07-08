@@ -99,10 +99,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
-#ifdef LEGION_PROF
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
-#endif
     }
     
     //--------------------------------------------------------------------------
