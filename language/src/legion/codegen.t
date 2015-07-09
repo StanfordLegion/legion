@@ -299,18 +299,28 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
   local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
   if index_type:is_opaque() then
     local expected_stride = terralib.sizeof(field_type)
-    local actions = quote
-      var accessor = [get_accessor]([accessor_args])
 
-      var [base_pointer] = nil
+    -- Note: This function MUST NOT be inlined. The presence of the
+    -- address-of operator in the body of function causes
+    -- optimizations to be disabled on the base pointer. When inlined,
+    -- this then extends to the caller's scope, causing a significant
+    -- performance regression.
+    local terra get_base(accessor : c.legion_accessor_generic_t) : &field_type
+      var base : &opaque = nil
       var stride : c.size_t = [expected_stride]
       var ok = c.legion_accessor_generic_get_soa_parameters(
-        [accessor], [&&opaque](&[base_pointer]), &stride)
+        [accessor], &base, &stride)
 
       std.assert(ok, "failed to get base pointer")
-      std.assert([base_pointer] ~= nil, "base pointer is nil")
+      std.assert(base ~= nil, "base pointer is nil")
       std.assert(stride == [expected_stride],
                  "stride does not match expected value")
+      return [&field_type](base)
+    end
+
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
+      var [base_pointer] = [get_base](accessor)
     end
     return actions, base_pointer, terralib.newlist({expected_stride})
   else
