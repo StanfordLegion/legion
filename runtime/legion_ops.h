@@ -1537,6 +1537,7 @@ namespace LegionRuntime {
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                const Domain &color_space);
+      void perform_logging();
       const RegionRequirement& get_requirement(void) const;
       inline Event get_handle_ready(void) const { return handle_ready; }
     public:

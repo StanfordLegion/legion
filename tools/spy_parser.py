@@ -55,6 +55,7 @@ copy_op_pat             = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<
 acquire_op_pat          = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 release_op_pat          = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 deletion_pat            = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+partition_op_pat        = re.compile(prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<kind>[0-9]+)")
 index_slice_pat         = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
 slice_slice_pat         = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
 slice_point_pat         = re.compile(prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
@@ -196,6 +197,10 @@ def parse_log_line(line, state):
     m = deletion_pat.match(line)
     if m <> None:
         if state.add_deletion(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = partition_op_pat.match(line)
+    if m <> None:
+        if state.add_partition_op(int(m.group('ctx')), int(m.group('uid')), int(m.group('kind'))):
             return True
     m = index_slice_pat.match(line)
     if m <> None:
