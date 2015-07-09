@@ -485,6 +485,11 @@ namespace LegionRuntime {
         partition_node = create_node(pid, parent_node, partition_color,
                                      color_space, (part_kind == DISJOINT_KIND),
                                      allocable ? MUTABLE : NO_MEMORY);
+#ifdef LEGION_SPY
+      bool disjoint = (part_kind == DISJOINT_KIND);
+      LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+          partition_color.get_point());
+#endif
       // We also need to explicitly instantiate all the children so
       // that they know the domains will be ready at a later time.
       // We instantiate them with an empty domain that will be filled in later
@@ -511,6 +516,9 @@ namespace LegionRuntime {
           create_node(is, handle_ready, domain_ready,
                       partition_node, child_color, parent_node->kind, 
                       allocable ? MUTABLE : NO_MEMORY);
+#ifdef LEGION_SPY
+        LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
+#endif
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
