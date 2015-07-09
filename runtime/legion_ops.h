@@ -511,6 +511,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -564,6 +565,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
@@ -754,6 +756,7 @@ namespace LegionRuntime {
       virtual bool is_close_op(void) const { return true; }
     public:
       virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
@@ -877,6 +880,7 @@ namespace LegionRuntime {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -932,6 +936,7 @@ namespace LegionRuntime {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -1558,6 +1563,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
     protected:
@@ -1619,6 +1625,7 @@ namespace LegionRuntime {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
@@ -1663,6 +1670,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     public:
       PhysicalInstance create_instance(const Domain &dom, 
                                        const std::vector<size_t> &field_sizes);
@@ -1705,6 +1713,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
     public:

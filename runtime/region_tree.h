@@ -930,6 +930,7 @@ namespace LegionRuntime {
       void remove_child(const ColorPoint &c);
       size_t get_num_children(void) const;
       void get_children(std::map<ColorPoint,IndexPartNode*> &children);
+      void get_child_colors(std::set<ColorPoint> &colors, bool only_valid);
     public:
       Event get_domain_precondition(void);
       const Domain& get_domain_blocking(void);
@@ -1364,6 +1365,17 @@ namespace LegionRuntime {
       public:
         NodeInfo(void)
           : physical_state(NULL), premap_only(false), needs_reset(false) { }
+        // Don't ever copy over the physical state
+        NodeInfo(const NodeInfo &rhs)
+          : physical_state(NULL), version_numbers(rhs.version_numbers),
+            premap_only(rhs.premap_only), needs_reset(rhs.needs_reset) { }
+        NodeInfo& operator=(const NodeInfo &rhs)
+        {
+          version_numbers = rhs.version_numbers;
+          premap_only = rhs.premap_only;
+          needs_reset = rhs.needs_reset;
+          return *this;
+        }
       public:
         PhysicalState *physical_state;
         RegionVersions version_numbers;
@@ -1388,11 +1400,14 @@ namespace LegionRuntime {
       void apply_premapping(ContextID ctx);
       void apply_mapping(ContextID ctx);
       void reset(void);
+      void release(void);
       void clear(void);
+      void sanity_check(RegionTreeNode *node);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       PhysicalState* create_physical_state(RegionTreeNode *node,
-                                           VersionManager *manager);
+                                           VersionManager *manager,
+                                           bool advance);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       bool projection;
@@ -1924,12 +1939,15 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void add_version_state(VersionState *state, FieldMask &mask);
+      void add_version_state(VersionState *state, const FieldMask &mask);
+      void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool premap_only);
-      void apply_state(void) const;
-      void apply_state(const LegionMap<VersionState*,FieldMask>::aligned 
-                                                &advanced_version_states) const;
+      void apply_state(bool advance) const;
       void reset(void);
+    public:
+      void print_physical_state(const FieldMask &capture_mask,
+          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                                TreeStateLogger *logger);
     public:
       // Fields which were closed and can be ignored when applying
       FieldMask closed_mask;
@@ -1947,6 +1965,7 @@ namespace LegionRuntime {
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
+      LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
 #ifdef DEBUG_HIGH_LEVEL
     public:
       RegionTreeNode *const node;
@@ -1973,6 +1992,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
+      void initialize(LogicalView *view, PhysicalUser &user);
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask, 
                                  bool premap_only) const;
@@ -2016,14 +2036,28 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-                                     bool premap_only);
-      void apply_updates(const PhysicalState *state, bool advance);
+                                     bool premap_only, bool advance);
+      void initialize_state(LogicalView *view, PhysicalUser &user);
       void filter_states(const FieldMask &filter_mask);
       void check_init(void);
       void clear(void);
       void sanity_check(void);
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
+    public:
+      void print_physical_state(RegionTreeNode *node,
+                                const FieldMask &capture_mask,
+                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                                TreeStateLogger *logger);
     protected:
+      void filter_previous_states(VersionID vid,const FieldMask &filter_mask);
+      void capture_previous_states(VersionStateInfo &info,
+                                   const FieldMask &capture_mask,
+                                   PhysicalState *state);
+      void filter_current_states(VersionStateInfo &info, VersionID vid,
+                                 const FieldMask &filter_mask,
+                                 PhysicalState *state);
+      void capture_advance_states(VersionID vid, const FieldMask &capture_mask,
+                                  PhysicalState *state, FieldMask &to_create);
       void capture_version_states(VersionID vid, FieldMask &remaining,
                                   PhysicalState *state);
     protected:
@@ -2061,7 +2095,7 @@ namespace LegionRuntime {
         assert(manager != NULL);
 #endif
         // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager);
+        result = info.create_physical_state(this, manager, info.will_advance());
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -2135,7 +2169,6 @@ namespace LegionRuntime {
     public:
       // Physical traversal operations
       // Entry
-      void apply_update(ContextID ctx,const PhysicalState *state,bool advance);
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
@@ -2487,10 +2520,6 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(VersionManager *manager,
-                               const FieldMask &capture_mask,
-                         LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                               TreeStateLogger *logger);
 #ifdef DEBUG_HIGH_LEVEL
     public:
       // These methods are only ever called by a debugger
@@ -2651,10 +2680,6 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(VersionManager *manager,
-                               const FieldMask &capture_mask,
-                         LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                               TreeStateLogger *logger);
 #ifdef DEBUG_HIGH_LEVEL
     public:
       // These methods are only ever called by a debugger
@@ -2749,10 +2774,15 @@ namespace LegionRuntime {
      */
     class NodeTraverser {
     public:
+      NodeTraverser(bool force = false)
+        : force_instantiation(force) { }
+    public:
       virtual bool break_early(void) const { return false; }
       virtual bool visit_only_valid(void) const = 0;
       virtual bool visit_region(RegionNode *node) = 0;
       virtual bool visit_partition(PartitionNode *node) = 0;
+    public:
+      const bool force_instantiation;
     };
 
     /**
@@ -2884,6 +2914,8 @@ namespace LegionRuntime {
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
+    protected:
+      void record_versions(RegionTreeNode *node);
     protected:
       const ContextID ctx;
       VersionInfo &version_info;

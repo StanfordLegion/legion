@@ -2034,6 +2034,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MapOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
     unsigned MapOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -3137,6 +3145,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<VersionInfo>::iterator it = src_versions.begin();
+            it != src_versions.end(); it++)
+      {
+        it->release();
+      }
+      for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
+            it != dst_versions.end(); it++)
+      {
+        it->release();
+      }
+      Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::report_aliased_requirements(unsigned idx1, unsigned idx2)
     //--------------------------------------------------------------------------
     {
@@ -4182,6 +4207,14 @@ namespace LegionRuntime {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    void CloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
+    }
+
     /////////////////////////////////////////////////////////////
     // Inter Close Operation 
     /////////////////////////////////////////////////////////////
@@ -5077,6 +5110,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void AcquireOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
     Mappable::MappableKind AcquireOp::get_mappable_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -5656,6 +5697,14 @@ namespace LegionRuntime {
     {
       // Mark that we're done executing
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
     }
 
     //--------------------------------------------------------------------------
@@ -8157,6 +8206,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::compute_parent_index(void)
     //--------------------------------------------------------------------------
     {
@@ -8483,6 +8540,14 @@ namespace LegionRuntime {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
     }
 
     //--------------------------------------------------------------------------
@@ -8854,6 +8919,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void AttachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(const Domain &dom,
                                                const std::vector<size_t> &sizes)
     //--------------------------------------------------------------------------
@@ -9185,6 +9258,14 @@ namespace LegionRuntime {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      Operation::trigger_commit();
     }
 
     //--------------------------------------------------------------------------

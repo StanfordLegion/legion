@@ -6412,6 +6412,12 @@ namespace LegionRuntime {
         pack_remote_commit(rez);
         runtime->send_individual_remote_commit(orig_proc,rez);
       }
+      // We can release our version infos now
+      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
+            it != version_infos.end(); it++)
+      {
+        it->release();
+      }
       commit_operation();
       // Finally we can deactivate this task now that it has commited
       deactivate();
@@ -7124,6 +7130,12 @@ namespace LegionRuntime {
     void PointTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
+      // We can release our version infos now
+      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
+            it != version_infos.end(); it++)
+      {
+        it->release();
+      }
       // Commit this operation
       commit_operation();
       // Then tell our slice owner that we're done
@@ -8654,6 +8666,12 @@ namespace LegionRuntime {
     void IndexTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
+      // We can release our version infos now
+      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
+            it != version_infos.end(); it++)
+      {
+        it->release();
+      }
       // Mark that this operation is now committed
       commit_operation();
       // Now we get to deactivate this task
@@ -10005,6 +10023,12 @@ namespace LegionRuntime {
         // futures already sent back
 
         index_owner->return_slice_commit(points.size());
+      }
+      // We can release our version infos now
+      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
+            it != version_infos.end(); it++)
+      {
+        it->release();
       }
       commit_operation();
       // After we're done with this, then we can reclaim oursleves
