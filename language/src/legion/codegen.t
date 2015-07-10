@@ -614,7 +614,16 @@ function ref:new(value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(index_type, field_type, base_pointer, strides, index)
-  if index_type.fields then
+  -- Note: This code is performance-critical and tends to be sensitive
+  -- to small changes. Please thoroughly performance-test any changes!
+  if not index_type.fields then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+  elseif #index_type.fields == 1 then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    local field = index_type.fields[1]
+    return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
+  else
     local offset
     for i, field in ipairs(index_type.fields) do
       if offset then
@@ -623,9 +632,7 @@ local function get_element_pointer(index_type, field_type, base_pointer, strides
         offset = `([index].__ptr.[ field ] * [ strides[i] ])
       end
     end
-    return `(@[&field_type](&(([&int8](base_pointer))[offset])))
-  else
-    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+    return `(@([&field_type]([&int8](base_pointer) + offset)))
   end
 end
 
