@@ -51,6 +51,7 @@ COPY_OP = 5
 FENCE_OP = 6
 ACQUIRE_OP = 7
 RELEASE_OP = 8
+PARTITION_OP = 8
 
 # Instance Kinds
 TASK_INST = 0
@@ -59,6 +60,7 @@ CLOSE_INST = 2
 COPY_INST = 3
 ACQUIRE_INST = 4
 RELEASE_INST = 5
+PARTITION_INST = 6
 
 
 # Some helper methods
@@ -357,6 +359,12 @@ class FieldSpaceNode(object):
 
     def set_field_name(self, fid, name):
         self.field_names[fid] = name
+
+    def get_field_name(self, fid):
+        if fid in self.field_names:
+            return self.field_names[fid]
+        else:
+            return None
 
     def print_graph(self, printer):
         if self.name != None:
@@ -1748,6 +1756,157 @@ class ReleaseOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
+class PartitionOp(object):
+    def __init__(self, state, uid, ctx, kind):
+        assert ctx is not None
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.partition_kind = kind
+        self.reqs = dict()
+        self.logical_incoming = set()
+        self.logical_outgoing = set()
+        self.logical_marked = False
+        self.op_instances = set()
+        self.op_instances.add(self)
+        self.instances = dict()
+        self.generation = 0
+        self.start_event = None
+        self.term_event = None
+        self.physical_marked = False
+        self.node_name = 'partition_node_'+str(self.uid)
+        self.prev_event_deps = set()
+
+    def get_name(self):
+        return "Dependent Partition "+str(self.uid)
+
+    def get_op_kind(self):
+        return PARTITION_OP
+
+    def get_inst_kind(self):
+        return PARTITION_INST
+
+    def add_requirement(self, idx, req):
+        assert idx not in self.reqs
+        self.reqs[idx] = req
+
+    def get_requirement(self, idx):
+        assert idx in self.reqs
+        return self.reqs[idx]
+
+    def add_req_field(self, idx, fid):
+        if not idx in self.reqs:
+            return False
+        self.reqs[idx].add_field(fid)
+        return True
+
+    def add_logical_incoming(self, op):
+        assert op <> self
+        self.logical_incoming.add(op)
+
+    def add_logical_outgoing(self, op):
+        assert op <> self
+        self.logical_outgoing.add(op)
+
+    def has_logical_path(self, target):
+        if target == self:
+            return True
+        if self.logical_marked:
+            return False
+        # Otherwise check all the outgoing edges
+        for op in self.logical_outgoing:
+            if op.has_logical_path(target):
+                return True
+        self.logical_marked = True
+        return False
+
+    def unmark_logical(self):
+        self.logical_marked = False
+
+    def add_events(self, start, term):
+        assert self.start_event == None
+        assert self.term_event == None
+        self.start_event = start
+        self.term_event = term
+
+    def event_graph_traverse(self, traverser):
+        traverser.visit_acquire(self)
+
+    def add_instance(self, idx, inst):
+        assert idx not in self.instances
+        self.instances[idx] = inst
+
+    def get_instance(self, idx):
+        assert idx in self.instances
+        return self.instances[idx]
+
+    def physical_traverse(self, component):
+        if self.physical_marked:
+            return
+        self.physical_marked = True
+        component.add_acquire(self)
+        self.start_event.physical_traverse(component)
+        self.term_event.physical_traverse(component)
+
+    def physical_unmark(self):
+        self.physical_marked = False
+
+    def find_dependences(self, op):
+        for idx,req in self.reqs.iteritems():
+            op.find_individual_dependences(self, req)
+
+    def find_individual_dependences(self, other_op, other_req):
+        for idx,req in self.reqs.iteritems():
+            dtype = self.state.compute_dependence(other_req, req)
+            if is_mapping_dependence(dtype):
+                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def compute_dependence_diff(self, verbose):
+        # do nothing for the moment
+        pass
+
+    def check_data_flow(self):
+        # do nothing for the moment
+        pass
+
+    def print_physical_node(self, printer):
+        field_names = []
+        fspace = self.state.field_space_nodes[self.reqs[0].fspace]
+        for f in self.reqs[0].fields:
+            field_name = fspace.get_field_name(f)
+            if field_name == None:
+                field_name = str(f)
+            field_names.append(field_name)
+
+        if self.partition_kind == 0:
+            subtitle = 'By Field ' + ','.join(field_names)
+        elif self.partition_kind == 1:
+            subtitle = 'By Image of Field ' + ','.join(field_names)
+        elif self.partition_kind == 2:
+            subtitle = 'By Pre-Image of Field ' + ','.join(field_names)
+        else:
+            assert(false)
+
+        printer.println(self.node_name+\
+                ' [style=filled,label="Dependent Partition '+str(self.uid)+'\\n '+\
+                subtitle+'\\nReq: '+\
+                self.reqs[0].to_summary_string()+\
+                ('' if self.reqs[0].region_node.name == None
+                        else '\\n('+self.reqs[0].region_node.name+')')+\
+                '",fillcolor=steelblue,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_event_dependences(self, printer):
+        self.start_event.print_prev_event_dependences(printer, self.node_name)
+        pass
+
+    def print_prev_event_dependences(self, printer, later_name):
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+
+                ' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+        self.start_event.print_prev_event_dependences(printer, later_name)
+
 class Close(object):
     def __init__(self, state, uid, ctx, is_inter_close_op):
         assert ctx is not None
@@ -3092,6 +3251,14 @@ class State(object):
         if ctx not in self.ops:
             return False
         self.ops[uid] = Deletion(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def add_partition_op(self, ctx, uid, kind):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = PartitionOp(self, uid, self.ops[ctx], kind)
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 

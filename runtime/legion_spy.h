@@ -232,6 +232,14 @@ namespace LegionRuntime {
             context, deletion);
       }
 
+      static inline void log_partition_operation(UniqueID context,
+                                                 UniqueID unique_id,
+                                                 int kind)
+      {
+        log_spy.info("Dependent Partition Operation %llu %llu %d",
+            context, unique_id, kind);
+      }
+
       static inline void log_index_slice(UniqueID index_id, UniqueID slice_id)
       {
         log_spy.info("Index Slice %llu %llu", index_id, slice_id);

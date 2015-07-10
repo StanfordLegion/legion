@@ -7880,6 +7880,7 @@ namespace LegionRuntime {
       requirement.add_field(fid);
       partition_handle = pid;
       color_space = space;
+      perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -7897,6 +7898,7 @@ namespace LegionRuntime {
       requirement.add_field(fid);
       partition_handle = pid;
       color_space = space;
+      perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -7913,6 +7915,38 @@ namespace LegionRuntime {
       partition_handle = pid;
       color_space = space;
       projection = proj;
+      perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::perform_logging()
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_partition_operation(parent_ctx->get_unique_task_id(),
+                                         unique_op_id,
+                                         partition_kind);
+      if (requirement.handle_type == PART_PROJECTION)
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  false/*region*/,
+                                  requirement.partition.index_partition.id,
+                                  requirement.partition.field_space.id,
+                                  requirement.partition.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop);
+      else
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  true/*region*/,
+                                  requirement.region.index_space.id,
+                                  requirement.region.field_space.id,
+                                  requirement.region.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8004,6 +8038,15 @@ namespace LegionRuntime {
       assert(handle_ready.exists() && !handle_ready.has_triggered());
 #endif
       handle_ready.trigger();
+#ifdef LEGION_SPY
+      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
+          handle_ready);
+      LegionSpy::log_op_events(unique_op_id, handle_ready,
+          completion_event);
+      LegionSpy::log_implicit_dependence(completion_event,
+          parent_ctx->get_task_completion());
+      LegionSpy::log_op_proc_user(unique_op_id, local_proc.id);
+#endif
       complete_mapping();
 
       if (!ready_event.has_triggered())
