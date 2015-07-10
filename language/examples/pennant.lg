@@ -1368,10 +1368,9 @@ end
 function _t2() end -- seems like I need this to break up the statements
 (terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
-task continue_simulation(warmup : bool,
-                         cycle : int64, cstop : int64,
+task continue_simulation(cycle : int64, cstop : int64,
                          time : double, tstop : double)
-  return warmup or (cycle < cstop and time < tstop)
+  return (cycle < cstop and time < tstop)
 end
 
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
@@ -1416,7 +1415,7 @@ do
   var cycle : int64 = 0
   var dt = dtmax
   var dthydro = dtmax
-  while continue_simulation(warmup, cycle, cstop, time, tstop) do
+  while continue_simulation(cycle, cstop, time, tstop) do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     __demand(__parallel)
