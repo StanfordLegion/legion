@@ -164,7 +164,7 @@ namespace LegionRuntime {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void compute_point_region_requirements(void);
+      void compute_point_region_requirements(MinimalPoint *mp = NULL);
       bool early_map_regions(void);
     protected:
       void compute_parent_indexes(void);
@@ -568,6 +568,8 @@ namespace LegionRuntime {
       bool trigger_slices(void);
       void clone_multi_from(MultiTask *task, const Domain &d, Processor p,
                             bool recurse, bool stealable);
+      void assign_points(MultiTask *target, const Domain &d);
+      void add_point(const DomainPoint &p, MinimalPoint *point);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -614,20 +616,20 @@ namespace LegionRuntime {
       virtual void remove_created_region(LogicalRegion handle);
       virtual void remove_created_field(FieldSpace handle, FieldID fid);
     public:
-      void pack_multi_task(Serializer &rez, bool pack_args, 
-                           AddressSpaceID target);
-      void unpack_multi_task(Deserializer &derez, bool unpack_args);
+      void pack_multi_task(Serializer &rez, AddressSpaceID target);
+      void unpack_multi_task(Deserializer &derez);
     public:
       void initialize_reduction_state(void);
       void fold_reduction_future(const void *result, size_t result_size,
                                  bool owner, bool exclusive); 
     protected:
-      bool sliced;
       Barrier must_barrier; // for must parallelism
-      ArgumentMap argument_map;
       std::list<SliceTask*> slices;
       std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
+      std::map<DomainPoint,MinimalPoint*> minimal_points;
+      unsigned minimal_points_assigned;
+      bool sliced;
     protected:
       ReductionOpID redop;
       const ReductionOp *reduction_op;
@@ -797,7 +799,7 @@ namespace LegionRuntime {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
     public:
-      void initialize_point(SliceTask *owner);
+      void initialize_point(SliceTask *owner, MinimalPoint *mp);
       void send_back_remote_state(AddressSpaceID target, unsigned index,
                                   RegionTreeContext remote_context,
                                   std::set<PhysicalManager*> &needed_managers);
@@ -1046,6 +1048,8 @@ namespace LegionRuntime {
                                  size_t result_size, bool owner);
       virtual void register_must_epoch(void);
     public:
+      void enumerate_points(void);
+    public:
       void return_slice_mapped(unsigned points, long long denom);
       void return_slice_complete(unsigned points);
       void return_slice_commit(unsigned points);
@@ -1067,6 +1071,7 @@ namespace LegionRuntime {
                                        AddressSpaceID source);
     protected:
       friend class SliceTask;
+      ArgumentMap argument_map;
       FutureMap future_map;
       Future reduction_future;
       // The fraction used to keep track of what part of
@@ -1135,7 +1140,8 @@ namespace LegionRuntime {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
       virtual void register_must_epoch(void);
-      PointTask* clone_as_point_task(const DomainPoint &p);
+      PointTask* clone_as_point_task(const DomainPoint &p,
+                                     MinimalPoint *mp);
       void enumerate_points(void);
     protected:
       virtual void trigger_task_complete(void);
@@ -1208,6 +1214,34 @@ namespace LegionRuntime {
       Reservation slice_lock;
       MultiTask *const owner;
       std::set<SliceTask*> failed_slices;
+    };
+
+    /**
+     * \class MinimalPoint
+     * A helper class for managing point specific data
+     * until we are ready to expand to a full point task
+     */
+    class MinimalPoint {
+    public:
+      MinimalPoint(void);
+      MinimalPoint(const MinimalPoint &rhs);
+      ~MinimalPoint(void);
+    public:
+      MinimalPoint& operator=(const MinimalPoint &rhs);
+    public:
+      void add_projection_region(unsigned index, LogicalRegion handle);
+      void add_argument(const TaskArgument &arg, bool own);
+    public:
+      void assign_argument(void *&local_arg, size_t &local_arglen);
+      LogicalRegion find_logical_region(unsigned index);
+    public:
+      void pack(Serializer &rez);
+      void unpack(Deserializer &derez);
+    protected:
+      std::map<unsigned,LogicalRegion> projections;
+      void *arg;
+      size_t arglen;
+      bool own_arg;
     };
 
   }; // namespace HighLevel

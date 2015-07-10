@@ -267,6 +267,7 @@ namespace LegionRuntime {
     class IndexTask;
     class SliceTask;
     class RemoteTask;
+    class MinimalPoint;
     
     // legion_trace.h
     class LegionTrace;

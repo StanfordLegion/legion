@@ -1402,7 +1402,7 @@ namespace LegionRuntime {
       if (req.handle_type != SINGULAR)
         version_info.set_projection();
       // If we are a write, mark that we are advancing
-      if (HAS_WRITE(user.usage))
+      if (IS_WRITE(user.usage))
         version_info.set_advance();
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
@@ -13064,7 +13064,8 @@ namespace LegionRuntime {
                                                RegionTreePath &path,
                                                VersionInfo &version_info,
                                                RestrictInfo &restrict_info,
-                                               const TraceInfo &trace_info)
+                                               const TraceInfo &trace_info,
+                                               bool projecting)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13158,6 +13159,47 @@ namespace LegionRuntime {
           if (version_info.will_advance())
             advance_version_numbers(state, dominator_mask);
         }
+        // Now that we've arrived, check to see if we are a projection 
+        // region requirement or a normal region requirement. If we are normal
+        // then we can do the regular analysis, otherwise, we have to traverse
+        // the paths for all the projected regions
+        if (!projecting && version_info.is_projection())
+        {
+
+        }
+        else
+        {
+          // Easy case, we are there 
+          record_version_numbers(state, user.field_mask,
+                   version_info, version_info.will_advance(), false/*premap*/);
+          // Here is the only difference with tracing.  If we already
+          // traced then we don't need to register ourselves as a user
+          // We also don't need to record ourselves if we are projecting
+          // since we are recording the upper bound
+          if (!projecting && !trace_info.already_traced)
+          {
+            // Register ourself with as a current user of this region
+            // Record a mapping reference on this operation
+            user.op->add_mapping_reference(user.gen);
+            // Add ourselves to the current epoch
+            state.curr_epoch_users.push_back(user);
+          }
+          // If this is a reduction, record that we have an outstanding 
+          // reduction at this node in the region tree
+          if (user.usage.redop > 0)
+            record_logical_reduction(state, user.usage.redop, user.field_mask);
+          // Record any restrictions we have on mappings if necessary
+          if (restrict_info.needs_check())
+          {
+            FieldMask restricted = user.field_mask & state.restricted_fields;
+            if (!!restricted)
+            {
+              RegionNode *local_this = as_region_node();
+              restrict_info.add_restriction(local_this->handle, restricted);
+            }
+          }
+        }
+
         // We also need to record the needed version numbers for this node
         // Note that we do this after the version numbers have been updated
         // so that we get the version numbers that we are contributing to
