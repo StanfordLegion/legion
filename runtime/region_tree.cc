@@ -2076,6 +2076,9 @@ namespace LegionRuntime {
                                                    )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
+#endif
       RegionNode *top_node = get_node(req.parent);
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
@@ -2121,6 +2124,9 @@ namespace LegionRuntime {
                                      false/*before*/, true/*premap*/,
                                      true/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
 #endif
       return result;
     }
@@ -4361,6 +4367,7 @@ namespace LegionRuntime {
         AutoLock t_lock(perf_trace_lock);
         trace.report_trace(diff);
       }
+      trace = PerfTrace(); // reset
     }
 
     //--------------------------------------------------------------------------
@@ -4408,6 +4415,11 @@ namespace LegionRuntime {
         case COPY_ACROSS_ANALYSIS:
           {
             fprintf(stdout,"COPY ACROSS ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case PERFORM_CLOSE_OPERATIONS_ANALYSIS:
+          {
+            fprintf(stdout,"PERFORM CLOSE OPERATIONS ANALYSIS: %lld us\n",diff);
             break;
           }
         default:
@@ -9028,7 +9040,7 @@ namespace LegionRuntime {
       }
       else
       {
-        // Ease case of making a foldable reduction
+        // Easy case of making a foldable reduction
         PhysicalInstance inst = context->create_instance(domain, location,
                                            reduction_op->sizeof_rhs, redop, op);
         if (inst.exists())
