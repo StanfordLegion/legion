@@ -51,7 +51,8 @@ COPY_OP = 5
 FENCE_OP = 6
 ACQUIRE_OP = 7
 RELEASE_OP = 8
-PARTITION_OP = 8
+DEPENDENT_PARTITION_OP = 9
+PENDING_PARTITION_OP = 10
 
 # Instance Kinds
 TASK_INST = 0
@@ -60,7 +61,8 @@ CLOSE_INST = 2
 COPY_INST = 3
 ACQUIRE_INST = 4
 RELEASE_INST = 5
-PARTITION_INST = 6
+DEPENDENT_PARTITION_INST = 6
+PENDING_PARTITION_INST = 7
 
 
 # Some helper methods
@@ -250,6 +252,12 @@ class IndexSpaceNode(object):
     def is_region(self):
         return True
 
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        else:
+            return "index space " + hex(self.uid)
+
     def set_name(self, name):
         self.name = name
 
@@ -314,6 +322,12 @@ class IndexPartNode(object):
 
     def is_region(self):
         return False
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        else:
+            return "index partition " + hex(self.uid)
 
     def set_name(self, name):
         self.name = name
@@ -1228,13 +1242,20 @@ class Mapping(object):
         self.physical_marked = False
 
     def print_physical_node(self, printer):
+        ranges = list_to_ranges(self.requirement.fields)
+        field_string = ','.join([r for r in ranges])
         inst_string = ''
         if self.state.verbose:
             inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+self.requirement.dot_requirement()
         printer.println(self.node_name+' [style=filled,label="'+\
-            'Mapping\ '+str(self.uid)+'\ in\ '+self.ctx.name+inst_string+'",'+\
-            'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
-            'shape=record,penwidth=2];')
+                'Mapping\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
+                field_string+'\}\\nReq: '+\
+                self.requirement.to_summary_string()+\
+                ('' if self.requirement.region_node.name == None
+                    else '\\n('+self.requirement.region_node.name+')')+\
+                inst_string+'",'+\
+                'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -1756,13 +1777,14 @@ class ReleaseOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
-class PartitionOp(object):
-    def __init__(self, state, uid, ctx, kind):
+class DependentPartitionOp(object):
+    def __init__(self, state, uid, ctx, part, kind):
         assert ctx is not None
         self.state = state
         self.uid = uid
         self.ctx = ctx
         self.partition_kind = kind
+        self.index_partition_node = part
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
@@ -1774,17 +1796,17 @@ class PartitionOp(object):
         self.start_event = None
         self.term_event = None
         self.physical_marked = False
-        self.node_name = 'partition_node_'+str(self.uid)
+        self.node_name = 'dep_partition_node_'+str(self.uid)
         self.prev_event_deps = set()
 
     def get_name(self):
         return "Dependent Partition "+str(self.uid)
 
     def get_op_kind(self):
-        return PARTITION_OP
+        return DEPENDENT_PARTITION_OP
 
     def get_inst_kind(self):
-        return PARTITION_INST
+        return DEPENDENT_PARTITION_INST
 
     def add_requirement(self, idx, req):
         assert idx not in self.reqs
@@ -1830,7 +1852,8 @@ class PartitionOp(object):
         self.term_event = term
 
     def event_graph_traverse(self, traverser):
-        traverser.visit_acquire(self)
+        pass
+        #traverser.visit_partition_op(self)
 
     def add_instance(self, idx, inst):
         assert idx not in self.instances
@@ -1844,7 +1867,7 @@ class PartitionOp(object):
         if self.physical_marked:
             return
         self.physical_marked = True
-        component.add_acquire(self)
+        component.add_partition_op(self)
         self.start_event.physical_traverse(component)
         self.term_event.physical_traverse(component)
 
@@ -1887,13 +1910,172 @@ class PartitionOp(object):
         else:
             assert(false)
 
+        src = self.index_partition_node.parent.get_name()
+        dst = self.index_partition_node.get_name()
+
         printer.println(self.node_name+\
-                ' [style=filled,label="Dependent Partition '+str(self.uid)+'\\n '+\
-                subtitle+'\\nReq: '+\
-                self.reqs[0].to_summary_string()+\
+                ' [style=filled,label="Dependent Partition '+str(self.uid)+'\\nReq:'+\
+                self.reqs[0].to_summary_string()+'\\n'+\
                 ('' if self.reqs[0].region_node.name == None
-                        else '\\n('+self.reqs[0].region_node.name+')')+\
+                    else '('+self.reqs[0].region_node.name+')\\n')+\
+                subtitle+'\\n'+src+' \=\=\> '+dst+\
                 '",fillcolor=steelblue,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_event_dependences(self, printer):
+        self.start_event.print_prev_event_dependences(printer, self.node_name)
+        pass
+
+    def print_prev_event_dependences(self, printer, later_name):
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+
+                ' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+        self.start_event.print_prev_event_dependences(printer, later_name)
+
+class PendingPartitionOp(object):
+    def __init__(self, state, uid, ctx):
+        assert ctx is not None
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.reqs = dict()
+        self.logical_incoming = set()
+        self.logical_outgoing = set()
+        self.logical_marked = False
+        self.op_instances = set()
+        self.op_instances.add(self)
+        self.instances = dict()
+        self.generation = 0
+        self.start_event = None
+        self.term_event = None
+        self.physical_marked = False
+        self.node_name = 'pending_partition_node_'+str(self.uid)
+        self.prev_event_deps = set()
+        self.index_partition_node = None
+        self.kind = None
+
+    def set_index_partition_node(self, part):
+        self.index_partition_node = part
+
+    def set_pending_partition_kind(self, kind):
+        self.kind = kind
+
+    def get_name(self):
+        return "Pending Partition "+str(self.uid)
+
+    def get_op_kind(self):
+        return PENDING_PARTITION_OP
+
+    def get_inst_kind(self):
+        return PENDING_PARTITION_INST
+
+    def add_requirement(self, idx, req):
+        assert idx not in self.reqs
+        self.reqs[idx] = req
+
+    def get_requirement(self, idx):
+        assert idx in self.reqs
+        return self.reqs[idx]
+
+    def add_req_field(self, idx, fid):
+        if not idx in self.reqs:
+            return False
+        self.reqs[idx].add_field(fid)
+        return True
+
+    def add_logical_incoming(self, op):
+        assert op <> self
+        self.logical_incoming.add(op)
+
+    def add_logical_outgoing(self, op):
+        assert op <> self
+        self.logical_outgoing.add(op)
+
+    def has_logical_path(self, target):
+        if target == self:
+            return True
+        if self.logical_marked:
+            return False
+        # Otherwise check all the outgoing edges
+        for op in self.logical_outgoing:
+            if op.has_logical_path(target):
+                return True
+        self.logical_marked = True
+        return False
+
+    def unmark_logical(self):
+        self.logical_marked = False
+
+    def add_events(self, start, term):
+        assert self.start_event == None
+        assert self.term_event == None
+        self.start_event = start
+        self.term_event = term
+
+    def event_graph_traverse(self, traverser):
+        pass
+        #traverser.visit_partition_op(self)
+
+    def add_instance(self, idx, inst):
+        assert idx not in self.instances
+        self.instances[idx] = inst
+
+    def get_instance(self, idx):
+        assert idx in self.instances
+        return self.instances[idx]
+
+    def physical_traverse(self, component):
+        if self.physical_marked:
+            return
+        self.physical_marked = True
+        component.add_partition_op(self)
+        self.start_event.physical_traverse(component)
+        self.term_event.physical_traverse(component)
+
+    def physical_unmark(self):
+        self.physical_marked = False
+
+    def find_dependences(self, op):
+        for idx,req in self.reqs.iteritems():
+            op.find_individual_dependences(self, req)
+
+    def find_individual_dependences(self, other_op, other_req):
+        for idx,req in self.reqs.iteritems():
+            dtype = self.state.compute_dependence(other_req, req)
+            if is_mapping_dependence(dtype):
+                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def compute_dependence_diff(self, verbose):
+        # do nothing for the moment
+        pass
+
+    def check_data_flow(self):
+        # do nothing for the moment
+        pass
+
+    def print_physical_node(self, printer):
+        kind_str = None
+        if self.kind == 0:
+            kind_str = "Equal Partition"
+        elif self.kind == 1:
+            kind_str = "Weighted Partition"
+        elif self.kind == 2:
+            kind_str = "Union Partition"
+        elif self.kind == 3:
+            kind_str = "Intersection Partition"
+        elif self.kind == 4:
+            kind_str = "Difference Partition"
+
+        if self.index_partition_node <> None:
+            dst = self.index_partition_node.get_name()
+        else:
+            dst = ""
+
+        printer.println(self.node_name+\
+                ' [style=filled,label="Pending Partition '+str(self.uid)+\
+                ("" if kind_str == None else "\\nType: " + kind_str + "\\n")+\
+                dst+'",fillcolor=honeydew,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
@@ -2775,6 +2957,7 @@ class ConnectedComponent(object):
         self.copies = dict()
         self.acquires = dict()
         self.releases = dict()
+        self.partition_ops = dict()
         self.phase_barriers = set()
         self.processors = state.processors
         self.utilities = state.utilities
@@ -2819,13 +3002,19 @@ class ConnectedComponent(object):
         if release.ctx != None:
             self.parent_tasks[release.uid] = release.ctx
 
+    def add_partition_op(self, partition_op):
+        assert partition_op not in self.partition_ops
+        self.partition_ops[partition_op.uid] = partition_op
+        if partition_op.ctx != None:
+            self.parent_tasks[partition_op.uid] = partition_op.ctx
+
     def add_phase_barrier(self, phase_barrier):
         assert phase_barrier not in self.phase_barriers
         self.phase_barriers.add(phase_barrier)
 
     def num_ops(self):
         return len(self.tasks)+len(self.maps)+len(self.closes)+len(self.copies)+\
-                len(self.acquires)+len(self.releases)
+                len(self.acquires)+len(self.releases)+len(self.partition_ops)
 
     def empty(self):
         total = self.num_ops()
@@ -2846,6 +3035,8 @@ class ConnectedComponent(object):
             a.physical_unmark()
         for r in self.releases.itervalues():
             r.physical_unmark()
+        for p in self.partition_ops.itervalues():
+            p.physical_unmark()
 
     def generate_graph(self, idx, path, simplify):
         name = 'event_graph_'+str(idx)
@@ -2863,6 +3054,8 @@ class ConnectedComponent(object):
             a.print_physical_node(printer)
         for r in self.releases.itervalues():
             r.print_physical_node(printer)
+        for p in self.partition_ops.itervalues():
+            p.print_physical_node(printer)
         for p in self.phase_barriers:
             p.print_physical_node(printer)
         # Now print the dependences
@@ -2878,6 +3071,8 @@ class ConnectedComponent(object):
             a.print_event_dependences(printer)
         for r in self.releases.itervalues():
             r.print_event_dependences(printer)
+        for p in self.partition_ops.itervalues():
+            p.print_event_dependences(printer)
         for e in self.events:
             e.print_event_dependences(printer)
         # Print links to contexts when it's in verbose mode
@@ -2893,6 +3088,8 @@ class ConnectedComponent(object):
                     op = self.acquires[uid]
                 elif uid in self.releases:
                     op = self.releases[uid]
+                elif uid in self.partition_ops:
+                    op = self.partition_ops[uid]
                 else:
                     continue
                 printer.println(ctx.node_name+' -> '+op.node_name+\
@@ -3254,12 +3451,32 @@ class State(object):
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
-    def add_partition_op(self, ctx, uid, kind):
+    def add_dependent_partition_op(self, ctx, uid, pid, kind):
         assert uid not in self.ops
         if ctx not in self.ops:
             return False
-        self.ops[uid] = PartitionOp(self, uid, self.ops[ctx], kind)
+        if pid not in self.index_part_nodes:
+            return False
+        self.ops[uid] = DependentPartitionOp(self, uid, self.ops[ctx],
+                                             self.index_part_nodes[pid], kind)
         self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def add_pending_partition_op(self, ctx, uid):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = PendingPartitionOp(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def set_pending_partition_target(self, uid, pid, kind):
+        if uid not in self.ops:
+            return False
+        if pid not in self.index_part_nodes:
+            return False
+        self.ops[uid].set_index_partition_node(self.index_part_nodes[pid])
+        self.ops[uid].set_pending_partition_kind(kind)
         return True
 
     def add_index_slice(self, index_id, slice_id):
