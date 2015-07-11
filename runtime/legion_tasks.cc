@@ -5159,6 +5159,8 @@ namespace LegionRuntime {
     void MultiTask::deactivate_multi(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_multi_task(this, task_id);
       deactivate_task();
       if (reduction_state != NULL)
       {

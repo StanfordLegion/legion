@@ -636,8 +636,8 @@ namespace LegionRuntime {
         int kind;
         int count;
         unsigned long long total_time;
-        unsigned long long min_time;
         unsigned long long max_time;
+        unsigned long long min_time;
       };
       struct PerfTrace {
       public:

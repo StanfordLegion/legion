@@ -57,11 +57,12 @@ namespace LegionRuntime {
       int max_local_id = 1;
       int local_space = 
         Processor::get_executing_processor().address_space();
-      const std::set<Processor> &procs = runtime->machine->get_all_processors();
+      std::set<Processor> procs;
+      runtime->machine.get_all_processors(procs);
       for (std::set<Processor>::const_iterator it = procs.begin();
             it != procs.end(); it++)
       {
-        if (local_space == it->address_space())
+        if (local_space == int(it->address_space()))
         {
           int local = it->local_id();
           if (local > max_local_id)
@@ -16000,7 +16001,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_DEPENDENCE_CHECKS_CALL);
+      PerfTracer tracer(user.op->runtime->forest, 
+                        PERFORM_DEPENDENCE_CHECKS_CALL);
 #endif
       FieldMask dominator_mask = check_mask;
       // It's not actually sound to assume we dominate something
@@ -16145,7 +16147,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_CLOSING_CHECKS_CALL);
+      PerfTracer tracer(closer.user.op->runtime->forest, 
+                        PERFORM_CLOSING_CHECKS_CALL);
 #endif
       // Since we are performing a close operation on the region
       // tree data structure, we know that we need to register
@@ -17630,13 +17633,21 @@ namespace LegionRuntime {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
             continue;
-          if (it->first->is_deferred_view())
-            continue;
-          MaterializedView *current = it->first->as_materialized_view();
           char *valid_mask = overlap.to_string();
-          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                      current->manager->get_instance().id, 
-                      current->manager->memory.id, valid_mask);
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *current = it->first->as_deferred_view();
+            logger->log("%s View %p Mask %s",
+                        current->is_composite_view() ? "Composite" : "Fill",
+                        current, valid_mask);            
+          }
+          else
+          {
+            MaterializedView *current = it->first->as_materialized_view();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->memory.id, valid_mask);
+          }
           free(valid_mask);
         }
         logger->up();
@@ -18803,11 +18814,21 @@ namespace LegionRuntime {
             continue;
           if (it->first->is_deferred_view())
             continue;
-          MaterializedView *current = it->first->as_materialized_view();
           char *valid_mask = overlap.to_string();
-          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                      current->manager->get_instance().id, 
-                      current->manager->memory.id, valid_mask);
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *current = it->first->as_deferred_view();
+            logger->log("%s View %p  Mask %s",
+                        current->is_composite_view() ? "Composite" : "Fill",
+                        current, valid_mask);            
+          }
+          else
+          {
+            MaterializedView *current = it->first->as_materialized_view();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->memory.id, valid_mask);
+          }
           free(valid_mask);
         }
         logger->up();
