@@ -9503,6 +9503,7 @@ namespace LegionRuntime {
       hcount += CreateInstanceRequest::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
       hcount += CreateInstanceResponse::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
+      hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
       hcount += ValidMaskRequestMessage::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
       hcount += ValidMaskDataMessage::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
       hcount += RollUpRequestMessage::add_handler_entries(&handlers[hcount], "Roll-up Request AM");

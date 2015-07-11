@@ -28,15 +28,29 @@ namespace LegionRuntime {
       int priority;
     };
 
+    struct RemoteFillArgs : public BaseMedium {
+      RegionInstance inst;
+      unsigned offset, size;
+      Event before_fill, after_fill;
+      int priority;
+    };
+
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
+
+    extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
 
     enum DMAActiveMessageIDs {
       REMOTE_COPY_MSGID = 200,
+      REMOTE_FILL_MSGID = 201,
     };
 
     typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
 				       RemoteCopyArgs,
 				       handle_remote_copy> RemoteCopyMessage;
+
+    typedef ActiveMessageMediumNoReply<REMOTE_FILL_MSGID,
+                                       RemoteFillArgs,
+                                       handle_remote_fill> RemoteFillMessage;
 
     extern void init_dma_handler(void);
 
