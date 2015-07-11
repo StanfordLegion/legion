@@ -659,7 +659,7 @@ namespace LegionRuntime {
       };
     protected:
       Reservation perf_trace_lock;
-      std::vector<PerfTrace> traces;
+      std::vector<std::vector<PerfTrace> > traces;
 #endif
     };
 

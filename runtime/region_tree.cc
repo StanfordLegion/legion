@@ -71,6 +71,8 @@ namespace LegionRuntime {
       }
       // Reserve enough space for traces for each processor
       traces.resize(max_local_id+1);
+      for (unsigned idx = 0; idx < traces.size(); idx++)
+        traces[idx].push_back(PerfTrace()); // empty perf trace for no recording
 #endif
     }
 
@@ -2126,7 +2128,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -4341,7 +4343,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Processor p = Processor::get_executing_processor();
-      traces[p.local_id()].record_call(kind, time);
+      traces[p.local_id()].back().record_call(kind, time);
     }
 
     //--------------------------------------------------------------------------
@@ -4351,7 +4353,7 @@ namespace LegionRuntime {
       Processor p = Processor::get_executing_processor();
       unsigned long long start = TimeStamp::get_current_time_in_micros();
       assert(p.local_id() < traces.size());
-      traces[p.local_id()] = PerfTrace(kind, start);
+      traces[p.local_id()].push_back(PerfTrace(kind, start));
     }
 
     //--------------------------------------------------------------------------
@@ -4360,14 +4362,15 @@ namespace LegionRuntime {
     {
       Processor p = Processor::get_executing_processor();
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      PerfTrace &trace = traces[p.local_id()];
+      unsigned index = p.local_id();
+      PerfTrace &trace = traces[index].back();
       unsigned long long diff = stop - trace.start;
       if (diff >= tolerance)
       {
         AutoLock t_lock(perf_trace_lock);
         trace.report_trace(diff);
       }
-      trace = PerfTrace(); // reset
+      traces[index].pop_back();
     }
 
     //--------------------------------------------------------------------------
