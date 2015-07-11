@@ -19,7 +19,7 @@ local log = require("legion/log")
 local std = require("legion/std")
 local symbol_table = require("legion/symbol_table")
 local traverse_symbols = require("legion/traverse_symbols")
-local cudahelper = require("legion/cudahelper")
+local cudahelper
 
 -- Configuration Variables
 
@@ -38,6 +38,8 @@ local cache_index_iterator = std.config["cached-iterators"]
 -- whenever two regions being placed in different physical regions
 -- would require the use of the divergence-safe code path to be used.
 local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
+
+if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 
 local codegen = {}
 
@@ -3090,6 +3092,8 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    legionlib.assert(std.config["cuda"],
+      "cuda should be enabled to generate cuda kernels")
     legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
       "multi-dimensional index spaces are not supported yet")
 

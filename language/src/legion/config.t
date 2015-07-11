@@ -27,6 +27,7 @@ local default_options = {
   ["no-dynamic-branches-assert"] = false,
   ["cached-iterators"] = false,
   ["task-inlines"] = true,
+  ["cuda"] = false,
 }
 
 local option = {

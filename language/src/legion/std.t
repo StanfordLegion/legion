@@ -16,11 +16,13 @@
 
 local config = require("legion/config")
 local log = require("legion/log")
-local cudahelper = require("legion/cudahelper")
+local cudahelper
 
 local std = {}
 
 std.config, std.args = config.parse_args()
+
+if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 
 -- #####################################
 -- ## Legion Bindings
@@ -2670,7 +2672,7 @@ function std.start(main_task)
         [task:getdefinition()])
       end
     end)
-  if terralib.cudacompile then
+  if std.config["cuda"] then
     cudahelper.link_driver_library()
     tasks:map(function(task)
       if task:getcuda() then
