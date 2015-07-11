@@ -1329,6 +1329,9 @@ namespace LegionRuntime {
         virtual ~PendingPartitionThunk(void) { }
       public:
         virtual Event perform(RegionTreeForest *forest) = 0;
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op) = 0;
+#endif
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
       public:
@@ -1338,6 +1341,9 @@ namespace LegionRuntime {
       public:
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_equal_partition(pid, granularity); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition pid;
         size_t granularity;
@@ -1351,6 +1357,9 @@ namespace LegionRuntime {
       public:
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_weighted_partition(pid, granularity, weights); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition pid;
         std::map<DomainPoint,int> weights;
@@ -1365,6 +1374,9 @@ namespace LegionRuntime {
       public:
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_union(pid, handle1, handle2); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition pid;
         IndexPartition handle1;
@@ -1380,6 +1392,9 @@ namespace LegionRuntime {
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(pid, handle1, 
                                                           handle2); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition pid;
         IndexPartition handle1;
@@ -1395,6 +1410,9 @@ namespace LegionRuntime {
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_difference(pid, handle1, 
                                                         handle2); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition pid;
         IndexPartition handle1;
@@ -1410,6 +1428,9 @@ namespace LegionRuntime {
         virtual Event perform(RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(base, source, 
                                                          handles); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexPartition base;
         IndexPartition source;
@@ -1429,6 +1450,9 @@ namespace LegionRuntime {
             return forest->compute_pending_space(target, handle, is_union);
           else
             return forest->compute_pending_space(target, handles, is_union); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         bool is_union, is_partition;
         IndexSpace target;
@@ -1444,6 +1468,9 @@ namespace LegionRuntime {
       public:
         virtual Event perform(RegionTreeForest *forest)
         { return forest->compute_pending_space(target, initial, handles); }
+#ifdef LEGION_SPY
+        virtual void perform_logging(PendingPartitionOp* op);
+#endif
       protected:
         IndexSpace target, initial;
         std::vector<IndexSpace> handles;
@@ -1489,6 +1516,7 @@ namespace LegionRuntime {
                                              IndexSpace target, 
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
+      void perform_logging();
       inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual bool trigger_execution(void);

@@ -80,27 +80,27 @@ void top_level_task(const Task *task,
     int num_circuit_wires = num_pieces * wires_per_piece;
     // Make index spaces
     IndexSpace node_index_space = runtime->create_index_space(ctx,num_circuit_nodes);
-    runtime->attach_name(node_index_space, "node_index_space");
+    runtime->attach_name(node_index_space, "NODE INDEX SPACE");
     IndexSpace wire_index_space = runtime->create_index_space(ctx,num_circuit_wires);
-    runtime->attach_name(wire_index_space, "wire_index_space");
+    runtime->attach_name(wire_index_space, "WIRE INDEX SPACE");
     // Make field spaces
     FieldSpace node_field_space = runtime->create_field_space(ctx);
-    runtime->attach_name(node_field_space, "node_field_space");
+    runtime->attach_name(node_field_space, "NODE FIELD SPACE");
     FieldSpace wire_field_space = runtime->create_field_space(ctx);
-    runtime->attach_name(wire_field_space, "wire_field_space");
+    runtime->attach_name(wire_field_space, "WIRE FIELD SPACE");
     FieldSpace locator_field_space = runtime->create_field_space(ctx);
-    runtime->attach_name(locator_field_space, "locator_field_space");
+    runtime->attach_name(locator_field_space, "LOCATOR FIELD SPACE");
     // Allocate fields
     allocate_node_fields(ctx, runtime, node_field_space);
     allocate_wire_fields(ctx, runtime, wire_field_space);
     allocate_locator_fields(ctx, runtime, locator_field_space);
     // Make logical regions
     circuit.all_nodes = runtime->create_logical_region(ctx,node_index_space,node_field_space);
-    runtime->attach_name(circuit.all_nodes, "all_nodes");
+    runtime->attach_name(circuit.all_nodes, "ALL NODES");
     circuit.all_wires = runtime->create_logical_region(ctx,wire_index_space,wire_field_space);
-    runtime->attach_name(circuit.all_wires, "all_wires");
+    runtime->attach_name(circuit.all_wires, "ALL WIRES");
     circuit.node_locator = runtime->create_logical_region(ctx,node_index_space,locator_field_space);
-    runtime->attach_name(circuit.node_locator, "node_locator");
+    runtime->attach_name(circuit.node_locator, "NODE LOCATOR");
   }
 
   // Load the circuit
@@ -320,46 +320,46 @@ void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace nod
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, node_space);
   allocator.allocate_field(sizeof(float), FID_NODE_CAP);
-  runtime->attach_name(node_space, FID_NODE_CAP, "node capacitance");
+  runtime->attach_name(node_space, FID_NODE_CAP, "NODE CAPACITANCE");
   allocator.allocate_field(sizeof(float), FID_LEAKAGE);
-  runtime->attach_name(node_space, FID_LEAKAGE, "leakage");
+  runtime->attach_name(node_space, FID_LEAKAGE, "LEAKAGE");
   allocator.allocate_field(sizeof(float), FID_CHARGE);
-  runtime->attach_name(node_space, FID_CHARGE, "charge");
+  runtime->attach_name(node_space, FID_CHARGE, "CHARGE");
   allocator.allocate_field(sizeof(float), FID_NODE_VOLTAGE);
-  runtime->attach_name(node_space, FID_NODE_VOLTAGE, "node voltage");
+  runtime->attach_name(node_space, FID_NODE_VOLTAGE, "NODE VOLTAGE");
   allocator.allocate_field(sizeof(Color), FID_NODE_COLOR);
-  runtime->attach_name(node_space, FID_NODE_COLOR, "node color");
+  runtime->attach_name(node_space, FID_NODE_COLOR, "NODE COLOR");
 }
 
 void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, wire_space);
   allocator.allocate_field(sizeof(ptr_t), FID_IN_PTR);
-  runtime->attach_name(wire_space, FID_IN_PTR, "in_ptr");
+  runtime->attach_name(wire_space, FID_IN_PTR, "IN PTR");
   allocator.allocate_field(sizeof(ptr_t), FID_OUT_PTR);
-  runtime->attach_name(wire_space, FID_OUT_PTR, "out_ptr");
+  runtime->attach_name(wire_space, FID_OUT_PTR, "OUT PTR");
   allocator.allocate_field(sizeof(PointerLocation), FID_IN_LOC);
-  runtime->attach_name(wire_space, FID_IN_LOC, "in_loc");
+  runtime->attach_name(wire_space, FID_IN_LOC, "IN LOC");
   allocator.allocate_field(sizeof(PointerLocation), FID_OUT_LOC);
-  runtime->attach_name(wire_space, FID_OUT_LOC, "out_loc");
+  runtime->attach_name(wire_space, FID_OUT_LOC, "OUT LOC");
   allocator.allocate_field(sizeof(float), FID_INDUCTANCE);
-  runtime->attach_name(wire_space, FID_INDUCTANCE, "inductance");
+  runtime->attach_name(wire_space, FID_INDUCTANCE, "INDUCTANCE");
   allocator.allocate_field(sizeof(float), FID_RESISTANCE);
-  runtime->attach_name(wire_space, FID_RESISTANCE, "resistance");
+  runtime->attach_name(wire_space, FID_RESISTANCE, "RESISTANCE");
   allocator.allocate_field(sizeof(float), FID_WIRE_CAP);
-  runtime->attach_name(wire_space, FID_WIRE_CAP, "wire capacitance");
+  runtime->attach_name(wire_space, FID_WIRE_CAP, "WIRE CAPACITANCE");
   for (int i = 0; i < WIRE_SEGMENTS; i++)
   {
     char field_name[10];
     allocator.allocate_field(sizeof(float), FID_CURRENT+i);
-    sprintf(field_name, "current_%d", i);
+    sprintf(field_name, "CURRENT %d", i);
     runtime->attach_name(wire_space, FID_CURRENT+i, field_name);
   }
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
   {
     char field_name[15];
     allocator.allocate_field(sizeof(float), FID_WIRE_VOLTAGE+i);
-    sprintf(field_name, "wire_voltage_%d", i);
+    sprintf(field_name, "WIRE VOLTAGE %d", i);
     runtime->attach_name(wire_space, FID_WIRE_VOLTAGE+i, field_name);
   }
 }
@@ -368,7 +368,7 @@ void allocate_locator_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace 
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, locator_space);
   allocator.allocate_field(sizeof(PointerLocation), FID_LOCATOR);
-  runtime->attach_name(locator_space, FID_LOCATOR, "locator");
+  runtime->attach_name(locator_space, FID_LOCATOR, "LOCATOR");
 }
 
 PointerLocation find_location(ptr_t ptr, HighLevelRuntime *runtime, Context ctx,
@@ -554,44 +554,47 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   IndexPartition ip_nodes = 
     runtime->create_partition_by_field(ctx, ckt.all_nodes, ckt.all_nodes, 
                                        FID_NODE_COLOR, color_space); 
+  runtime->attach_name(ip_nodes, "NODES PARTITIONED BY COLOR");
   LogicalPartition lp_locator = 
     runtime->get_logical_partition(ctx, ckt.node_locator, ip_nodes);
-  runtime->attach_name(lp_locator, "locator partition");
+  runtime->attach_name(lp_locator, "LOCATOR PARTITION");
   result.node_locations = lp_locator;
   // Now partition the wires by mapping the node partition onto the wires
   IndexPartition ip_wires = 
     runtime->create_partition_by_preimage(ctx, ip_nodes, ckt.all_wires, ckt.all_wires,
                                           FID_IN_PTR, color_space, DISJOINT_KIND); 
-  runtime->attach_name(ip_wires, "wires index partition");
+  runtime->attach_name(ip_wires, "WIRES INDEX PARTITION");
   LogicalPartition lp_wires = 
     runtime->get_logical_partition(ctx, ckt.all_wires, ip_wires);
-  runtime->attach_name(lp_wires, "wires logical partition");
+  runtime->attach_name(lp_wires, "WIRES LOGICAL PARTITION");
   result.pvt_wires = lp_wires; 
 
   IndexPartition ip_temp_one_hop = 
     runtime->create_partition_by_image(ctx, ckt.all_nodes.get_index_space(),
                                        lp_wires, ckt.all_wires, FID_OUT_PTR, color_space);
+  runtime->attach_name(ip_temp_one_hop, "ALL NODES THAT OUT PTR POINTS TO");
   // Now compute the ghost partition
   IndexPartition ip_temp_ghost = 
     runtime->create_partition_by_difference(ctx, ckt.all_nodes.get_index_space(),
                                             ip_temp_one_hop, ip_nodes);
+  runtime->attach_name(ip_temp_ghost, "PARTITION FOR GHOST NODES");
 
   // Create the pending partition for all private and all shared regions
   Domain all_color_space = Domain::from_rect<1>(Rect<1>(0, 1));
   IndexPartition ip_all = 
     runtime->create_pending_partition(ctx, ckt.all_nodes.get_index_space(),
                                       all_color_space, DISJOINT_KIND);
-  runtime->attach_name(ip_all, "all index partition");
+  runtime->attach_name(ip_all, "ALL INDEX PARTITION");
   LogicalPartition lp_all = 
     runtime->get_logical_partition(ctx, ckt.all_nodes, ip_all);
-  runtime->attach_name(lp_all, "all logical partition");
+  runtime->attach_name(lp_all, "ALL LOGICAL PARTITION");
   // Compute each of the subregions
   DomainPoint all_private_color = DomainPoint::from_point<1>(Point<1>(0));
   DomainPoint all_shared_color = DomainPoint::from_point<1>(Point<1>(1));
 
   IndexSpace is_all_shared = 
     runtime->create_index_space_union(ctx, ip_all, all_shared_color, ip_temp_ghost);
-  runtime->attach_name(is_all_shared, "all shared index space");
+  runtime->attach_name(is_all_shared, "ALL SHARED INDEX SPACE");
 
   std::vector<IndexSpace> diff_spaces;
   diff_spaces.push_back(is_all_shared);
@@ -599,33 +602,34 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     runtime->create_index_space_difference(ctx, ip_all, all_private_color,
                                            ckt.all_nodes.get_index_space(),
                                            diff_spaces);
-  runtime->attach_name(is_all_private, "all private index space");
+  runtime->attach_name(is_all_private, "ALL PRIVATE INDEX SPACE");
   LogicalRegion lr_all_private = 
     runtime->get_logical_subregion(ctx, lp_all, is_all_private);
-  runtime->attach_name(lr_all_private, "all private nodes");
+  runtime->attach_name(lr_all_private, "ALL PRIVATE NODES");
   LogicalRegion lr_all_shared = 
     runtime->get_logical_subregion(ctx, lp_all, is_all_shared);
-  runtime->attach_name(lr_all_shared, "all shared nodes");
+  runtime->attach_name(lr_all_shared, "ALL SHARED NODES");
   // Now compute the sub-partitions
   IndexPartition ip_private = 
     runtime->create_partition_by_field(ctx, lr_all_private, ckt.all_nodes,
                                        FID_NODE_COLOR, color_space);
-  runtime->attach_name(ip_private, "private index space partition");
+  runtime->attach_name(ip_private, "PRIVATE INDEX SPACE PARTITION");
   result.pvt_nodes = runtime->get_logical_partition(ctx, lr_all_private, ip_private);
   IndexPartition ip_shared = 
     runtime->create_partition_by_field(ctx, lr_all_shared, ckt.all_nodes,
                                        FID_NODE_COLOR, color_space);
-  runtime->attach_name(ip_shared, "shared index space partition");
+  runtime->attach_name(ip_shared, "SHARED INDEX SPACE PARTITION");
   result.shr_nodes = runtime->get_logical_partition(ctx, lr_all_shared, ip_shared);
   // Ghost sub-partition 
   IndexPartition ip_shared_one_hop = 
     runtime->create_partition_by_image(ctx, is_all_shared, lp_wires, 
                                        ckt.all_wires, FID_OUT_PTR, color_space);
+  runtime->attach_name(ip_shared_one_hop, "SHARED NODES THAT OUT PTR POINTS TO");
   // Now compute the ghost partition
   IndexPartition ip_ghost = 
     runtime->create_partition_by_difference(ctx, is_all_shared,
                                             ip_shared_one_hop, ip_shared);
-  runtime->attach_name(ip_ghost, "ghost index space partition");
+  runtime->attach_name(ip_ghost, "GHOST INDEX SPACE PARTITION");
   result.ghost_nodes = runtime->get_logical_partition(ctx, lr_all_shared, ip_ghost);
 
   char buf[100];
@@ -634,19 +638,19 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   {
     pieces[n].pvt_nodes = 
       runtime->get_logical_subregion_by_color(ctx, result.pvt_nodes, n);
-    sprintf(buf, "private_nodes_of_piece_%d", n);
+    sprintf(buf, "PRIVATE NODES OF PIECE %d", n);
     runtime->attach_name(pieces[n].pvt_nodes, buf);
     pieces[n].shr_nodes = 
       runtime->get_logical_subregion_by_color(ctx, result.shr_nodes, n);
-    sprintf(buf, "shared_nodes_of_piece_%d", n);
+    sprintf(buf, "SHARED NODES OF PIECE %d", n);
     runtime->attach_name(pieces[n].shr_nodes, buf);
     pieces[n].ghost_nodes = 
       runtime->get_logical_subregion_by_color(ctx, result.ghost_nodes, n);
-    sprintf(buf, "ghost_nodes_of_piece_%d", n);
+    sprintf(buf, "GHOST NODES OF PIECE %d", n);
     runtime->attach_name(pieces[n].ghost_nodes, buf);
     pieces[n].pvt_wires = 
       runtime->get_logical_subregion_by_color(ctx, result.pvt_wires, n);
-    sprintf(buf, "private_wires_of_piece_%d", n);
+    sprintf(buf, "PRIVATE WIRES OF PIECE %d", n);
     runtime->attach_name(pieces[n].pvt_wires, buf);
     pieces[n].num_wires = wires_per_piece;
     pieces[n].first_wire = first_wires[n];

@@ -7457,6 +7457,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7504,6 +7508,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7553,6 +7561,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7602,6 +7614,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7652,6 +7668,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_difference(ctx, result, initial, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);

@@ -32,34 +32,36 @@ mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (
 
 # Calls for the shape of region trees
 top_index_pat           = re.compile(prefix+"Index Space (?P<uid>[0-9a-f]+)")
-top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
+top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-\w ]+)")
 index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
+index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-\w ]+)")
 index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
-field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>\w+)")
+field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-\w ]+)")
 field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
-field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>\w+)")
+field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-\w ]+)")
 region_pat              = re.compile(prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
-region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>\w+)")
-partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>\w+)")
+region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
+partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
 
 # Logger calls for operations
-top_task_pat            = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
-single_task_pat         = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
-index_task_pat          = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
-mapping_pat             = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-close_pat               = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
-fence_pat               = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-copy_op_pat             = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-acquire_op_pat          = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-release_op_pat          = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-deletion_pat            = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-partition_op_pat        = re.compile(prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<kind>[0-9]+)")
-index_slice_pat         = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
-slice_slice_pat         = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
-slice_point_pat         = re.compile(prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-point_point_pat         = re.compile(prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
+top_task_pat             = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
+single_task_pat          = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
+index_task_pat           = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
+mapping_pat              = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+close_pat                = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+fence_pat                = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+copy_op_pat              = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+acquire_op_pat           = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+release_op_pat           = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+deletion_pat             = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+dep_partition_op_pat     = re.compile(prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+pending_partition_op_pat = re.compile(prefix+"Pending Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+target_partition_pat     = re.compile(prefix+"Pending Partition Target (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+index_slice_pat          = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
+slice_slice_pat          = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
+slice_point_pat          = re.compile(prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+point_point_pat          = re.compile(prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 
 # Logger calls for phase barriers
 phase_barrier_pat       = re.compile(prefix+"Phase Barrier (?P<uid>[0-9a-f]+)")
@@ -198,9 +200,17 @@ def parse_log_line(line, state):
     if m <> None:
         if state.add_deletion(int(m.group('ctx')), int(m.group('uid'))):
             return True
-    m = partition_op_pat.match(line)
+    m = dep_partition_op_pat.match(line)
     if m <> None:
-        if state.add_partition_op(int(m.group('ctx')), int(m.group('uid')), int(m.group('kind'))):
+        if state.add_dependent_partition_op(int(m.group('ctx')), int(m.group('uid')), int(m.group('pid'), 16), int(m.group('kind'))):
+            return True
+    m = pending_partition_op_pat.match(line)
+    if m <> None:
+        if state.add_pending_partition_op(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = target_partition_pat.match(line)
+    if m <> None:
+        if state.set_pending_partition_target(int(m.group('uid')), int(m.group('pid'), 16), int(m.group('kind'))):
             return True
     m = index_slice_pat.match(line)
     if m <> None:

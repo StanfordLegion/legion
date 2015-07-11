@@ -535,6 +535,9 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DISJOINTNESS_TASK_ID, NULL,
                                          domain_ready);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(domain_ready, disjointness_event);
+#endif
       }
     }
 
@@ -618,6 +621,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_field(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -677,6 +683,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_image(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -738,6 +747,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_preimage(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -818,6 +830,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -860,6 +875,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -904,6 +922,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -7639,6 +7660,9 @@ namespace LegionRuntime {
         Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
         // Now set the domains for all the nodes
         idx = 0;
         for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
@@ -7699,6 +7723,9 @@ namespace LegionRuntime {
         Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
         // Now set the domains for the nodes
         idx = 0;
         for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
