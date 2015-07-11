@@ -25,8 +25,10 @@ task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-
 meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
+multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
@@ -482,6 +484,14 @@ class Channel(object):
     def __repr__(self):
         return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
+class TaskKind(object):
+    def __init__(self, task_id, name):
+        self.task_id = task_id
+        self.name = 'Task "'+name+'"'
+
+    def __repr__(self):
+        return self.name
+
 class Variant(object):
     def __init__(self, func_id, name):
         self.func_id = func_id
@@ -549,8 +559,10 @@ class Operation(object):
         self.kind = None
         self.is_task = False
         self.is_meta = False
+        self.is_multi = False
         self.name = 'Operation '+str(op_id)
         self.variant = None
+        self.task_kind = None
         self.create = None
         self.ready = None
         self.start = None
@@ -582,7 +594,11 @@ class Operation(object):
 
     def __repr__(self):
         if self.is_task:
+            assert self.variant is not None
             return self.variant.name+' '+self.get_info()
+        elif self.is_multi:
+            assert self.task_kind is not None
+            return self.task_kind.name+' '+self.get_info()
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -818,10 +834,12 @@ class State(object):
         self.processors = {}
         self.memories = {}
         self.channels = {}
+        self.task_kinds = {}
         self.variants = {}
         self.meta_variants = {}
         self.op_kinds = {}
         self.operations = {}
+        self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
         self.last_time = 0L
@@ -873,6 +891,11 @@ class State(object):
                                        read_time(m.group('create')),
                                        read_time(m.group('destroy')))
                     continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')),
+                                  m.group('name'))
+                    continue
                 m = variant_pat.match(line)
                 if m is not None:
                     self.log_variant(int(m.group('fid')),
@@ -882,6 +905,11 @@ class State(object):
                 if m is not None:
                     self.log_operation(long(m.group('opid')),
                                        int(m.group('kind')))
+                    continue
+                m = multi_pat.match(line)
+                if m is not None:
+                    self.log_multi(long(m.group('opid')),
+                                   int(m.group('tid')))
                     continue
                 m = meta_desc_pat.match(line)
                 if m is not None:
@@ -966,6 +994,10 @@ class State(object):
             self.last_time = destroy 
         mem.add_instance(inst)
 
+    def log_kind(self, task_id, name):
+        if task_id not in self.task_kinds:
+            self.task_kinds[task_id] = TaskKind(task_id, name)
+
     def log_variant(self, func_id, name):
         if func_id not in self.variants:
             self.variants[func_id] = Variant(func_id, name)
@@ -977,6 +1009,12 @@ class State(object):
         assert kind in self.op_kinds
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
+
+    def log_multi(self, op_id, task_id):
+        op = self.find_op(op_id)
+        if task_id in self.task_kinds:
+            op.is_multi = True
+            op.task_kind = self.task_kinds[task_id]
 
     def log_meta_desc(self, hlr, name):
         if hlr not in self.meta_variants:

@@ -57,11 +57,12 @@ namespace LegionRuntime {
       int max_local_id = 1;
       int local_space = 
         Processor::get_executing_processor().address_space();
-      const std::set<Processor> &procs = runtime->machine->get_all_processors();
+      std::set<Processor> procs;
+      runtime->machine.get_all_processors(procs);
       for (std::set<Processor>::const_iterator it = procs.begin();
             it != procs.end(); it++)
       {
-        if (local_space == it->address_space())
+        if (local_space == int(it->address_space()))
         {
           int local = it->local_id();
           if (local > max_local_id)
@@ -70,6 +71,8 @@ namespace LegionRuntime {
       }
       // Reserve enough space for traces for each processor
       traces.resize(max_local_id+1);
+      for (unsigned idx = 0; idx < traces.size(); idx++)
+        traces[idx].push_back(PerfTrace()); // empty perf trace for no recording
 #endif
     }
 
@@ -2096,6 +2099,9 @@ namespace LegionRuntime {
                                                    )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
+#endif
       RegionNode *top_node = get_node(req.parent);
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
@@ -2141,6 +2147,9 @@ namespace LegionRuntime {
                                      false/*before*/, true/*premap*/,
                                      true/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -4355,7 +4364,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Processor p = Processor::get_executing_processor();
-      traces[p.local_id()].record_call(kind, time);
+      traces[p.local_id()].back().record_call(kind, time);
     }
 
     //--------------------------------------------------------------------------
@@ -4365,7 +4374,7 @@ namespace LegionRuntime {
       Processor p = Processor::get_executing_processor();
       unsigned long long start = TimeStamp::get_current_time_in_micros();
       assert(p.local_id() < traces.size());
-      traces[p.local_id()] = PerfTrace(kind, start);
+      traces[p.local_id()].push_back(PerfTrace(kind, start));
     }
 
     //--------------------------------------------------------------------------
@@ -4374,13 +4383,15 @@ namespace LegionRuntime {
     {
       Processor p = Processor::get_executing_processor();
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      PerfTrace &trace = traces[p.local_id()];
+      unsigned index = p.local_id();
+      PerfTrace &trace = traces[index].back();
       unsigned long long diff = stop - trace.start;
       if (diff >= tolerance)
       {
         AutoLock t_lock(perf_trace_lock);
         trace.report_trace(diff);
       }
+      traces[index].pop_back();
     }
 
     //--------------------------------------------------------------------------
@@ -4428,6 +4439,11 @@ namespace LegionRuntime {
         case COPY_ACROSS_ANALYSIS:
           {
             fprintf(stdout,"COPY ACROSS ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case PERFORM_CLOSE_OPERATIONS_ANALYSIS:
+          {
+            fprintf(stdout,"PERFORM CLOSE OPERATIONS ANALYSIS: %lld us\n",diff);
             break;
           }
         default:
@@ -9054,7 +9070,7 @@ namespace LegionRuntime {
       }
       else
       {
-        // Ease case of making a foldable reduction
+        // Easy case of making a foldable reduction
         PhysicalInstance inst = context->create_instance(domain, location,
                                            reduction_op->sizeof_rhs, redop, op);
         if (inst.exists())
@@ -16027,7 +16043,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_DEPENDENCE_CHECKS_CALL);
+      PerfTracer tracer(user.op->runtime->forest, 
+                        PERFORM_DEPENDENCE_CHECKS_CALL);
 #endif
       FieldMask dominator_mask = check_mask;
       // It's not actually sound to assume we dominate something
@@ -16172,7 +16189,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_CLOSING_CHECKS_CALL);
+      PerfTracer tracer(closer.user.op->runtime->forest, 
+                        PERFORM_CLOSING_CHECKS_CALL);
 #endif
       // Since we are performing a close operation on the region
       // tree data structure, we know that we need to register
@@ -17657,13 +17675,21 @@ namespace LegionRuntime {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
             continue;
-          if (it->first->is_deferred_view())
-            continue;
-          MaterializedView *current = it->first->as_materialized_view();
           char *valid_mask = overlap.to_string();
-          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                      current->manager->get_instance().id, 
-                      current->manager->memory.id, valid_mask);
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *current = it->first->as_deferred_view();
+            logger->log("%s View %p Mask %s",
+                        current->is_composite_view() ? "Composite" : "Fill",
+                        current, valid_mask);            
+          }
+          else
+          {
+            MaterializedView *current = it->first->as_materialized_view();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->memory.id, valid_mask);
+          }
           free(valid_mask);
         }
         logger->up();
@@ -18830,11 +18856,21 @@ namespace LegionRuntime {
             continue;
           if (it->first->is_deferred_view())
             continue;
-          MaterializedView *current = it->first->as_materialized_view();
           char *valid_mask = overlap.to_string();
-          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                      current->manager->get_instance().id, 
-                      current->manager->memory.id, valid_mask);
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *current = it->first->as_deferred_view();
+            logger->log("%s View %p  Mask %s",
+                        current->is_composite_view() ? "Composite" : "Fill",
+                        current, valid_mask);            
+          }
+          else
+          {
+            MaterializedView *current = it->first->as_materialized_view();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->memory.id, valid_mask);
+          }
           free(valid_mask);
         }
         logger->up();

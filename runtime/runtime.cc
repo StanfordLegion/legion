@@ -4963,6 +4963,7 @@ namespace LegionRuntime {
         {
           const std::map<VariantID,TaskVariantCollection::Variant> 
             &variants = cit->second->variants;  
+          profiler->register_task_kind(cit->first, cit->second->name);
           for (std::map<VariantID,TaskVariantCollection::Variant>::
                 const_iterator it = variants.begin(); it != 
                 variants.end(); it++)

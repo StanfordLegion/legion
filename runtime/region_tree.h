@@ -636,8 +636,8 @@ namespace LegionRuntime {
         int kind;
         int count;
         unsigned long long total_time;
-        unsigned long long min_time;
         unsigned long long max_time;
+        unsigned long long min_time;
       };
       struct PerfTrace {
       public:
@@ -659,7 +659,7 @@ namespace LegionRuntime {
       };
     protected:
       Reservation perf_trace_lock;
-      std::vector<PerfTrace> traces;
+      std::vector<std::vector<PerfTrace> > traces;
 #endif
     };
 
@@ -671,6 +671,7 @@ namespace LegionRuntime {
       REMAP_PHYSICAL_REGION_ANALYSIS,
       REGISTER_PHYSICAL_REGION_ANALYSIS,
       COPY_ACROSS_ANALYSIS,
+      PERFORM_CLOSE_OPERATIONS_ANALYSIS,
     };
 
     enum CallKind {
