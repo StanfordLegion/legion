@@ -1786,9 +1786,6 @@ namespace LegionRuntime {
                                                        )
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -1798,6 +1795,9 @@ namespace LegionRuntime {
       {
         return MappingRef(ref.get_handle().get_view(), FieldMask());
       }
+#ifdef DEBUG_PERF
+      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
+#endif
       RegionNode *target_node = get_node(req.region);
       FieldMask user_mask = 
         target_node->column_source->get_field_mask(req.privilege_fields);
