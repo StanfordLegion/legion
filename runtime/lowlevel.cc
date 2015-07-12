@@ -7908,21 +7908,17 @@ namespace LegionRuntime {
       off_t o;
       if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * metadata.elmt_size) + byte_offset;
+	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
+        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
+                         metadata.elmt_size, metadata.block_size, index);
 
-	int block_num = index / metadata.block_size;
-	int block_ofs = index % metadata.block_size;
-
-	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
-	     (field_size * block_ofs) +
-	     (byte_offset - field_start));
       }
       Memory::Impl *m = get_runtime()->get_memory_impl(memory);
-      m->get_bytes(metadata.alloc_offset + o, dst, size);
+      m->get_bytes(o, dst, size);
     }
 
     void RegionInstance::Impl::put_bytes(int index, off_t byte_offset, const void *src, size_t size)
@@ -7932,21 +7928,16 @@ namespace LegionRuntime {
       off_t o;
       if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * metadata.elmt_size) + byte_offset;
+	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
-
-	int block_num = index / metadata.block_size;
-	int block_ofs = index % metadata.block_size;
-
-	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
-	     (field_size * block_ofs) +
-	     (byte_offset - field_start));
+        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
+                         metadata.elmt_size, metadata.block_size, index);
       }
       Memory::Impl *m = get_runtime()->get_memory_impl(memory);
-      m->put_bytes(metadata.alloc_offset + o, src, size);
+      m->put_bytes(o, src, size);
     }
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };

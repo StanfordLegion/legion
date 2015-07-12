@@ -251,9 +251,11 @@ namespace LegionRuntime {
       template<int DIM>
       void perform_dma_rect(Memory::Impl *mem_impl);
 
+      size_t optimize_fill_buffer(RegionInstance::Impl *impl, int &fill_elmts);
+
       Domain domain;
       Domain::CopySrcDstField dst;
-      void *fill_value;
+      void *fill_buffer;
       size_t fill_size;
       Event before_fill;
       Waiter waiter;
@@ -1086,15 +1088,6 @@ namespace LegionRuntime {
 	byte_offset -= (*it);
       }
       assert(0);
-    }
-
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-				     int block_size, int index)
-    {
-      return (alloc_offset +                                      // start address
-	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-	      (field_start * block_size) +                        // skip other fields
-	      ((index % block_size) * field_size));               // some some of our fields within our block
     }
 
     static inline int min(int a, int b) { return (a < b) ? a : b; }
@@ -3836,8 +3829,8 @@ namespace LegionRuntime {
       size_t elmts = *idata++;
 
       fill_size = dst.size;
-      fill_value = malloc(fill_size);
-      memcpy(fill_value, idata, fill_size);
+      fill_buffer = malloc(fill_size);
+      memcpy(fill_buffer, idata, fill_size);
 
       idata += elmts;
 
@@ -3855,14 +3848,14 @@ namespace LegionRuntime {
         before_fill(_before_fill)
     {
       fill_size = _fill_size;
-      fill_value = malloc(fill_size);
-      memcpy(fill_value, _fill_value, fill_size);
+      fill_buffer = malloc(fill_size);
+      memcpy(fill_buffer, _fill_value, fill_size);
     }
 
     FillRequest::~FillRequest(void)
     {
       // clean up our mess
-      free(fill_value);
+      free(fill_buffer);
       if (measurements.wants_measurement<
           Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
@@ -3888,7 +3881,7 @@ namespace LegionRuntime {
       assert(dst.size == fill_size);
       size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
       *msgptr++ = elmts;
-      memcpy(msgptr, fill_value, fill_size);
+      memcpy(msgptr, fill_buffer, fill_size);
       msgptr += elmts;
 
       requests.serialize(msgptr);
@@ -3996,6 +3989,9 @@ namespace LegionRuntime {
               find_field_start(inst_impl->metadata.field_sizes, dst.offset,
                                dst.size, field_start, field_size);
               assert(field_size <= int(fill_size));
+              int fill_elmts = 1;
+              // Optimize our buffer for the target instance
+              size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
               Arrays::Mapping<1, 1> *dst_linearization = 
                 inst_impl->metadata.linearization.get_mapping<1>();
               ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
@@ -4012,10 +4008,18 @@ namespace LegionRuntime {
                                                  inst_impl->metadata.elmt_size,
                                                  inst_impl->metadata.block_size,
                                                  dst_index + done);
-                  for (int i = 0; i < todo; i++) {
-                    mem_impl->put_bytes(dst_start+i, fill_value, fill_size); 
+                  // Record how many we've done
+                  done += done;
+                  // Now do as many bulk transfers as we can
+                  while (todo > fill_elmts) {
+                    mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size);
+                    dst_start += fill_elmts_size;
+                    todo -= fill_elmts;
                   }
-                  done += todo;
+                  // Handle any remainder elemts
+                  if (todo > 0) {
+                    mem_impl->put_bytes(dst_start, fill_buffer, todo*fill_size);
+                  }
                 }
               }
               delete e;
@@ -4042,6 +4046,8 @@ namespace LegionRuntime {
       } else {
         // TODO: Implement GASNet, Disk, and Framebuffer
       }
+      if(after_copy.exists())
+        get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
     }
 
     template<int DIM>
@@ -4055,6 +4061,9 @@ namespace LegionRuntime {
       typename Arrays::Mapping<DIM, 1> *dst_linearization = 
         inst_impl->metadata.linearization.get_mapping<DIM>();
       typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+      int fill_elmts = 1;
+      // Optimize our buffer for the target instance
+      size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
       for (typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(rect, 
             *dst_linearization); lso; lso++) {
         int dst_index = lso.image_lo[0];
@@ -4069,12 +4078,49 @@ namespace LegionRuntime {
                                          inst_impl->metadata.elmt_size,
                                          inst_impl->metadata.block_size,
                                          dst_index + done);
-          for (int i = 0; i < todo; i++) {
-            mem_impl->put_bytes(dst_start+i, fill_value, fill_size); 
-          }
+          // Record how many we've done
           done += todo;
+          // Now do as many bulk transfers as we can
+          while (todo >= fill_elmts) {
+            mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size); 
+            dst_start += fill_elmts_size;
+            todo -= fill_elmts;
+          }
+          // Handle any remainder elemts
+          if (todo > 0) {
+            mem_impl->put_bytes(dst_start, fill_buffer, todo*fill_size);
+          }
         }
       }
+    }
+
+    size_t FillRequest::optimize_fill_buffer(RegionInstance::Impl *inst_impl, int &fill_elmts)
+    {
+      const size_t max_size = 1024; 
+      // Only do this optimization for "small" fields
+      // which are less than half a page
+      if (fill_size <= max_size)
+      {
+        // If we have a single-field instance or we have a set 
+        // of contiguous elmts then make a bulk buffer to use
+        if ((inst_impl->metadata.elmt_size == fill_size) ||
+            (inst_impl->metadata.block_size > 1)) 
+        {
+          fill_elmts = min(inst_impl->metadata.block_size,max_size/fill_size);
+          size_t fill_elmts_size = fill_elmts * fill_size;
+          char *next_buffer = (char*)malloc(fill_elmts_size);
+          char *next_ptr = next_buffer;
+          for (int idx = 0; idx < fill_elmts; idx++) {
+            memcpy(next_ptr, fill_buffer, fill_size);
+            next_ptr += fill_size;
+          }
+          // Free the old buffer and replace it
+          free(fill_buffer);
+          fill_buffer = next_buffer;
+          return fill_elmts_size;
+        }
+      }
+      return fill_size;
     }
 
     static volatile bool terminate_flag = false;

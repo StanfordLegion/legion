@@ -66,6 +66,17 @@ namespace LegionRuntime {
 			     Event before_copy,
 			     Event after_copy = Event::NO_EVENT);
     */
+
+    // An important helper method used in other places
+    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
+				     int block_size, int index)
+    {
+      return (alloc_offset +                                      // start address
+	      ((index / block_size) * block_size * elmt_size) +   // full blocks
+	      (field_start * block_size) +                        // skip other fields
+	      ((index % block_size) * field_size));               // some some of our fields within our block
+    }
+
   };
 };
 
