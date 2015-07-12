@@ -4011,7 +4011,7 @@ namespace LegionRuntime {
                   // Record how many we've done
                   done += done;
                   // Now do as many bulk transfers as we can
-                  while (todo > fill_elmts) {
+                  while (todo >= fill_elmts) {
                     mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size);
                     dst_start += fill_elmts_size;
                     todo -= fill_elmts;
@@ -4106,7 +4106,7 @@ namespace LegionRuntime {
         if ((inst_impl->metadata.elmt_size == fill_size) ||
             (inst_impl->metadata.block_size > 1)) 
         {
-          fill_elmts = min(inst_impl->metadata.block_size,max_size/fill_size);
+          fill_elmts = min(inst_impl->metadata.block_size,2*max_size/fill_size);
           size_t fill_elmts_size = fill_elmts * fill_size;
           char *next_buffer = (char*)malloc(fill_elmts_size);
           char *next_ptr = next_buffer;

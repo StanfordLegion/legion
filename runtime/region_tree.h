@@ -507,6 +507,10 @@ namespace LegionRuntime {
                        const std::vector<Domain::CopySrcDstField> &src_fields,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
+      Event issue_fill(const Domain &dom, Operation *op,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       const void *fill_value, size_t fill_size,
+                       Event precondition = Event::NO_EVENT);
       Event issue_reduction_copy(const Domain &dom, Operation *op,
                        ReductionOpID redop, bool reduction_fold,
                        const std::vector<Domain::CopySrcDstField> &src_fields,
@@ -3366,6 +3370,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const = 0;
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
+      virtual Event get_use_event(void) const = 0;
     public:
       virtual DistributedID send_manager(AddressSpaceID target, 
                         std::set<PhysicalManager*> &needed_managers);
@@ -3424,6 +3429,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -3441,7 +3447,7 @@ namespace LegionRuntime {
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op);
+                           const ReductionOp *op, Event use_event);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
@@ -3466,6 +3472,9 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
+    public:
+      const Event use_event;
     };
 
     /**

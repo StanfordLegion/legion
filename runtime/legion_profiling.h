@@ -71,6 +71,12 @@ namespace LegionRuntime {
         Memory source, target;
         unsigned long long create, ready, start, stop;
       };
+      struct FillInfo {
+      public:
+        UniqueID op_id;
+        Memory target;
+        unsigned long long create, ready, start, stop;
+      };
       struct InstInfo {
       public:
         UniqueID op_id; 
@@ -101,6 +107,9 @@ namespace LegionRuntime {
       void process_copy(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
+      void process_fill(UniqueID op_id,
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
+                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
       void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
@@ -111,11 +120,12 @@ namespace LegionRuntime {
       std::deque<TaskKind>          task_kinds;
       std::deque<TaskVariant>       task_variants;
       std::deque<OperationInstance> operation_instances;
-      std::deque<MultiTask>        multi_tasks;
+      std::deque<MultiTask>         multi_tasks;
     private:
       std::deque<TaskInfo> task_infos;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
+      std::deque<FillInfo> fill_infos;
       std::deque<InstInfo> inst_infos;
     };
 
@@ -125,6 +135,7 @@ namespace LegionRuntime {
         LEGION_PROF_TASK,
         LEGION_PROF_META,
         LEGION_PROF_COPY,
+        LEGION_PROF_FILL,
         LEGION_PROF_INST,
       };
       struct ProfilingInfo {
@@ -164,6 +175,8 @@ namespace LegionRuntime {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             HLRTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
+                            Operation *op);
+      void add_fill_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);

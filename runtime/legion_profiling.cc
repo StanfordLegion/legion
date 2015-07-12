@@ -152,6 +152,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::process_fill(UniqueID op_id,
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
+                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
+    //--------------------------------------------------------------------------
+    {
+      fill_infos.push_back(FillInfo());
+      FillInfo &info = fill_infos.back();
+      info.op_id = op_id;
+      info.target = usage->target;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      info.stop = timeline->end_time;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage)
@@ -213,6 +229,13 @@ namespace LegionRuntime {
         log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT 
                       " %llu %llu %llu %llu", it->op_id, it->source.id,
                     it->target.id, it->create, it->ready, it->start, it->stop);
+      }
+      for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
+            it != fill_infos.end(); it++)
+      {
+        log_prof.info("Prof Fill Info %llu " IDFMT 
+                      " %llu %llu %llu %llu", it->op_id, it->target.id, 
+                            it->create, it->ready, it->start, it->stop);
       }
       for (std::deque<InstInfo>::const_iterator it = inst_infos.begin();
             it != inst_infos.end(); it++)
@@ -403,7 +426,24 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
+                                          Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_FILL);
+      // No ID here
+      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -502,6 +542,26 @@ namespace LegionRuntime {
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationMemoryUsage>();
             instances[local_id]->process_copy(info->op_id,
+                                              timeline, usage);
+            delete timeline;
+            delete usage;
+            break;
+          }
+        case LEGION_PROF_FILL:
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>());
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>());
+#endif
+            Realm::ProfilingMeasurements::OperationTimeline *timeline = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>();
+            Realm::ProfilingMeasurements::OperationMemoryUsage *usage = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationMemoryUsage>();
+            instances[local_id]->process_fill(info->op_id,
                                               timeline, usage);
             delete timeline;
             delete usage;

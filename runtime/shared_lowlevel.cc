@@ -5463,9 +5463,7 @@ namespace LegionRuntime {
 	const ReductionOpUntyped *redop = 0;
 	if(redop_id) {
 	  redop = Runtime::Impl::get_runtime()->get_reduction_op(redop_id);
-	  assert(redop->has_identity);
-	  assert(elmt_size == redop->sizeof_rhs);
-	  redop->init(ptr, rounded_num_elmts);
+          // We no longer do reduction initialization in the low-level runtime
 	}
 
 	RegionInstance::Impl* impl = Runtime::Impl::get_runtime()->get_free_instance(m,

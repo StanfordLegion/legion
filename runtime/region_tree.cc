@@ -3876,6 +3876,24 @@ namespace LegionRuntime {
       else
         return dom.copy(src_fields, dst_fields, precondition);
     }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeForest::issue_fill(const Domain &dom, Operation *op,
+                         const std::vector<Domain::CopySrcDstField> &dst_fields,
+                         const void *fill_value, size_t fill_size,
+                                       Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->profiler != NULL)
+      {
+        Realm::ProfilingRequestSet requests;
+        runtime->profiler->add_fill_request(requests, op);
+        return dom.fill(dst_fields, requests, 
+                        fill_value, fill_size, precondition);
+      }
+      else
+        return dom.fill(dst_fields, fill_value, fill_size, precondition);
+    }
     
     //--------------------------------------------------------------------------
     Event RegionTreeForest::issue_reduction_copy(const Domain &dom, 
@@ -9076,11 +9094,23 @@ namespace LegionRuntime {
         if (inst.exists())
         {
           DistributedID did = context->runtime->get_available_distributed_id();
+          // Issue the fill operation to fill in the init values for the field
+          std::vector<Domain::CopySrcDstField> init(1);
+          Domain::CopySrcDstField &dst = init[1];
+          dst.inst = inst;
+          dst.offset = 0;
+          dst.size = reduction_op->sizeof_rhs;
+          // Get the initial value
+          void *init_value = malloc(reduction_op->sizeof_rhs);
+          reduction_op->init(init_value, 1);
+          Event ready_event = context->issue_fill(domain, op, init, init_value, 
+                                                  reduction_op->sizeof_rhs);
+          free(init_value);
           result = legion_new<FoldReductionManager>(context, did,
                                             context->runtime->address_space,
                                             context->runtime->address_space, 
                                             location, inst, node, redop, 
-                                            reduction_op);
+                                            reduction_op, ready_event);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
@@ -20368,6 +20398,7 @@ namespace LegionRuntime {
       rez.serialize(region_node->handle);
       rez.serialize(is_foldable());
       rez.serialize(get_pointer_space());
+      rez.serialize(get_use_event());
     }
 
     //--------------------------------------------------------------------------
@@ -20391,6 +20422,8 @@ namespace LegionRuntime {
       derez.deserialize(foldable);
       Domain ptr_space;
       derez.deserialize(ptr_space);
+      Event use_event;
+      derez.deserialize(use_event);
 
       RegionNode *node = context->get_node(handle);
       const ReductionOp *op = Runtime::get_reduction_op(redop);
@@ -20402,7 +20435,7 @@ namespace LegionRuntime {
         if (make)
           return legion_new<FoldReductionManager>(context, did, owner_space,
                                           context->runtime->address_space,
-                                          mem, inst, node, redop, op);
+                                          mem, inst, node, redop, op, use_event);
         else
           return NULL;
       }
@@ -20599,6 +20632,13 @@ namespace LegionRuntime {
       return NULL;
     }
 
+    //--------------------------------------------------------------------------
+    Event ListReductionManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Event::NO_EVENT;
+    }
+
     /////////////////////////////////////////////////////////////
     // FoldReductionManager 
     /////////////////////////////////////////////////////////////
@@ -20612,9 +20652,10 @@ namespace LegionRuntime {
                                                PhysicalInstance inst, 
                                                RegionNode *node,
                                                ReductionOpID red,
-                                               const ReductionOp *o)
+                                               const ReductionOp *o,
+                                               Event u_event)
       : ReductionManager(ctx, did, owner_space, local_space, mem, 
-                         inst, node, red, o)
+                         inst, node, red, o), use_event(u_event)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -20624,7 +20665,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, Memory::NO_MEMORY,
-                         PhysicalInstance::NO_INST, NULL, 0, NULL)
+                         PhysicalInstance::NO_INST, NULL, 0, NULL),
+        use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20749,6 +20791,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return const_cast<FoldReductionManager*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    Event FoldReductionManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return use_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -25685,8 +25734,9 @@ namespace LegionRuntime {
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(it->fill(dst_fields, value, 
-                                        value_size, fill_pre));
+            post_events.insert(context->issue_fill(*it, info.op,
+                                                   dst_fields, value,
+                                                   value_size, fill_pre));
           }
           fill_post = Event::merge_events(post_events);
         }
@@ -25696,7 +25746,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+          fill_post = context->issue_fill(dom, info.op, dst_fields,
+                                          value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         if (!fill_post.exists())
@@ -25798,8 +25849,8 @@ namespace LegionRuntime {
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(it->fill(dst_fields, value, 
-                                        value_size, fill_pre));
+            post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+                                                  value, value_size, fill_pre));
           }
           fill_post = Event::merge_events(post_events);
         }
@@ -25809,7 +25860,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+          fill_post = context->issue_fill(dom, info.op, dst_fields,
+                                          value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         if (!fill_post.exists())
@@ -25843,8 +25895,8 @@ namespace LegionRuntime {
       for (std::set<Domain>::const_iterator it = overlap_domains.begin();
             it != overlap_domains.end(); it++)
       {
-        post_events.insert(it->fill(dst_fields, value, 
-                                    value_size, precondition));
+        post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+                                              value, value_size, precondition));
       }
       Event post_event = Event::merge_events(post_events); 
       // If we're going to issue a reduction then we can just flush reductions
@@ -26595,6 +26647,16 @@ namespace LegionRuntime {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
+      Event use_event = manager->get_use_event();
+      if (use_event.exists())
+      {
+        LegionMap<Event,FieldMask>::aligned::iterator finder = 
+            preconditions.find(use_event);
+        if (finder == preconditions.end())
+          preconditions[use_event] = copy_mask;
+        else
+          finder->second |= copy_mask;
+      }
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       if (reading)
       {
@@ -26673,9 +26735,12 @@ namespace LegionRuntime {
       assert(IS_REDUCE(user.usage));
       assert(user.usage.redop == manager->redop);
 #endif
+      std::set<Event> wait_on;
+      Event use_event = manager->get_use_event();
+      if (use_event.exists())
+        wait_on.insert(use_event);
       AutoLock v_lock(view_lock);
       // Wait on any readers currently reading the instance
-      std::set<Event> wait_on;
       for (LegionList<PhysicalUser>::aligned::const_iterator it = 
             reading_users.begin(); it != reading_users.end(); it++)
       {
