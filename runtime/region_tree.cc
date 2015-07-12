@@ -9096,7 +9096,7 @@ namespace LegionRuntime {
           DistributedID did = context->runtime->get_available_distributed_id();
           // Issue the fill operation to fill in the init values for the field
           std::vector<Domain::CopySrcDstField> init(1);
-          Domain::CopySrcDstField &dst = init[1];
+          Domain::CopySrcDstField &dst = init[0];
           dst.inst = inst;
           dst.offset = 0;
           dst.size = reduction_op->sizeof_rhs;
