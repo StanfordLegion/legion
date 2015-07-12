@@ -4075,9 +4075,9 @@ namespace LegionRuntime {
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
-        if (get_linearization().get_dim() == 1) {
+        if (linearization.get_dim() == 1) {
           Arrays::Mapping<1, 1> *dst_linearization = 
-            get_linearization().get_mapping<1>();
+            linearization.get_mapping<1>();
           for (Domain::DomainPointIterator itr(domain); itr; itr++)
           {
             int index = dst_linearization->image(itr.p.get_index());
