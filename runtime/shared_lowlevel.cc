@@ -4075,12 +4075,24 @@ namespace LegionRuntime {
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
-        for (Domain::DomainPointIterator itr(domain); itr; itr++)
-        {
-          int index = itr.p.get_index();
-          void *raw_addr = get_address(index, field_start,
-                                       field_size, within_field);
-          memcpy(raw_addr, fill_value, fill_value_size);
+        if (get_linearization().get_dim() == 1) {
+          Arrays::Mapping<1, 1> *dst_linearization = 
+            get_linearization().get_mapping<1>();
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = dst_linearization->image(itr.p.get_index());
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
+        } else {
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = itr.p.get_index();
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
         }
       } else {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
