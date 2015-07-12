@@ -733,7 +733,7 @@ namespace LegionRuntime {
       derez.deserialize(did);
       
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-      if (target->remove_resource_reference())
+      if (target->remove_nested_resource_ref(did))
         delete target;
     }
 
@@ -751,7 +751,7 @@ namespace LegionRuntime {
       derez.deserialize(cnt);
 
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-      if (target->remove_remote_reference(source, destruction_event, cnt))
+      if (target->remove_nested_remote_ref(source, destruction_event, did, cnt))
         delete target;
     }
 
@@ -794,7 +794,7 @@ namespace LegionRuntime {
       // can only be deleted once its owner has been deleted
       if (owner_did != did)
       {
-        resource_references = 1;
+        add_nested_resource_ref(owner_did);
 #ifdef DEBUG_HIGH_LEVEL
         assert(owner_addr != runtime->address_space);
 #endif
@@ -823,6 +823,7 @@ namespace LegionRuntime {
           {
             RezCheck z(rez);
             rez.serialize(it->second);
+            rez.serialize(did);
           }
           runtime->send_remove_hierarchical_resource(it->first, rez);
         }
@@ -1170,6 +1171,7 @@ namespace LegionRuntime {
       {
         RezCheck z(rez);
         rez.serialize(owner_did);
+        rez.serialize(did);
         rez.serialize(held_remote_references);
       }
       runtime->send_remove_hierarchical_remote(owner_addr, rez);
@@ -1185,8 +1187,10 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      DistributedID owner_did;
+      derez.deserialize(owner_did);
       HierarchicalCollectable *target = rt->find_hierarchical_collectable(did);
-      if (target->remove_resource_reference())
+      if (target->remove_nested_resource_ref(owner_did))
         delete target;
     }
 
@@ -1198,10 +1202,12 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      DistributedID owner_did;
+      derez.deserialize(owner_did);
       unsigned num_remote_references;
       derez.deserialize(num_remote_references);
       HierarchicalCollectable *target = rt->find_hierarchical_collectable(did);
-      if (target->remove_remote_reference(num_remote_references))
+      if (target->remove_nested_remote_ref(owner_did, num_remote_references))
         delete target;
     }
 

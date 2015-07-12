@@ -4093,7 +4093,7 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez);
     public:
-      void add_root(CompositeNode *root, const FieldMask &valid);
+      void add_root(CompositeNode *root, const FieldMask &valid, bool top);
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL);
@@ -4202,6 +4202,7 @@ namespace LegionRuntime {
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
+      void set_owner_did(DistributedID owner_did);
     public:
       bool find_field_descriptors(PhysicalUser &user, 
                                   unsigned fid_idx, Processor local_proc, 
@@ -4229,6 +4230,7 @@ namespace LegionRuntime {
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
     protected:
+      DistributedID owner_did;
       FieldMask dirty_mask;
       LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;

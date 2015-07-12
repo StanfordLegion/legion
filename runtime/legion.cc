@@ -1608,7 +1608,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1617,7 +1617,7 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
         impl = NULL;
       }
@@ -1629,7 +1629,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1638,12 +1638,12 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       return *this;
     }
 

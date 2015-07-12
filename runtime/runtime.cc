@@ -884,7 +884,7 @@ namespace LegionRuntime {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
         // collected while we are waiting for the contribution task to run
-        add_gc_reference();
+        add_base_gc_ref(PENDING_COLLECTIVE_REF);
         ContributeCollectiveArgs args;
         args.hlr_id = HLR_CONTRIBUTE_COLLECTIVE_ID;
         args.impl = this;
@@ -908,7 +908,7 @@ namespace LegionRuntime {
       cargs->impl->contribute_to_collective(cargs->barrier, cargs->count);
       // Now remote the garbage collection reference and see if we can 
       // reclaim the future
-      if (cargs->impl->remove_gc_reference())
+      if (cargs->impl->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
         delete cargs->impl;
     }
       
@@ -3271,7 +3271,7 @@ namespace LegionRuntime {
     void MemoryManager::recycle_physical_instance(InstanceManager *instance)
     //--------------------------------------------------------------------------
     {
-      instance->add_resource_reference();
+      instance->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(available_instances.find(instance) == available_instances.end());
@@ -3296,7 +3296,7 @@ namespace LegionRuntime {
         }
       }
       // If we are reclaiming it, remove our resource reference
-      if (reclaim && instance->remove_resource_reference())
+      if (reclaim && instance->remove_base_resource_ref(MEMORY_MANAGER_REF))
         legion_delete(instance);
       return reclaim;
     }
@@ -3335,7 +3335,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -3374,7 +3374,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -4669,7 +4669,7 @@ namespace LegionRuntime {
       {
         // Add a garbage collection reference to the view, it will
         // be removed in LogicalView::handle_deferred_collect
-        view->add_gc_reference();
+        view->add_base_gc_ref(PENDING_GC_REF);
         collections[view].insert(term);
       }
       else
@@ -5483,7 +5483,7 @@ namespace LegionRuntime {
       // on the task being reported back to the mapper
       UserEvent result = UserEvent::create_user_event();
       // Add a reference to the future impl to prevent it being collected
-      f.impl->add_gc_reference();
+      f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
       MapperTaskArgs args;
       args.hlr_id = HLR_MAPPER_TASK_ID;
@@ -8724,7 +8724,8 @@ namespace LegionRuntime {
             // add the necessary references to prevent premature
             // garbage collection by the runtime
             result->add_reference();
-            launcher.predicate_false_future.impl->add_gc_reference();
+            launcher.predicate_false_future.impl->add_base_gc_ref(
+                                                    FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
@@ -16719,9 +16720,9 @@ namespace LegionRuntime {
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
             future_args->target->complete_future();
-            if (future_args->target->remove_gc_reference())
+            if (future_args->target->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->target);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16743,7 +16744,7 @@ namespace LegionRuntime {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16789,7 +16790,7 @@ namespace LegionRuntime {
             rt->invoke_mapper_task_result(margs->map_id, margs->proc,
                                           margs->event, result, result_size);
             // Now indicate that we are done with the future
-            if (margs->future->remove_gc_reference())
+            if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
             // Finally tell the runtime we have one less top level task
             rt->decrement_outstanding_top_level_tasks();

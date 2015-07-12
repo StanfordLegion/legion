@@ -6009,8 +6009,8 @@ namespace LegionRuntime {
         else
         {
           // Add references so they aren't garbage collected
-          result.impl->add_gc_reference();
-          predicate_false_future.impl->add_gc_reference();
+          result.impl->add_base_gc_ref(INDIVIDUAL_TASK_REF);
+          predicate_false_future.impl->add_base_gc_ref(INDIVIDUAL_TASK_REF);
           Runtime::DeferredFutureSetArgs args;
           args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
           args.target = result.impl;
@@ -8337,7 +8337,7 @@ namespace LegionRuntime {
           {
             // Add references so things won't be prematurely collected
             future_map.impl->add_reference();
-            predicate_false_future.impl->add_gc_reference();
+            predicate_false_future.impl->add_base_gc_ref(INDEX_TASK_REF);
             Runtime::DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = future_map.impl;
@@ -8379,8 +8379,8 @@ namespace LegionRuntime {
           else
           {
             // Add references so they aren't garbage collected 
-            reduction_future.impl->add_gc_reference();
-            predicate_false_future.impl->add_gc_reference();
+            reduction_future.impl->add_base_gc_ref(INDEX_TASK_REF);
+            predicate_false_future.impl->add_base_gc_ref(INDEX_TASK_REF);
             Runtime::DeferredFutureSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
             args.target = reduction_future.impl;
