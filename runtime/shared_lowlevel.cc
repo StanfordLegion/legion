@@ -6932,6 +6932,11 @@ namespace LegionRuntime {
 	return;
       }
 
+      // Start the threads for each of the processors (including the utility processors)
+      for (unsigned id=1; id < processors.size(); id++)
+        processors[id]->start_processor();
+      dma_queue->start();
+
       if(task_id != 0) { // no need to check ONE_TASK_ONLY here, since 1 node
 	for(int id = 1; id <= NUM_PROCS; id++) {
 	  Processor p;
@@ -6940,10 +6945,7 @@ namespace LegionRuntime {
 	  if(style != ONE_TASK_PER_PROC) break;
 	}
       }
-      // Start the threads for each of the processors (including the utility processors)
-      for (unsigned id=1; id < processors.size(); id++)
-        processors[id]->start_processor();
-      dma_queue->start();
+      
       // Poll the processors to see if they are done
       while (true)
       {
