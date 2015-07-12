@@ -24,6 +24,7 @@ prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: 
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
@@ -482,7 +483,10 @@ class Channel(object):
         print
         
     def __repr__(self):
-        return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+        if self.src is None:
+            return 'Fill ' + self.dst.__repr__() + ' Channel'
+        else:
+            return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
 class TaskKind(object):
     def __init__(self, task_id, name):
@@ -642,6 +646,22 @@ class Copy(object):
 
     def __repr__(self):
         return 'Copy initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+
+class Fill(object):
+    def __init__(self, dst, op):
+        self.dst = dst
+        self.op = op
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_color(self):
+        return self.op.get_color()
+
+    def __repr__(self):
+        return 'Fill initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
                 ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
 
 class Instance(object):
@@ -882,6 +902,15 @@ class State(object):
                                        read_time(m.group('start')),
                                        read_time(m.group('stop')))
                     continue
+                m = fill_info_pat.match(line)
+                if m is not None:
+                    self.log_fill_info(long(m.group('opid')),
+                                       int(m.group('dst'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
                 m = inst_info_pat.match(line)
                 if m is not None:
                     self.log_inst_info(long(m.group('opid')),
@@ -980,8 +1009,22 @@ class State(object):
         copy.stop = stop
         if stop > self.last_time:
             self.last_time = stop
-        pair = self.find_mem_pair(src, dst)
-        pair.add_copy(copy)
+        channel = self.find_channel(src, dst)
+        channel.add_copy(copy)
+
+    def log_fill_info(self, op_id, dst_mem,
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        dst = self.find_memory(dst_mem)
+        fill = self.create_fill(dst, op)
+        fill.create = create
+        fill.ready = ready
+        fill.start = start
+        fill.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        channel = self.find_channel(None, dst)
+        channel.add_copy(fill)
 
     def log_inst_info(self, op_id, inst_id, mem_id, size, 
                       create, destroy):
@@ -1048,11 +1091,17 @@ class State(object):
             self.memories[mem_id] = Memory(mem_id, None)
         return self.memories[mem_id]
 
-    def find_mem_pair(self, src, dst):
-        key = (src,dst)
-        if key not in self.channels:
-            self.channels[key] = Channel(src,dst)
-        return self.channels[key]
+    def find_channel(self, src, dst):
+        if src is not None:
+            key = (src,dst)
+            if key not in self.channels:
+                self.channels[key] = Channel(src,dst)
+            return self.channels[key]
+        else:
+            # This is a fill channel
+            if dst not in self.channels:
+                self.channels[dst] = Channel(None,dst)
+            return self.channels[dst]
 
     def find_variant(self, func_id):
         if func_id not in self.variants:
@@ -1086,6 +1135,9 @@ class State(object):
 
     def create_copy(self, src, dst, op):
         return Copy(src, dst, op)
+
+    def create_fill(self, dst, op):
+        return Fill(dst, op)
 
     def create_instance(self, inst_id, mem, op, size):
         return Instance(inst_id, mem, op, size)
