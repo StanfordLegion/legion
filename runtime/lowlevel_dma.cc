@@ -4009,7 +4009,7 @@ namespace LegionRuntime {
                                                  inst_impl->metadata.block_size,
                                                  dst_index + done);
                   // Record how many we've done
-                  done += done;
+                  done += todo;
                   // Now do as many bulk transfers as we can
                   while (todo >= fill_elmts) {
                     mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size);
