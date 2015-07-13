@@ -1395,12 +1395,7 @@ namespace LegionRuntime {
       if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
       {
         restrict_info.set_check();
-        if (req.handle_type != SINGULAR)
-          restrict_info.set_projection();
       }
-      // If we are projection requirement, we need to record extra info
-      if (req.handle_type != SINGULAR)
-        version_info.set_projection();
       // If we are a write, mark that we are advancing
       if (IS_WRITE(user.usage))
         version_info.set_advance();
@@ -1417,7 +1412,7 @@ namespace LegionRuntime {
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
       parent_node->register_logical_node(ctx.get_id(), user, path, version_info,
-                                         restrict_info, trace_info);
+                      restrict_info, trace_info, (req.handle_type != SINGULAR));
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
       // If we have a restriction, then record it on the region requirement
@@ -2075,7 +2070,7 @@ namespace LegionRuntime {
                                                    Processor local_proc,
                                     const std::set<ColorPoint> &target_children,
                                                    bool leave_open,
-                                                   const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                                    Event &closed,
                                                    const MappingRef &target,
                                                    VersionInfo &version_info,
@@ -2111,7 +2106,7 @@ namespace LegionRuntime {
                                                      target,
                                                      version_info,
                                                      leave_open, 
-                                                     next_child,
+                                                     next_children,
                                                      closed,
                                                      create_composite);
       else
@@ -2120,7 +2115,7 @@ namespace LegionRuntime {
       if (!result && create_composite)
       {
         close_node->create_composite_instance(info.ctx, target_children,
-                          leave_open, next_child, closing_mask, version_info);
+                        leave_open, next_children, closing_mask, version_info);
         // Making a composite always succeeds
         result = true;
         closed = Event::NO_EVENT;
@@ -8912,15 +8907,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : projection(false), advance(false)
+      : advance(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
-      : node_infos(rhs.node_infos), 
-        projection(rhs.projection), advance(rhs.advance)
+      : node_infos(rhs.node_infos), advance(rhs.advance)
     //--------------------------------------------------------------------------
     {
     }
@@ -8950,7 +8944,6 @@ namespace LegionRuntime {
       }
 #endif
       node_infos = rhs.node_infos;
-      projection = rhs.projection;
       advance = rhs.advance;
       return *this;
     }
@@ -9060,7 +9053,6 @@ namespace LegionRuntime {
       }
 #endif
       node_infos.clear();
-      projection = false;
       advance = false;
     }
 
@@ -9132,15 +9124,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     RestrictInfo::RestrictInfo(void)
-      : perform_check(false), projection(false)
+      : perform_check(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     RestrictInfo::RestrictInfo(const RestrictInfo &rhs)
-      : perform_check(rhs.perform_check), projection(rhs.projection),
-        restrictions(rhs.restrictions)
+      : perform_check(rhs.perform_check), restrictions(rhs.restrictions)
     //--------------------------------------------------------------------------
     {
     }
@@ -9563,95 +9554,7 @@ namespace LegionRuntime {
       else
         node->release_restriction(ctx, restrict_mask);
       return true;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // RestrictionRecorder 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RestrictionRecorder::RestrictionRecorder(ContextID c, RestrictInfo &info,
-                                             const FieldMask &mask)
-      : ctx(c), restrict_info(info), user_mask(mask)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionRecorder::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionRecorder::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->record_logical_restrictions(ctx, restrict_info, user_mask);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionRecorder::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      // Skip partitions because there are no restrictions
-      return true;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // RestrictionRecorder 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    VersionRecorder::VersionRecorder(ContextID c, VersionInfo &info,
-                                     const FieldMask &mask)
-      : NodeTraverser(true), ctx(c), version_info(info), user_mask(mask)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool VersionRecorder::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VersionRecorder::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      record_versions(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VersionRecorder::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      record_versions(node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionRecorder::record_versions(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      LogicalState &state = node->get_logical_state(ctx);
-      if (version_info.will_advance())
-      {
-        FieldMask new_dirty_fields = user_mask - state.dirty_below;
-        if (!!new_dirty_fields)
-        {
-          node->advance_version_numbers(state, new_dirty_fields);
-          state.dirty_below |= new_dirty_fields;
-        }
-      }
-      node->record_version_numbers(state, user_mask, 
-                 version_info, version_info.will_advance(), false/*premap*/);
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // PhysicalInitializer 
@@ -11034,7 +10937,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(RegionTreeNode *target, 
                                                    Operation *creator,
-                                                   const ColorPoint &next_child,
                                                    const VersionInfo &ver_info,
                                                    const RestrictInfo &res_info,
                                                    const TraceInfo &trace_info)
@@ -11046,15 +10948,27 @@ namespace LegionRuntime {
       {
         LegionList<ClosingSet>::aligned leave_open;
         compute_close_sets(leave_open_children, leave_open);
-        create_close_operations(target, creator, next_child, ver_info, res_info,
+        create_close_operations(target, creator, ver_info, res_info,
               trace_info, true/*leave open*/, leave_open, leave_open_closes);
       }
       if (!force_close_children.empty())
       {
         LegionList<ClosingSet>::aligned force_close;
         compute_close_sets(force_close_children, force_close);
-        create_close_operations(target, creator, next_child, ver_info, res_info,
+        create_close_operations(target, creator, ver_info, res_info,
               trace_info, false/*leave open*/, force_close, force_close_closes);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::add_next_child(const ColorPoint &next_child)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to add children to leave open closes
+      for (LegionMap<InterCloseOp*,LogicalUser>::aligned::const_iterator it = 
+            leave_open_closes.begin(); it != leave_open_closes.end(); it++)
+      {
+        it->first->add_next_child(next_child);
       }
     }
 
@@ -11130,7 +11044,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::create_close_operations(RegionTreeNode *target,
-                            Operation *creator, const ColorPoint &next_child, 
+                            Operation *creator,
                             const VersionInfo &version_info,
                             const RestrictInfo &restrict_info, 
                             const TraceInfo &trace_info, bool leave_open,
@@ -11144,7 +11058,6 @@ namespace LegionRuntime {
         InterCloseOp *close_op = target->create_close_op(creator, 
                                                        it->closing_mask,
                                                        leave_open, it->children,
-                                                       next_child, 
                                                        close_versions,
                                                        version_info,
                                                        restrict_info, 
@@ -13065,7 +12978,7 @@ namespace LegionRuntime {
                                                VersionInfo &version_info,
                                                RestrictInfo &restrict_info,
                                                const TraceInfo &trace_info,
-                                               bool projecting)
+                                               const bool projecting)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13074,68 +12987,69 @@ namespace LegionRuntime {
       LogicalState &state = get_logical_state(ctx);
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
-      // Now check to see if we need to do any close operations
-      // Close up any children which we may have dependences on below
-      LogicalCloser closer(ctx, user, arrived/*validates*/);
-      // There is one special case where we don't need to actually make
-      // any close operations. In the case where we have arrived and we
-      // have READ_WRITE privileges, we know we will always be the first
-      // one to this node and will do our own physical close, so there is
-      // no need to register a close operations here.
-      FieldMask open_below;
-      siphon_logical_children(closer, state, user.field_mask,
-                !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
-                arrived ? ColorPoint() : path.get_child(depth), open_below);
-      const bool open_only = !open_below;
-      // We always need to create and register close operations
-      // regardless of whether we are tracing or not
-      // If we're not replaying a trace we need to do work here
-      // See if we need to register a close operation
-      if (closer.has_closed_fields())
+      FieldMask open_below, dominator_mask;
+      ColorPoint next_child;
+      if (!arrived)
+        next_child = path.get_child(depth);
+      // If we've arrived and we're doing analysis for a projection 
+      // requirement then we skip the closes for now as we will end up
+      // doing them later
+      if (!arrived || !projecting)
       {
-        // Generate the close operations         
-        ColorPoint next_child;
-        if (!arrived)
-          next_child = path.get_child(depth); 
-        const FieldMask &closed_mask = closer.get_closed_mask();
-        // We need to record the version numbers for this node as well
-        closer.record_version_numbers(this, state, closed_mask);
-        closer.initialize_close_operations(this, user.op, next_child, 
-                            version_info, restrict_info, trace_info);
-        // Perform dependence analysis for all the close operations
-        closer.perform_dependence_analysis(user, open_below,
-                                           state.curr_epoch_users,
-                                           state.prev_epoch_users);
-        // Now we can flush out all the users dominated by closes
-        filter_prev_epoch_users(state, closed_mask);
-        filter_curr_epoch_users(state, closed_mask);
-        // Note we don't need to update the version numbers because
-        // that happened when we recorded dirty fields below. 
-        // However, we do need to mark that there is no longer any
-        // dirty data below this node for all the closed fields
-        state.dirty_below -= closed_mask;
-        // Now we can add the close operations to the current epoch
-        closer.register_close_operations(state.curr_epoch_users);
-      } 
+        // Now check to see if we need to do any close operations
+        // Close up any children which we may have dependences on below
+        LogicalCloser closer(ctx, user, arrived/*validates*/);
+        siphon_logical_children(closer, state, user.field_mask,
+                  !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
+                  next_child, open_below);
+        // We always need to create and register close operations
+        // regardless of whether we are tracing or not
+        // If we're not replaying a trace we need to do work here
+        // See if we need to register a close operation
+        if (closer.has_closed_fields())
+        {
+          // Generate the close operations         
+          const FieldMask &closed_mask = closer.get_closed_mask();
+          // We need to record the version numbers for this node as well
+          closer.record_version_numbers(this, state, closed_mask);
+          closer.initialize_close_operations(this, user.op, version_info, 
+                                             restrict_info, trace_info);
+          closer.add_next_child(next_child);
+          // Perform dependence analysis for all the close operations
+          closer.perform_dependence_analysis(user, open_below,
+                                             state.curr_epoch_users,
+                                             state.prev_epoch_users);
+          // Now we can flush out all the users dominated by closes
+          filter_prev_epoch_users(state, closed_mask);
+          filter_curr_epoch_users(state, closed_mask);
+          // Note we don't need to update the version numbers because
+          // that happened when we recorded dirty fields below. 
+          // However, we do need to mark that there is no longer any
+          // dirty data below this node for all the closed fields
+          state.dirty_below -= closed_mask;
+          // Now we can add the close operations to the current epoch
+          closer.register_close_operations(state.curr_epoch_users);
+        }
 
-      // We also always do our dependence analysis even if we have
-      // already traced because we need to pick up dependences on 
-      // any dynamic close operations that we need to do
-      // Now that we registered any close operation, do our analysis
-      FieldMask dominator_mask = 
-             perform_dependence_checks<CURR_LOGICAL_ALLOC,
-                       true/*record*/,false/*has skip*/,true/*track dom*/>(
-                          user, state.curr_epoch_users, user.field_mask, 
-                          open_below, arrived/*validates*/);
-      FieldMask non_dominated_mask = user.field_mask - dominator_mask;
-      // For the fields that weren't dominated, we have to check
-      // those fields against the previous epoch's users
-      if (!!non_dominated_mask)
-      {
-        perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                        true/*record*/, false/*has skip*/, false/*track dom*/>(
-                            user, state.prev_epoch_users, non_dominated_mask, 
-                            open_below, arrived/*validates*/);
+        // We also always do our dependence analysis even if we have
+        // already traced because we need to pick up dependences on 
+        // any dynamic close operations that we need to do
+        // Now that we registered any close operation, do our analysis
+        dominator_mask = 
+               perform_dependence_checks<CURR_LOGICAL_ALLOC,
+                         true/*record*/,false/*has skip*/,true/*track dom*/>(
+                            user, state.curr_epoch_users, user.field_mask, 
+                            open_below, arrived/*validates*/ && !projecting);
+        FieldMask non_dominated_mask = user.field_mask - dominator_mask;
+        // For the fields that weren't dominated, we have to check
+        // those fields against the previous epoch's users
+        if (!!non_dominated_mask)
+        {
+          perform_dependence_checks<PREV_LOGICAL_ALLOC,
+                          true/*record*/, false/*has skip*/, false/*track dom*/>(
+                              user, state.prev_epoch_users, non_dominated_mask, 
+                              open_below, arrived/*validates*/ && !projecting);
+        }
       }
 
       if (arrived)
@@ -13163,27 +13077,28 @@ namespace LegionRuntime {
         // region requirement or a normal region requirement. If we are normal
         // then we can do the regular analysis, otherwise, we have to traverse
         // the paths for all the projected regions
-        if (!projecting && version_info.is_projection())
+        if (projecting)
         {
-
+          // Compute the fat tree path for this operation and then do the
+          // traversal over the entire sub-tree
+          FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
+          register_logical_fat_path(ctx, user, fat_path, 
+                                    version_info, restrict_info, trace_info);
         }
         else
         {
           // Easy case, we are there 
+          // We also need to record the needed version numbers for this node
+          // Note that we do this after the version numbers have been updated
+          // so that we get the version numbers that we are contributing to
+          // as part of the execution for this operation. If we are writing
+          // in any way, then record the previous version number
+          // If this is a projection requirement, we also need to record any
+          // version numbers from farther down in the tree as well. 
+          // Do this before the version numbers can be updated.
           record_version_numbers(state, user.field_mask,
                    version_info, version_info.will_advance(), false/*premap*/);
-          // Here is the only difference with tracing.  If we already
-          // traced then we don't need to register ourselves as a user
-          // We also don't need to record ourselves if we are projecting
-          // since we are recording the upper bound
-          if (!projecting && !trace_info.already_traced)
-          {
-            // Register ourself with as a current user of this region
-            // Record a mapping reference on this operation
-            user.op->add_mapping_reference(user.gen);
-            // Add ourselves to the current epoch
-            state.curr_epoch_users.push_back(user);
-          }
+          
           // If this is a reduction, record that we have an outstanding 
           // reduction at this node in the region tree
           if (user.usage.redop > 0)
@@ -13199,25 +13114,6 @@ namespace LegionRuntime {
             }
           }
         }
-
-        // We also need to record the needed version numbers for this node
-        // Note that we do this after the version numbers have been updated
-        // so that we get the version numbers that we are contributing to
-        // as part of the execution for this operation. If we are writing
-        // in any way, then record the previous version number
-        // If this is a projection requirement, we also need to record any
-        // version numbers from farther down in the tree as well. 
-        // Do this before the version numbers can be updated.
-        if (version_info.is_projection())
-        {
-          VersionRecorder recorder(ctx, version_info, user.field_mask);
-          visit_node(&recorder);
-        }
-        else
-        {
-          record_version_numbers(state, user.field_mask, 
-                   version_info, version_info.will_advance(), false/*premap*/);
-        }
         // Here is the only difference with tracing.  If we already
         // traced then we don't need to register ourselves as a user
         if (!trace_info.already_traced)
@@ -13228,28 +13124,6 @@ namespace LegionRuntime {
           // Add ourselves to the current epoch
           state.curr_epoch_users.push_back(user);
         }
-        // If this is a reduction, record that we have an outstanding 
-        // reduction at this node in the region tree
-        if (user.usage.redop > 0)
-          record_logical_reduction(state, user.usage.redop, user.field_mask); 
-        // Record any restrictions we have on mappings if necessary
-        if (restrict_info.needs_check())
-        {
-          if (restrict_info.is_projection())
-          {
-            RestrictionRecorder recorder(ctx, restrict_info, user.field_mask);
-            visit_node(&recorder);
-          }
-          else
-          {
-            FieldMask restricted = user.field_mask & state.restricted_fields;
-            if (!!restricted)
-            {
-              RegionNode *local_this = as_region_node();
-              restrict_info.add_restriction(local_this->handle, restricted);
-            }
-          }
-        } 
       }
       else // We're still not there, so keep going
       {
@@ -13269,13 +13143,13 @@ namespace LegionRuntime {
         // to from this node.
         record_version_numbers(state, user.field_mask, 
                      version_info, version_info.will_advance(), true/*premap*/);
-        RegionTreeNode *child = get_tree_child(path.get_child(depth));
-        if (open_only)
+        RegionTreeNode *child = get_tree_child(next_child);
+        if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
-                        restrict_info, trace_info.already_traced);
+                        restrict_info, trace_info.already_traced, projecting);
         else
           child->register_logical_node(ctx, user, path, version_info, 
-                                       restrict_info, trace_info);
+                                       restrict_info, trace_info, projecting);
       }
     }
 
@@ -13285,7 +13159,8 @@ namespace LegionRuntime {
                                              RegionTreePath &path,
                                              VersionInfo &version_info,
                                              RestrictInfo &restrict_info,
-                                             const bool already_traced)
+                                             const bool already_traced,
+                                             const bool projecting)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13300,40 +13175,25 @@ namespace LegionRuntime {
           advance_version_numbers(state, user.field_mask);
         // If this is a projection then we do need to capture any 
         // child version information because it might change
-        // Do this before the version numbers are updated
-        if (version_info.is_projection())
+        if (projecting)
         {
-          VersionRecorder recorder(ctx, version_info, user.field_mask);
-          visit_node(&recorder);
+          // Compute the fat tree path for this operation and then do the
+          // traversal over the entire sub-tree
+          FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
+          open_logical_fat_path(ctx, user, fat_path, 
+                                version_info, restrict_info);
         }
         else
         {
           // First record any version information that we need
           record_version_numbers(state, user.field_mask, 
                     version_info, version_info.will_advance(), false/*premap*/);
-        }
-        // No need to record ourselves if we've already traced
-        if (!already_traced)
-        {
-          // We've arrived where we're going,
-          // add ourselves as a user
-          // Record a mapping reference on this operation
-          user.op->add_mapping_reference(user.gen);
-          state.curr_epoch_users.push_back(user);
-        }
-        // If this is a reduction, record that we have an outstanding 
-        // reduction at this node in the region tree
-        if (user.usage.redop > 0)
-          record_logical_reduction(state, user.usage.redop, user.field_mask);
-        // Record any restrictions we have on mappings if necessary
-        if (restrict_info.needs_check())
-        {
-          if (restrict_info.is_projection())
-          {
-            RestrictionRecorder recorder(ctx, restrict_info, user.field_mask);
-            visit_node(&recorder);
-          }
-          else
+          // If this is a reduction, record that we have an outstanding 
+          // reduction at this node in the region tree
+          if (user.usage.redop > 0)
+            record_logical_reduction(state, user.usage.redop, user.field_mask);
+          // Record any restrictions we have on mappings if necessary
+          if (restrict_info.needs_check())
           {
             FieldMask restricted = user.field_mask & state.restricted_fields;
             if (!!restricted)
@@ -13342,6 +13202,14 @@ namespace LegionRuntime {
               restrict_info.add_restriction(local_this->handle, restricted);
             }
           }
+        }
+        if (!already_traced)
+        {
+          // We've arrived where we're going,
+          // add ourselves as a user
+          // Record a mapping reference on this operation
+          user.op->add_mapping_reference(user.gen);
+          state.curr_epoch_users.push_back(user);
         }
       }
       else
@@ -13372,7 +13240,242 @@ namespace LegionRuntime {
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
         child_node->open_logical_node(ctx, user, path, version_info, 
-                                      restrict_info, already_traced);
+                                     restrict_info, already_traced, projecting);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::register_logical_fat_path(ContextID ctx,
+                                                   const LogicalUser &user,
+                                                   FatTreePath *fat_path,
+                                                   VersionInfo &version_info,
+                                                   RestrictInfo &restrict_info,
+                                                   const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
+#endif
+      LogicalState &state = get_logical_state(ctx);
+      const std::map<ColorPoint,FatTreePath*> &children = 
+                                                fat_path->get_children();
+      const bool arrived = children.empty();
+      std::map<ColorPoint,bool> open_only;
+      FieldMask any_open_below;
+      // Perform the close operations for all the children
+      {
+        LogicalCloser closer(ctx, user, arrived/*validates*/);
+        if (!arrived)
+        {
+          // Close up any interfering children, we know our children
+          // are disjoint so don't worry about them interferring with
+          // each other. This was checked when the fat path was created
+          for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+                children.begin(); it != children.end(); it++)
+          {
+            FieldMask open_below;
+            siphon_logical_children(closer, state, user.field_mask,
+                        true/*not arrived so close*/, it->first, open_below);
+            open_only[it->first] = !open_below;
+            any_open_below |= open_below;
+          }
+        }
+        else
+        {
+          // Otherwise just do the normal single close operation
+          siphon_logical_children(closer, state, user.field_mask,
+                          IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
+                          ColorPoint(), any_open_below);
+        }
+        if (closer.has_closed_fields())
+        {
+          // Generate the close operations         
+          const FieldMask &closed_mask = closer.get_closed_mask();
+          // We need to record the version numbers for this node as well
+          closer.record_version_numbers(this, state, closed_mask);
+          closer.initialize_close_operations(this, user.op, version_info, 
+                                             restrict_info, trace_info);
+          if (!arrived)
+          {
+            for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+                  children.begin(); it != children.end(); it++)
+            {
+              closer.add_next_child(it->first);
+            }
+          }
+          // Perform dependence analysis for all the close operations
+          closer.perform_dependence_analysis(user, any_open_below,
+                                             state.curr_epoch_users,
+                                             state.prev_epoch_users);
+          // Now we can flush out all the users dominated by closes
+          filter_prev_epoch_users(state, closed_mask);
+          filter_curr_epoch_users(state, closed_mask);
+          // Note we don't need to update the version numbers because
+          // that happened when we recorded dirty fields below. 
+          // However, we do need to mark that there is no longer any
+          // dirty data below this node for all the closed fields
+          state.dirty_below -= closed_mask;
+          // Now we can add the close operations to the current epoch
+          closer.register_close_operations(state.curr_epoch_users);
+        }
+      }
+      // We also always do our dependence analysis even if we have
+      // already traced because we need to pick up dependences on 
+      // any dynamic close operations that we need to do
+      // Now that we registered any close operation, do our analysis
+      FieldMask dominator_mask = 
+             perform_dependence_checks<CURR_LOGICAL_ALLOC,
+                       true/*record*/,false/*has skip*/,true/*track dom*/>(
+                          user, state.curr_epoch_users, user.field_mask, 
+                          any_open_below, arrived/*validates*/);
+      FieldMask non_dominated_mask = user.field_mask - dominator_mask;
+      // For the fields that weren't dominated, we have to check
+      // those fields against the previous epoch's users
+      if (!!non_dominated_mask)
+      {
+        perform_dependence_checks<PREV_LOGICAL_ALLOC,
+                        true/*record*/, false/*has skip*/, false/*track dom*/>(
+                            user, state.prev_epoch_users, non_dominated_mask, 
+                            any_open_below, arrived/*validates*/);
+      }
+      // Unlike for a normal traversal, the user we are registering is 
+      // actually the upper bound which was registered at this level of
+      // the tree or above, so we can always consider ourselves a dominator
+      if (!!dominator_mask)
+      {
+        // Dominator mask is not empty
+        // Mask off all the dominated fields from the previous set
+        // of epoch users and remove any previous epoch users
+        // that were totally dominated
+        filter_prev_epoch_users(state, dominator_mask); 
+        // Mask off all dominated fields from current epoch users and move
+        // them to prev epoch users.  If all fields masked off, then remove
+        // them from the list of current epoch users.
+        filter_curr_epoch_users(state, dominator_mask);
+      }
+
+      if (arrived)
+      {
+        // If we dominated and this is our final destination then we 
+        // can filter the operations since we actually do dominate them
+        // We only advance version numbers for fields which are being
+        // written and dominated the previous epoch because multiple 
+        // writes for atomic and simultaneous go in the same generation.
+        if (!!dominator_mask && version_info.will_advance())
+            advance_version_numbers(state, dominator_mask);
+        // No need to register ourselves as a user 
+        record_version_numbers(state, user.field_mask,
+                   version_info, version_info.will_advance(), false/*premap*/);
+          
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // Record any restrictions we have on mappings if necessary
+        if (restrict_info.needs_check())
+        {
+          FieldMask restricted = user.field_mask & state.restricted_fields;
+          if (!!restricted)
+          {
+            RegionNode *local_this = as_region_node();
+            restrict_info.add_restriction(local_this->handle, restricted);
+          }
+        }
+      }
+      else
+      {
+        // If we are writing in any way (including reduces), check to
+        // see if we have already marked those fields dirty. If not,
+        // advance the version numbers for those fields.
+        if (version_info.will_advance())
+        {
+          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
+          if (!!new_dirty_fields)
+          {
+            advance_version_numbers(state, new_dirty_fields);
+            state.dirty_below |= new_dirty_fields;
+          }
+        }
+        // Record version numbers of the fields which we are contributing
+        // to from this node.
+        record_version_numbers(state, user.field_mask, 
+                    version_info, version_info.will_advance(), false/*premap*/);
+        for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          RegionTreeNode *child = get_tree_child(it->first);
+          if (open_only[it->first])
+            child->open_logical_fat_path(ctx, user, it->second, 
+                                         version_info, restrict_info);
+          else
+            child->register_logical_fat_path(ctx, user, it->second,
+                                       version_info, restrict_info, trace_info);
+        }
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::open_logical_fat_path(ContextID ctx,
+                                               const LogicalUser &user,
+                                               FatTreePath *fat_path,
+                                               VersionInfo &version_info,
+                                               RestrictInfo &restrict_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
+#endif
+      LogicalState &state = get_logical_state(ctx); 
+      const std::map<ColorPoint,FatTreePath*> &children = 
+                                                fat_path->get_children();
+      const bool arrived = children.empty();
+      if (arrived)
+      {
+        if (version_info.will_advance())
+          advance_version_numbers(state, user.field_mask);
+        // First record any version information that we need
+        record_version_numbers(state, user.field_mask, 
+                  version_info, version_info.will_advance(), false/*premap*/);
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // Record any restrictions we have on mappings if necessary
+        if (restrict_info.needs_check())
+        {
+          FieldMask restricted = user.field_mask & state.restricted_fields;
+          if (!!restricted)
+          {
+            RegionNode *local_this = as_region_node();
+            restrict_info.add_restriction(local_this->handle, restricted);
+          }
+        }
+      }
+      else
+      {
+        // If we are writing in any way (including reduces), check to
+        // see if we have already marked those fields dirty. If not,
+        // advance the version numbers for those fields.
+        if (version_info.will_advance())
+        {
+          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          if (!!new_dirty_fields)
+          {
+            advance_version_numbers(state, new_dirty_fields);
+            state.dirty_below |= new_dirty_fields;
+          }
+        }
+        // Record version numbers of the fields which we are contributing
+        // to from this node.
+        record_version_numbers(state, user.field_mask, 
+                    version_info, version_info.will_advance(), false/*premap*/);
+        for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          RegionTreeNode *child = get_tree_child(it->first);
+          child->open_logical_fat_path(ctx, user, it->second, 
+                                       version_info, restrict_info);
+        }
       }
     }
 
@@ -14497,11 +14600,12 @@ namespace LegionRuntime {
       {
         PhysicalCloser next_closer(closer);
         bool create_composite = false;
+        std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
         bool result = 
 #endif
         siphon_physical_children(next_closer, state, closing_mask,
-                                 ColorPoint()/*next child*/, create_composite);
+                                 empty_next_children, create_composite);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result); // should always succeed since targets already exist
         assert(!create_composite);
@@ -14688,7 +14792,7 @@ namespace LegionRuntime {
     bool RegionTreeNode::siphon_physical_children(PhysicalCloser &closer,
                                               PhysicalState *state,
                                               const FieldMask &closing_mask,
-                                              const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                               bool &create_composite)
     //--------------------------------------------------------------------------
     {
@@ -14712,7 +14816,7 @@ namespace LegionRuntime {
             it = open_copy.begin(); it != open_copy.end(); it++)
       {
         if (!close_physical_child(closer, state, closing_mask,
-                             it->first, next_child, create_composite))
+                             it->first, next_children, create_composite))
           return false;
       }
       // Rebuild the valid mask
@@ -14732,7 +14836,7 @@ namespace LegionRuntime {
                                               PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               const ColorPoint &target_child,
-                                              const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                               bool &create_composite)
     //--------------------------------------------------------------------------
     {
@@ -14751,9 +14855,21 @@ namespace LegionRuntime {
       if (finder->second * closing_mask)
         return true;
       // Check for child disjointness
-      if (next_child.is_valid() && 
-          are_children_disjoint(finder->first, next_child))
-        return true;
+      if (!next_children.empty())
+      {
+        bool all_disjoint = true;
+        for (std::set<ColorPoint>::const_iterator it = 
+              next_children.begin(); it != next_children.end(); it++)
+        {
+          if (!are_children_disjoint(finder->first, *it))
+          {
+            all_disjoint = false;
+            break;
+          }
+        }
+        if (all_disjoint)
+          return true;
+      }
       FieldMask close_mask = finder->second & closing_mask;
       // First check to see if the closer needs to make physical
       // instance targets in order to perform the close operation
@@ -14814,7 +14930,7 @@ namespace LegionRuntime {
     void RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                             const std::set<ColorPoint> &targets,
                                                bool leave_open, 
-                                               const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                                const FieldMask &closing_mask,
                                                VersionInfo &version_info)
     //--------------------------------------------------------------------------
@@ -14832,7 +14948,7 @@ namespace LegionRuntime {
         FieldMask child_complete;
         close_physical_child(closer, root, state, 
                              closing_mask, (*it), 
-                             next_child, dirty_mask, child_complete);
+                             next_children, dirty_mask, child_complete);
         if (!child_complete)
           continue;
         if (capture_children)
@@ -14957,8 +15073,9 @@ namespace LegionRuntime {
         if (!overlap)
           continue;
         FieldMask child_complete;
+        std::set<ColorPoint> empty_next_children;
         close_physical_child(closer, node, state, overlap, 
-                             it->first, ColorPoint()/*next child*/, 
+                             it->first, empty_next_children, 
                              dirty_mask, child_complete);
         all_children &= child_complete;
         any_children |= child_complete;
@@ -14990,7 +15107,7 @@ namespace LegionRuntime {
                                               PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               const ColorPoint &target_child,
-                                              const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                               FieldMask &dirty_mask,
                                               FieldMask &complete_mask)
     //--------------------------------------------------------------------------
@@ -15011,9 +15128,21 @@ namespace LegionRuntime {
       if (finder->second * closing_mask)
         return;
       // Check for child disjointness
-      if (next_child.is_valid() && 
-          are_children_disjoint(finder->first, next_child))
-        return;
+      if (!next_children.empty())
+      {
+        bool all_disjoint = true;
+        for (std::set<ColorPoint>::const_iterator it = 
+              next_children.begin(); it != next_children.end(); it++)
+        {
+          if (!are_children_disjoint(finder->first, *it))
+          {
+            all_disjoint = false;
+            break;
+          }
+        }
+        if (all_disjoint)
+          return;
+      }
       FieldMask close_mask = finder->second & closing_mask;
       // Need to get this value before the iterator is invalidated
       RegionTreeNode *child_node = get_tree_child(finder->first);
@@ -16971,7 +17100,6 @@ namespace LegionRuntime {
                                               const FieldMask &closing_mask,
                                               bool leave_open,
                                             const std::set<ColorPoint> &targets,
-                                              const ColorPoint &next_child,
                                               const VersionInfo &close_info,
                                               const VersionInfo &version_info,
                                               const RestrictInfo &restrict_info,
@@ -16989,7 +17117,7 @@ namespace LegionRuntime {
                                    req.privilege_fields);
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
-                     next_child, trace_info.trace, trace_info.req_idx, 
+                     trace_info.trace, trace_info.req_idx, 
                      close_info, version_info, restrict_info, 
                      closing_mask, creator);
       return op;
@@ -17002,7 +17130,7 @@ namespace LegionRuntime {
                                              const MappingRef &target_region,
                                              VersionInfo &version_info,
                                              bool leave_open, 
-                                             const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                              Event &closed,
                                              bool &create_composite)
     //--------------------------------------------------------------------------
@@ -17029,7 +17157,7 @@ namespace LegionRuntime {
             it != targets.end(); it++)
       {
         bool result = close_physical_child(closer, state, closing_mask,
-                                           (*it), next_child,
+                                           (*it), next_children,
                                            create_composite);
 
         if (!result || create_composite)
@@ -17302,11 +17430,12 @@ namespace LegionRuntime {
             closer.update_dirty_mask(user.field_mask);
             // writing and the closer will 
             bool create_composite = false;
+            std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
             bool result = 
 #endif
             siphon_physical_children(closer, state, user.field_mask,
-                                     ColorPoint()/*next child*/, 
+                                     empty_next_children, 
                                      create_composite);
 #ifdef DEBUG_HIGH_LEVEL
             assert(result); // should always succeed
@@ -17406,11 +17535,12 @@ namespace LegionRuntime {
         closer.add_target(target_view);
         closer.update_dirty_mask(user.field_mask);
         bool create_composite = false;
+        std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
         bool temp_result = 
 #endif
         siphon_physical_children(closer, state, user.field_mask, 
-                                 ColorPoint()/*next child*/, create_composite); 
+                                 empty_next_children, create_composite); 
 #ifdef DEBUG_HIGH_LEVEL
         assert(temp_result); // should always succeed
         assert(!create_composite);
@@ -18410,7 +18540,6 @@ namespace LegionRuntime {
                                                  const FieldMask &closing_mask,
                                                  bool leave_open,
                                             const std::set<ColorPoint> &targets,
-                                                 const ColorPoint &next_child, 
                                                  const VersionInfo &close_info,
                                                  const VersionInfo &ver_info,
                                                  const RestrictInfo &res_info,
@@ -18428,7 +18557,7 @@ namespace LegionRuntime {
                                    req.privilege_fields);
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
-                     next_child, trace_info.trace, trace_info.req_idx, 
+                     trace_info.trace, trace_info.req_idx, 
                      close_info, ver_info, res_info, closing_mask, creator);
       return op;
     }
@@ -18440,7 +18569,7 @@ namespace LegionRuntime {
                                                 const MappingRef &target_reg,
                                                 VersionInfo &version_info,
                                                 bool leave_open, 
-                                                const ColorPoint &next_child,
+                                      const std::set<ColorPoint> &next_children,
                                                 Event &closed,
                                                 bool &create_composite)
     //--------------------------------------------------------------------------
@@ -18479,9 +18608,10 @@ namespace LegionRuntime {
             child_closer.add_target(target_view->get_materialized_subview(*it));
           PhysicalState *child_state = 
             child_node->get_physical_state(info.ctx, version_info);
+          std::set<ColorPoint> empty_next_children;
           bool result = child_node->siphon_physical_children(child_closer,
                                              child_state, closing_mask,
-                                             ColorPoint()/*next child*/,
+                                             empty_next_children,
                                              create_composite);
           // If we succeeded, then update the views
           if (!result || create_composite)
@@ -18508,7 +18638,7 @@ namespace LegionRuntime {
               it != targets.end(); it++)
         {
           bool result = close_physical_child(closer, state, closing_mask,
-                                             (*it), next_child,
+                                             (*it), next_children,
                                              create_composite);
           if (!result || create_composite)
           {

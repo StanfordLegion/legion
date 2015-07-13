@@ -361,7 +361,7 @@ namespace LegionRuntime {
                                    Processor local_proc,
                                    const std::set<ColorPoint> &targets,
                                    bool leave_open,
-                                   const ColorPoint &next_child,
+                                   const std::set<ColorPoint> &next_children,
                                    Event &closed,
                                    const MappingRef &target,
                                    VersionInfo &version_info,
@@ -1391,8 +1391,6 @@ namespace LegionRuntime {
     public:
       inline NodeInfo& find_tree_node_info(RegionTreeNode *node)
         { return node_infos[node]; }
-      inline void set_projection(void) { projection = true; }
-      inline bool is_projection(void) const { return projection; }
       inline void set_advance(void) { advance = true; }
       inline bool will_advance(void) { return advance; }
     public:
@@ -1410,7 +1408,6 @@ namespace LegionRuntime {
                                            bool advance);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
-      bool projection;
       bool advance;
     };
 
@@ -1429,8 +1426,6 @@ namespace LegionRuntime {
     public:
       inline bool needs_check(void) const { return perform_check; }
       inline void set_check(void) { perform_check = true; } 
-      inline bool is_projection(void) const { return projection; }
-      inline void set_projection(void) { projection = true; }
       inline void add_restriction(LogicalRegion handle, const FieldMask &mask)
       {
         LegionMap<LogicalRegion,FieldMask>::aligned::iterator finder = 
@@ -1446,7 +1441,6 @@ namespace LegionRuntime {
       inline void clear(void)
       {
         perform_check = false;
-        projection = false;
         restrictions.clear();
       }
       inline void merge(const RestrictInfo &rhs, const FieldMask &mask)
@@ -1467,7 +1461,6 @@ namespace LegionRuntime {
                        RegionTreeForest *forest);
     protected:
       bool perform_check;
-      bool projection;
       LegionMap<LogicalRegion,FieldMask>::aligned restrictions;
     };
 
@@ -1661,10 +1654,10 @@ namespace LegionRuntime {
                                bool leave_open);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
-                                       const ColorPoint &next_child, 
                                        const VersionInfo &version_info,
                                        const RestrictInfo &restrict_info,
                                        const TraceInfo &trace_info);
+      void add_next_child(const ColorPoint &next_child);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -1677,8 +1670,7 @@ namespace LegionRuntime {
       static void compute_close_sets(
                      const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
                      LegionList<ClosingSet>::aligned &close_sets);
-      void create_close_operations(RegionTreeNode *target, 
-                          Operation *creator, const ColorPoint &next_child,
+      void create_close_operations(RegionTreeNode *target, Operation *creator,
                           const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
@@ -2116,13 +2108,26 @@ namespace LegionRuntime {
                                  RegionTreePath &path,
                                  VersionInfo &version_info,
                                  RestrictInfo &restrict_info,
-                                 const TraceInfo &trace_info);
+                                 const TraceInfo &trace_info,
+                                 const bool projecting);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
                              VersionInfo &version_info,
                              RestrictInfo &restrict_info,
-                             const bool already_traced);
+                             const bool already_traced,
+                             const bool projecting);
+      void register_logical_fat_path(ContextID ctx,
+                                     const LogicalUser &user,
+                                     FatTreePath *fat_path,
+                                     VersionInfo &version_info,
+                                     RestrictInfo &restrict_info,
+                                     const TraceInfo &trace_info);
+      void open_logical_fat_path(ContextID ctx,
+                                 const LogicalUser &user,
+                                 FatTreePath *fat_path,
+                                 VersionInfo &version_info,
+                                 RestrictInfo &restrict_info);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open);
@@ -2179,19 +2184,19 @@ namespace LegionRuntime {
       bool siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState *state,
                                     const FieldMask &closing_mask,
-                                    const ColorPoint &next_child,
+                                    const std::set<ColorPoint> &next_children,
                                     bool &create_composite); 
       bool close_physical_child(PhysicalCloser &closer,
                                 PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 const ColorPoint &target_child,
-                                const ColorPoint &next_child,
+                                const std::set<ColorPoint> &next_children,
                                 bool &create_composite);
       // Analogous methods to those above except for closing to a composite view
       void create_composite_instance(ContextID ctx_id,
                                      const std::set<ColorPoint> &targets,
                                      bool leave_open, 
-                                     const ColorPoint &next_child,
+                                     const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info); 
       void close_physical_node(CompositeCloser &closer,
@@ -2210,7 +2215,7 @@ namespace LegionRuntime {
                                 PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 const ColorPoint &target_child,
-                                const ColorPoint &next_child,
+                                const std::set<ColorPoint> &next_children,
                                 FieldMask &dirty_mask,
                                 FieldMask &complete_mask);
       void open_physical_child(ContextID ctx_id,
@@ -2339,7 +2344,6 @@ namespace LegionRuntime {
                                             const FieldMask &closing_mask,
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
-                                            const ColorPoint &next_child, 
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
@@ -2350,7 +2354,7 @@ namespace LegionRuntime {
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
                                            bool leave_open,
-                                           const ColorPoint &next_child,
+                                     const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite) = 0;
       virtual MaterializedView * create_instance(Memory target_mem,
@@ -2475,7 +2479,6 @@ namespace LegionRuntime {
                                             const FieldMask &closing_mask,
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
-                                            const ColorPoint &next_child,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
@@ -2486,7 +2489,7 @@ namespace LegionRuntime {
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
                                            bool leave_open,
-                                           const ColorPoint &next_child,
+                                     const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
@@ -2637,7 +2640,6 @@ namespace LegionRuntime {
                                             const FieldMask &closing_mask,
                                             bool leave_open,
                                             const std::set<ColorPoint> &targets,
-                                            const ColorPoint &next_child,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
@@ -2648,7 +2650,7 @@ namespace LegionRuntime {
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
                                            bool leave_open,
-                                           const ColorPoint &next_child,
+                                     const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
@@ -2735,6 +2737,25 @@ namespace LegionRuntime {
       std::vector<ColorPoint> path;
       unsigned min_depth;
       unsigned max_depth;
+    };
+
+    /**
+     * \class FatTreePath
+     * A data structure for representing many different
+     * paths through a region tree.
+     */
+    class FatTreePath {
+    public:
+      FatTreePath(void);
+      FatTreePath(const FatTreePath &rhs);
+      ~FatTreePath(void);
+    public:
+      FatTreePath& operator=(const FatTreePath &rhs);
+    public:
+      inline const std::map<ColorPoint,FatTreePath*> get_children(void) const
+        { return children; }
+    protected:
+      std::map<ColorPoint,FatTreePath*> children;
     };
 
     /**
@@ -2886,41 +2907,7 @@ namespace LegionRuntime {
     protected:
       const ContextID ctx;
       const FieldMask &restrict_mask;
-    };
-
-    /**
-     * \class RestrictionRecorder
-     * A class for recording rerstrictions of logical regions
-     */
-    class RestrictionRecorder : public NodeTraverser {
-    public:
-      RestrictionRecorder(ContextID ctx, RestrictInfo &res_info,
-                          const FieldMask &mask);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-      RestrictInfo &restrict_info;
-      const FieldMask &user_mask;
-    };
-
-    class VersionRecorder : public NodeTraverser {
-    public:
-      VersionRecorder(ContextID ctx, VersionInfo &version_info,
-                      const FieldMask &mask);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      void record_versions(RegionTreeNode *node);
-    protected:
-      const ContextID ctx;
-      VersionInfo &version_info;
-      const FieldMask &user_mask;
-    };
+    }; 
 
     /**
      * \class PhysicalInitializer

@@ -4252,8 +4252,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                  const std::set<ColorPoint> &targets,
-                                  bool open, const ColorPoint &next, 
+                                  const std::set<ColorPoint> &targets,bool open,
                                   LegionTrace *trace, int close, 
                                   const VersionInfo &close_info,
                                   const VersionInfo &ver_info,
@@ -4278,13 +4277,19 @@ namespace LegionRuntime {
       restrict_info.merge(res_info, close_m);
       target_children = targets;
       leave_open = open;
-      next_child = next;
       close_idx = close;
       close_mask = close_m;
       create_op = create;
       create_gen = create_op->get_generation();
       parent_req_index = create->find_parent_index(close_idx);
       perform_logging(1/*is inter close op*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::add_next_child(const ColorPoint &next_child)
+    //--------------------------------------------------------------------------
+    {
+      next_children.insert(next_child);
     }
 
     //--------------------------------------------------------------------------
@@ -4305,7 +4310,7 @@ namespace LegionRuntime {
       deactivate_close();
       target_children.clear();
       close_mask.clear();
-      next_child.clear();
+      next_children.clear();
       runtime->free_inter_close_op(this);
     }
 
@@ -4418,12 +4423,12 @@ namespace LegionRuntime {
       // For partition operations that don't have a next child we
       // always want to make a composite instance because the low-level
       // runtime knows how to deal with lots of small instances
-      bool force_composite = !next_child.is_valid() && 
+      bool force_composite = next_children.empty() && 
                              create_op->is_partition_op();
       bool success = runtime->forest->perform_close_operation(physical_ctx,
                                               requirement, parent_ctx,
                                               local_proc, target_children,
-                                              leave_open, next_child, 
+                                              leave_open, next_children, 
                                               close_event, target,
                                               version_info, force_composite
 #ifdef DEBUG_HIGH_LEVEL

@@ -779,13 +779,13 @@ namespace LegionRuntime {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets, 
-                      bool leave_open, const ColorPoint &next_child, 
+                      const std::set<ColorPoint> &targets, bool leave_open, 
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
                       const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
+      void add_next_child(const ColorPoint &next_child);
     public:
       const RegionRequirement& get_region_requirement(void) const;
       const std::set<ColorPoint>& get_target_children(void) const;
@@ -804,7 +804,7 @@ namespace LegionRuntime {
     protected:
       std::set<ColorPoint> target_children;
       bool leave_open;
-      ColorPoint next_child;
+      std::set<ColorPoint> next_children;
       unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing

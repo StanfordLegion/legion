@@ -286,6 +286,7 @@ namespace LegionRuntime {
 
     class RegionTreeContext;
     class RegionTreePath;
+    class FatTreePath;
     class PathTraverser;
     class NodeTraverser;
     class PremapTraverser;
