@@ -39,7 +39,37 @@ namespace LegionRuntime {
       PENDING_GC_REF,
       PENDING_COLLECTIVE_REF,
       MEMORY_MANAGER_REF,
+      LAST_SOURCE_REF,
     };
+
+    enum ReferenceKind {
+      GC_REF_KIND,
+      VALID_REF_KIND,
+      REMOTE_REF_KIND,
+      RESOURCE_REF_KIND,
+    };
+
+#define REFERENCE_NAMES_ARRAY(names)                \
+    const char *const names[LAST_SOURCE_REF] = {    \
+      "Future Handle Reference",                    \
+      "Individual Task Reference",                  \
+      "Index Task Reference",                       \
+      "Reduction Closer Reference",                 \
+      "Physical Closer Reference",                  \
+      "Composite Closer Reference",                 \
+      "Composite Node Reference",                   \
+      "Temporary Valid Reference",                  \
+      "Physical State Reference",                   \
+      "Field Descriptors Reference",                \
+      "View Handle Reference",                      \
+      "Mapping Reference",                          \
+      "Instance Reference",                         \
+      "Pending GC Reference",                       \
+      "Pending Collective Reference",               \
+      "Memory Manager Reference"                    \
+    }
+
+    extern Logger::Category log_garbage;
 
     /**
      * \class Collectable
@@ -357,10 +387,37 @@ namespace LegionRuntime {
       bool free_distributed_id;
     };
 
-
     //--------------------------------------------------------------------------
     // Give some implementations here so things get inlined
     //--------------------------------------------------------------------------
+
+    //--------------------------------------------------------------------------
+    template<bool ADD>
+    static inline void log_base_ref(ReferenceKind kind, DistributedID did,
+                                    ReferenceSource src, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD)
+        log_garbage.info("GC Add Base Ref %d %ld %d %d",
+                          kind, did, src, cnt);
+      else
+        log_garbage.info("GC Remove Base Ref %d %ld %d %d",
+                          kind, did, src, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ADD>
+    static inline void log_nested_ref(ReferenceKind kind, DistributedID did, 
+                                      DistributedID src, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD)
+        log_garbage.info("GC Add Nested Ref %d %ld %ld %d",
+                          kind, did, src, cnt);
+      else
+        log_garbage.info("GC Remove Nested Ref %d %ld %ld %d",
+                          kind, did, src, cnt);
+    }
 
     //--------------------------------------------------------------------------
     inline void Collectable::add_reference(unsigned cnt /*= 1*/)
@@ -387,7 +444,9 @@ namespace LegionRuntime {
                                                         unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
       add_gc_reference(cnt);
     }
 
@@ -396,7 +455,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
       add_gc_reference(cnt);
     }
 
@@ -405,7 +466,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
       return remove_gc_reference(cnt);
     }
 
@@ -414,7 +477,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
       return remove_gc_reference(cnt);
     }
 
@@ -423,7 +488,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
       add_valid_reference(cnt);
     }
 
@@ -432,7 +499,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
       add_valid_reference(cnt);
     }
 
@@ -441,7 +510,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
       return remove_valid_reference(cnt);
     }
 
@@ -450,7 +521,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
       return remove_valid_reference(cnt);
     }
 
@@ -459,7 +532,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       add_resource_reference(cnt);
     }
 
@@ -468,7 +543,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       add_resource_reference(cnt);
     }
 
@@ -477,7 +554,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       return remove_resource_reference(cnt);
     }
 
@@ -486,7 +565,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       return remove_resource_reference(cnt);
     }
 
@@ -495,7 +576,9 @@ namespace LegionRuntime {
                 AddressSpaceID sid, ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return add_remote_reference(sid, cnt);
     }
 
@@ -504,7 +587,9 @@ namespace LegionRuntime {
                   AddressSpaceID sid, DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return add_remote_reference(sid, cnt);
     }
 
@@ -514,7 +599,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return remove_remote_reference(sid, dest_event, cnt);
     }
 
@@ -524,7 +611,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return remove_remote_reference(sid, dest_event, cnt);
     }
 
@@ -533,7 +622,9 @@ namespace LegionRuntime {
                                                         unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
       add_gc_reference(cnt);
     }
 
@@ -542,7 +633,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
       add_gc_reference(cnt);
     }
 
@@ -551,7 +644,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
       return remove_gc_reference(cnt);
     }
 
@@ -560,7 +655,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
       return remove_gc_reference(cnt);
     }
 
@@ -569,7 +666,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
       add_valid_reference(cnt);
     }
 
@@ -578,7 +677,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
       add_valid_reference(cnt);
     }
 
@@ -587,7 +688,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
       return remove_valid_reference(cnt);
     }
 
@@ -596,7 +699,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
       return remove_valid_reference(cnt);
     }
 
@@ -605,7 +710,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       add_resource_reference(cnt);
     }
 
@@ -614,7 +721,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       add_resource_reference(cnt);
     }
 
@@ -623,7 +732,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       return remove_resource_reference(cnt);
     }
 
@@ -632,7 +743,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
       return remove_resource_reference(cnt);
     }
 
@@ -641,7 +754,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       add_remote_reference(cnt);
     }
 
@@ -650,7 +765,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       add_remote_reference(cnt);
     }
 
@@ -659,7 +776,9 @@ namespace LegionRuntime {
                                     ReferenceSource source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_base_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return remove_remote_reference(cnt);
     }
 
@@ -668,7 +787,9 @@ namespace LegionRuntime {
                                       DistributedID source, unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-
+#ifdef LEGION_GC
+      log_nested_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
       return remove_remote_reference(cnt);
     }
 

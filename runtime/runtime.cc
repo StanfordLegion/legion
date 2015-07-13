@@ -25,6 +25,7 @@
 #include "legion_spy.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#include "garbage_collection.h"
 #ifdef HANG_TRACE
 #include <signal.h>
 #include <execinfo.h>
@@ -396,6 +397,9 @@ namespace LegionRuntime {
         runtime->register_future(did, this);
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
+#ifdef LEGION_GC
+      log_garbage.info("GC Future %ld", did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4973,6 +4977,15 @@ namespace LegionRuntime {
           }
         }
       }
+#ifdef LEGION_GC
+      {
+        REFERENCE_NAMES_ARRAY(reference_names);
+        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
+        {
+          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
+        }
+      }
+#endif
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -13543,10 +13556,12 @@ namespace LegionRuntime {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      // Don't recycle distributed IDs if we're doing LegionSpy
+      // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
+#ifndef LEGION_GC
 #ifndef LEGION_SPY
       AutoLock d_lock(distributed_id_lock);
       available_distributed_ids.push_back(did);
+#endif
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       AutoLock dist_lock(distributed_collectable_lock,1,false/*exclusive*/);

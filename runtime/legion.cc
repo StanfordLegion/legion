@@ -30,12 +30,12 @@ namespace LegionRuntime {
     Logger::Category log_field("field_spaces");
     Logger::Category log_region("regions");
     Logger::Category log_inst("instances");
-    Logger::Category log_garbage("gc");
     Logger::Category log_leak("leaks");
     Logger::Category log_variant("variants");
     Logger::Category log_allocation("allocation");
     Logger::Category log_directory("directory");
     Logger::Category log_prof("legion_prof");
+    Logger::Category log_garbage("legion_gc");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");

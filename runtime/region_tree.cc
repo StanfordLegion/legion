@@ -19719,6 +19719,10 @@ namespace LegionRuntime {
       context->runtime->allocate_physical_instance(this);
       // Add a reference to the layout
       layout->add_reference();
+#ifdef LEGION_GC
+      log_garbage.info("GC Instance Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20485,6 +20489,10 @@ namespace LegionRuntime {
     {
       // Tell the runtime so it can update the per memory data structures
       context->runtime->allocate_physical_instance(this);
+#ifdef LEGION_GC
+      log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20660,6 +20668,10 @@ namespace LegionRuntime {
     {
       // Tell the runtime so it can update the per memory data structures
       context->runtime->allocate_physical_instance(this);
+#ifdef LEGION_GC
+      log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20948,6 +20960,8 @@ namespace LegionRuntime {
         // and then we are done
         if (result != did)
         {
+          // We always add a remote reference for sending
+          add_nested_remote_ref(result);
           send_updates(result, target, send_mask, 
                        needed_views, needed_managers); 
           return result;
@@ -21210,6 +21224,9 @@ namespace LegionRuntime {
       manager->add_nested_resource_ref(did);
       // Initialize the current versions to zero
       current_versions[0] = FieldMask(FIELD_ALL_ONES);
+#ifdef LEGION_GC
+      log_garbage.info("GC Materialized View %ld %ld", did, manager->did); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -23629,6 +23646,9 @@ namespace LegionRuntime {
         parent(par), valid_mask(mask)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Composite View %ld", did);
+#endif
     }
     
     //--------------------------------------------------------------------------
@@ -25493,6 +25513,9 @@ namespace LegionRuntime {
         value(val), value_size(val_size), value_owner(val_owner)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Fill View %ld", did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -26272,6 +26295,9 @@ namespace LegionRuntime {
       assert(manager != NULL);
 #endif
       manager->add_nested_resource_ref(did);
+#ifdef LEGION_GC
+      log_garbage.info("GC Reduction View %ld %ld", did, manager->did);
+#endif
     }
 
     //--------------------------------------------------------------------------
