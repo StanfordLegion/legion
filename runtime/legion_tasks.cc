@@ -5209,10 +5209,6 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
 
-      // Do this before here since each of the clones will slice themselves
-      if (must_parallelism && (slices.size() > 1))
-        must_barrier = must_barrier.alter_arrival_count(slices.size()-1);
-
       std::set<Event> all_slices_mapped;
       size_t total_volume = 0;
       for (unsigned idx = 0; idx < splits.size(); idx++)
@@ -5393,8 +5389,6 @@ namespace LegionRuntime {
       this->index_domain = d;
       this->must_parallelism = rhs->must_parallelism;
       this->sliced = !recurse;
-      if (must_parallelism)
-        this->must_barrier = rhs->must_barrier;
       this->argument_map = rhs->argument_map;
       this->redop = rhs->redop;
       if (this->redop != 0)
@@ -5557,7 +5551,6 @@ namespace LegionRuntime {
       RezCheck z(rez);
       pack_base_task(rez, target);
       rez.serialize(sliced);
-      rez.serialize(must_barrier);
       rez.serialize(redop);
       if (pack_args)
         argument_map.impl->pack_arguments(rez, index_domain);
@@ -5570,7 +5563,6 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       unpack_base_task(derez); 
       derez.deserialize(sliced);
-      derez.deserialize(must_barrier);
       derez.deserialize(redop);
       if (redop > 0)
       {
@@ -7808,8 +7800,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_multi();
-      if (must_parallelism)
-        must_barrier.destroy_barrier();
       privilege_paths.clear();
       // Remove our reference to the argument map
       argument_map = ArgumentMap();
@@ -7865,8 +7855,6 @@ namespace LegionRuntime {
       tag = launcher.tag;
       is_index_space = true;
       must_parallelism = launcher.must_parallelism;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -7941,8 +7929,6 @@ namespace LegionRuntime {
       tag = launcher.tag;
       is_index_space = true;
       must_parallelism = launcher.must_parallelism;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -8031,8 +8017,6 @@ namespace LegionRuntime {
       tag = t;
       is_index_space = true;
       must_parallelism = must;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = domain;
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
@@ -8107,8 +8091,6 @@ namespace LegionRuntime {
       tag = t;
       is_index_space = true;
       must_parallelism = must;
-        if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -9395,9 +9377,6 @@ namespace LegionRuntime {
       // Launch all of our child points
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->launch_task();
-      // If we're doing must parallelism, mark that everyone is ready to run
-      if (must_parallelism)
-        must_barrier.arrive();
     }
 
     //--------------------------------------------------------------------------
@@ -9440,14 +9419,6 @@ namespace LegionRuntime {
       assert(!points.empty());
       assert(mapping_index <= points.size());
 #endif
-      // Watch out for the race condition here of all the points
-      // finishing and cleaning up this context before we are done
-      // Pull everything onto the stack that we need.
-      bool has_barrier = must_parallelism;
-      Barrier must_bar;
-      if (must_parallelism)
-        must_bar = must_barrier;
-
       // Now try mapping and then launching all the points starting
       // at the index of the last known good index
       // Copy the points onto the stack to avoid them being
@@ -9474,13 +9445,6 @@ namespace LegionRuntime {
           // is possible that this slice task object can be recycled
           next_point->launch_task();
         }
-      }
-
-      if (map_success)
-      {
-        // Trigger the must barrier once everyone is launched
-        if (has_barrier)
-          must_bar.arrive();
       }
       return map_success;
     }

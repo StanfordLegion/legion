@@ -6665,8 +6665,10 @@ namespace LegionRuntime {
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace);
+        indiv_tasks[idx]->must_parallelism = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
+      index_tasks.resize(launcher.index_tasks.size());
       for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
       {
         index_tasks[idx] = runtime->get_available_index_task();
@@ -6675,6 +6677,7 @@ namespace LegionRuntime {
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace);
+        index_tasks[idx]->must_parallelism = true;
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;

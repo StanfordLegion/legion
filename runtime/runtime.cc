@@ -8705,6 +8705,13 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        return execute_must_epoch(ctx, epoch_launcher);
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
