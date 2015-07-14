@@ -399,6 +399,7 @@ namespace LegionRuntime {
       }
       // Unpack any profiling requests 
       const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
 
@@ -3207,6 +3208,7 @@ namespace LegionRuntime {
 
       // Unpack any requests that we have
       const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
 
@@ -3835,6 +3837,8 @@ namespace LegionRuntime {
       idata += elmts;
 
       const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
+
       // better have consumed exactly the right amount of data
       assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
     }

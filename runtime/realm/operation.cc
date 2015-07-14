@@ -45,4 +45,12 @@ namespace Realm {
       timeline.record_end_time();
   }
 
+  void Operation::reconstruct_measurements()
+  {
+    measurements.import_requests(requests);
+    capture_timeline = measurements.wants_measurement<
+                        ProfilingMeasurements::OperationTimeline>();
+    if (capture_timeline)
+      timeline.record_create_time();
+  }
 }; // namespace Realm
