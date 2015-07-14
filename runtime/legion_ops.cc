@@ -325,6 +325,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FatTreePath* Operation::compute_fat_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::complete_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -4274,6 +4283,7 @@ namespace LegionRuntime {
       // Merge in the two different version informations
       version_info.merge(close_info, close_m);
       version_info.merge(ver_info, close_m);
+      version_info.set_advance(); // always advancing for close operations
       restrict_info.merge(res_info, close_m);
       target_children = targets;
       leave_open = open;
@@ -4289,6 +4299,9 @@ namespace LegionRuntime {
     void InterCloseOp::add_next_child(const ColorPoint &next_child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(next_child.is_valid());
+#endif
       next_children.insert(next_child);
     }
 
@@ -4386,23 +4399,8 @@ namespace LegionRuntime {
 #endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-        version_info.apply_premapping(physical_ctx.get_id());
-      }
- 
+      Processor local_proc = parent_ctx->get_executing_processor(); 
+      // Never need to premap close operations
       Event close_event = Event::NO_EVENT;
       // If our requirement is restricted, then we already know what
       // our target should be.
@@ -4632,22 +4630,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_idx);
       Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-        version_info.apply_premapping(physical_ctx.get_id());
-      }
- 
+      // We never need to premap close operations 
+
       // If we have a reference then we know we are closing a context
       // to a specific physical instance, so we can issue that without
       // worrying about failing.

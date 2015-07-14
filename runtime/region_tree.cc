@@ -3744,6 +3744,103 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_fat_path(IndexSpace child,
+                                                    IndexSpace parent,
+                                 std::map<IndexTreeNode*,FatTreePath*> &storage,
+                                                    bool test, bool &overlap)
+    //--------------------------------------------------------------------------
+    {
+      IndexTreeNode *child_node = get_node(child);
+      IndexTreeNode *parent_node = get_node(parent);
+      return compute_fat_path(child_node, parent_node, storage, test, overlap);
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_fat_path(IndexSpace child,
+                                                    IndexPartition parent,
+                                 std::map<IndexTreeNode*,FatTreePath*> &storage,
+                                                    bool test, bool &overlap)
+    //--------------------------------------------------------------------------
+    {
+      IndexTreeNode *child_node = get_node(child);
+      IndexTreeNode *parent_node = get_node(parent);
+      return compute_fat_path(child_node, parent_node, storage, test, overlap);
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_fat_path(IndexTreeNode *child,
+                                                    IndexTreeNode *parent,
+                                 std::map<IndexTreeNode*,FatTreePath*> &storage,
+                                               bool test_overlap, bool &overlap)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent->depth <= child->depth); // some sanity checking
+#endif
+      if (storage.find(child) != storage.end())
+      {
+        if (test_overlap)
+          overlap = true;
+        std::map<IndexTreeNode*,FatTreePath*>::const_iterator finder = 
+          storage.find(parent);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != storage.end());
+#endif
+        return finder->second;
+      }
+      if (child == parent)
+      {
+        FatTreePath *result = new FatTreePath();
+        storage[child] = result;
+        if (test_overlap)
+          overlap = false;
+        return result;
+      }
+      IndexTreeNode *current = child;
+      FatTreePath *current_path = new FatTreePath();
+      // Add ourselves to the map
+      storage[current] = current_path;
+      while (current != parent)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(parent->depth < child->depth);
+#endif
+        IndexTreeNode *next = current->get_parent();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(next != NULL);
+#endif
+        std::map<IndexTreeNode*,FatTreePath*>::const_iterator finder = 
+          storage.find(next);
+        if (finder != storage.end())
+        {
+          // If we found it then add it and check for disjointness
+          if (test_overlap)
+            overlap = finder->second->add_child(current->color, 
+                                                current_path, next);
+          else
+            finder->second->add_child(current->color, current_path);
+          if (next == parent)
+            return finder->second;
+          finder = storage.find(parent);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != storage.end()); 
+#endif
+          return finder->second;
+        }
+        // Otherwise the next one doesn't exist yet so make it 
+        FatTreePath *next_path = new FatTreePath();
+        storage[next] = next_path;
+        next_path->add_child(current->color, current_path);
+        current = next;
+        current_path = next_path;
+      }
+      // We had to add the whole path so we are done
+      if (test_overlap)
+        overlap = false;
+      return current_path;
+    }
+
+    //--------------------------------------------------------------------------
     Event RegionTreeForest::issue_copy(const Domain &dom, Operation *op,
                          const std::vector<Domain::CopySrcDstField> &src_fields,
                          const std::vector<Domain::CopySrcDstField> &dst_fields,
@@ -5282,6 +5379,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexSpaceNode::is_index_space_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexSpaceNode::as_index_space_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartNode* IndexSpaceNode::as_index_part_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     IndexTreeNode* IndexSpaceNode::get_parent(void) const
     //--------------------------------------------------------------------------
     {
@@ -6371,6 +6489,27 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::is_index_space_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexPartNode::as_index_space_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartNode* IndexPartNode::as_index_part_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
     }
 
     //--------------------------------------------------------------------------
@@ -10866,6 +11005,8 @@ namespace LegionRuntime {
       : ctx(c), user(u), validates(val)
     //--------------------------------------------------------------------------
     {
+      // closers always advance
+      close_versions.set_advance();
     }
 
     //--------------------------------------------------------------------------
@@ -12401,7 +12542,7 @@ namespace LegionRuntime {
           // Find what we can in the previous version
           VersionStateInfo &prev_info = previous_version_infos[it->first]; 
           capture_previous_states(prev_info, it->second, state);
-          // Filter back anything from the current version
+          // Filter back anything from the current version and capture it
           filter_current_states(prev_info, it->first, it->second, state);
           // Figure out what we need to make for the new version
           FieldMask to_create;
@@ -12443,17 +12584,22 @@ namespace LegionRuntime {
         // If we have anything to create 
         // take the lock in exlusive and make them
         AutoLock v_lock(version_lock);
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
               to_create.begin(); it != to_create.end(); it++)
         {
-          // If we still have fields, we need to make a state
-          VersionState *new_state = legion_new<VersionState>(it->first);
-          // Add a reference
-          new_state->add_reference();
-          VersionStateInfo &info = current_version_infos[it->first];
-          info.states[new_state] = it->second; 
-          info.valid_fields |= it->second;
-          state->add_version_state(new_state, it->second);
+          // Check again to make sure we didn't lose the race
+          capture_version_states(it->first, it->second, state);
+          if (!!it->second)
+          {
+            // If we still have fields, we need to make a state
+            VersionState *new_state = legion_new<VersionState>(it->first);
+            // Add a reference
+            new_state->add_reference();
+            VersionStateInfo &info = current_version_infos[it->first];
+            info.states[new_state] = it->second; 
+            info.valid_fields |= it->second;
+            state->add_version_state(new_state, it->second);
+          }
         }
 #ifdef DEBUG_HIGH_LEVEL
         sanity_check();
@@ -12465,6 +12611,98 @@ namespace LegionRuntime {
       return state;
     }
 
+    //--------------------------------------------------------------------------
+    void VersionManager::filter_previous_states_with_lock(VersionID vid,
+                                               const FieldMask &filter_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(version_lock);
+      LegionMap<VersionID,VersionStateInfo>::aligned::iterator finder = 
+        previous_version_infos.find(vid);
+      if (finder == previous_version_infos.end())
+        return;
+      if (filter_mask * finder->second.valid_fields)
+        return;
+      VersionStateInfo &info = finder->second; 
+      std::vector<VersionState*> to_delete;
+      for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+            info.states.begin(); it != info.states.end(); it++)
+      {
+        it->second -= filter_mask;
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      info.valid_fields -= filter_mask;
+      if (!info.valid_fields)
+      {
+        previous_version_infos.erase(finder);
+        // Only need to remove references
+        for (std::vector<VersionState*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          if ((*it)->remove_reference())
+            legion_delete(*it);
+        }
+      }
+      else if (!to_delete.empty())
+      {
+        // Remove references and delete 
+        for (std::vector<VersionState*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          info.states.erase(*it); 
+          if ((*it)->remove_reference())
+            legion_delete(*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::filter_current_states_with_lock(VersionID vid,
+                                               const FieldMask &filter_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(version_lock);
+      LegionMap<VersionID,VersionStateInfo>::aligned::iterator finder = 
+        current_version_infos.find(vid);
+      if (finder == current_version_infos.end())
+        return false;
+      if (filter_mask * finder->second.valid_fields)
+        return false;
+      VersionStateInfo &info = finder->second; 
+      std::vector<VersionState*> to_delete;
+      for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+            info.states.begin(); it != info.states.end(); it++)
+      {
+        it->second -= filter_mask;
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      info.valid_fields -= filter_mask;
+      if (!info.valid_fields)
+      {
+        previous_version_infos.erase(finder);
+        // Only need to remove references
+        for (std::vector<VersionState*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          if ((*it)->remove_reference())
+            legion_delete(*it);
+        }
+      }
+      else if (!to_delete.empty())
+      {
+        // Remove references and delete 
+        for (std::vector<VersionState*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          info.states.erase(*it); 
+          if ((*it)->remove_reference())
+            legion_delete(*it);
+        }
+      }
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     void VersionManager::filter_previous_states(VersionID vid,
@@ -12647,13 +12885,9 @@ namespace LegionRuntime {
         }
       }
 #ifdef DEBUG_HIGH_LEVEL
-      // Quick sanity check
-      if (!!remaining)
-      {
-        finder = previous_version_infos.find(vid);
-        if (finder != previous_version_infos.end())
-          assert(remaining * finder->second.valid_fields);
-      }
+      finder = previous_version_infos.find(vid);
+      if (finder != previous_version_infos.end())
+        assert(finder->second.valid_fields * remaining);
 #endif
     }
     
@@ -12985,6 +13219,9 @@ namespace LegionRuntime {
       PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_logical_state(state);
+#endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below, dominator_mask;
@@ -13014,7 +13251,8 @@ namespace LegionRuntime {
           closer.record_version_numbers(this, state, closed_mask);
           closer.initialize_close_operations(this, user.op, version_info, 
                                              restrict_info, trace_info);
-          closer.add_next_child(next_child);
+          if (!arrived)
+            closer.add_next_child(next_child);
           // Perform dependence analysis for all the close operations
           closer.perform_dependence_analysis(user, open_below,
                                              state.curr_epoch_users,
@@ -13084,6 +13322,7 @@ namespace LegionRuntime {
           FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
           register_logical_fat_path(ctx, user, fat_path, 
                                     version_info, restrict_info, trace_info);
+          delete fat_path;
         }
         else
         {
@@ -13167,6 +13406,9 @@ namespace LegionRuntime {
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_logical_state(state);
+#endif
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
@@ -13182,6 +13424,7 @@ namespace LegionRuntime {
           FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
           open_logical_fat_path(ctx, user, fat_path, 
                                 version_info, restrict_info);
+          delete fat_path;
         }
         else
         {
@@ -13219,7 +13462,7 @@ namespace LegionRuntime {
         // advance the version numbers for those fields.
         if (version_info.will_advance())
         {
-          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
             advance_version_numbers(state, new_dirty_fields);
@@ -13257,6 +13500,9 @@ namespace LegionRuntime {
       PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_logical_state(state);
+#endif
       const std::map<ColorPoint,FatTreePath*> &children = 
                                                 fat_path->get_children();
       const bool arrived = children.empty();
@@ -13426,6 +13672,9 @@ namespace LegionRuntime {
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx); 
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_logical_state(state);
+#endif
       const std::map<ColorPoint,FatTreePath*> &children = 
                                                 fat_path->get_children();
       const bool arrived = children.empty();
@@ -13458,7 +13707,7 @@ namespace LegionRuntime {
         // advance the version numbers for those fields.
         if (version_info.will_advance())
         {
-          FieldMask new_dirty_fields = state.dirty_below & user.field_mask;
+          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
             advance_version_numbers(state, new_dirty_fields);
@@ -13472,6 +13721,13 @@ namespace LegionRuntime {
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
+          // Update our field states
+          merge_new_field_state(state, 
+                                FieldState(user, user.field_mask, it->first));
+#ifdef DEBUG_HIGH_LEVEL
+          sanity_check_logical_state(state);
+#endif
+
           RegionTreeNode *child = get_tree_child(it->first);
           child->open_logical_fat_path(ctx, user, it->second, 
                                        version_info, restrict_info);
@@ -14137,7 +14393,6 @@ namespace LegionRuntime {
       node_info.premap_only = premap_only;
       VersionInfo::RegionVersions &versions = node_info.version_numbers;
 #ifdef DEBUG_HIGH_LEVEL
-      assert(versions.empty());
       FieldMask unversioned = mask;
 #endif
       LegionMap<VersionID,FieldMask,
@@ -14186,9 +14441,9 @@ namespace LegionRuntime {
       LegionMap<VersionID,FieldMask>::aligned to_add; 
       LegionMap<VersionID,FieldMask,
                VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
-      // Do this in forward order so we can reduce deletions
-      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
-            current.begin(); it != current.end(); it++)
+      // Do this in reverse order so we can forward in place if possible
+      for (LegionMap<VersionID,FieldMask>::aligned::reverse_iterator it = 
+            current.rbegin(); it != current.rend(); it++)
       {
         FieldMask overlap = it->second & mask;
         if (!overlap)
@@ -14633,6 +14888,33 @@ namespace LegionRuntime {
       // We no longer need to invalidate anything, 
       // we can just mark this state closed
       state->closed_mask |= closing_mask;
+      // Finally tell the version manager to filter all
+      // the version states for the current fields
+      filter_version_states(ctx, state, closing_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::filter_version_states(ContextID ctx, 
+                                               const PhysicalState *state,
+                                               const FieldMask &closing_mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager *manager = version_managers.lookup_entry(ctx);
+      // Check for the version number in both previous and current and 
+      // the version and if we find it in current, check for version 
+      // number minus one in the previous.
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it = 
+            state->version_states.begin(); it != 
+            state->version_states.end(); it++)
+      {
+        FieldMask overlap = closing_mask & it->second.valid_fields;
+        if (!overlap)
+          continue;
+        manager->filter_previous_states_with_lock(it->first, overlap);  
+        if (manager->filter_current_states_with_lock(it->first, overlap) && 
+            (it->first > 0))
+          manager->filter_previous_states_with_lock(it->first-1, overlap);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19306,6 +19588,101 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return ((max_depth-min_depth)+1); 
+    }
+
+    /////////////////////////////////////////////////////////////
+    // FatTreePath 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FatTreePath::FatTreePath(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath::FatTreePath(const FatTreePath &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath::~FatTreePath(void)
+    //--------------------------------------------------------------------------
+    {
+      // Delete all our children
+      for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        delete it->second;
+      }
+      children.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath& FatTreePath::operator=(const FatTreePath &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FatTreePath::add_child(const ColorPoint &child_color, 
+                                FatTreePath *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(children.find(child_color) == children.end());
+#endif
+      children[child_color] = child;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FatTreePath::add_child(const ColorPoint &child_color,
+                                FatTreePath *child, IndexTreeNode *tree_node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(children.find(child_color) == children.end());
+#endif
+      bool overlap = false;
+      if (!children.empty())
+      {
+        if (tree_node->is_index_space_node())
+        {
+          IndexSpaceNode *node = tree_node->as_index_space_node();
+          for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+                children.begin(); it != children.end(); it++)
+          {
+            if ((it->first == child_color) || 
+                !node->are_disjoint(it->first, child_color))
+            {
+              overlap = true;
+              break;
+            }
+          }
+        }
+        else
+        {
+          IndexPartNode *node = tree_node->as_index_part_node();
+          for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
+                children.begin(); it != children.end(); it++)
+          {
+            if ((it->first == child_color) || 
+                !node->are_disjoint(it->first, child_color))
+            {
+              overlap = true;
+              break;
+            }
+          }
+        }
+      }
+      children[child_color] = child;
+      return overlap;
     }
 
     /////////////////////////////////////////////////////////////

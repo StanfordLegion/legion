@@ -5333,7 +5333,7 @@ namespace LegionRuntime {
         slices.push_back(slice);
       }
       // If the volumes don't match, then something bad happend in the mapper
-      if (minimal_points_assigned != index_domain.get_volume())
+      if (minimal_points_assigned != minimal_points.size())
       {
         log_run.error("Invalid mapper domain slice result for mapper %d "
                       "on processor " IDFMT " for task %s (ID %lld). "
@@ -8376,6 +8376,91 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FatTreePath* IndexTask::compute_fat_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < regions.size());
+      assert(regions[idx].handle_type != SINGULAR);
+#endif
+      FatTreePath *result = NULL; 
+      std::map<IndexTreeNode*,FatTreePath*> storage;
+      bool overlap = false;
+      const bool overlap_is_bad = IS_WRITE(regions[idx]);
+      if (regions[idx].handle_type == REG_PROJECTION)
+      {
+        IndexSpace parent_space = regions[idx].region.get_index_space();
+        if (overlap_is_bad)
+        {
+          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            LogicalRegion dst = it->second->find_logical_region(idx);
+            result = runtime->forest->compute_fat_path(dst.get_index_space(),
+                               parent_space, storage, true/*test*/, overlap);
+            if (overlap)
+              break;
+          }
+        }
+        else
+        {
+          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            LogicalRegion dst = it->second->find_logical_region(idx);
+            result = runtime->forest->compute_fat_path(dst.get_index_space(),
+                               parent_space, storage, false/*test*/, overlap);
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(regions[idx].handle_type == PART_PROJECTION);
+#endif
+        IndexPartition parent_partition = 
+                        regions[idx].partition.get_index_partition();
+        if (overlap_is_bad)
+        {
+          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            LogicalRegion dst = it->second->find_logical_region(idx);
+            result = runtime->forest->compute_fat_path(dst.get_index_space(),
+                            parent_partition, storage, true/*test*/, overlap);
+            if (overlap)
+              break;
+          }
+        }
+        else
+        {
+          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            LogicalRegion dst = it->second->find_logical_region(idx);
+            result = runtime->forest->compute_fat_path(dst.get_index_space(),
+                            parent_partition, storage, false/*test*/, overlap);
+          }
+        }
+      }
+      if (overlap_is_bad && overlap)
+      {
+        log_task.error("Index Space Task %s (ID %lld) violated the disjoint "
+                       "projection region requirement assumption for region "
+                       "requirement %d!", variants->name, 
+                       get_unique_task_id(), idx);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_BAD_PROJECTION_USE);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
@@ -8576,10 +8661,17 @@ namespace LegionRuntime {
       {
         if (!is_sliced() && (target_proc != current_proc))
         {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(minimal_points_assigned == 0);
+#endif
           // Make a slice copy and send it away
           SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
                                                  true/*needs slice*/,
                                                  spawn_task, 1LL);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(minimal_points_assigned == minimal_points.size());
+#endif
+          minimal_points.clear();
           // Before we do this we have to chain the all children mapped event
           all_children_mapped.trigger(clone->get_children_mapped());
 #ifdef DEBUG_HIGH_LEVEL

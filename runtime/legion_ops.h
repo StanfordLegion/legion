@@ -190,6 +190,11 @@ namespace LegionRuntime {
       // requirement for an operation which is necessary for
       // issuing close operation on behalf of the operation.
       virtual unsigned find_parent_index(unsigned idx);
+      // A method for computing a fat region tree path for a
+      // region requirement. This is only called for projection
+      // region requirements so pretty much only index tasks.
+      // The caller owns the resulting data structure.
+      virtual FatTreePath* compute_fat_path(unsigned idx);
       // This is a special helper method for tracing which
       // needs to know explicitly about close operations
       virtual bool is_close_op(void) const { return false; }

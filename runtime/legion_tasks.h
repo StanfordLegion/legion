@@ -1016,6 +1016,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual FatTreePath* compute_fat_path(unsigned idx);
     public:
       virtual void resolve_false(void);
       virtual bool premap_task(void);

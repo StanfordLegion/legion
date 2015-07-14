@@ -513,6 +513,17 @@ namespace LegionRuntime {
                            RegionTreePath &path);
       void initialize_path(IndexPartition child, IndexPartition parent,
                            RegionTreePath &path);
+      FatTreePath* compute_fat_path(IndexSpace child, IndexSpace parent,
+                               std::map<IndexTreeNode*,FatTreePath*> &storage,
+                               bool test_overlap, bool &overlap);
+      FatTreePath* compute_fat_path(IndexSpace child, 
+                                    IndexPartition parent,
+                               std::map<IndexTreeNode*,FatTreePath*> &storage,
+                               bool test_overlap, bool &overlap);
+    protected:
+      FatTreePath* compute_fat_path(IndexTreeNode *child, IndexTreeNode *parent,
+                                 std::map<IndexTreeNode*,FatTreePath*> &storage,
+                                 bool test_overlap, bool &overlap);
     public:
       // Interfaces to the low-level runtime
       Event issue_copy(const Domain &dom, Operation *op,
@@ -844,6 +855,10 @@ namespace LegionRuntime {
       virtual size_t get_num_elmts(void) = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
+      virtual bool is_index_space_node(void) const = 0;
+      virtual IndexSpaceNode* as_index_space_node(void) = 0;
+      virtual IndexPartNode* as_index_part_node(void) = 0;
+    public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
       void retrieve_semantic_information(SemanticTag tag,
@@ -914,6 +929,10 @@ namespace LegionRuntime {
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      virtual bool is_index_space_node(void) const;
+      virtual IndexSpaceNode* as_index_space_node(void);
+      virtual IndexPartNode* as_index_part_node(void);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -1049,6 +1068,10 @@ namespace LegionRuntime {
       IndexPartNode& operator=(const IndexPartNode &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      virtual bool is_index_space_node(void) const;
+      virtual IndexSpaceNode* as_index_space_node(void);
+      virtual IndexPartNode* as_index_part_node(void);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -2040,8 +2063,12 @@ namespace LegionRuntime {
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
+      void filter_previous_states_with_lock(VersionID vid, 
+                                            const FieldMask &filter_mask);
+      bool filter_current_states_with_lock(VersionID vid, 
+                                           const FieldMask &filter_mask);
     protected:
-      void filter_previous_states(VersionID vid,const FieldMask &filter_mask);
+      void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
       void capture_previous_states(VersionStateInfo &info,
                                    const FieldMask &capture_mask,
                                    PhysicalState *state);
@@ -2176,6 +2203,8 @@ namespace LegionRuntime {
       // Entry
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
+      void filter_version_states(ContextID ctx, const PhysicalState *state,
+                                 const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
                                 const FieldMask &closing_mask,
                 const LegionMap<InstanceView*,FieldMask>::aligned &valid_views,
@@ -2754,6 +2783,9 @@ namespace LegionRuntime {
     public:
       inline const std::map<ColorPoint,FatTreePath*> get_children(void) const
         { return children; }
+      void add_child(const ColorPoint &child_color, FatTreePath *child);
+      bool add_child(const ColorPoint &child_color, FatTreePath *child,
+                     IndexTreeNode *index_tree_node);
     protected:
       std::map<ColorPoint,FatTreePath*> children;
     };
