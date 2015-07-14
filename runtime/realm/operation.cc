@@ -21,9 +21,14 @@ namespace Realm {
   Operation::~Operation(void)
   {
     if (requests.request_count() > 0) {
-      if (capture_timeline)
+      // send profiling requests only when the timeline is valid
+      if (capture_timeline && timeline.is_valid()) {
         measurements.add_measurement(timeline);
-      measurements.send_responses(requests);
+        measurements.send_responses(requests);
+      }
+      else if (!capture_timeline) {
+        measurements.send_responses(requests);
+      }
     }
   }
 

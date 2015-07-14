@@ -106,6 +106,9 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       task_infos.push_back(TaskInfo()); 
       TaskInfo &info = task_infos.back();
       info.task_id = op_id;
@@ -123,6 +126,9 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       meta_infos.push_back(MetaInfo());
       MetaInfo &info = meta_infos.back();
       info.op_id = op_id;
@@ -140,6 +146,9 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       copy_infos.push_back(CopyInfo());
       CopyInfo &info = copy_infos.back();
       info.op_id = op_id;
@@ -157,6 +166,9 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       fill_infos.push_back(FillInfo());
       FillInfo &info = fill_infos.back();
       info.op_id = op_id;
