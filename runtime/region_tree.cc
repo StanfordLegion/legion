@@ -11350,6 +11350,9 @@ namespace LegionRuntime {
       // region has already been advanced.
       node->record_version_numbers(state, local_mask, 
                            close_versions, false/*previous*/, false/*premap*/);
+      // We also need to advance the version numbers because the close
+      // operations will be writing a new valid version
+      node->advance_version_numbers(state, local_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -12517,7 +12520,7 @@ namespace LegionRuntime {
       PhysicalState *state = legion_new<PhysicalState>(node);
 #else
       PhysicalState *state = legion_new<PhysicalState>();
-#endif
+#endif 
       // Take the lock in exclusive mode in case we need to make a version
       LegionMap<VersionID,FieldMask>::aligned to_create;
       if (advance)
@@ -12544,6 +12547,9 @@ namespace LegionRuntime {
           capture_previous_states(prev_info, it->second, state);
           // Filter back anything from the current version and capture it
           filter_current_states(prev_info, it->first, it->second, state);
+          // Erase the previous info entry if we didn't need it
+          if (!prev_info.valid_fields)
+            previous_version_infos.erase(it->first);
           // Figure out what we need to make for the new version
           FieldMask to_create;
           capture_advance_states(it->first+1, it->second, state, to_create);
@@ -12884,11 +12890,25 @@ namespace LegionRuntime {
           remaining -= overlap;
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
       finder = previous_version_infos.find(vid);
       if (finder != previous_version_infos.end())
-        assert(finder->second.valid_fields * remaining);
-#endif
+      {
+        FieldMask overlap = remaining & finder->second.valid_fields;
+        if (!!overlap)
+        {
+          const VersionStateInfo &info = finder->second;
+          // Find any intersecting version states and capture them
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                it = info.states.begin(); it != info.states.end(); it++)
+          {
+            FieldMask local_overlap = remaining & it->second;
+            if (!!local_overlap)
+              state->add_version_state(it->first, local_overlap);
+          }
+          // Update our remaining fields
+          remaining -= overlap;
+        }
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -12986,6 +13006,7 @@ namespace LegionRuntime {
             current_version_infos.end(); vit++)
       {
         const VersionStateInfo &info = vit->second;
+        assert(!!info.valid_fields);
         // Make sure each field appears once in each version state info
         FieldMask local_version_fields;
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
@@ -13006,6 +13027,7 @@ namespace LegionRuntime {
             previous_version_infos.end(); vit++)
       {
         const VersionStateInfo &info = vit->second;
+        assert(!!info.valid_fields);
         // Make sure each field appears once in each version state info
         FieldMask local_version_fields;
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
@@ -13783,8 +13805,11 @@ namespace LegionRuntime {
       closer.record_version_numbers(this, state, closing_mask);
       // If we're doing a close operation, that means someone is
       // going to be writing to a region that aliases with this one
-      // so we need to advance the field version.
-      advance_version_numbers(state, closing_mask);
+      // so we need to advance the field version. However, if we're
+      // staying open then we don't need to be advanced since we
+      // will still be valid
+      if (!permit_leave_open)
+        advance_version_numbers(state, closing_mask);
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields
@@ -13908,8 +13933,8 @@ namespace LegionRuntime {
                 const bool needs_upgrade = HAS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, *it, next_child,
-                                         (it->open_children.size() == 1),
-                                         needs_upgrade, 
+                                         true/*allow next*/,
+                                         needs_upgrade,
                                          false/*permit leave open*/,
                                          false/*record_close_operations*/,
                                          new_states, already_open);
@@ -14178,9 +14203,6 @@ namespace LegionRuntime {
               removed_fields = true;
               if (permit_leave_open)
               {
-#ifdef DEBUG_HIGH_LEVEL
-                assert(IS_READ_ONLY(closer.user.usage));
-#endif
                 new_states.push_back(FieldState(closer.user,
                                   close_mask, finder->first));
               }
@@ -14242,9 +14264,6 @@ namespace LegionRuntime {
           // state for the current user
           if (permit_leave_open)
           {
-#ifdef DEBUG_HIGH_LEVEL
-            assert(IS_READ_ONLY(closer.user.usage));
-#endif
             new_states.push_back(FieldState(closer.user,close_mask,it->first));
           }
         }
@@ -14436,7 +14455,7 @@ namespace LegionRuntime {
     void RegionTreeNode::advance_version_numbers(LogicalState &state,
                                                  const FieldMask &mask)
     //--------------------------------------------------------------------------
-    {
+    {  
       std::set<VersionID> to_delete;
       LegionMap<VersionID,FieldMask>::aligned to_add; 
       LegionMap<VersionID,FieldMask,
