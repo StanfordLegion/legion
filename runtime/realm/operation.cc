@@ -50,6 +50,13 @@ namespace Realm {
       timeline.record_end_time();
   }
 
+  void Operation::clear_profiling(void)
+  {
+    capture_timeline = false;
+    requests.clear();
+    measurements.clear();
+  }
+
   void Operation::reconstruct_measurements()
   {
     measurements.import_requests(requests);

@@ -492,6 +492,9 @@ namespace LegionRuntime {
 	}
       }
       requests.serialize(msgptr); 
+      // We sent this message remotely, so we need to clear the profiling
+      // so it doesn't get sent accidentally
+      clear_profiling();
     }
 
     void DmaRequest::Waiter::sleep_on_event(Event e, 
@@ -3304,6 +3307,8 @@ namespace LegionRuntime {
       *msgptr++ = inst_lock_needed;
 
       requests.serialize(msgptr);
+      // We sent this request remotely so we need to clear it's profiling
+      clear_profiling();
     }
 
     bool ReduceRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -3889,6 +3894,9 @@ namespace LegionRuntime {
       msgptr += elmts;
 
       requests.serialize(msgptr);
+      // We sent this message remotely, so we need to clear the profiling
+      // so it doesn't get sent accidentally
+      clear_profiling();
     }
 
     bool FillRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
