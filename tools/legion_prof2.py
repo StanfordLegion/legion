@@ -1102,7 +1102,8 @@ class State(object):
 
     def find_memory(self, mem_id):
         if mem_id not in self.memories:
-            self.memories[mem_id] = Memory(mem_id, None)
+            # use 'system memory' as the default kind
+            self.memories[mem_id] = Memory(mem_id, 1, None)
         return self.memories[mem_id]
 
     def find_channel(self, src, dst):
