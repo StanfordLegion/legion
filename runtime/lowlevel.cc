@@ -5624,17 +5624,21 @@ namespace LegionRuntime {
       unsigned long long start = TimeStamp::get_current_time_in_micros(); 
 #endif
       assert(state == RUNNING_STATE);
-      // First mark that we are going to try pausing
-      state = PAUSING_STATE;
+      // First mark that we are this thread is now paused
+      state = PAUSED_STATE;
+      // Then tell the processor to pause the thread
+      proc->pause_thread(this);
+      // Now register ourselves with the event
       Event::Impl *event = get_runtime()->get_event_impl(wait_for);
-      // Register ourselves with the event
       event->add_waiter(wait_for.gen, this);
+      // Take our lock and see if we are still in the paused state
+      // It's possible that we've already been woken up so check before
+      // going to sleep
       gasnet_hsl_lock(&thread_mutex);
-      if (state == PAUSING_STATE)
+      // If we are in the paused state or the resumable state then we actually
+      // do need to go to sleep so we can be woken up by the processor later
+      if ((state == PAUSED_STATE) || (state == RESUMABLE_STATE))
       {
-        state = PAUSED_STATE;
-        // Tell the processor that this thread is going to sleep
-        proc->pause_thread(this);
         gasnett_cond_wait(&thread_cond, &thread_mutex.lock);
       }
       assert(state == RUNNING_STATE);
@@ -5651,21 +5655,11 @@ namespace LegionRuntime {
     bool LocalThread::event_triggered(void)
     {
       gasnet_hsl_lock(&thread_mutex);
-      assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
-      bool need_resume = false;
-      // If the thread is still trying to go to sleep we
-      // can just mark it runnable again, otherwise it
-      // already went to sleep so we have to mark that
-      // it is resumable
-      if (state == PAUSED_STATE) {
-        need_resume = true;
-        state = RESUMABLE_STATE;
-      } else {
-        state = RUNNING_STATE;
-      }
+      assert(state == PAUSED_STATE);
+      state = RESUMABLE_STATE;
       gasnet_hsl_unlock(&thread_mutex);
-      if (need_resume)
-        proc->resume_thread(this);
+      // Now tell the processor that this thread is resumable
+      proc->resume_thread(this);
       return false;
     }
 

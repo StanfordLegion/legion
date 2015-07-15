@@ -1174,7 +1174,6 @@ namespace LegionRuntime {
     public:
       enum ThreadState {
         RUNNING_STATE,
-        PAUSING_STATE, // about to pause
         PAUSED_STATE,
         RESUMABLE_STATE,
         SLEEPING_STATE, // about to sleep
