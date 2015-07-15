@@ -2664,8 +2664,7 @@ function std.start(main_task)
         4294967295 --[[ AUTO_GENERATE_ID ]],
         c.legion_task_config_options_t {
           leaf = options.leaf,
-          -- FIXME: Inner appears to be broken.
-          inner = false, -- options.inner,
+          inner = options.inner,
           idempotent = options.idempotent,
         },
         [task:getname()],
