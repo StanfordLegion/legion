@@ -4111,22 +4111,25 @@ function codegen.stat_task(cx, node)
         physical_regions_index:insert(physical_region_i)
         physical_region_i = physical_region_i + 1
 
-        local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
-          std.zip(field_paths, field_types):map(
-            function(field)
-              local field_path, field_type = unpack(field)
-              local field_id = field_ids_by_field_path[field_path:hash()]
-              return terralib.newlist({
-                  physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
-        end))))
-        physical_region_actions:insertall(pr_actions or {})
-        base_pointers:insert(pr_base_pointers)
+        if not task:get_config_options().inner then
+          local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
+            std.zip(field_paths, field_types):map(
+              function(field)
+                local field_path, field_type = unpack(field)
+                local field_id = field_ids_by_field_path[field_path:hash()]
+                return terralib.newlist({
+                    physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
+          end))))
 
-        for i, field_path in ipairs(field_paths) do
-          physical_regions_by_field_path[field_path:hash()] = physical_region
-          if privileges_by_field_path[field_path:hash()] ~= "none" then
-            base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
-            strides_by_field_path[field_path:hash()] = pr_strides[i]
+          physical_region_actions:insertall(pr_actions or {})
+          base_pointers:insert(pr_base_pointers)
+
+          for i, field_path in ipairs(field_paths) do
+            physical_regions_by_field_path[field_path:hash()] = physical_region
+            if privileges_by_field_path[field_path:hash()] ~= "none" then
+              base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
+              strides_by_field_path[field_path:hash()] = pr_strides[i]
+            end
           end
         end
       end
