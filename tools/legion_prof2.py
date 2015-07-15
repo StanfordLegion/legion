@@ -115,6 +115,7 @@ def read_time(string):
 
 class TimeRange(object):
     def __init__(self, start_time, stop_time):
+        assert start_time <= stop_time
         self.start_time = start_time
         self.stop_time = stop_time
         self.subranges = list()
@@ -975,8 +976,11 @@ class State(object):
         variant = self.find_variant(func_id)
         task = self.find_task(task_id, variant)
         task.create = create
+        assert create <= ready
         task.ready = ready
+        assert ready <= start
         task.start = start
+        assert start <= stop
         task.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -989,8 +993,11 @@ class State(object):
         variant = self.find_meta_variant(hlr)
         meta = self.create_meta(variant, op)
         meta.create = create
+        assert create <= ready
         meta.ready = ready
+        assert ready <= start
         meta.start = start
+        assert start <= stop
         meta.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -1004,8 +1011,11 @@ class State(object):
         dst = self.find_memory(dst_mem)
         copy = self.create_copy(src, dst, op)
         copy.create = create
+        assert create <= ready
         copy.ready = ready
+        assert ready <= start
         copy.start = start
+        assert start <= stop
         copy.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -1018,8 +1028,11 @@ class State(object):
         dst = self.find_memory(dst_mem)
         fill = self.create_fill(dst, op)
         fill.create = create
+        assert create <= ready
         fill.ready = ready
+        assert ready <= start
         fill.start = start
+        assert start <= stop
         fill.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -1032,6 +1045,7 @@ class State(object):
         mem = self.find_memory(mem_id)
         inst = self.create_instance(inst_id, mem, op, size)
         inst.create = create
+        assert create <= destroy
         inst.destroy = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
