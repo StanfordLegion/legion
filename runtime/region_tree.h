@@ -2159,6 +2159,11 @@ namespace LegionRuntime {
                                  FatTreePath *fat_path,
                                  VersionInfo &version_info,
                                  RestrictInfo &restrict_info);
+      void close_logical_subtree(ContextID ctx,
+                                 const LogicalUser &user,
+                                 VersionInfo &version_info,
+      void close_logical_subtree(LogicalCloser &closer,
+                                 const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open);

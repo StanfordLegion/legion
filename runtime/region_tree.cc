@@ -13259,8 +13259,10 @@ namespace LegionRuntime {
         next_child = path.get_child(depth);
       // If we've arrived and we're doing analysis for a projection 
       // requirement then we skip the closes for now as we will end up
-      // doing them later
-      if (!arrived || !projecting)
+      // doing them later. We can also skip the close operations for 
+      // any operations which have arrived and have read-write privileges
+      // because they will be doing their own close operations.
+      if ((!arrived || !projecting) && !IS_WRITE(user.usage))
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
@@ -13356,6 +13358,16 @@ namespace LegionRuntime {
         else
         {
           // Easy case, we are there 
+          // If we have arrived and we are doing read-write access, then we
+          // need to capture any versions in sub-trees for which we will 
+          // be issuing a close when we actually map.
+          if (IS_WRITE(user.usage))
+          {
+            LogicalCloser closer(ctx, user, arrived/*validates*/);
+            // There's no point in siphoning, we know we need to close
+            // everything up that interferes with this task
+            close_logical_subtree(closer, user.field_mask);
+          }
           // We also need to record the needed version numbers for this node
           // Note that we do this after the version numbers have been updated
           // so that we get the version numbers that we are contributing to
@@ -13773,6 +13785,54 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::close_logical_subtree(LogicalCloser &closer,
+                                               const FieldMask &closing_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
+#endif
+      LogicalState &state = get_logical_state(closer.ctx);
+
+      // No need to perform any local checks since they have all been done
+      // Recursively traverse any open children and close them
+      LegionDeque<FieldState>::aligned dummy_states;
+      ColorPoint next_child; // invalid next point
+      for (std::list<FieldState>::iterator it = state.field_states.begin();
+            it != state.field_states.end(); /*nothing*/)
+      {
+        FieldMask overlap = it->valid_fields & closing_mask;
+        if (!overlap)
+        {
+          it++;
+          continue;
+        }
+        FieldMask already_open;
+        perform_close_operations(closer, overlap, *it,
+                                 next_child, false/*allow next*/,
+                                 false/*upgrade*/, false/*leave open*/,
+                                 false/*record close operations*/,
+                                 dummy_states, already_open);
+        // Remove the state if it is now empty
+        if (!it->valid_fields)
+          it = state.field_states.erase(it);
+        else
+          it++;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(dummy_states.empty());
+#endif
+      // No need to record or advance version numbers since that will 
+      // be done by the caller
+
+      // We can mark that there is no longer any dirty data below
+      state.dirty_below -= closing_mask;
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_logical_state(state);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
                                             bool permit_leave_open)
@@ -13795,14 +13855,15 @@ namespace LegionRuntime {
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); /*nothing*/)
       {
-        if (it->valid_fields * closing_mask)
+        FieldMask overlap = it->valid_fields & closing_mask;
+        if (!overlap)
         {
           it++;
           continue;
         }
         // Recursively perform any close operations
         FieldMask already_open;
-        perform_close_operations(closer, closing_mask, *it, 
+        perform_close_operations(closer, overlap, *it, 
                                  ColorPoint()/*next child*/,
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
