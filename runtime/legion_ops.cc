@@ -4539,10 +4539,9 @@ namespace LegionRuntime {
       assert(ref.has_ref());
 #endif
       reference = ref;
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
-      if (requirement.privilege == WRITE_DISCARD)
-        requirement.privilege = READ_WRITE;
+      // This requirement only needs to be read-only to ensure
+      // that we get the most recent version of the data in this instance
+      requirement.privilege = READ_ONLY;
       parent_idx = idx;
       localize_region_requirement(requirement);
       perform_logging();
