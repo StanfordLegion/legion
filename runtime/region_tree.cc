@@ -23311,6 +23311,7 @@ namespace LegionRuntime {
       ReductionOpID redop = view->get_redop();
       bool added = false;
       AutoLock v_lock(view_lock);
+      reduction_mask |= valid_mask;
       // Iterate backwards and add to the first epoch that matches
       for (std::deque<ReductionEpoch>::reverse_iterator it = 
             reduction_epochs.rbegin(); it != reduction_epochs.rend(); it++)
