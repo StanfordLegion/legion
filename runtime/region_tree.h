@@ -2085,7 +2085,6 @@ namespace LegionRuntime {
       LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
 #ifdef DEBUG_HIGH_LEVEL
       // Debug only since this can grow unbounded
-      FieldMask observed_fields;
       LegionMap<VersionID,FieldMask>::aligned observed;
 #endif
     };

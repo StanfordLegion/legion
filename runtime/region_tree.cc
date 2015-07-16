@@ -12563,7 +12563,6 @@ namespace LegionRuntime {
               FieldMask &observed_mask = observed[it->first+1];
               assert(observed_mask * to_create);
               observed_mask |= to_create;
-              observed_fields |= to_create;
 #endif
               VersionState *new_state = legion_new<VersionState>(it->first+1);
               new_state->add_reference();
@@ -12596,7 +12595,6 @@ namespace LegionRuntime {
               FieldMask &observed_mask = observed[it->first];
               assert(observed_mask * to_create);
               observed_mask |= to_create;
-              observed_fields |= to_create;
 #endif
               VersionState *new_state = legion_new<VersionState>(it->first);
               new_state->add_reference();
@@ -13051,10 +13049,6 @@ namespace LegionRuntime {
         assert(previous_version_fields * info.valid_fields);
         previous_version_fields |= info.valid_fields;
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert((current_version_fields | 
-              previous_version_fields) == observed_fields);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17813,46 +17807,22 @@ namespace LegionRuntime {
         MaterializedView *target_view = 
                           view->as_instance_view()->as_materialized_view();
         PhysicalState *state = get_physical_state(info.ctx, info.version_info);
-        // First check to see if we are in the set of valid views, if
-        // not then we need to issue updates for all of our fields
+        // Figure out what fields we need to update
+        FieldMask update_mask = user.field_mask;
         LegionMap<InstanceView*,FieldMask>::aligned::const_iterator finder = 
           state->valid_views.find(target_view);
-        if ((finder == state->valid_views.end()) || 
-            !!(user.field_mask - finder->second))
-        {
-          FieldMask update_mask = user.field_mask;
-          if (finder != state->valid_views.end())
-            update_mask -= finder->second;
-          LegionMap<InstanceView*,FieldMask>::aligned valid_views;
-          find_valid_instance_views(info.ctx, state, update_mask, update_mask,
-                      info.version_info, false/*needs space*/, valid_views);
-          issue_update_copies(info, target_view, update_mask, valid_views);
-        }
-        // Now do the close to this physical instance
-        PhysicalCloser closer(info, false/*leave open*/, handle);
-        closer.add_target(target_view);
-        closer.update_dirty_mask(user.field_mask);
-        bool create_composite = false;
-        std::set<ColorPoint> empty_next_children;
-#ifdef DEBUG_HIGH_LEVEL
-        bool temp_result = 
-#endif
-        siphon_physical_children(closer, state, user.field_mask, 
-                                 empty_next_children, create_composite); 
-#ifdef DEBUG_HIGH_LEVEL
-        assert(temp_result); // should always succeed
-        assert(!create_composite);
-#endif
-        // Now update the valid views
-        closer.update_node_views(this, state);
-        flush_reductions(user.field_mask,
-                         info.req.redop, info);
-        // Get the resulting instance reference
-        InstanceRef result = target_view->add_user(user);
+        if (finder != state->valid_views.end())
+          update_mask -= finder->second;
+        // All we should actually have to do here is just register
+        // our region because any actualy close operations that would
+        // need to be done would have been issued as part of the 
+        // logical analysis.
+        InstanceRef result = register_region(info, user, 
+                                             target_view, update_mask);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
-        return result.get_ready_event();
+        return result.get_ready_event(); 
       }
     }
 
