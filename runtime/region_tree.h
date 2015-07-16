@@ -1387,15 +1387,19 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : physical_state(NULL), premap_only(false), needs_reset(false) { }
+          : physical_state(NULL), premap_only(false), 
+            path_only(false), advance(false), needs_reset(false) { }
         // Don't ever copy over the physical state
         NodeInfo(const NodeInfo &rhs)
           : physical_state(NULL), version_numbers(rhs.version_numbers),
-            premap_only(rhs.premap_only), needs_reset(rhs.needs_reset) { }
+            premap_only(rhs.premap_only), path_only(rhs.path_only),
+            advance(rhs.advance), needs_reset(rhs.needs_reset) { }
         NodeInfo& operator=(const NodeInfo &rhs)
         {
           version_numbers = rhs.version_numbers;
           premap_only = rhs.premap_only;
+          path_only = rhs.path_only;
+          advance = rhs.advance;
           needs_reset = rhs.needs_reset;
           return *this;
         }
@@ -1403,6 +1407,8 @@ namespace LegionRuntime {
         PhysicalState *physical_state;
         RegionVersions version_numbers;
         bool premap_only; // state needed for premapping only
+        bool path_only; // state needed for intermediate path
+        bool advance;
         bool needs_reset;
       };
     public:
@@ -1956,7 +1962,7 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool premap_only);
+      void capture_state(bool path_only);
       void apply_state(bool advance) const;
       void reset(void);
     public:
@@ -2010,7 +2016,7 @@ namespace LegionRuntime {
       void initialize(LogicalView *view, PhysicalUser &user);
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask, 
-                                 bool premap_only) const;
+                                 bool path_only) const;
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
     public:
@@ -2051,7 +2057,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-                                     bool premap_only, bool advance);
+                                     bool path_only, bool advance);
       void initialize_state(LogicalView *view, PhysicalUser &user);
       void filter_states(const FieldMask &filter_mask);
       void check_init(void);
@@ -2063,26 +2069,25 @@ namespace LegionRuntime {
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
-      void filter_previous_states_with_lock(VersionID vid, 
-                                            const FieldMask &filter_mask);
-      bool filter_current_states_with_lock(VersionID vid, 
-                                           const FieldMask &filter_mask);
     protected:
       void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
-      void capture_previous_states(VersionStateInfo &info,
-                                   const FieldMask &capture_mask,
+      void filter_current_states(VersionID vid, const FieldMask &filter_mask);
+      void capture_previous_states(VersionID vid, const FieldMask &capture_mask,
                                    PhysicalState *state);
-      void filter_current_states(VersionStateInfo &info, VersionID vid,
-                                 const FieldMask &filter_mask,
-                                 PhysicalState *state);
-      void capture_advance_states(VersionID vid, const FieldMask &capture_mask,
-                                  PhysicalState *state, FieldMask &to_create);
-      void capture_version_states(VersionID vid, FieldMask &remaining,
-                                  PhysicalState *state);
+      void capture_previous_states(VersionID vid, const FieldMask &capture_mask,
+                                   PhysicalState *state, FieldMask &to_create);
+      void capture_current_states(VersionID vid, const FieldMask &capture_mask,
+                                  PhysicalState *state, FieldMask &to_create,
+                                  bool advance);
     protected:
       Reservation version_lock;
       LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
       LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
+#ifdef DEBUG_HIGH_LEVEL
+      // Debug only since this can grow unbounded
+      FieldMask observed_fields;
+      LegionMap<VersionID,FieldMask>::aligned observed;
+#endif
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
@@ -2182,7 +2187,7 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info, bool capture_previous,
-                                  bool premap_only);
+                                  bool premap_only, bool path_only);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
@@ -2203,8 +2208,6 @@ namespace LegionRuntime {
       // Entry
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
-      void filter_version_states(ContextID ctx, const PhysicalState *state,
-                                 const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
                                 const FieldMask &closing_mask,
                 const LegionMap<InstanceView*,FieldMask>::aligned &valid_views,
