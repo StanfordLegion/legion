@@ -23352,10 +23352,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Iterate over all the reduction epochs and issue reductions
-      std::deque<ReductionEpoch> to_issue;  
+      LegionDeque<ReductionEpoch>::aligned to_issue;  
       {
         AutoLock v_lock(view_lock, 1, false/*exclusive*/);
-        for (std::deque<ReductionEpoch>::const_iterator it = 
+        for (LegionDeque<ReductionEpoch>::aligned::const_iterator it = 
               reduction_epochs.begin(); it != reduction_epochs.end(); it++)
         {
           if (reduce_mask * it->valid_fields)
@@ -23363,7 +23363,7 @@ namespace LegionRuntime {
           to_issue.push_back(*it);
         }
       }
-      for (std::deque<ReductionEpoch>::const_iterator rit = 
+      for (LegionDeque<ReductionEpoch>::aligned::const_iterator rit = 
             to_issue.begin(); rit != to_issue.end(); rit++)
       {
         const ReductionEpoch &epoch = *rit; 
