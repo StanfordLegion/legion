@@ -6853,8 +6853,6 @@ namespace LegionRuntime {
       assert(false);
       return RegionInstance::NO_INST;
 #else
-      Realm::ProfilingRequestSet requests;
-
       assert(field_sizes.size() == field_files.size());
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
