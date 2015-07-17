@@ -1,0 +1,62 @@
+
+Edit
+====
+
+This is a modified version of the original CGreenelet library to customize
+it for the Legion runtime.
+
+Note
+====
+
+CGreenlet doesn't use the "stack splicing" approach that other green threads
+implementations use. This means that a whole stack will be allocated per
+greenlet. This is a lot less memory effcient than using stack splicing.
+
+You should consider this code mostly as a proof of concept. For a proven
+real-world implementation of green threads with stack splicing see the
+"stacklet" implementatin from PyPy:
+
+  https://bitbucket.org/pypy/pypy/src/default/rpython/translator/c/src/stacklet
+  
+The Stacklet API is a little bit more low-level. Stacklet would be an ideal
+backend for CGreenlet.
+
+Overview
+========
+
+CGreenlet is a FAST! and cross-platfrm coroutine library for C/C++. The API is
+modeled after the Python "greenlet" API [1]_.
+
+Building and Installing
+=======================
+
+ $ make
+ $ sudo make install [PREFIX=prefix]
+
+Platforms
+=========
+
+The list of tested platforms currently includes:
+
+ * Linux (i386 and x86-64)
+ * Mac OSX (x86-64)
+ * Windows (i386)
+
+Comments and suggestions
+========================
+
+Freel free to add an issue on the github site:
+
+  https://github.com/geertj/cgreenlet
+
+For any questions, feel free to contact me at <geertj@gmail.com>.
+
+Documentation
+=============
+
+See the docs/ and examples/ directories in the source tree.
+
+References
+==========
+
+.. [1] http://pypi.python.org/pypi/greenlet

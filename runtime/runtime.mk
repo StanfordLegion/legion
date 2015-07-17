@@ -100,7 +100,7 @@ ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/greenlet
 ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
 else
@@ -248,6 +248,12 @@ CC_FLAGS        += -Wall -Werror
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
+LOW_RUNTIME_SRC	?=
+HIGH_RUNTIME_SRC?=
+GPU_RUNTIME_SRC	?=
+MAPPER_SRC	?=
+ASM_SRC		?=
+
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc $(LG_RT_DIR)/channel.cc
@@ -258,6 +264,10 @@ ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
+		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
+		   $(LG_RT_DIR)/greenlet/greenlet-cc.cc
+ASM_SRC		+= $(LG_RT_DIR)/greenlet/greenlet-asm.S
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
@@ -266,6 +276,7 @@ endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 		   $(LG_RT_DIR)/realm/operation.cc
+
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
@@ -287,3 +298,73 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
 		    $(LG_RT_DIR)/region_tree.cc \
 		    $(LG_RT_DIR)/runtime.cc \
 		    $(LG_RT_DIR)/garbage_collection.cc
+
+# General shell commands
+SHELL	:= /bin/sh
+SH	:= sh
+RM	:= rm -f
+LS	:= ls
+MKDIR	:= mkdir
+MV	:= mv
+CP	:= cp
+SED	:= sed
+ECHO	:= echo
+TOUCH	:= touch
+MAKE	:= make
+ifndef GCC
+GCC	:= g++
+endif
+ifndef NVCC
+NVCC	:= $(CUDA)/bin/nvcc
+endif
+SSH	:= ssh
+SCP	:= scp
+
+GEN_OBJS	:= $(GEN_SRC:.cc=.o)
+LOW_RUNTIME_OBJS:= $(LOW_RUNTIME_SRC:.cc=.o)
+HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.o)
+MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.o)
+ASM_OBJS	:= $(ASM_SRC:.S=.o)
+# Only compile the gpu objects if we need to 
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.o)
+GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.o)
+else
+GEN_GPU_OBJS	:=
+GPU_RUNTIME_OBJS:=
+endif
+
+ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+
+.PHONY: all
+all: $(OUTFILE)
+
+# If we're using the general low-level runtime we have to link with nvcc
+$(OUTFILE) : $(ALL_OBJS)
+	@echo "---> Linking objects into one binary: $(OUTFILE)"
+	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
+
+$(GEN_OBJS) : %.o : %.cc
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+$(ASM_OBJS) : %.o : %.S
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+$(LOW_RUNTIME_OBJS) : %.o : %.cc
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+$(HIGH_RUNTIME_OBJS) : %.o : %.cc
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+$(MAPPER_OBJS) : %.o : %.cc
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+$(GEN_GPU_OBJS) : %.o : %.cu
+	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+
+$(GPU_RUNTIME_OBJS): %.o : %.cu
+	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+
+clean:
+	@$(RM) -rf $(ALL_OBJS) $(OUTFILE)
+
