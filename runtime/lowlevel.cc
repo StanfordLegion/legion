@@ -6853,6 +6853,8 @@ namespace LegionRuntime {
       assert(false);
       return RegionInstance::NO_INST;
 #else
+      Realm::ProfilingRequestSet requests;
+
       assert(field_sizes.size() == field_files.size());
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
@@ -6914,7 +6916,7 @@ namespace LegionRuntime {
       size_t inst_bytes = elem_size * num_elements;
       RegionInstance i = hdf_mem->create_instance(get_index_space(), linearization_bits, inst_bytes, 
                                                   1/*block_size*/, elem_size, field_sizes,
-                                                  0 /*redop_id*/, -1/*list_size*/, RegionInstance::NO_INST,
+                                                  0 /*redop_id*/, -1/*list_size*/, requests, RegionInstance::NO_INST,
                                                   file_name, field_files, *this, read_only);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
