@@ -164,7 +164,11 @@ ifeq ($(strip $(USE_GASNET)),1)
 
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
-  LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  ifneq ($(shell uname -s),Darwin)
+    LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  else
+    LD_FLAGS	+= -L$(GASNET)/lib -lm
+  endif 
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1

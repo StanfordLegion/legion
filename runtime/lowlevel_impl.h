@@ -1569,9 +1569,9 @@ namespace LegionRuntime {
                                              size_t block_size,
                                              size_t element_size,
                                              const std::vector<size_t>& field_sizes,
-                                             const Realm::ProfilingRequestSet &reqs,
                                              ReductionOpID redopid,
                                              off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
                                              RegionInstance parent_inst);
 
       RegionInstance create_instance(IndexSpace is,
@@ -1582,6 +1582,7 @@ namespace LegionRuntime {
                                      const std::vector<size_t>& field_sizes,
                                      ReductionOpID redopid,
                                      off_t list_size,
+                                     const Realm::ProfilingRequestSet &reqs,
                                      RegionInstance parent_inst,
                                      const char* file,
                                      const std::vector<const char*>& path_names,
