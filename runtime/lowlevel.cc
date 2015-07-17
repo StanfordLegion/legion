@@ -9796,7 +9796,7 @@ namespace LegionRuntime {
 #endif
       // should local proc threads get dedicated cores?
       bool bind_localproc_threads = true;
-      bool use_greenlet_procs = true;
+      bool use_greenlet_procs = false;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname) do { \
