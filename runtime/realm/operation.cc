@@ -21,9 +21,14 @@ namespace Realm {
   Operation::~Operation(void)
   {
     if (requests.request_count() > 0) {
-      if (capture_timeline)
+      // send profiling requests only when the timeline is valid
+      if (capture_timeline && timeline.is_valid()) {
         measurements.add_measurement(timeline);
-      measurements.send_responses(requests);
+        measurements.send_responses(requests);
+      }
+      else if (!capture_timeline) {
+        measurements.send_responses(requests);
+      }
     }
   }
 
@@ -45,4 +50,19 @@ namespace Realm {
       timeline.record_end_time();
   }
 
+  void Operation::clear_profiling(void)
+  {
+    capture_timeline = false;
+    requests.clear();
+    measurements.clear();
+  }
+
+  void Operation::reconstruct_measurements()
+  {
+    measurements.import_requests(requests);
+    capture_timeline = measurements.wants_measurement<
+                        ProfilingMeasurements::OperationTimeline>();
+    if (capture_timeline)
+      timeline.record_create_time();
+  }
 }; // namespace Realm

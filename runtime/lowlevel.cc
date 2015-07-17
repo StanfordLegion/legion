@@ -5117,18 +5117,6 @@ namespace LegionRuntime {
 	size_t zero = 0;
 	put_bytes(count_offset, &zero, sizeof(zero));
       }
-      else if (redopid > 0)
-      {
-        assert(field_sizes.size() == 1);
-        // Otherwise if this is a fold reduction instance then
-        // we need to initialize the memory with the identity
-        const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redopid];
-        assert(redop->has_identity);
-        assert(element_size == redop->sizeof_rhs);
-        void *ptr = get_direct_ptr(inst_offset, bytes_needed); 
-        size_t num_elements = bytes_needed/element_size;
-        redop->init(ptr, num_elements);
-      }
 
       // SJT: think about this more to see if there are any race conditions
       //  with an allocator temporarily having the wrong ID
@@ -5636,17 +5624,21 @@ namespace LegionRuntime {
       unsigned long long start = TimeStamp::get_current_time_in_micros(); 
 #endif
       assert(state == RUNNING_STATE);
-      // First mark that we are going to try pausing
-      state = PAUSING_STATE;
+      // First mark that we are this thread is now paused
+      state = PAUSED_STATE;
+      // Then tell the processor to pause the thread
+      proc->pause_thread(this);
+      // Now register ourselves with the event
       Event::Impl *event = get_runtime()->get_event_impl(wait_for);
-      // Register ourselves with the event
       event->add_waiter(wait_for.gen, this);
+      // Take our lock and see if we are still in the paused state
+      // It's possible that we've already been woken up so check before
+      // going to sleep
       gasnet_hsl_lock(&thread_mutex);
-      if (state == PAUSING_STATE)
+      // If we are in the paused state or the resumable state then we actually
+      // do need to go to sleep so we can be woken up by the processor later
+      if ((state == PAUSED_STATE) || (state == RESUMABLE_STATE))
       {
-        state = PAUSED_STATE;
-        // Tell the processor that this thread is going to sleep
-        proc->pause_thread(this);
         gasnett_cond_wait(&thread_cond, &thread_mutex.lock);
       }
       assert(state == RUNNING_STATE);
@@ -5663,21 +5655,11 @@ namespace LegionRuntime {
     bool LocalThread::event_triggered(void)
     {
       gasnet_hsl_lock(&thread_mutex);
-      assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
-      bool need_resume = false;
-      // If the thread is still trying to go to sleep we
-      // can just mark it runnable again, otherwise it
-      // already went to sleep so we have to mark that
-      // it is resumable
-      if (state == PAUSED_STATE) {
-        need_resume = true;
-        state = RESUMABLE_STATE;
-      } else {
-        state = RUNNING_STATE;
-      }
+      assert(state == PAUSED_STATE);
+      state = RESUMABLE_STATE;
       gasnet_hsl_unlock(&thread_mutex);
-      if (need_resume)
-        proc->resume_thread(this);
+      // Now tell the processor that this thread is resumable
+      proc->resume_thread(this);
       return false;
     }
 
@@ -6871,6 +6853,8 @@ namespace LegionRuntime {
       assert(false);
       return RegionInstance::NO_INST;
 #else
+      Realm::ProfilingRequestSet requests;
+
       assert(field_sizes.size() == field_files.size());
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
@@ -7909,21 +7893,17 @@ namespace LegionRuntime {
       off_t o;
       if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * metadata.elmt_size) + byte_offset;
+	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
+        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
+                         metadata.elmt_size, metadata.block_size, index);
 
-	int block_num = index / metadata.block_size;
-	int block_ofs = index % metadata.block_size;
-
-	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
-	     (field_size * block_ofs) +
-	     (byte_offset - field_start));
       }
       Memory::Impl *m = get_runtime()->get_memory_impl(memory);
-      m->get_bytes(metadata.alloc_offset + o, dst, size);
+      m->get_bytes(o, dst, size);
     }
 
     void RegionInstance::Impl::put_bytes(int index, off_t byte_offset, const void *src, size_t size)
@@ -7933,21 +7913,16 @@ namespace LegionRuntime {
       off_t o;
       if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * metadata.elmt_size) + byte_offset;
+	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
-
-	int block_num = index / metadata.block_size;
-	int block_ofs = index % metadata.block_size;
-
-	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
-	     (field_size * block_ofs) +
-	     (byte_offset - field_start));
+        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
+                         metadata.elmt_size, metadata.block_size, index);
       }
       Memory::Impl *m = get_runtime()->get_memory_impl(memory);
-      m->put_bytes(metadata.alloc_offset + o, src, size);
+      m->put_bytes(o, src, size);
     }
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
@@ -9288,7 +9263,6 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
-      Realm::InitialTime::get_initial_time();
       // have to register domain mappings too
       Arrays::Mapping<1,1>::register_mapping<Arrays::CArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::CArrayLinearization<2> >();
@@ -9504,6 +9478,7 @@ namespace LegionRuntime {
       hcount += CreateInstanceRequest::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
       hcount += CreateInstanceResponse::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
+      hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
       hcount += ValidMaskRequestMessage::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
       hcount += ValidMaskDataMessage::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
       hcount += RollUpRequestMessage::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
@@ -9579,6 +9554,7 @@ namespace LegionRuntime {
         start_sending_threads();
 
       Clock::synchronize();
+      Realm::InitialTime::get_initial_time();
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -10671,7 +10647,7 @@ namespace LegionRuntime {
     void AccessorType::verify_access(void *impl_ptr, unsigned ptr)
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
-      internal->verify_access(ptr);
+      impl->verify_access(ptr);
     }
 #endif
 

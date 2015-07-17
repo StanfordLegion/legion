@@ -172,12 +172,13 @@ bool CircuitMapper::map_task(Task *task)
 
 bool CircuitMapper::map_inline(Inline *inline_operation)
 {
-  // let the default mapper do its thing, and then override the
-  //  blocking factor to force SOA
-  bool ret = DefaultMapper::map_inline(inline_operation);
+  //bool ret = DefaultMapper::map_inline(inline_operation);
+  Memory sys_mem = all_sysmems[inline_operation->parent_task->target_proc];
+  assert(sys_mem.exists());
   RegionRequirement& req = inline_operation->requirement;
   req.blocking_factor = req.max_blocking_factor;
-  return ret;
+  req.target_ranking.push_back(sys_mem);
+  return true;
 }
 
 void CircuitMapper::notify_mapping_failed(const Mappable *mappable)

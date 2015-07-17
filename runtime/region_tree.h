@@ -507,6 +507,10 @@ namespace LegionRuntime {
                        const std::vector<Domain::CopySrcDstField> &src_fields,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
+      Event issue_fill(const Domain &dom, Operation *op,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       const void *fill_value, size_t fill_size,
+                       Event precondition = Event::NO_EVENT);
       Event issue_reduction_copy(const Domain &dom, Operation *op,
                        ReductionOpID redop, bool reduction_fold,
                        const std::vector<Domain::CopySrcDstField> &src_fields,
@@ -636,8 +640,8 @@ namespace LegionRuntime {
         int kind;
         int count;
         unsigned long long total_time;
-        unsigned long long min_time;
         unsigned long long max_time;
+        unsigned long long min_time;
       };
       struct PerfTrace {
       public:
@@ -659,7 +663,7 @@ namespace LegionRuntime {
       };
     protected:
       Reservation perf_trace_lock;
-      std::vector<PerfTrace> traces;
+      std::vector<std::vector<PerfTrace> > traces;
 #endif
     };
 
@@ -671,6 +675,7 @@ namespace LegionRuntime {
       REMAP_PHYSICAL_REGION_ANALYSIS,
       REGISTER_PHYSICAL_REGION_ANALYSIS,
       COPY_ACROSS_ANALYSIS,
+      PERFORM_CLOSE_OPERATIONS_ANALYSIS,
     };
 
     enum CallKind {
@@ -3365,6 +3370,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const = 0;
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
+      virtual Event get_use_event(void) const = 0;
     public:
       virtual DistributedID send_manager(AddressSpaceID target, 
                         std::set<PhysicalManager*> &needed_managers);
@@ -3423,6 +3429,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -3440,7 +3447,7 @@ namespace LegionRuntime {
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op);
+                           const ReductionOp *op, Event use_event);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
@@ -3465,6 +3472,9 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
+    public:
+      const Event use_event;
     };
 
     /**
@@ -4083,7 +4093,7 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez);
     public:
-      void add_root(CompositeNode *root, const FieldMask &valid);
+      void add_root(CompositeNode *root, const FieldMask &valid, bool top);
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL);
@@ -4192,6 +4202,7 @@ namespace LegionRuntime {
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
+      void set_owner_did(DistributedID owner_did);
     public:
       bool find_field_descriptors(PhysicalUser &user, 
                                   unsigned fid_idx, Processor local_proc, 
@@ -4219,6 +4230,7 @@ namespace LegionRuntime {
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
     protected:
+      DistributedID owner_did;
       FieldMask dirty_mask;
       LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;

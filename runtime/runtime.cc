@@ -25,6 +25,7 @@
 #include "legion_spy.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#include "garbage_collection.h"
 #ifdef HANG_TRACE
 #include <signal.h>
 #include <execinfo.h>
@@ -396,6 +397,9 @@ namespace LegionRuntime {
         runtime->register_future(did, this);
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
+#ifdef LEGION_GC
+      log_garbage.info("GC Future %ld", did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -884,7 +888,7 @@ namespace LegionRuntime {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
         // collected while we are waiting for the contribution task to run
-        add_gc_reference();
+        add_base_gc_ref(PENDING_COLLECTIVE_REF);
         ContributeCollectiveArgs args;
         args.hlr_id = HLR_CONTRIBUTE_COLLECTIVE_ID;
         args.impl = this;
@@ -908,7 +912,7 @@ namespace LegionRuntime {
       cargs->impl->contribute_to_collective(cargs->barrier, cargs->count);
       // Now remote the garbage collection reference and see if we can 
       // reclaim the future
-      if (cargs->impl->remove_gc_reference())
+      if (cargs->impl->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
         delete cargs->impl;
     }
       
@@ -3271,7 +3275,7 @@ namespace LegionRuntime {
     void MemoryManager::recycle_physical_instance(InstanceManager *instance)
     //--------------------------------------------------------------------------
     {
-      instance->add_resource_reference();
+      instance->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(available_instances.find(instance) == available_instances.end());
@@ -3296,7 +3300,7 @@ namespace LegionRuntime {
         }
       }
       // If we are reclaiming it, remove our resource reference
-      if (reclaim && instance->remove_resource_reference())
+      if (reclaim && instance->remove_base_resource_ref(MEMORY_MANAGER_REF))
         legion_delete(instance);
       return reclaim;
     }
@@ -3335,7 +3339,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -3374,7 +3378,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -4669,7 +4673,7 @@ namespace LegionRuntime {
       {
         // Add a garbage collection reference to the view, it will
         // be removed in LogicalView::handle_deferred_collect
-        view->add_gc_reference();
+        view->add_base_gc_ref(PENDING_GC_REF);
         collections[view].insert(term);
       }
       else
@@ -4941,11 +4945,10 @@ namespace LegionRuntime {
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
-#ifdef LEGION_PROF
+      // Set up the profiler if it was requested
       // If it is less than zero, all nodes enabled by default, otherwise
       // we have to be less than the maximum number to enable profiling
-      if ((Runtime::num_profiling_nodes < 0) || 
-          (int(address_space) < Runtime::num_profiling_nodes))
+      if (address_space < Runtime::num_profiling_nodes)
       {
         HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
         profiler = new LegionProfiler((local_utils.empty() ? 
@@ -4964,6 +4967,7 @@ namespace LegionRuntime {
         {
           const std::map<VariantID,TaskVariantCollection::Variant> 
             &variants = cit->second->variants;  
+          profiler->register_task_kind(cit->first, cit->second->name);
           for (std::map<VariantID,TaskVariantCollection::Variant>::
                 const_iterator it = variants.begin(); it != 
                 variants.end(); it++)
@@ -4971,6 +4975,14 @@ namespace LegionRuntime {
             profiler->register_task_variant(cit->second->name,
                                             it->second);
           }
+        }
+      }
+#ifdef LEGION_GC
+      {
+        REFERENCE_NAMES_ARRAY(reference_names);
+        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
+        {
+          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
         }
       }
 #endif
@@ -5033,14 +5045,12 @@ namespace LegionRuntime {
         LegionProf::finalize_copy_profiler();
       }
 #endif
-#ifdef LEGION_PROF
       if (profiler != NULL)
       {
         profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
-#endif
       delete high_level;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -5486,7 +5496,7 @@ namespace LegionRuntime {
       // on the task being reported back to the mapper
       UserEvent result = UserEvent::create_user_event();
       // Add a reference to the future impl to prevent it being collected
-      f.impl->add_gc_reference();
+      f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
       MapperTaskArgs args;
       args.hlr_id = HLR_MAPPER_TASK_ID;
@@ -7461,6 +7471,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7508,6 +7522,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7557,6 +7575,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7606,6 +7628,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7656,6 +7682,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_difference(ctx, result, initial, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -8675,6 +8705,13 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        return execute_must_epoch(ctx, epoch_launcher);
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
@@ -8707,7 +8744,8 @@ namespace LegionRuntime {
             // add the necessary references to prevent premature
             // garbage collection by the runtime
             result->add_reference();
-            launcher.predicate_false_future.impl->add_gc_reference();
+            launcher.predicate_false_future.impl->add_base_gc_ref(
+                                                    FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
@@ -13525,10 +13563,12 @@ namespace LegionRuntime {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      // Don't recycle distributed IDs if we're doing LegionSpy
+      // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
+#ifndef LEGION_GC
 #ifndef LEGION_SPY
       AutoLock d_lock(distributed_id_lock);
       available_distributed_ids.push_back(did);
+#endif
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       AutoLock dist_lock(distributed_collectable_lock,1,false/*exclusive*/);
@@ -15448,9 +15488,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
     /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
 #endif
-#ifdef LEGION_PROF
-    /*static*/ int Runtime::num_profiling_nodes = -1;
-#endif
+    /*static*/ unsigned Runtime::num_profiling_nodes = 0;
 
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
@@ -15550,9 +15588,7 @@ namespace LegionRuntime {
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
 #endif
-#ifdef LEGION_PROF
-        num_profiling_nodes = -1;
-#endif
+        num_profiling_nodes = 0;
 #ifdef DEBUG_HIGH_LEVEL
         logging_region_tree_state = false;
         verbose_logging = false;
@@ -15608,17 +15644,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
           INT_ARG("-hl:perf_tol", perf_trace_tolerance);
 #endif
-#ifdef LEGION_PROF
           INT_ARG("-hl:prof", num_profiling_nodes);
-#else
-          if (!strcmp(argv[i],"-hl:prof"))
-          {
-            log_run.warning("WARNING: Legion Prof is disabled.  The "
-                                  "-hl:prof flag will be ignored.  Recompile "
-                                  "with the -DLEGION_PROF flag to enable "
-                                  "profiling.");
-          }
-#endif
         }
 #undef INT_ARG
 #undef BOOL_ARG
@@ -16716,9 +16742,9 @@ namespace LegionRuntime {
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
             future_args->target->complete_future();
-            if (future_args->target->remove_gc_reference())
+            if (future_args->target->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->target);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16740,7 +16766,7 @@ namespace LegionRuntime {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16786,7 +16812,7 @@ namespace LegionRuntime {
             rt->invoke_mapper_task_result(margs->map_id, margs->proc,
                                           margs->event, result, result_size);
             // Now indicate that we are done with the future
-            if (margs->future->remove_gc_reference())
+            if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
             // Finally tell the runtime we have one less top level task
             rt->decrement_outstanding_top_level_tasks();

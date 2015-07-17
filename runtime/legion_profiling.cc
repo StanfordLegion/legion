@@ -58,6 +58,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_task_kind(Processor::TaskFuncID task_id,
+                                                const char *name)
+    //--------------------------------------------------------------------------
+    {
+      task_kinds.push_back(TaskKind());
+      TaskKind &kind = task_kinds.back();
+      kind.task_id = task_id;
+      kind.task_name = strdup(name);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::register_task_variant(const char *variant_name,
                                   const TaskVariantCollection::Variant &variant)
     //--------------------------------------------------------------------------
@@ -79,11 +90,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_multi_task(Operation *op, 
+                                                 Processor::TaskFuncID task_id)
+    //--------------------------------------------------------------------------
+    {
+      multi_tasks.push_back(MultiTask());
+      MultiTask &task = multi_tasks.back();
+      task.op_id = op->get_unique_op_id();
+      task.task_id = task_id;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(size_t id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       task_infos.push_back(TaskInfo()); 
       TaskInfo &info = task_infos.back();
       info.task_id = op_id;
@@ -101,6 +126,9 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       meta_infos.push_back(MetaInfo());
       MetaInfo &info = meta_infos.back();
       info.op_id = op_id;
@@ -118,10 +146,32 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
       copy_infos.push_back(CopyInfo());
       CopyInfo &info = copy_infos.back();
       info.op_id = op_id;
       info.source = usage->source;
+      info.target = usage->target;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      info.stop = timeline->end_time;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_fill(UniqueID op_id,
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
+                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(timeline->is_valid());
+#endif
+      fill_infos.push_back(FillInfo());
+      FillInfo &info = fill_infos.back();
+      info.op_id = op_id;
       info.target = usage->target;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
@@ -149,6 +199,12 @@ namespace LegionRuntime {
     void LegionProfInstance::dump_state(void)
     //--------------------------------------------------------------------------
     {
+      for (std::deque<TaskKind>::const_iterator it = task_kinds.begin();
+            it != task_kinds.end(); it++)
+      {
+        log_prof.info("Prof Task Kind %u %s", it->task_id, it->task_name);
+        free(const_cast<char*>(it->task_name));
+      }
       for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
             it != task_variants.end(); it++)
       {
@@ -159,6 +215,11 @@ namespace LegionRuntime {
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
         log_prof.info("Prof Operation %llu %u", it->op_id, it->op_kind);
+      }
+      for (std::deque<MultiTask>::const_iterator it = 
+            multi_tasks.begin(); it != multi_tasks.end(); it++)
+      {
+        log_prof.info("Prof Multi %llu %u", it->op_id, it->task_id);
       }
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
@@ -181,6 +242,13 @@ namespace LegionRuntime {
                       " %llu %llu %llu %llu", it->op_id, it->source.id,
                     it->target.id, it->create, it->ready, it->start, it->stop);
       }
+      for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
+            it != fill_infos.end(); it++)
+      {
+        log_prof.info("Prof Fill Info %llu " IDFMT 
+                      " %llu %llu %llu %llu", it->op_id, it->target.id, 
+                            it->create, it->ready, it->start, it->stop);
+      }
       for (std::deque<InstInfo>::const_iterator it = inst_infos.begin();
             it != inst_infos.end(); it++)
       {
@@ -188,8 +256,10 @@ namespace LegionRuntime {
                       it->op_id, it->inst.id, it->mem.id, it->total_bytes,
                       it->create, it->destroy);
       }
+      task_kinds.clear();
       task_variants.clear();
       operation_instances.clear();
+      multi_tasks.clear();
       task_infos.clear();
       meta_infos.clear();
       copy_infos.clear();
@@ -268,6 +338,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::register_task_kind(Processor::TaskFuncID task_id,
+                                            const char *task_name)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id(); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->register_task_kind(task_id, task_name);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::register_task_variant(const char *variant_name,
                                   const TaskVariantCollection::Variant &variant)
     //--------------------------------------------------------------------------
@@ -294,6 +379,21 @@ namespace LegionRuntime {
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->register_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::register_multi_task(Operation *op, 
+                                             Processor::TaskFuncID task_id)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id(); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->register_multi_task(op, task_id);
     }
 
     //--------------------------------------------------------------------------
@@ -338,7 +438,24 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
+                                          Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_FILL);
+      // No ID here
+      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -437,6 +554,26 @@ namespace LegionRuntime {
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationMemoryUsage>();
             instances[local_id]->process_copy(info->op_id,
+                                              timeline, usage);
+            delete timeline;
+            delete usage;
+            break;
+          }
+        case LEGION_PROF_FILL:
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>());
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>());
+#endif
+            Realm::ProfilingMeasurements::OperationTimeline *timeline = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>();
+            Realm::ProfilingMeasurements::OperationMemoryUsage *usage = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationMemoryUsage>();
+            instances[local_id]->process_fill(info->op_id,
                                               timeline, usage);
             delete timeline;
             delete usage;

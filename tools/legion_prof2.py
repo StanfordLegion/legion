@@ -24,9 +24,12 @@ prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: 
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
+multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
@@ -112,6 +115,7 @@ def read_time(string):
 
 class TimeRange(object):
     def __init__(self, start_time, stop_time):
+        assert start_time <= stop_time
         self.start_time = start_time
         self.stop_time = stop_time
         self.subranges = list()
@@ -480,7 +484,18 @@ class Channel(object):
         print
         
     def __repr__(self):
-        return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+        if self.src is None:
+            return 'Fill ' + self.dst.__repr__() + ' Channel'
+        else:
+            return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+
+class TaskKind(object):
+    def __init__(self, task_id, name):
+        self.task_id = task_id
+        self.name = 'Task "'+name+'"'
+
+    def __repr__(self):
+        return self.name
 
 class Variant(object):
     def __init__(self, func_id, name):
@@ -549,8 +564,10 @@ class Operation(object):
         self.kind = None
         self.is_task = False
         self.is_meta = False
+        self.is_multi = False
         self.name = 'Operation '+str(op_id)
         self.variant = None
+        self.task_kind = None
         self.create = None
         self.ready = None
         self.start = None
@@ -582,7 +599,11 @@ class Operation(object):
 
     def __repr__(self):
         if self.is_task:
+            assert self.variant is not None
             return self.variant.name+' '+self.get_info()
+        elif self.is_multi:
+            assert self.task_kind is not None
+            return self.task_kind.name+' '+self.get_info()
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -626,6 +647,22 @@ class Copy(object):
 
     def __repr__(self):
         return 'Copy initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+
+class Fill(object):
+    def __init__(self, dst, op):
+        self.dst = dst
+        self.op = op
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_color(self):
+        return self.op.get_color()
+
+    def __repr__(self):
+        return 'Fill initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
                 ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
 
 class Instance(object):
@@ -818,10 +855,12 @@ class State(object):
         self.processors = {}
         self.memories = {}
         self.channels = {}
+        self.task_kinds = {}
         self.variants = {}
         self.meta_variants = {}
         self.op_kinds = {}
         self.operations = {}
+        self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
         self.last_time = 0L
@@ -864,6 +903,15 @@ class State(object):
                                        read_time(m.group('start')),
                                        read_time(m.group('stop')))
                     continue
+                m = fill_info_pat.match(line)
+                if m is not None:
+                    self.log_fill_info(long(m.group('opid')),
+                                       int(m.group('dst'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
                 m = inst_info_pat.match(line)
                 if m is not None:
                     self.log_inst_info(long(m.group('opid')),
@@ -872,6 +920,11 @@ class State(object):
                                        long(m.group('bytes')),
                                        read_time(m.group('create')),
                                        read_time(m.group('destroy')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')),
+                                  m.group('name'))
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
@@ -882,6 +935,11 @@ class State(object):
                 if m is not None:
                     self.log_operation(long(m.group('opid')),
                                        int(m.group('kind')))
+                    continue
+                m = multi_pat.match(line)
+                if m is not None:
+                    self.log_multi(long(m.group('opid')),
+                                   int(m.group('tid')))
                     continue
                 m = meta_desc_pat.match(line)
                 if m is not None:
@@ -918,8 +976,11 @@ class State(object):
         variant = self.find_variant(func_id)
         task = self.find_task(task_id, variant)
         task.create = create
+        assert create <= ready
         task.ready = ready
+        assert ready <= start
         task.start = start
+        assert start <= stop
         task.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -932,8 +993,11 @@ class State(object):
         variant = self.find_meta_variant(hlr)
         meta = self.create_meta(variant, op)
         meta.create = create
+        assert create <= ready
         meta.ready = ready
+        assert ready <= start
         meta.start = start
+        assert start <= stop
         meta.stop = stop
         if stop > self.last_time:
             self.last_time = stop
@@ -947,13 +1011,33 @@ class State(object):
         dst = self.find_memory(dst_mem)
         copy = self.create_copy(src, dst, op)
         copy.create = create
+        assert create <= ready
         copy.ready = ready
+        assert ready <= start
         copy.start = start
+        assert start <= stop
         copy.stop = stop
         if stop > self.last_time:
             self.last_time = stop
-        pair = self.find_mem_pair(src, dst)
-        pair.add_copy(copy)
+        channel = self.find_channel(src, dst)
+        channel.add_copy(copy)
+
+    def log_fill_info(self, op_id, dst_mem,
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        dst = self.find_memory(dst_mem)
+        fill = self.create_fill(dst, op)
+        fill.create = create
+        assert create <= ready
+        fill.ready = ready
+        assert ready <= start
+        fill.start = start
+        assert start <= stop
+        fill.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        channel = self.find_channel(None, dst)
+        channel.add_copy(fill)
 
     def log_inst_info(self, op_id, inst_id, mem_id, size, 
                       create, destroy):
@@ -961,10 +1045,15 @@ class State(object):
         mem = self.find_memory(mem_id)
         inst = self.create_instance(inst_id, mem, op, size)
         inst.create = create
+        assert create <= destroy
         inst.destroy = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
         mem.add_instance(inst)
+
+    def log_kind(self, task_id, name):
+        if task_id not in self.task_kinds:
+            self.task_kinds[task_id] = TaskKind(task_id, name)
 
     def log_variant(self, func_id, name):
         if func_id not in self.variants:
@@ -977,6 +1066,12 @@ class State(object):
         assert kind in self.op_kinds
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
+
+    def log_multi(self, op_id, task_id):
+        op = self.find_op(op_id)
+        if task_id in self.task_kinds:
+            op.is_multi = True
+            op.task_kind = self.task_kinds[task_id]
 
     def log_meta_desc(self, hlr, name):
         if hlr not in self.meta_variants:
@@ -1007,14 +1102,21 @@ class State(object):
 
     def find_memory(self, mem_id):
         if mem_id not in self.memories:
-            self.memories[mem_id] = Memory(mem_id, None)
+            # use 'system memory' as the default kind
+            self.memories[mem_id] = Memory(mem_id, 1, None)
         return self.memories[mem_id]
 
-    def find_mem_pair(self, src, dst):
-        key = (src,dst)
-        if key not in self.channels:
-            self.channels[key] = Channel(src,dst)
-        return self.channels[key]
+    def find_channel(self, src, dst):
+        if src is not None:
+            key = (src,dst)
+            if key not in self.channels:
+                self.channels[key] = Channel(src,dst)
+            return self.channels[key]
+        else:
+            # This is a fill channel
+            if dst not in self.channels:
+                self.channels[dst] = Channel(None,dst)
+            return self.channels[dst]
 
     def find_variant(self, func_id):
         if func_id not in self.variants:
@@ -1048,6 +1150,9 @@ class State(object):
 
     def create_copy(self, src, dst, op):
         return Copy(src, dst, op)
+
+    def create_fill(self, dst, op):
+        return Fill(dst, op)
 
     def create_instance(self, inst_id, mem, op, size):
         return Instance(inst_id, mem, op, size)
