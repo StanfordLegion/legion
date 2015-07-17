@@ -5546,6 +5546,26 @@ namespace LegionRuntime {
 	member_list.push_back((*it)->me);
     }
 
+    void ProcessorGroup::start_processor(void)
+    {
+      assert(0);
+    }
+
+    void ProcessorGroup::shutdown_processor(void)
+    {
+      assert(0);
+    }
+
+    void ProcessorGroup::initialize_processor(void)
+    {
+      assert(0);
+    }
+
+    void ProcessorGroup::finalize_processor(void)
+    {
+      assert(0);
+    }
+
     void ProcessorGroup::enqueue_task(Task *task)
     {
       for (std::vector<Processor::Impl *>::const_iterator it = members.begin();
@@ -6187,6 +6207,449 @@ namespace LegionRuntime {
       Event::gen_t finish_gen;
     };
 
+    GreenletTask::GreenletTask(Task *t, GreenletProcessor *p,
+                               void *s, long *ssize)
+      : greenlet(NULL, s, ssize), task(t), proc(p)
+    {
+    }
+
+    GreenletTask::~GreenletTask(void)
+    {
+      // Make sure we are dead
+      assert(isdead());
+      // Remove our reference on our task
+      if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+        delete task;
+      // Release our stack and return it to the processor
+      long stacksize;
+      void *stack = release_stack(&stacksize);
+      proc->release_stack(stack, stacksize);
+    }
+
+    bool GreenletTask::event_triggered(void)
+    {
+      // Tell the processor we're awake
+      proc->unpause_task(this);
+      // Don't delete
+      return false;
+    }
+
+    void GreenletTask::print_info(FILE *f)
+    {
+      fprintf(f,"Waiting greenlet %p of processor %s\n",
+              this, proc->processor_name);
+    }
+
+    void* GreenletTask::run(void *arg)
+    {
+      GreenletThread *thread = static_cast<GreenletThread*>(arg);
+      thread->run_greenlet_task(task);
+      proc->record_task_complete(this);
+      return NULL;
+    }
+
+    GreenletThread::GreenletThread(GreenletProcessor *p)
+      : proc(p)
+    {
+      current_task = NULL;
+    }
+
+    GreenletThread::~GreenletThread(void)
+    {
+    }
+
+    Processor GreenletThread::get_processor(void) const
+    {
+      return proc->me;
+    }
+
+    void GreenletThread::thread_main(void)
+    {
+      greenlet::init_greenlet_thread();
+      proc->initialize_processor();
+      while (true)
+      {
+        bool quit = proc->execute_task();
+        if (quit) break;
+      }
+      proc->finalize_processor();
+    }
+
+    void GreenletThread::sleep_on_event(Event wait_for)
+    {
+      // Register ourselves as the waiter
+      Event::Impl *event = get_runtime()->get_event_impl(wait_for);
+      event->add_waiter(wait_for.gen, current_task);
+      GreenletTask *paused_task = current_task;
+      current_task = 0;
+      // Tell the processor to pause us
+      proc->pause_task(paused_task);
+      // When we return the event has triggered
+      assert(paused_task == current_task);
+    }
+
+    void GreenletThread::start_task(GreenletTask *task)
+    {
+      current_task = task;
+      task->switch_to(this);
+    }
+
+    void GreenletThread::resume_task(GreenletTask *task)
+    {
+      current_task = task;
+      task->switch_to(this);
+    }
+
+    void GreenletThread::run_greenlet_task(Task *task)
+    {
+      Processor::TaskFuncPtr fptr = get_runtime()->task_table[task->func_id];
+#ifdef EVENT_GRAPH_TRACE
+      start_enclosing(task->finish_event);
+      unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
+      log_task.info("thread running ready task %p for proc " IDFMT "",
+                              task, task->proc.id);
+      task->mark_started();
+      (*fptr)(task->args, task->arglen, proc->me); 
+      task->mark_completed();
+      // Capture the actual processor if necessary
+      if (task->capture_proc)
+        task->proc = proc->me;
+      log_task.info("thread finished running task %p for proc " IDFMT "",
+                              task, task->proc.id);
+#ifdef EVENT_GRAPH_TRACE
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+                            task->finish_event.id, task->finish_event.gen,
+                            (stop - start));
+#endif
+      if(task->finish_event.exists())
+          get_runtime()->get_genevent_impl(task->finish_event)->
+                          trigger(task->finish_event.gen, gasnet_mynode());
+    }
+
+    GreenletProcessor::GreenletProcessor(Processor _me, Processor::Kind _kind,
+                                         size_t _stack_size, int init_stack_size,
+                                         const char *name, int _core_id)
+      : Processor::Impl(_me, _kind), core_id(_core_id), proc_stack_size(_stack_size), 
+        processor_name(name), shutdown(false), shutdown_trigger(false), 
+        greenlet_thread(0), thread_state(GREENLET_RUNNING)
+    {
+      gasnet_hsl_init(&mutex);
+      gasnett_cond_init(&condvar);
+    }
+
+    GreenletProcessor::~GreenletProcessor(void)
+    {
+    }
+
+    void GreenletProcessor::start_processor(void)
+    {
+      assert(greenlet_thread == 0);
+      greenlet_thread = new GreenletThread(this);
+      greenlet_thread->start_thread(proc_stack_size, core_id, processor_name);
+    }
+
+    void GreenletProcessor::shutdown_processor(void)
+    {
+      gasnet_hsl_lock(&mutex);
+      if (!shutdown_trigger)
+        gasnett_cond_wait(&condvar, &mutex.lock);
+      assert(shutdown_trigger);
+      shutdown = true;
+      // Signal our thread in case it is asleep
+      gasnett_cond_signal(&condvar);
+      gasnet_hsl_unlock(&mutex);
+    }
+
+    void GreenletProcessor::initialize_processor(void)
+    {
+      Processor::TaskIDTable::iterator it = 
+        get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+      if(it != get_runtime()->task_table.end()) {
+        log_task.info("calling processor init task: proc=" IDFMT "", me.id);
+        (it->second)(0, 0, me);
+        log_task.info("finished processor init task: proc=" IDFMT "", me.id);
+      } else {
+        log_task.info("no processor init task: proc=" IDFMT "", me.id);
+      }
+    }
+
+    void GreenletProcessor::finalize_processor(void)
+    {
+      Processor::TaskIDTable::iterator it = 
+        get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+      if(it != get_runtime()->task_table.end()) {
+        log_task.info("calling processor shutdown task: proc=" IDFMT "", me.id);
+        (it->second)(0, 0, me);
+        log_task.info("finished processor shutdown task: proc=" IDFMT "", me.id);
+      } else {
+        log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);
+      }
+    }
+
+    void GreenletProcessor::enqueue_task(Task *task)
+    {
+      gasnet_hsl_lock(&mutex);
+      task_queue.insert(task, task->priority); 
+      // Wake someone up if we aren't running
+      if (thread_state == GREENLET_IDLE)
+      {
+        thread_state = GREENLET_RUNNING;
+        gasnett_cond_signal(&condvar);
+      }
+      gasnet_hsl_unlock(&mutex);
+    }
+
+    void GreenletProcessor::spawn_task(Processor::TaskFuncID func_id,
+                                       const void *args, size_t arglen,
+                                       Event start_event, Event finish_event,
+                                       int priority)
+    {
+      // create task object to hold args, etc.
+      Task *task = new Task(me, func_id, args, arglen, finish_event, 
+                            priority, 1/*users*/);
+
+      // early out - if the event has obviously triggered (or is NO_EVENT)
+      //  don't build up continuation
+      if(start_event.has_triggered()) {
+        log_task.info("new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
+        enqueue_task(task);
+      } else {
+        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen);
+        start_event.impl()->add_waiter(start_event.gen, 
+                                new DeferredTaskSpawn(this, task));
+      }
+    }
+
+    void GreenletProcessor::spawn_task(Processor::TaskFuncID func_id,
+                                       const void *args, size_t arglen,
+                                       const Realm::ProfilingRequestSet &reqs,
+                                       Event start_event, Event finish_event,
+                                       int priority)
+    {
+      // create task object to hold args, etc.
+      Task *task = new Task(me, func_id, args, arglen, reqs,
+                            finish_event, priority, 1/*users*/);
+
+      // early out - if the event has obviously triggered (or is NO_EVENT)
+      //  don't build up continuation
+      if(start_event.has_triggered()) {
+        log_task.info("new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
+        enqueue_task(task);
+      } else {
+        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen);
+        start_event.impl()->add_waiter(start_event.gen, 
+                                new DeferredTaskSpawn(this, task));
+      }
+    }
+
+    bool GreenletProcessor::execute_task(void)
+    {
+      gasnet_hsl_lock(&mutex);
+      // We should be running
+      assert(thread_state == GREENLET_RUNNING);
+      if (!resumable_tasks.empty())
+      {
+        // If we have tasks that are ready to resume, run them
+        GreenletTask *to_resume = resumable_tasks.front();
+        resumable_tasks.pop_front();
+        gasnet_hsl_unlock(&mutex);
+        greenlet_thread->resume_task(to_resume);
+      }
+      else if (task_queue.empty())
+      {
+        // Nothing to do, so let's go to sleep
+        thread_state = GREENLET_IDLE;
+        gasnett_cond_wait(&condvar, &mutex.lock);
+        if (!shutdown)
+          assert(thread_state == GREENLET_RUNNING);
+        gasnet_hsl_unlock(&mutex);
+      }
+      else
+      {
+        // Pull a task off the queue and execute it
+        Task *task = task_queue.pop();
+        if (task->func_id == 0) {
+          // This is the kill pill so we need to handle it special
+          finished();
+          // Mark that we received the shutdown trigger
+          shutdown_trigger = true;
+          gasnett_cond_signal(&condvar);
+          gasnet_hsl_unlock(&mutex);
+          // Trigger the completion task
+          if (__sync_fetch_and_add(&(task->run_count),1) == 0)
+            get_runtime()->get_genevent_impl(task->finish_event)->
+                          trigger(task->finish_event.gen, gasnet_mynode());
+          // Delete the task
+          if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+            delete task;
+        } else {
+          if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
+            GreenletStack stack;
+            bool needs_stack = allocate_stack(stack);
+            gasnet_hsl_unlock(&mutex);
+            if (needs_stack)
+              create_stack(stack);
+            GreenletTask *green_task = new GreenletTask(task, this,
+                                            stack.stack, &stack.stack_size);
+            greenlet_thread->start_task(green_task);
+          } else {
+            gasnet_hsl_unlock(&mutex);
+            // Remove our deletion reference
+            if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+              delete task;
+          }
+        }
+      }
+      // If we have any complete greenlets, clean them up
+      if (!complete_greenlets.empty())
+      {
+        for (std::vector<GreenletTask*>::const_iterator it = 
+              complete_greenlets.begin(); it != complete_greenlets.end(); it++)
+        {
+          delete (*it);
+        }
+        complete_greenlets.clear();
+      }
+      return shutdown;
+    }
+
+    void GreenletProcessor::pause_task(GreenletTask *paused_task)
+    {
+      gasnet_hsl_lock(&mutex);
+      bool found = false;
+      // Go through and see if the task is already ready
+      for (std::list<GreenletTask*>::reverse_iterator it = 
+            resumable_tasks.rbegin(); it != resumable_tasks.rend(); it++)
+      {
+        if ((*it) == paused_task)
+        {
+          found = true;
+          // Reverse iterator conversion requires adding 1 first
+          resumable_tasks.erase((++it).base());
+          break;
+        }
+      }
+      // If we found it we're already ready so just return
+      if (found)
+      {
+        gasnet_hsl_unlock(&mutex);
+        return;
+      }
+      else // Add it to the list of paused tasks
+        paused_tasks.insert(paused_task);
+      // Now figure out what we want to do
+      if (!resumable_tasks.empty())
+      {
+        // Pick a task to resume and run it
+        GreenletTask *to_resume = resumable_tasks.front();
+        resumable_tasks.pop_front();
+        gasnet_hsl_unlock(&mutex);
+        greenlet_thread->resume_task(to_resume);
+      }
+      else if (!task_queue.empty())
+      {
+        // Pull a task off the queue and execute it
+        Task *task = task_queue.pop();
+        if (task->func_id == 0) {
+          // This is the kill pill so we need to handle it special
+          finished();
+          // Mark that we received the shutdown trigger
+          shutdown_trigger = true;
+          gasnett_cond_signal(&condvar);
+          gasnet_hsl_unlock(&mutex);
+          // Trigger the completion task
+          if (__sync_fetch_and_add(&(task->run_count),1) == 0)
+            get_runtime()->get_genevent_impl(task->finish_event)->
+                          trigger(task->finish_event.gen, gasnet_mynode());
+          // Delete the task
+          if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+            delete task;
+        } else {
+          if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
+            GreenletStack stack;
+            bool needs_stack = allocate_stack(stack);
+            gasnet_hsl_unlock(&mutex);
+            if (needs_stack)
+              create_stack(stack);
+            GreenletTask *green_task = new GreenletTask(task, this,
+                                            stack.stack, &stack.stack_size);
+            greenlet_thread->start_task(green_task);
+          } else {
+            gasnet_hsl_unlock(&mutex);
+            // Remove our deletion reference
+            if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+              delete task;
+          }
+        }
+      }
+      else
+      {
+        gasnet_hsl_unlock(&mutex);
+        // Nothing to do, send us back to the root at which
+        // point we'll likely go to sleep
+        greenlet *root = greenlet::root();
+        root->switch_to(NULL);
+      }
+    }
+
+    void GreenletProcessor::unpause_task(GreenletTask *paused_task)
+    {
+      gasnet_hsl_lock(&mutex);
+      paused_tasks.erase(paused_task);
+      resumable_tasks.push_back(paused_task);
+      if (thread_state == GREENLET_IDLE)
+      {
+        thread_state = GREENLET_RUNNING;
+        gasnett_cond_signal(&condvar);
+      }
+      gasnet_hsl_unlock(&mutex);
+    }
+
+    bool GreenletProcessor::allocate_stack(GreenletStack &stack)
+    {
+      if (!greenlet_stacks.empty())
+      {
+        stack = greenlet_stacks.back();
+        greenlet_stacks.pop_back();
+        return false; // needs stack
+      }
+      return true; // needs stack
+    }
+
+    void GreenletProcessor::create_stack(GreenletStack &stack)
+    {
+      // We need to make a stack
+      // Set the suggested stack size
+      stack.stack_size = proc_stack_size;
+      // Then call the greenlet library
+      stack.stack = greenlet::alloc_greenlet_stack(&stack.stack_size);
+    }
+
+    void GreenletProcessor::release_stack(void *stack, long stack_size)
+    {
+      gasnet_hsl_lock(&mutex);
+      greenlet_stacks.push_back(GreenletStack());
+      GreenletStack &last = greenlet_stacks.back();
+      last.stack = stack;
+      last.stack_size = stack_size;
+      gasnet_hsl_unlock(&mutex);
+    }
+
+    void GreenletProcessor::record_task_complete(GreenletTask *task)
+    {
+      // No need for the lock here, only one thread 
+      complete_greenlets.push_back(task);
+    }
+
     // can't be static if it's used in a template...
     void handle_spawn_task_message(SpawnTaskArgs args,
 				   const void *data, size_t datalen)
@@ -6226,6 +6689,26 @@ namespace LegionRuntime {
 
       ~RemoteProcessor(void)
       {
+      }
+
+      virtual void start_processor(void)
+      {
+        assert(0);
+      }
+
+      virtual void shutdown_processor(void)
+      {
+        assert(0);
+      }
+
+      virtual void initialize_processor(void)
+      {
+        assert(0);
+      }
+
+      virtual void finalize_processor(void)
+      {
+        assert(0);
       }
 
       virtual void enqueue_task(Task *task)
@@ -8654,9 +9137,9 @@ namespace LegionRuntime {
 				       NodeAnnounceData,
 				       node_announce_handler> NodeAnnounceMessage;
 
-    static std::vector<LocalProcessor *> local_cpus;
-    static std::vector<LocalProcessor *> local_util_procs;
-    static std::vector<LocalProcessor *> local_io_procs;
+    static std::vector<Processor::Impl*> local_cpus;
+    static std::vector<Processor::Impl*> local_util_procs;
+    static std::vector<Processor::Impl*> local_io_procs;
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
@@ -9285,6 +9768,7 @@ namespace LegionRuntime {
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
+      unsigned init_stack_count = 1;
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
       unsigned num_io_procs = 0;
@@ -9311,6 +9795,7 @@ namespace LegionRuntime {
 #endif
       // should local proc threads get dedicated cores?
       bool bind_localproc_threads = true;
+      bool use_greenlet_procs = false;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname) do { \
@@ -9329,7 +9814,8 @@ namespace LegionRuntime {
 	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
 	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
         INT_ARG("-ll:dsize", disk_mem_size_in_mb);
-        INT_ARG("-ll:stack", stack_size_in_mb);
+        INT_ARG("-ll:stacksize", stack_size_in_mb);
+        INT_ARG("-ll:stacks", init_stack_count);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
         INT_ARG("-ll:io", num_io_procs);
@@ -9339,6 +9825,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
 	INT_ARG("-ll:bind", bind_localproc_threads);
+        BOOL_ARG("-ll:greenlet", use_greenlet_procs);
 #ifdef USE_CUDA
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
@@ -9385,7 +9872,7 @@ namespace LegionRuntime {
           continue;
         }
 
-        if (!strncmp((*argv)[i], "-ll:", 4))
+        if (strncmp((*argv)[i], "-ll:", 4) != 0)
         {
 	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", (*argv)[i]);
 	  assert(0);
@@ -9399,6 +9886,9 @@ namespace LegionRuntime {
 	// now move ourselves off the reserved cores
 	proc_assignment->bind_thread(-1, 0, "machine thread");
       }
+
+      if (use_greenlet_procs)
+        greenlet::init_greenlet_library();
 
       //GASNetNode::my_node = new GASNetNode(argc, argv, this);
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
@@ -9598,10 +10088,17 @@ namespace LegionRuntime {
       if (num_util_procs > 0)
       {
         for(unsigned i = 0; i < num_util_procs; i++) {
-          LocalProcessor *up = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
-                                            n->processors.size()).convert<Processor>(),
-                                            Processor::UTIL_PROC, 
-                                            stack_size_in_mb << 20, "utility worker");
+          Processor::Impl *up;
+          if (use_greenlet_procs)
+            up = new GreenletProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
+                                    n->processors.size()).convert<Processor>(),
+                                    Processor::UTIL_PROC, stack_size_in_mb << 20, 
+                                    init_stack_count, "utility worker");
+          else
+            up = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
+                                    n->processors.size()).convert<Processor>(),
+                                    Processor::UTIL_PROC, 
+                                    stack_size_in_mb << 20, "utility worker");
           n->processors.push_back(up);
           local_util_procs.push_back(up);
           adata[apos++] = NODE_ANNOUNCE_PROC;
@@ -9670,10 +10167,15 @@ namespace LegionRuntime {
 	Processor p = ID(ID::ID_PROCESSOR, 
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
-
-	LocalProcessor *lp = new LocalProcessor(p, Processor::LOC_PROC,
-                                                stack_size_in_mb << 20,
-                                                "local worker", i);
+        Processor::Impl *lp;
+        if (use_greenlet_procs)
+          lp = new GreenletProcessor(p, Processor::LOC_PROC,
+                                     stack_size_in_mb << 20, init_stack_count,
+                                     "local worker", i);
+        else
+	  lp = new LocalProcessor(p, Processor::LOC_PROC,
+                                  stack_size_in_mb << 20,
+                                  "local worker", i);
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
 	adata[apos++] = NODE_ANNOUNCE_PROC;
@@ -9756,7 +10258,7 @@ namespace LegionRuntime {
 #endif
 
       // list affinities between local CPUs / memories
-      for(std::vector<LocalProcessor *>::iterator it = local_util_procs.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++) {
 	if(cpu_mem_size_in_mb > 0) {
@@ -9800,7 +10302,7 @@ namespace LegionRuntime {
 	}
       }
 
-      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_io_procs.begin();
           it != local_io_procs.end();
           it++)
       {
@@ -9846,7 +10348,7 @@ namespace LegionRuntime {
       }
 
       // list affinities between local CPUs / memories
-      for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++) {
 	if(cpu_mem_size_in_mb > 0) {
@@ -9976,7 +10478,7 @@ namespace LegionRuntime {
 	  adata[apos++] = 200;
 
 	  // ZC also accessible to all the local CPUs
-	  for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
+	  for(std::vector<Processor::Impl*>::iterator it = local_cpus.begin();
 	      it != local_cpus.end();
 	      it++) {
 	    adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -10170,17 +10672,17 @@ namespace LegionRuntime {
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      for(std::vector<LocalProcessor *>::iterator it = local_util_procs.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
 	(*it)->start_processor();
 
-      for (std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+      for (std::vector<Processor::Impl*>::iterator it = local_io_procs.begin();
             it != local_io_procs.end();
             it++)
         (*it)->start_processor();
 
-      for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
 	(*it)->start_processor();
@@ -10246,17 +10748,17 @@ namespace LegionRuntime {
 #endif
 
       // Shutdown all the threads
-      for(std::vector<LocalProcessor *>::iterator it = local_util_procs.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
 	(*it)->shutdown_processor();
 
-      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_io_procs.begin();
           it != local_io_procs.end();
           it++)
         (*it)->shutdown_processor();
 
-      for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
+      for(std::vector<Processor::Impl*>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
 	(*it)->shutdown_processor();

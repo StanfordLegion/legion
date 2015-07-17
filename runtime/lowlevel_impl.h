@@ -56,6 +56,7 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <list>
 #include <map>
 #include <aio.h>
+#include <greenlet>
 
 #if __cplusplus >= 201103L
 #define typeof decltype
@@ -960,6 +961,11 @@ namespace LegionRuntime {
 	run_counter = _run_counter;
       }
 
+      virtual void start_processor(void) = 0;
+      virtual void shutdown_processor(void) = 0;
+      virtual void initialize_processor(void) = 0;
+      virtual void finalize_processor(void) = 0;
+
       virtual void enqueue_task(Task *task) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
@@ -1081,6 +1087,11 @@ namespace LegionRuntime {
       void set_group_members(const std::vector<Processor>& member_list);
 
       void get_group_members(std::vector<Processor>& member_list);
+
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
 
       virtual void enqueue_task(Task *task);
 
@@ -1250,6 +1261,104 @@ namespace LegionRuntime {
       std::set<LocalThread*>    paused_threads;
       std::deque<LocalThread*>  resumable_threads;
       std::vector<LocalThread*> available_threads;
+    };
+
+    // Forward declarations
+    class GreenletThread;
+    class GreenletProcessor;
+
+    class GreenletTask : public greenlet, public EventWaiter {
+    public:
+      GreenletTask(Task *task, GreenletProcessor *proc,
+                   void *stack, long *stack_size);
+      virtual ~GreenletTask(void);
+    public:
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+    public:
+      virtual void* run(void *arg);
+    protected:
+      Task *const task;
+      GreenletProcessor *const proc;
+    };
+
+    class GreenletThread : public PreemptableThread {
+    public:
+      GreenletThread(GreenletProcessor *proc);
+      virtual ~GreenletThread(void);
+    public:
+      virtual Processor get_processor(void) const;
+    public:
+      virtual void thread_main(void);
+      virtual void sleep_on_event(Event wait_for);
+    public:
+      void start_task(GreenletTask *task);
+      void resume_task(GreenletTask *task);
+      void run_greenlet_task(Task *task);
+    public:
+      GreenletProcessor *const proc;
+    protected:
+      GreenletTask *current_task;
+    };
+
+    class GreenletProcessor : public Processor::Impl {
+    public:
+      enum GreenletState {
+        GREENLET_IDLE,
+        GREENLET_RUNNING,
+      };
+      struct GreenletStack {
+      public:
+        void *stack;
+        long stack_size;
+      };
+    public:
+      GreenletProcessor(Processor _me, Processor::Kind _kind,
+                        size_t stack_size, int init_stack_count,
+                        const char *name, int core_id = -1);
+      virtual ~GreenletProcessor(void);
+    public:
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+    public:
+      virtual void enqueue_task(Task *task);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+			      Event start_event, Event finish_event,
+                              int priority);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+    public:
+      bool execute_task(void);
+      void pause_task(GreenletTask *paused_task);
+      void unpause_task(GreenletTask *paused_task);
+    public:
+      bool allocate_stack(GreenletStack &stack);
+      void create_stack(GreenletStack &stack);
+      void release_stack(void *stack, long stack_size);
+    public:
+      void record_task_complete(GreenletTask *task);
+    public:
+      const int core_id;
+      const size_t proc_stack_size;
+      const char *const processor_name;
+    protected:
+      gasnet_hsl_t mutex;
+      gasnett_cond_t condvar;
+      JobQueue<Task> task_queue;
+      bool shutdown, shutdown_trigger;
+    protected:
+      GreenletThread             *greenlet_thread;
+      GreenletState              thread_state;
+      std::set<GreenletTask*>    paused_tasks; 
+      std::list<GreenletTask*>   resumable_tasks;
+      std::vector<GreenletStack> greenlet_stacks;
+      std::vector<GreenletTask*> complete_greenlets;
     };
 
     class Memory::Impl {
