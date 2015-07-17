@@ -21,7 +21,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
-#include <linux/aio_abi.h>
+//#include <linux/aio_abi.h>
+#include <aio.h>
 #include <map>
 #include <vector>
 #include <deque>
@@ -36,6 +37,8 @@
 #ifdef USE_CUDA
 #include "lowlevel_gpu.h"
 #endif
+
+typedef u_int aio_context_t;
 
 namespace LegionRuntime{
   namespace LowLevel{

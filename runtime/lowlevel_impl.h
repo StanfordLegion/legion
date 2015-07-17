@@ -1455,17 +1455,19 @@ namespace LegionRuntime {
 
       virtual ~HDFMemory(void);
 
+      
       virtual RegionInstance create_instance(IndexSpace is,
                                              const int *linearization_bits,
                                              size_t bytes_needed,
                                              size_t block_size,
                                              size_t element_size,
                                              const std::vector<size_t>& field_sizes,
-                                             const Realm::ProfilingRequestSet &reqs,
                                              ReductionOpID redopid,
                                              off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
                                              RegionInstance parent_inst);
-
+      using Memory::Impl::create_instance;
+      
       RegionInstance create_instance(IndexSpace is,
                                      const int *linearization_bits,
                                      size_t bytes_needed,
