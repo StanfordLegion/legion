@@ -9796,7 +9796,7 @@ namespace LegionRuntime {
 #endif
       // should local proc threads get dedicated cores?
       bool bind_localproc_threads = true;
-      bool use_greenlet_procs = false;
+      bool use_greenlet_procs = true;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname) do { \
@@ -9873,10 +9873,9 @@ namespace LegionRuntime {
           continue;
         }
 
-        if (strncmp((*argv)[i], "-ll:", 4) != 0)
+        if (strncmp((*argv)[i], "-ll:", 4) == 0)
         {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", (*argv)[i]);
-	  assert(0);
+	  fprintf(stderr, "WARNING: unrecognized lowlevel option: %s\n", (*argv)[i]);
 	}
       }
 

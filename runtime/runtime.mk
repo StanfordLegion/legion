@@ -347,6 +347,9 @@ $(OUTFILE) : $(ALL_OBJS)
 $(GEN_OBJS) : %.o : %.cc
 	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
+$(ASM_OBJS) : %.o : %.S
+	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
 $(LOW_RUNTIME_OBJS) : %.o : %.cc
 	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
