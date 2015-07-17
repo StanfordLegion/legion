@@ -9262,7 +9262,6 @@ namespace LegionRuntime {
 
     bool Runtime::Impl::init(int *argc, char ***argv)
     {
-      Realm::InitialTime::get_initial_time();
       // have to register domain mappings too
       Arrays::Mapping<1,1>::register_mapping<Arrays::CArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::CArrayLinearization<2> >();
@@ -9554,6 +9553,7 @@ namespace LegionRuntime {
         start_sending_threads();
 
       Clock::synchronize();
+      Realm::InitialTime::get_initial_time();
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
