@@ -148,7 +148,7 @@ namespace LegionRuntime {
                     Rect<DIM> subrect_check;
                     irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
                     orect = dso->image;
-                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
                   }
                 }
                 break;
@@ -171,7 +171,7 @@ namespace LegionRuntime {
                     Rect<DIM> subrect_check;
                     orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
                     irect = dsi->image;
-                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
                   }
                 }
                 break;
@@ -271,14 +271,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);
@@ -391,14 +391,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);
@@ -579,14 +579,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);
@@ -821,7 +821,7 @@ namespace LegionRuntime {
             requests = hdf_read_reqs;
             lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
-            assert(lsi->strides[0] == 1);
+            assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
@@ -848,7 +848,7 @@ namespace LegionRuntime {
             requests = hdf_write_reqs;
             lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
-            assert(lsi->strides[0] == 1);
+            assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {

@@ -6929,10 +6929,11 @@ namespace LegionRuntime {
 	num_elements = inst_extent.volume();
       }
 
+      Realm::ProfilingRequestSet requests;
       size_t inst_bytes = elem_size * num_elements;
       RegionInstance i = hdf_mem->create_instance(get_index_space(), linearization_bits, inst_bytes,
                                                   get_volume() /*block_size*/, elem_size, field_sizes,
-                                                  0 /*redop_id*/, -1/*list_size*/, RegionInstance::NO_INST,
+                                                  0 /*redop_id*/, -1/*list_size*/, requests, RegionInstance::NO_INST,
                                                   file_name, field_files, *this, read_only);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
