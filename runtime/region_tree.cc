@@ -11007,8 +11007,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, bool val)
-      : ctx(c), user(u), validates(val)
+    LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
+                                 bool val, bool capture)
+      : ctx(c), user(u), validates(val), capture_users(capture)
     //--------------------------------------------------------------------------
     {
       // closers always advance
@@ -11017,7 +11018,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
-      : user(rhs.user)
+      : user(rhs.user), validates(rhs.validates),
+        capture_users(rhs.capture_users)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11279,12 +11281,23 @@ namespace LegionRuntime {
           // on any other users from the same op as the current one
           // we are doing the analysis for (e.g. other region reqs)
           if (!child_users.empty())
+          {
             RegionTreeNode::perform_dependence_checks<CLOSE_LOGICAL_ALLOC,
               false/*record*/, true/*has skip*/, false/*track dom*/>(
                                           op_it->second, child_users,
                                           close_op_mask, open_below,
                                           false/*validates*/,
                                           current.op, current.gen);
+            // We own mapping references on each one of the users so 
+            // we need to remove them once we are done
+            for (LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::
+                  track_aligned::const_iterator it = child_users.begin(); 
+                  it != child_users.end(); it++)
+            {
+              it->op->remove_mapping_reference(it->gen);
+            }
+            child_users.clear();
+          }
         }
         // Next do checks against any operations above in the tree which
         // the operation already recorded dependences. No need for skip
@@ -11360,6 +11373,14 @@ namespace LegionRuntime {
       // We also need to advance the version numbers because the close
       // operations will be writing a new valid version
       node->advance_version_numbers(state, local_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::merge_version_info(VersionInfo &target,
+                                           const FieldMask &merge_mask)
+    //--------------------------------------------------------------------------
+    {
+      target.merge(close_versions, merge_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -13253,7 +13274,7 @@ namespace LegionRuntime {
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
-      FieldMask open_below, dominator_mask;
+      FieldMask open_below;
       ColorPoint next_child;
       if (!arrived)
         next_child = path.get_child(depth);
@@ -13262,11 +13283,11 @@ namespace LegionRuntime {
       // doing them later. We can also skip the close operations for 
       // any operations which have arrived and have read-write privileges
       // because they will be doing their own close operations.
-      if ((!arrived || !projecting) && !IS_WRITE(user.usage))
+      if (!arrived || !(projecting || IS_WRITE(user.usage)))
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
-        LogicalCloser closer(ctx, user, arrived/*validates*/);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*captures*/);
         siphon_logical_children(closer, state, user.field_mask,
                   !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
                   next_child, open_below);
@@ -13299,7 +13320,10 @@ namespace LegionRuntime {
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
-
+      }
+      FieldMask dominator_mask;
+      if (!arrived || !projecting)
+      {
         // We also always do our dependence analysis even if we have
         // already traced because we need to pick up dependences on 
         // any dynamic close operations that we need to do
@@ -13363,10 +13387,14 @@ namespace LegionRuntime {
           // be issuing a close when we actually map.
           if (IS_WRITE(user.usage))
           {
-            LogicalCloser closer(ctx, user, arrived/*validates*/);
+            LogicalCloser closer(ctx,user,true/*validates*/,false/*captures*/);
             // There's no point in siphoning, we know we need to close
             // everything up that interferes with this task
             close_logical_subtree(closer, user.field_mask);
+            // We've registered dependences on any users in the sub-tree
+            // and we definitely interfered with them all so all we need
+            // to do now is capture the version information.
+            closer.merge_version_info(version_info, user.field_mask);
           }
           // We also need to record the needed version numbers for this node
           // Note that we do this after the version numbers have been updated
@@ -13555,7 +13583,7 @@ namespace LegionRuntime {
       FieldMask any_open_below;
       // Perform the close operations for all the children
       {
-        LogicalCloser closer(ctx, user, arrived/*validates*/);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*captures*/);
         if (!arrived)
         {
           // Close up any interfering children, we know our children
@@ -13571,8 +13599,10 @@ namespace LegionRuntime {
             any_open_below |= open_below;
           }
         }
-        else
+        else if (!IS_WRITE(user.usage))
         {
+          // Anything other than a write will do the normal close
+          // Writes get their own special close routine
           // Otherwise just do the normal single close operation
           siphon_logical_children(closer, state, user.field_mask,
                           IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
@@ -13654,6 +13684,20 @@ namespace LegionRuntime {
         // writes for atomic and simultaneous go in the same generation.
         if (!!dominator_mask && version_info.will_advance())
             advance_version_numbers(state, dominator_mask);
+        // If we have arrived and we are doing read-write access, then we
+        // need to capture any versions in sub-trees for which we will 
+        // be issuing a close when we actually map.
+        if (IS_WRITE(user.usage))
+        {
+          LogicalCloser closer(ctx, user, true/*validates*/, false/*captures*/);
+          // There's no point in siphoning, we know we need to close
+          // everything up that interferes with this task
+          close_logical_subtree(closer, user.field_mask);
+          // We've registered dependences on any users in the sub-tree
+          // and we definitely interfered with them all so all we need
+          // to do now is capture the version information.
+          closer.merge_version_info(version_info, user.field_mask);
+        }
         // No need to register ourselves as a user 
         record_version_numbers(state, user.field_mask,
                                version_info, version_info.will_advance(), 
@@ -17052,24 +17096,42 @@ namespace LegionRuntime {
           // it hasn't committed, reset timeout
           it->timeout = LogicalUser::TIMEOUT;
         }
-        // Record that we closed this user
-        // Update the field mask and the privilege
-        closer.closed_users.push_back(*it);
-        LogicalUser &closed_user = closer.closed_users.back();
-        closed_user.field_mask = overlap;
-        closed_user.usage.privilege = 
-          (PrivilegeMode)((int)closed_user.usage.privilege | PROMOTED);
-        // Remove the closed set of fields from this user
-        it->field_mask -= overlap;
-        // If it's empty, remove it from the list and let
-        // the mapping reference go up the tree with it
-        // Otherwise add a new mapping reference
-        if (!it->field_mask)
-          it = users.erase(it);
+        
+        if (closer.capture_users)
+        {
+          // Record that we closed this user
+          // Update the field mask and the privilege
+          closer.closed_users.push_back(*it);
+          LogicalUser &closed_user = closer.closed_users.back();
+          closed_user.field_mask = overlap;
+          closed_user.usage.privilege = 
+            (PrivilegeMode)((int)closed_user.usage.privilege | PROMOTED);
+          // Remove the closed set of fields from this user
+          it->field_mask -= overlap;
+          // If it's empty, remove it from the list and let
+          // the mapping reference go up the tree with it
+          // Otherwise add a new mapping reference
+          if (!it->field_mask)
+            it = users.erase(it);
+          else
+          {
+            it->op->add_mapping_reference(it->gen);
+            it++;
+          }
+        }
         else
         {
-          it->op->add_mapping_reference(it->gen);
-          it++;
+          // Remove the closed set of fields from this user
+          it->field_mask -= overlap;
+          // Otherwise, if we can remote it, then remove it's
+          // mapping reference from the logical tree.
+          if (!it->field_mask)
+          {
+            it->op->remove_mapping_reference(it->gen);
+            it = users.erase(it);
+          }
+          else
+            it++;
         }
       }
     }

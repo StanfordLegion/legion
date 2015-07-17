@@ -1671,7 +1671,7 @@ namespace LegionRuntime {
       };
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
-                    bool validates);
+                    bool validates, bool captures);
       LogicalCloser(const LogicalCloser &rhs);
       ~LogicalCloser(void);
     public:
@@ -1695,6 +1695,7 @@ namespace LegionRuntime {
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
       void record_version_numbers(RegionTreeNode *node, LogicalState &state,
                                   const FieldMask &local_mask);
+      void merge_version_info(VersionInfo &target, const FieldMask &merge_mask);
     protected:
       static void compute_close_sets(
                      const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
@@ -1715,7 +1716,8 @@ namespace LegionRuntime {
     public:
       ContextID ctx;
       const LogicalUser &user;
-      bool validates;
+      const bool validates;
+      const bool capture_users;
       LegionDeque<LogicalUser>::aligned closed_users;
     protected:
       FieldMask closed_mask;
@@ -2159,9 +2161,6 @@ namespace LegionRuntime {
                                  FatTreePath *fat_path,
                                  VersionInfo &version_info,
                                  RestrictInfo &restrict_info);
-      void close_logical_subtree(ContextID ctx,
-                                 const LogicalUser &user,
-                                 VersionInfo &version_info,
       void close_logical_subtree(LogicalCloser &closer,
                                  const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
