@@ -6282,10 +6282,11 @@ namespace LegionRuntime {
       event->add_waiter(wait_for.gen, current_task);
       GreenletTask *paused_task = current_task;
       current_task = 0;
-      // Tell the processor to pause us
-      proc->pause_task(paused_task);
-      // When we return the event has triggered
-      assert(paused_task == current_task);
+      // Tell the processor to pause us detect if we return immediately
+      if (!proc->pause_task(paused_task))
+        current_task = paused_task;
+      else // When we return the event has triggered
+        assert(paused_task == current_task);
     }
 
     void GreenletThread::start_task(GreenletTask *task)
@@ -6522,7 +6523,7 @@ namespace LegionRuntime {
       return shutdown;
     }
 
-    void GreenletProcessor::pause_task(GreenletTask *paused_task)
+    bool GreenletProcessor::pause_task(GreenletTask *paused_task)
     {
       gasnet_hsl_lock(&mutex);
       bool found = false;
@@ -6542,7 +6543,7 @@ namespace LegionRuntime {
       if (found)
       {
         gasnet_hsl_unlock(&mutex);
-        return;
+        return false; // Didn't pause
       }
       else // Add it to the list of paused tasks
         paused_tasks.insert(paused_task);
@@ -6599,6 +6600,7 @@ namespace LegionRuntime {
         greenlet *root = greenlet::root();
         root->switch_to(NULL);
       }
+      return true; // Did pause
     }
 
     void GreenletProcessor::unpause_task(GreenletTask *paused_task)

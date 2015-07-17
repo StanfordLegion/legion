@@ -1335,7 +1335,7 @@ namespace LegionRuntime {
                               int priority);
     public:
       bool execute_task(void);
-      void pause_task(GreenletTask *paused_task);
+      bool pause_task(GreenletTask *paused_task);
       void unpause_task(GreenletTask *paused_task);
     public:
       bool allocate_stack(GreenletStack &stack);
