@@ -9801,17 +9801,17 @@ namespace LegionRuntime {
       bool use_greenlet_procs = false;
 
       for(int i = 1; i < *argc; i++) {
-#define INT_ARG(argname, varname) do { \
+#define INT_ARG(argname, varname)                       \
 	  if(!strcmp((*argv)[i], argname)) {		\
 	    varname = atoi((*argv)[++i]);		\
 	    continue;					\
-	  } } while(0)
+	  }
 
-#define BOOL_ARG(argname, varname) do { \
+#define BOOL_ARG(argname, varname)                      \
 	  if(!strcmp((*argv)[i], argname)) {		\
 	    varname = true;				\
 	    continue;					\
-	  } } while(0)
+	  }
 
 	INT_ARG("-ll:gsize", gasnet_mem_size_in_mb);
 	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
@@ -9877,7 +9877,8 @@ namespace LegionRuntime {
 
         if (strncmp((*argv)[i], "-ll:", 4) == 0)
         {
-	  fprintf(stderr, "WARNING: unrecognized lowlevel option: %s\n", (*argv)[i]);
+	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", (*argv)[i]);
+          assert(0);
 	}
       }
 
