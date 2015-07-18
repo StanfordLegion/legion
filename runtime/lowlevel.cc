@@ -6598,6 +6598,7 @@ namespace LegionRuntime {
 
     bool GreenletProcessor::allocate_stack(GreenletStack &stack)
     {
+      // No need to hold the lock since only one thread is here
       if (!greenlet_stacks.empty())
       {
         stack = greenlet_stacks.back();
@@ -6618,12 +6619,11 @@ namespace LegionRuntime {
 
     void GreenletProcessor::release_stack(void *stack, long stack_size)
     {
-      gasnet_hsl_lock(&mutex);
+      // No need to hold the lock since only one thread is here
       greenlet_stacks.push_back(GreenletStack());
       GreenletStack &last = greenlet_stacks.back();
       last.stack = stack;
       last.stack_size = stack_size;
-      gasnet_hsl_unlock(&mutex);
     }
 
     void GreenletProcessor::record_task_complete(GreenletTask *task)
