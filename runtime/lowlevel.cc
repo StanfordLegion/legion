@@ -9809,7 +9809,8 @@ namespace LegionRuntime {
 #endif
       // should local proc threads get dedicated cores?
       bool bind_localproc_threads = true;
-      bool use_greenlet_procs = false;
+      bool use_greenlet_procs = true;
+      bool disable_greenlets = false;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname)                       \
@@ -9840,6 +9841,7 @@ namespace LegionRuntime {
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
 	INT_ARG("-ll:bind", bind_localproc_threads);
         BOOL_ARG("-ll:greenlet", use_greenlet_procs);
+        BOOL_ARG("-ll:gdb", disable_greenlets);
 #ifdef USE_CUDA
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
@@ -9901,6 +9903,8 @@ namespace LegionRuntime {
 	proc_assignment->bind_thread(-1, 0, "machine thread");
       }
 
+      if (disable_greenlets)
+        use_greenlet_procs = false;
       if (use_greenlet_procs)
         greenlet::init_greenlet_library();
 
