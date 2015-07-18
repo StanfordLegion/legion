@@ -5880,7 +5880,10 @@ namespace LegionRuntime {
         } else {
           gasnet_hsl_unlock(&mutex);
           // Common case: just run the task
-          thread->run_task(task, me);
+          if (__sync_fetch_and_add(&task->run_count,1) == 0)
+            thread->run_task(task, me);
+          if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
+            delete task;
         }
       }
       // This value is monotonic so once it becomes true, then we should exit
@@ -6054,50 +6057,45 @@ namespace LegionRuntime {
 
     void PreemptableThread::run_task(Task *task, Processor actual_proc /*=NO_PROC*/)
     {
-      if (__sync_fetch_and_add(&(task->run_count),1) == 0)
-      {
-        Processor::TaskFuncPtr fptr = get_runtime()->task_table[task->func_id];
+      Processor::TaskFuncPtr fptr = get_runtime()->task_table[task->func_id];
 #if 0
-        char argstr[100];
-        argstr[0] = 0;
-        for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
-          sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
-        if(task->arglen > 40) strcpy(argstr+80, "...");
-        log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-                 "utility task start: %d (%p) (%s)", task->func_id, fptr, argstr);
+      char argstr[100];
+      argstr[0] = 0;
+      for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
+        sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
+      if(task->arglen > 40) strcpy(argstr+80, "...");
+      log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+               "utility task start: %d (%p) (%s)", task->func_id, fptr, argstr);
 #endif
 #ifdef EVENT_GRAPH_TRACE
-        start_enclosing(task->finish_event);
-        unsigned long long start = TimeStamp::get_current_time_in_micros();
+      start_enclosing(task->finish_event);
+      unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
-        log_task.info("thread running ready task %p for proc " IDFMT "",
-                                task, task->proc.id);
-        task->mark_started();
-        (*fptr)(task->args, task->arglen, 
-                (actual_proc.exists() ? actual_proc : task->proc));
-        task->mark_completed();
-        // Capture the actual processor if necessary
-        if (task->capture_proc && actual_proc.exists())
-          task->proc = actual_proc;
-        log_task.info("thread finished running task %p for proc " IDFMT "",
-                                task, task->proc.id);
+      log_task.info("thread running ready task %p for proc " IDFMT "",
+                              task, task->proc.id);
+      task->mark_started();
+      (*fptr)(task->args, task->arglen, 
+              (actual_proc.exists() ? actual_proc : task->proc));
+      task->mark_completed();
+      // Capture the actual processor if necessary
+      if (task->capture_proc && actual_proc.exists())
+        task->proc = actual_proc;
+      log_task.info("thread finished running task %p for proc " IDFMT "",
+                              task, task->proc.id);
 #ifdef EVENT_GRAPH_TRACE
-        unsigned long long stop = TimeStamp::get_current_time_in_micros();
-        finish_enclosing();
-        log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-                              task->finish_event.id, task->finish_event.gen,
-                              (stop - start));
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+                            task->finish_event.id, task->finish_event.gen,
+                            (stop - start));
 #endif
 #if 0
-        log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-                 "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
+      log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+               "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
 #endif
-        if(task->finish_event.exists())
-          get_runtime()->get_genevent_impl(task->finish_event)->
-                          trigger(task->finish_event.gen, gasnet_mynode());
-      }
-      if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-        delete task;
+      if(task->finish_event.exists())
+        get_runtime()->get_genevent_impl(task->finish_event)->
+                        trigger(task->finish_event.gen, gasnet_mynode());
     }
 
     /*static*/ bool PreemptableThread::preemptable_sleep(Event wait_for)
@@ -6243,7 +6241,7 @@ namespace LegionRuntime {
     void* GreenletTask::run(void *arg)
     {
       GreenletThread *thread = static_cast<GreenletThread*>(arg);
-      thread->run_greenlet_task(task);
+      thread->run_task(task, proc->me);
       proc->record_task_complete(this);
       return NULL;
     }
@@ -6299,35 +6297,6 @@ namespace LegionRuntime {
     {
       current_task = task;
       task->switch_to(this);
-    }
-
-    void GreenletThread::run_greenlet_task(Task *task)
-    {
-      Processor::TaskFuncPtr fptr = get_runtime()->task_table[task->func_id];
-#ifdef EVENT_GRAPH_TRACE
-      start_enclosing(task->finish_event);
-      unsigned long long start = TimeStamp::get_current_time_in_micros();
-#endif
-      log_task.info("thread running ready task %p for proc " IDFMT "",
-                              task, task->proc.id);
-      task->mark_started();
-      (*fptr)(task->args, task->arglen, proc->me); 
-      task->mark_completed();
-      // Capture the actual processor if necessary
-      if (task->capture_proc)
-        task->proc = proc->me;
-      log_task.info("thread finished running task %p for proc " IDFMT "",
-                              task, task->proc.id);
-#ifdef EVENT_GRAPH_TRACE
-      unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      finish_enclosing();
-      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-                            task->finish_event.id, task->finish_event.gen,
-                            (stop - start));
-#endif
-      if(task->finish_event.exists())
-          get_runtime()->get_genevent_impl(task->finish_event)->
-                          trigger(task->finish_event.gen, gasnet_mynode());
     }
 
     void GreenletThread::wait_for_shutdown(void)
@@ -6502,17 +6471,15 @@ namespace LegionRuntime {
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
         } else {
+          gasnet_hsl_unlock(&mutex);
           if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
             GreenletStack stack;
-            bool needs_stack = allocate_stack(stack);
-            gasnet_hsl_unlock(&mutex);
-            if (needs_stack)
+            if (!allocate_stack(stack))
               create_stack(stack);
             GreenletTask *green_task = new GreenletTask(task, this,
                                             stack.stack, &stack.stack_size);
             greenlet_thread->start_task(green_task);
           } else {
-            gasnet_hsl_unlock(&mutex);
             // Remove our deletion reference
             if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
               delete task;
@@ -6556,8 +6523,8 @@ namespace LegionRuntime {
         gasnet_hsl_unlock(&mutex);
         return false; // Didn't pause
       }
-      else // Add it to the list of paused tasks
-        paused_tasks.insert(paused_task);
+      // Add it to the list of paused tasks
+      paused_tasks.insert(paused_task);
       // Now figure out what we want to do
       if (!resumable_tasks.empty())
       {
@@ -6586,17 +6553,15 @@ namespace LegionRuntime {
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
         } else {
+          gasnet_hsl_unlock(&mutex);
           if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
             GreenletStack stack;
-            bool needs_stack = allocate_stack(stack);
-            gasnet_hsl_unlock(&mutex);
-            if (needs_stack)
+            if (!allocate_stack(stack))
               create_stack(stack);
             GreenletTask *green_task = new GreenletTask(task, this,
                                             stack.stack, &stack.stack_size);
             greenlet_thread->start_task(green_task);
           } else {
-            gasnet_hsl_unlock(&mutex);
             // Remove our deletion reference
             if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
               delete task;
@@ -6633,9 +6598,9 @@ namespace LegionRuntime {
       {
         stack = greenlet_stacks.back();
         greenlet_stacks.pop_back();
-        return false; // needs stack
+        return true; // succeeded
       }
-      return true; // needs stack
+      return false; // failed
     }
 
     void GreenletProcessor::create_stack(GreenletStack &stack)
