@@ -13868,9 +13868,11 @@ namespace LegionRuntime {
 #endif
       // No need to record or advance version numbers since that will 
       // be done by the caller
-
       // We can mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
+      // We can also clear any outstanding reduction fields
+      if (!(state.outstanding_reduction_fields * closing_mask))
+        clear_logical_reduction_fields(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -17858,9 +17860,49 @@ namespace LegionRuntime {
 #endif
             // Now update the valid views and the dirty mask
             closer.update_node_views(this, state);
+            // flush any reductions that we need to do
+            FieldMask reduction_overlap = user.field_mask &
+                                          state->reduction_mask;
+            if (!!reduction_overlap)
+              flush_reductions(reduction_overlap, 0/*redop*/, info); 
           }
           else
           {
+            // Remove any open children for these fields, we don't
+            // need to traverse down the tree because we already
+            // advanced those version numbers logically so we don't
+            // need to both updating the version states
+            if (!(user.field_mask * state->children.valid_fields))
+            {
+              std::vector<ColorPoint> to_delete; 
+              for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
+                    it = state->children.open_children.begin(); 
+                    it != state->children.open_children.end(); it++)
+              {
+                it->second -= user.field_mask;
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
+              {
+                if (to_delete.size() != state->children.open_children.size())
+                {
+                  for (std::vector<ColorPoint>::const_iterator it = 
+                        to_delete.begin(); it != to_delete.end(); it++)
+                  {
+                    state->children.open_children.erase(*it);  
+                  }
+                }
+                else
+                  state->children.open_children.clear();
+              }
+              state->children.valid_fields -= user.field_mask;
+            }
+            // Remove any overlapping reducitons
+            FieldMask reduction_overlap = user.field_mask &
+                                          state->reduction_mask;
+            if (!!reduction_overlap)
+              invalidate_reduction_views(state, reduction_overlap);
             // This is write-only so update the valid views on the
             // state with the new instance view
             update_valid_views(state, user.field_mask, 
