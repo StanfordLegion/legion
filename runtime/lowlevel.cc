@@ -6330,6 +6330,12 @@ namespace LegionRuntime {
                           trigger(task->finish_event.gen, gasnet_mynode());
     }
 
+    void GreenletThread::wait_for_shutdown(void)
+    {
+      void *result;
+      pthread_join(thread, &result);
+    }
+
     GreenletProcessor::GreenletProcessor(Processor _me, Processor::Kind _kind,
                                          size_t _stack_size, int init_stack_size,
                                          const char *name, int _core_id)
@@ -6362,6 +6368,7 @@ namespace LegionRuntime {
       // Signal our thread in case it is asleep
       gasnett_cond_signal(&condvar);
       gasnet_hsl_unlock(&mutex);
+      greenlet_thread->wait_for_shutdown();
     }
 
     void GreenletProcessor::initialize_processor(void)
@@ -6392,6 +6399,8 @@ namespace LegionRuntime {
 
     void GreenletProcessor::enqueue_task(Task *task)
     {
+      // Mark this task as ready
+      task->mark_ready();
       gasnet_hsl_lock(&mutex);
       task_queue.insert(task, task->priority); 
       // Wake someone up if we aren't running
@@ -6520,7 +6529,9 @@ namespace LegionRuntime {
         }
         complete_greenlets.clear();
       }
-      return shutdown;
+      if (shutdown)
+        return (task_queue.empty() && resumable_tasks.empty());
+      return false;
     }
 
     bool GreenletProcessor::pause_task(GreenletTask *paused_task)

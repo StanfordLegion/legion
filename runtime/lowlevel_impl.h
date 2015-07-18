@@ -1295,6 +1295,7 @@ namespace LegionRuntime {
       void start_task(GreenletTask *task);
       void resume_task(GreenletTask *task);
       void run_greenlet_task(Task *task);
+      void wait_for_shutdown(void);
     public:
       GreenletProcessor *const proc;
     protected:
