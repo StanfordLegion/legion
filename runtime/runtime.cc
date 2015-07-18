@@ -16848,6 +16848,13 @@ namespace LegionRuntime {
             IndexPartNode::handle_pending_child_task(args);
             break;
           }
+        case HLR_DECREMENT_PENDING_TASK_ID:
+          {
+            SingleTask::DecrementArgs *dargs = 
+              (SingleTask::DecrementArgs*)args;
+            dargs->parent_ctx->decrement_pending();
+            break;
+          }
         default:
           assert(false); // should never get here
       }

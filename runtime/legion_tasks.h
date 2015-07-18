@@ -267,6 +267,10 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
       };
+      struct DecrementArgs {
+        HLRTaskID hlr_id;
+        SingleTask *parent_ctx;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);

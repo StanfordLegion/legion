@@ -3334,8 +3334,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -3400,8 +3401,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -3501,8 +3503,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -4914,9 +4917,15 @@ namespace LegionRuntime {
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
-      // Decrement the number of pending tasks on the processor which
-      // we originally mapped this task
-      parent_ctx->decrement_pending();
+      // Issue a utility task to decrement the number of outstanding
+      // tasks now that this task has started running
+      {
+        DecrementArgs decrement_args;
+        decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
+        decrement_args.parent_ctx = parent_ctx;
+        runtime->issue_runtime_meta_task(&decrement_args, 
+            sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
+      }
       // Start the profiling if requested
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 
