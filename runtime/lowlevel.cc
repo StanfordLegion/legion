@@ -6218,10 +6218,6 @@ namespace LegionRuntime {
       // Remove our reference on our task
       if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
         delete task;
-      // Release our stack and return it to the processor
-      long stacksize;
-      void *stack = release_stack(&stacksize);
-      proc->release_stack(stack, stacksize);
     }
 
     bool GreenletTask::event_triggered(void)
@@ -6242,7 +6238,7 @@ namespace LegionRuntime {
     {
       GreenletThread *thread = static_cast<GreenletThread*>(arg);
       thread->run_task(task, proc->me);
-      proc->record_task_complete(this);
+      proc->complete_greenlet(this);
       return NULL;
     }
 
@@ -6617,19 +6613,18 @@ namespace LegionRuntime {
       stack.stack = greenlet::alloc_greenlet_stack(&stack.stack_size);
     }
 
-    void GreenletProcessor::release_stack(void *stack, long stack_size)
-    {
-      // No need to hold the lock since only one thread is here
-      greenlet_stacks.push_back(GreenletStack());
-      GreenletStack &last = greenlet_stacks.back();
-      last.stack = stack;
-      last.stack_size = stack_size;
-    }
-
-    void GreenletProcessor::record_task_complete(GreenletTask *task)
+    void GreenletProcessor::complete_greenlet(GreenletTask *greenlet)
     {
       // No need for the lock here, only one thread 
-      complete_greenlets.push_back(task);
+      complete_greenlets.push_back(greenlet);
+      // Tricky optimization here, we can actually release
+      // the stack now because we know there is only one thread
+      // and we are guaranteed to exit after this call so by the
+      // time this thread will try to re-use the stack we are
+      // guaranteed to have finished using it.
+      greenlet_stacks.push_back(GreenletStack());
+      GreenletStack &last = greenlet_stacks.back();
+      last.stack = greenlet->release_stack(&last.stack_size);
     }
 
     // can't be static if it's used in a template...

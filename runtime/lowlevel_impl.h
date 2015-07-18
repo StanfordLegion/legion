@@ -1341,9 +1341,7 @@ namespace LegionRuntime {
     public:
       bool allocate_stack(GreenletStack &stack);
       void create_stack(GreenletStack &stack);
-      void release_stack(void *stack, long stack_size);
-    public:
-      void record_task_complete(GreenletTask *task);
+      void complete_greenlet(GreenletTask *greenlet); 
     public:
       const int core_id;
       const size_t proc_stack_size;
