@@ -1294,6 +1294,7 @@ namespace LegionRuntime {
     public:
       void start_task(GreenletTask *task);
       void resume_task(GreenletTask *task);
+      void return_to_root(void);
       void wait_for_shutdown(void);
     public:
       GreenletProcessor *const proc;
@@ -1335,7 +1336,7 @@ namespace LegionRuntime {
                               int priority);
     public:
       bool execute_task(void);
-      bool pause_task(GreenletTask *paused_task);
+      void pause_task(GreenletTask *paused_task);
       void unpause_task(GreenletTask *paused_task);
     public:
       bool allocate_stack(GreenletStack &stack);

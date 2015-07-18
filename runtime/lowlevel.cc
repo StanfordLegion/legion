@@ -6275,16 +6275,15 @@ namespace LegionRuntime {
 
     void GreenletThread::sleep_on_event(Event wait_for)
     {
+      assert(current_task != NULL);
       // Register ourselves as the waiter
       Event::Impl *event = get_runtime()->get_event_impl(wait_for);
       event->add_waiter(wait_for.gen, current_task);
       GreenletTask *paused_task = current_task;
-      current_task = 0;
-      // Tell the processor to pause us detect if we return immediately
-      if (!proc->pause_task(paused_task))
-        current_task = paused_task;
-      else // When we return the event has triggered
-        assert(paused_task == current_task);
+      // Tell the processor to pause us
+      proc->pause_task(paused_task);
+      // When we return the event has triggered
+      assert(paused_task == current_task);
     }
 
     void GreenletThread::start_task(GreenletTask *task)
@@ -6297,6 +6296,13 @@ namespace LegionRuntime {
     {
       current_task = task;
       task->switch_to(this);
+    }
+
+    void GreenletThread::return_to_root(void)
+    {
+      current_task = NULL;
+      greenlet *root = greenlet::root();
+      root->switch_to(NULL);
     }
 
     void GreenletThread::wait_for_shutdown(void)
@@ -6501,7 +6507,7 @@ namespace LegionRuntime {
       return false;
     }
 
-    bool GreenletProcessor::pause_task(GreenletTask *paused_task)
+    void GreenletProcessor::pause_task(GreenletTask *paused_task)
     {
       gasnet_hsl_lock(&mutex);
       bool found = false;
@@ -6521,7 +6527,7 @@ namespace LegionRuntime {
       if (found)
       {
         gasnet_hsl_unlock(&mutex);
-        return false; // Didn't pause
+        return;
       }
       // Add it to the list of paused tasks
       paused_tasks.insert(paused_task);
@@ -6573,10 +6579,8 @@ namespace LegionRuntime {
         gasnet_hsl_unlock(&mutex);
         // Nothing to do, send us back to the root at which
         // point we'll likely go to sleep
-        greenlet *root = greenlet::root();
-        root->switch_to(NULL);
+        greenlet_thread->return_to_root(); 
       }
-      return true; // Did pause
     }
 
     void GreenletProcessor::unpause_task(GreenletTask *paused_task)
