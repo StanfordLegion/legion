@@ -1423,6 +1423,10 @@ namespace LegionRuntime {
       inline void set_advance(void) { advance = true; }
       inline bool will_advance(void) { return advance; }
     public:
+      void set_upper_bound_node(RegionTreeNode *node);
+      inline bool is_upper_bound_node(RegionTreeNode *node) const
+        { return (node == upper_bound_node); }
+    public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_premapping(ContextID ctx);
       void apply_mapping(ContextID ctx);
@@ -1437,6 +1441,7 @@ namespace LegionRuntime {
                                            bool advance);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
+      RegionTreeNode *upper_bound_node;
       bool advance;
     };
 
@@ -1588,7 +1593,7 @@ namespace LegionRuntime {
                  const ColorPoint &child);
     public:
       bool overlaps(const FieldState &rhs) const;
-      void merge(const FieldState &rhs);
+      void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask) const;
@@ -1681,6 +1686,7 @@ namespace LegionRuntime {
       const FieldMask& get_closed_mask(void) const { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
                                bool leave_open);
+      void record_flush_only_fields(const FieldMask &flush_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
@@ -1728,6 +1734,7 @@ namespace LegionRuntime {
       LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
     protected:
       VersionInfo close_versions;
+      FieldMask flush_only_fields;
     }; 
 
     struct CopyTracker {
@@ -2225,8 +2232,9 @@ namespace LegionRuntime {
                                 PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 const ColorPoint &target_child,
+                                FieldMask &child_mask,
                                 const std::set<ColorPoint> &next_children,
-                                bool &create_composite);
+                                bool &create_composite, bool &changed);
       // Analogous methods to those above except for closing to a composite view
       void create_composite_instance(ContextID ctx_id,
                                      const std::set<ColorPoint> &targets,
@@ -2333,8 +2341,8 @@ namespace LegionRuntime {
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
-      FieldMask flush_reductions(const FieldMask &flush_mask,
-                            ReductionOpID redop, const MappableInfo &info);
+      void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
+                            const MappableInfo &info,CopyTracker *tracker=NULL);
       // Entry
       void initialize_physical_state(ContextID ctx);
       // Entry

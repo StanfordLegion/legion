@@ -1399,6 +1399,7 @@ namespace LegionRuntime {
       // If we are a write, mark that we are advancing
       if (IS_WRITE(user.usage))
         version_info.set_advance();
+      version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -9046,14 +9047,15 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : advance(false)
+      : upper_bound_node(NULL), advance(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
-      : node_infos(rhs.node_infos), advance(rhs.advance)
+      : node_infos(rhs.node_infos), upper_bound_node(rhs.upper_bound_node), 
+        advance(rhs.advance)
     //--------------------------------------------------------------------------
     {
     }
@@ -9083,8 +9085,19 @@ namespace LegionRuntime {
       }
 #endif
       node_infos = rhs.node_infos;
+      upper_bound_node = rhs.upper_bound_node;
       advance = rhs.advance;
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::set_upper_bound_node(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(upper_bound_node == NULL);
+#endif
+      upper_bound_node = node;
     }
 
     //--------------------------------------------------------------------------
@@ -9113,6 +9126,15 @@ namespace LegionRuntime {
         }
         if (entry != NULL)
           node_infos[vit->first].advance = vit->second.advance;
+      }
+      if (upper_bound_node == NULL)
+        upper_bound_node = rhs.upper_bound_node;
+      else if (rhs.upper_bound_node != NULL)
+      {
+        unsigned current_depth = upper_bound_node->get_depth();
+        unsigned rhs_depth = rhs.upper_bound_node->get_depth();
+        if (current_depth < rhs_depth)
+          upper_bound_node = rhs.upper_bound_node;
       }
     }
 
@@ -9196,6 +9218,7 @@ namespace LegionRuntime {
       }
 #endif
       node_infos.clear();
+      upper_bound_node = NULL;
       advance = false;
     }
 
@@ -10874,7 +10897,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FieldState::merge(const FieldState &rhs)
+    void FieldState::merge(const FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
       valid_fields |= rhs.valid_fields;
@@ -10897,11 +10920,20 @@ namespace LegionRuntime {
         assert(!open_children.empty());
 #endif
         // For the reductions, handle the case where we need to merge
-        // reduction modes
-        if (open_children.size() == 1)
-          open_state = OPEN_SINGLE_REDUCE;
+        // reduction modes, if they are all disjoint, we don't need
+        // to distinguish between single and multi reduce
+        if (node->are_all_children_disjoint())
+        {
+          open_state = OPEN_READ_WRITE;
+          redop = 0;
+        }
         else
-          open_state = OPEN_MULTI_REDUCE;
+        {
+          if (open_children.size() == 1)
+            open_state = OPEN_SINGLE_REDUCE;
+          else
+            open_state = OPEN_MULTI_REDUCE;
+        }
       }
     }
 
@@ -11084,6 +11116,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::record_flush_only_fields(const FieldMask &flush_only)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!flush_only_fields);
+#endif
+      flush_only_fields = flush_only;
+      closed_mask |= flush_only;
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(RegionTreeNode *target, 
                                                    Operation *creator,
                                                    const VersionInfo &ver_info,
@@ -11106,6 +11149,22 @@ namespace LegionRuntime {
         compute_close_sets(force_close_children, force_close);
         create_close_operations(target, creator, ver_info, res_info,
               trace_info, false/*leave open*/, force_close, force_close_closes);
+      }
+      // Finally if we have any fields which are flush only
+      // make a close operation for them and add it to force close
+      if (!!flush_only_fields)
+      {
+        std::set<ColorPoint> empty_children;
+        InterCloseOp *flush_op = target->create_close_op(creator,
+                                                         flush_only_fields,
+                                                         false/*leave open*/,
+                                                         empty_children,
+                                                         close_versions,
+                                                         ver_info, res_info,
+                                                         trace_info);
+        force_close_closes[flush_op] = LogicalUser(flush_op, 0/*idx*/,
+                              RegionUsage(flush_op->get_region_requirement()),
+                              flush_only_fields);
       }
     }
 
@@ -13020,6 +13079,9 @@ namespace LegionRuntime {
       }
       current_version_infos.clear();
       previous_version_infos.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      observed.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13982,17 +14044,20 @@ namespace LegionRuntime {
           // See if we still have fields to close
           if (!!reduction_flush_fields)
           {
+            FieldMask flushed_fields;
             // We need to flush these fields so issue close operations
             for (std::list<FieldState>::iterator it = 
                   state.field_states.begin(); it != 
                   state.field_states.end(); /*nothing*/)
             {
-              if (it->valid_fields * reduction_flush_fields)
+              FieldMask overlap = it->valid_fields & reduction_flush_fields;
+              if (!overlap)
               {
                 it++;
                 continue;
               }
-              perform_close_operations(closer, reduction_flush_fields, *it,
+              flushed_fields |= overlap;
+              perform_close_operations(closer, overlap, *it,
                                        next_child, false/*allow_next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
@@ -14003,6 +14068,12 @@ namespace LegionRuntime {
               else
                 it++;
             }
+            // Check to see if we have any unflushed fields
+            // These are fields which still need a close operation
+            // to be performed but only to flush the reductions
+            FieldMask unflushed = reduction_flush_fields - flushed_fields;
+            if (!!unflushed)
+              closer.record_flush_only_fields(unflushed);
             // Then we can mark that these fields no longer have 
             // unflushed reductions
             clear_logical_reduction_fields(state, reduction_flush_fields);
@@ -14431,7 +14502,7 @@ namespace LegionRuntime {
       {
         if (it->overlaps(new_state))
         {
-          it->merge(new_state);
+          it->merge(new_state, this);
           return;
         }
       }
@@ -15204,29 +15275,41 @@ namespace LegionRuntime {
       // First check, if all the fields are disjoint, then we're done
       if (state->children.valid_fields * closing_mask)
         return true;
-      // Make a copy of the open children map since close_physical_child
-      // will release our hold on the lock which may lead to someone
-      // else invalidating our iterator.
-      LegionMap<ColorPoint,FieldMask>::aligned open_copy = 
-                                            state->children.open_children;
       // Otherwise go through all of the children and 
       // see which ones we need to clean up
+      bool changed = false;
+      std::vector<ColorPoint> to_delete;
       for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
-            it = open_copy.begin(); it != open_copy.end(); it++)
+            it = state->children.open_children.begin(); 
+            it != state->children.open_children.end(); it++)
       {
-        if (!close_physical_child(closer, state, closing_mask,
-                             it->first, next_children, create_composite))
+        if (!close_physical_child(closer, state, closing_mask, it->first,
+                   it->second, next_children, create_composite, changed))
           return false;
+        if (!it->second)
+          to_delete.push_back(it->first);
       }
-      // Rebuild the valid mask
-      FieldMask next_valid;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            state->children.open_children.begin(); it !=
-            state->children.open_children.end(); it++)
+      // Delete any empty children
+      if (!to_delete.empty())
       {
-        next_valid |= it->second;
+        for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
+              it != to_delete.end(); it++)
+        {
+          state->children.open_children.erase(*it);
+        }
       }
-      state->children.valid_fields = next_valid;
+      // Rebuild the valid mask if anything changed
+      if (changed)
+      {
+        FieldMask next_valid;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
+        {
+          next_valid |= it->second;
+        }
+        state->children.valid_fields = next_valid;
+      }
       return true;
     }
 
@@ -15235,8 +15318,9 @@ namespace LegionRuntime {
                                               PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               const ColorPoint &target_child,
+                                              FieldMask &child_mask,
                                       const std::set<ColorPoint> &next_children,
-                                              bool &create_composite)
+                                          bool &create_composite, bool &changed)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15245,13 +15329,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
-      // See if we can find the child
-      LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-        state->children.open_children.find(target_child);
-      if (finder == state->children.open_children.end())
-        return true;
+      FieldMask close_mask = child_mask & closing_mask;
       // Check field disjointness
-      if (finder->second * closing_mask)
+      if (!close_mask)
         return true;
       // Check for child disjointness
       if (!next_children.empty())
@@ -15260,7 +15340,7 @@ namespace LegionRuntime {
         for (std::set<ColorPoint>::const_iterator it = 
               next_children.begin(); it != next_children.end(); it++)
         {
-          if (!are_children_disjoint(finder->first, *it))
+          if (!are_children_disjoint(target_child, *it))
           {
             all_disjoint = false;
             break;
@@ -15269,7 +15349,6 @@ namespace LegionRuntime {
         if (all_disjoint)
           return true;
       }
-      FieldMask close_mask = finder->second & closing_mask;
       // First check to see if the closer needs to make physical
       // instance targets in order to perform the close operation
       LegionMap<InstanceView*,FieldMask>::aligned space_views;
@@ -15306,7 +15385,7 @@ namespace LegionRuntime {
         }
       }
       // Need to get this value before the iterator is invalidated
-      RegionTreeNode *child_node = get_tree_child(finder->first);
+      RegionTreeNode *child_node = get_tree_child(target_child);
       if (!update_views.empty())
       {
         // Issue any update copies, and then release any
@@ -15321,6 +15400,9 @@ namespace LegionRuntime {
       }
       // Now we're ready to perform the close operation
       closer.close_tree_node(child_node, close_mask);
+      // Update the child field mask and mark that we changed something
+      child_mask -= close_mask;
+      changed = true;
       // Reacquire our lock on the state upon returning
       return true;
     }
@@ -15449,11 +15531,6 @@ namespace LegionRuntime {
       // First check, if all the fields are disjoint, then we're done
       if (state->children.valid_fields * closing_mask)
         return;
-      // Make a copy of the open children map since close_physical_child
-      // will release our hold on the lock which may lead to someone
-      // else invalidating our iterator.
-      LegionMap<ColorPoint,FieldMask>::aligned open_copy = 
-                                              state->children.open_children;
       // Keep track of two sets of fields
       // 1. The set of fields for which all children are complete
       // 2. The set of fields for which any children are complete
@@ -15462,10 +15539,13 @@ namespace LegionRuntime {
       // this node and therefore be complete
       FieldMask all_children = closing_mask;
       FieldMask any_children;
+      bool changed = false;
+      std::vector<ColorPoint> to_delete;
       // Otherwise go through all of the children and 
       // see which ones we need to clean up
       for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-            open_copy.begin(); it != open_copy.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         FieldMask overlap = it->second & closing_mask;
         all_children &= overlap;
@@ -15478,6 +15558,10 @@ namespace LegionRuntime {
                              dirty_mask, child_complete);
         all_children &= child_complete;
         any_children |= child_complete;
+        changed = true;
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
       }
       // If this is a region, if any of our children were complete
       // then we can also be considered complete
@@ -15487,17 +15571,29 @@ namespace LegionRuntime {
       // if all children were complete, we are complete, and 
       // we touched all of the children
       else if (!!all_children && is_complete() &&
-               (open_copy.size() == get_num_children()))
+               (state->children.open_children.size() == get_num_children()))
         complete_mask |= all_children;
-      // Rebuild the valid mask
-      FieldMask next_valid;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-            state->children.open_children.begin(); it !=
-            state->children.open_children.end(); it++)
+      // Delete any closed children
+      if (!to_delete.empty())
       {
-        next_valid |= it->second;
+        for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
+              it != to_delete.end(); it++)
+        {
+          state->children.open_children.erase(*it);
+        }
       }
-      state->children.valid_fields = next_valid;
+      // Rebuild the valid mask if anything changed
+      if (changed)
+      {
+        FieldMask next_valid;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
+        {
+          next_valid |= it->second;
+        }
+        state->children.valid_fields = next_valid;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15584,22 +15680,27 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
-      FieldMask up_mask = valid_mask - state->dirty_mask;
-      RegionTreeNode *parent = get_parent();
-      if ((!!up_mask || needs_space) && (parent != NULL))
+      if (!version_info.is_upper_bound_node(this))
       {
-        // Acquire the parent nodes physical state in read-only mode
-        PhysicalState *parent_state = 
-          parent->get_physical_state(ctx, version_info);
-        LegionMap<InstanceView*,FieldMask>::aligned local_valid;
-        parent->find_valid_instance_views(ctx, parent_state, up_mask, 
-                  space_mask, version_info, needs_space, local_valid);
-        // Get the subview for this level
-        for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
-              local_valid.begin(); it != local_valid.end(); it++)
+        RegionTreeNode *parent = get_parent();
+        if (parent != NULL)
         {
-          InstanceView *local_view = it->first->get_subview(get_color());
-          valid_views[local_view] = it->second;
+          FieldMask up_mask = valid_mask - state->dirty_mask;
+          if (!!up_mask || needs_space)
+          {
+            PhysicalState *parent_state = 
+              parent->get_physical_state(ctx, version_info);
+            LegionMap<InstanceView*,FieldMask>::aligned local_valid;
+            parent->find_valid_instance_views(ctx, parent_state, up_mask, 
+                      space_mask, version_info, needs_space, local_valid);
+            // Get the subview for this level
+            for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator 
+                  it = local_valid.begin(); it != local_valid.end(); it++)
+            {
+              InstanceView *local_view = it->first->get_subview(get_color());
+              valid_views[local_view] = it->second;
+            }
+          }
         }
       }
       // Now figure out which of our valid views we can add
@@ -16511,9 +16612,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldMask RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
-                                               ReductionOpID redop,
-                                               const MappableInfo &info)
+    void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
+                                          ReductionOpID redop,
+                                          const MappableInfo &info,
+                                          CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -16557,7 +16659,7 @@ namespace LegionRuntime {
         {
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.local_proc,
-                                  reduction_views, info.op);
+                                  reduction_views, info.op, tracker);
           // Save the overlap fields
           it->second = overlap;
 #ifdef DEBUG_HIGH_LEVEL
@@ -16586,7 +16688,6 @@ namespace LegionRuntime {
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
       }
-      return flush_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -17569,23 +17670,49 @@ namespace LegionRuntime {
         closer.add_target(inst_view->as_materialized_view());
       }
       bool success = true;
+      bool changed = false;
       PhysicalState *state = get_physical_state(info.ctx, version_info);
       for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
             it != targets.end(); it++)
       {
+        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+          state->children.open_children.find(*it);
+        if (finder == state->children.open_children.end())
+          continue;
         bool result = close_physical_child(closer, state, closing_mask,
-                                           (*it), next_children,
-                                           create_composite);
-
+                                           (*it), finder->second,
+                                           next_children, 
+                                           create_composite, changed);
         if (!result || create_composite)
         {
           success = false;
           break;
         }
+        if (!finder->second)
+          state->children.open_children.erase(finder);
+      }
+      // If anything changed, rebuild the field mask
+      if (changed)
+      {
+        FieldMask next_valid;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
+        {
+          next_valid |= it->second;
+        }
+        state->children.valid_fields = next_valid;
       }
       if (success)
       {
         closer.update_node_views(this, state);
+        // Now flush any reductions which need to be closed
+        if (!!state->reduction_mask)
+        {
+          FieldMask flush_reduction_mask = state->reduction_mask & closing_mask;
+          if (!!flush_reduction_mask)
+            flush_reductions(flush_reduction_mask, 0/*redop*/, info, &closer);
+        }
         closed = closer.get_termination_event();
       }
       return success;
@@ -19066,23 +19193,44 @@ namespace LegionRuntime {
         PhysicalCloser closer(info, leave_open, parent->handle);
         if (target_view != NULL)
           closer.add_target(target_view);
+        bool changed = false;
         PhysicalState *state = get_physical_state(info.ctx, version_info); 
         for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
               it != targets.end(); it++)
         {
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            state->children.open_children.find(*it);
+          if (finder == state->children.open_children.end())
+            continue;
           bool result = close_physical_child(closer, state, closing_mask,
-                                             (*it), next_children,
-                                             create_composite);
+                                             (*it), finder->second, 
+                                             next_children,
+                                             create_composite, changed);
           if (!result || create_composite)
           {
             success = false;
             break;
           }
+          if (!finder->second)
+            state->children.open_children.erase(finder);
+        }
+        // If anything changed, rebuild the field mask
+        {
+          FieldMask next_valid;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                state->children.open_children.begin(); it !=
+                state->children.open_children.end(); it++)
+          {
+            next_valid |= it->second;
+          }
+          state->children.valid_fields = next_valid;
         }
         // If we succeed, update the physical instance views
         if (success)
         {
           closer.update_node_views(this, state);
+          // No need to check for flushed reductions, nobody can be
+          // reducing directly to a partition object anyway
           closed = closer.get_termination_event();
         }
       }
