@@ -17,7 +17,8 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-      inline int io_setup(unsigned nr, aio_context_t *ctxp)
+#ifndef DARWIN 
+    inline int io_setup(unsigned nr, aio_context_t *ctxp)
       {
         return syscall(__NR_io_setup, nr, ctxp);
       }
@@ -37,7 +38,7 @@ namespace LegionRuntime {
       {
         return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
       }
-
+#endif
       static inline int min(int a, int b) { return (a < b) ? a : b; }
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
@@ -148,7 +149,7 @@ namespace LegionRuntime {
                     Rect<DIM> subrect_check;
                     irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
                     orect = dso->image;
-                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
                   }
                 }
                 break;
@@ -171,7 +172,7 @@ namespace LegionRuntime {
                     Rect<DIM> subrect_check;
                     orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
                     irect = dsi->image;
-                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
                   }
                 }
                 break;
@@ -271,14 +272,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);
@@ -391,14 +392,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);
@@ -821,7 +822,7 @@ namespace LegionRuntime {
             requests = hdf_read_reqs;
             lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
-            assert(lsi->strides[0] == 1);
+            assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
@@ -848,7 +849,7 @@ namespace LegionRuntime {
             requests = hdf_write_reqs;
             lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
             // Make sure instance involves FortranArrayLinearization
-            assert(lsi->strides[0] == 1);
+            assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
@@ -1051,6 +1052,7 @@ namespace LegionRuntime {
 
       DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
       {
+#ifndef DARWIN
         kind = _kind;
         ctx = 0;
         capacity = max_nr;
@@ -1078,18 +1080,22 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
+#endif
       }
 
       DiskChannel::~DiskChannel()
       {
+#ifndef DARWIN
         io_destroy(ctx);
         free(cb);
         free(cbs);
         free(events);
+#endif
       }
 
       long DiskChannel::submit(Request** requests, long nr)
       {
+#ifndef DARWIN
         int ns = 0;
         switch (kind) {
           case XferDes::XFER_DISK_READ:
@@ -1127,10 +1133,14 @@ namespace LegionRuntime {
           perror("io_submit error");
         }
         return ret;
+#else
+        return 0; 
+#endif 
       }
 
       void DiskChannel::pull()
       {
+#ifndef DARWIN
         int nr = io_getevents(ctx, 0, capacity, events, NULL);
         if (nr < 0)
           perror("io_getevents error");
@@ -1142,11 +1152,17 @@ namespace LegionRuntime {
           req->xd->notify_request_read_done(req);
           req->xd->notify_request_write_done(req);
         }
+#endif
       }
 
       long DiskChannel::available()
       {
+#ifndef DARWIN
         return available_cb.size();
+#else
+        return 0;
+#endif
+
       }
 
 #ifdef USE_CUDA

@@ -21,7 +21,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
-//#include <linux/aio_abi.h>
+#ifndef DARWIN
+#include <linux/aio_abi.h>
+#endif 
 #include <aio.h>
 #include <map>
 #include <vector>

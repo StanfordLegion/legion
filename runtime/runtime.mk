@@ -13,6 +13,10 @@
 # limitations under the License.
 #
 
+ifeq ($(shell uname -s),Darwin)
+DARWIN = 1
+CC_FLAGS := -DDARWIN
+endif
 
 # If using the general low-level runtime
 # select a target GPU architecture
@@ -101,10 +105,10 @@ ifneq (${MARCH},)
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
-ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -lrt -lpthread
-else
+ifeq ($(strip $(DARWIN)),1)
 LD_FLAGS	+= -lpthread
+else
+LD_FLAGS	+= -lrt -lpthread
 endif
 
 USE_LIBDL = 1
@@ -134,10 +138,10 @@ NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 else
 NVCC_FLAGS	+= -O2
 endif
-ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
-else
+ifeq ($(strip $(DARWIN)),1)
 LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+else
+LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
@@ -164,7 +168,11 @@ ifeq ($(strip $(USE_GASNET)),1)
 
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
+ifeq ($(strip $(DARWIN)),1)
+  LD_FLAGS	+= -L$(GASNET)/lib -lm
+else
   LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+endif
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
