@@ -8,7 +8,6 @@ compiler:
 env:
   - CC_FLAGS=
   - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  - CC_FLAGS=-DLEGION_PROF
   - CC_FLAGS=-DLEGION_SPY
   - CC_FLAGS=-std=c++0x
 matrix:

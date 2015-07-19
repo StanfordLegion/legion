@@ -580,14 +580,14 @@ namespace LegionRuntime {
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
           case DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
           case ANY_ORDER:
             assert(0);

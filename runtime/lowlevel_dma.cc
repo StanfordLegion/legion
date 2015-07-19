@@ -227,6 +227,45 @@ namespace LegionRuntime {
       Waiter waiter; // if we need to wait on events
     };
 
+    class FillRequest : public DmaRequest {
+    public:
+      FillRequest(const void *data, size_t msglen,
+                  RegionInstance inst,
+                  unsigned offset, unsigned size,
+                  Event _before_fill, 
+                  Event _after_fill,
+                  int priority);
+      FillRequest(const Domain &_domain,
+                  const Domain::CopySrcDstField &_dst,
+                  const void *fill_value, size_t fill_size,
+                  Event _before_fill,
+                  Event _after_fill,
+                  int priority,
+                  const Realm::ProfilingRequestSet &reqs);
+      virtual ~FillRequest(void);
+
+      size_t compute_size(void);
+      void serialize(void *buffer);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      template<int DIM>
+      void perform_dma_rect(Memory::Impl *mem_impl);
+
+      size_t optimize_fill_buffer(RegionInstance::Impl *impl, int &fill_elmts);
+
+      Domain domain;
+      Domain::CopySrcDstField dst;
+      void *fill_buffer;
+      size_t fill_size;
+      Event before_fill;
+      Waiter waiter;
+    };
+
     DmaRequestQueue::DmaRequestQueue(void)
     {
       gasnet_hsl_init(&queue_mutex);
@@ -329,7 +368,9 @@ namespace LegionRuntime {
       int priority = 0;
 #endif
 
-      while(((idata - ((const IDType *)data))*sizeof(IDType)) < datalen) {
+      size_t num_pairs = *idata++;
+
+      for (unsigned idx = 0; idx < num_pairs; idx++) {
 	RegionInstance src_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
@@ -363,6 +404,7 @@ namespace LegionRuntime {
       }
       // Unpack any profiling requests 
       const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
 
@@ -409,8 +451,8 @@ namespace LegionRuntime {
     CopyRequest::~CopyRequest(void)
     {
       if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>() &&
-          !oas_by_inst->empty()) {
+          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        assert(!oas_by_inst->empty());
         const InstPair &pair = oas_by_inst->begin()->first; 
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
@@ -423,6 +465,7 @@ namespace LegionRuntime {
     size_t CopyRequest::compute_size(void) const
     {
       size_t result = domain.compute_size();
+      result += sizeof(IDType); // number of requests;
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
         OASVec& oasvec = it2->second;
         result += (3 + oasvec.size() * 3) * sizeof(IDType);
@@ -435,6 +478,8 @@ namespace LegionRuntime {
     {
       // domain info goes first
       IDType *msgptr = domain.serialize((IDType *)buffer);
+
+      *msgptr++ = oas_by_inst->size();
 
       // now OAS vectors
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
@@ -452,6 +497,9 @@ namespace LegionRuntime {
 	}
       }
       requests.serialize(msgptr); 
+      // We sent this message remotely, so we need to clear the profiling
+      // so it doesn't get sent accidentally
+      clear_profiling();
     }
 
     void DmaRequest::Waiter::sleep_on_event(Event e, 
@@ -604,6 +652,7 @@ namespace LegionRuntime {
 	return true;
 
       assert(0);
+      return false;
     }
 
     // defined in lowlevel.cc
@@ -1052,15 +1101,6 @@ namespace LegionRuntime {
 	byte_offset -= (*it);
       }
       assert(0);
-    }
-
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-				     int block_size, int index)
-    {
-      return (alloc_offset +                                      // start address
-	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-	      (field_start * block_size) +                        // skip other fields
-	      ((index % block_size) * field_size));               // some some of our fields within our block
     }
 
     static inline int min(int a, int b) { return (a < b) ? a : b; }
@@ -3556,6 +3596,7 @@ namespace LegionRuntime {
 
       // Unpack any requests that we have
       const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
 
@@ -3608,12 +3649,22 @@ namespace LegionRuntime {
 
     ReduceRequest::~ReduceRequest(void)
     {
+      if (measurements.wants_measurement<
+          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
+        // Not precise, but close enough for now
+        assert(!srcs.empty());
+        usage.source = srcs[0].inst.get_location();
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
     }
 
     size_t ReduceRequest::compute_size(void)
     {
       size_t result = domain.compute_size();
       result += (4 + 3 * srcs.size()) * sizeof(IDType);
+      result += sizeof(IDType); // for inst_lock_needed
       result += requests.compute_size();
       return result;
     }
@@ -3641,6 +3692,8 @@ namespace LegionRuntime {
       *msgptr++ = inst_lock_needed;
 
       requests.serialize(msgptr);
+      // We sent this request remotely so we need to clear it's profiling
+      clear_profiling();
     }
 
     bool ReduceRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -4150,6 +4203,323 @@ namespace LegionRuntime {
 		   after_copy.id, after_copy.gen);
     }
 
+    FillRequest::FillRequest(const void *data, size_t datalen,
+                             RegionInstance inst,
+                             unsigned offset, unsigned size,
+                             Event _before_fill, Event _after_fill,
+                             int _priority)
+      : DmaRequest(_priority, _after_fill), before_fill(_before_fill)
+    {
+      dst.inst = inst;
+      dst.offset = offset;
+      dst.size = size;
+
+      const IDType *idata = (const IDType *)data;
+
+      idata = domain.deserialize(idata);
+
+      size_t elmts = *idata++;
+
+      fill_size = dst.size;
+      fill_buffer = malloc(fill_size);
+      memcpy(fill_buffer, idata, fill_size);
+
+      idata += elmts;
+
+      const void *result = requests.deserialize(idata);
+      Realm::Operation::reconstruct_measurements();
+
+      // better have consumed exactly the right amount of data
+      assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
+    }
+
+    FillRequest::FillRequest(const Domain &d, 
+                             const Domain::CopySrcDstField &_dst,
+                             const void *_fill_value, size_t _fill_size,
+                             Event _before_fill, Event _after_fill, int _priority,
+                             const Realm::ProfilingRequestSet &reqs)
+      : DmaRequest(_priority, _after_fill, reqs), domain(d), dst(_dst),
+        before_fill(_before_fill)
+    {
+      fill_size = _fill_size;
+      fill_buffer = malloc(fill_size);
+      memcpy(fill_buffer, _fill_value, fill_size);
+    }
+
+    FillRequest::~FillRequest(void)
+    {
+      // clean up our mess
+      free(fill_buffer);
+      if (measurements.wants_measurement<
+          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = Memory::NO_MEMORY;
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
+    }
+
+    size_t FillRequest::compute_size(void)
+    {
+      size_t result = domain.compute_size();
+      size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
+      result += ((elmts+1) * sizeof(IDType)); // +1 for fill size in bytes
+      result += requests.compute_size();
+      return result;
+    }
+
+    void FillRequest::serialize(void *buffer)
+    {
+      IDType *msgptr = domain.serialize((IDType *)buffer);
+      
+      assert(dst.size == fill_size);
+      size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
+      *msgptr++ = elmts;
+      memcpy(msgptr, fill_buffer, fill_size);
+      msgptr += elmts;
+
+      requests.serialize(msgptr);
+      // We sent this message remotely, so we need to clear the profiling
+      // so it doesn't get sent accidentally
+      clear_profiling();
+    }
+
+    bool FillRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
+    {
+      if(state == STATE_INIT)
+	state = STATE_METADATA_FETCH;
+
+      // remember which queue we're going to be assigned to if we sleep
+      waiter.req = this;
+      waiter.queue = rq;
+
+      // make sure our node has all the meta data it needs, but don't take more than one lock
+      //  at a time
+      if(state == STATE_METADATA_FETCH) {
+        // index space first
+	if(domain.get_dim() == 0) {
+	  IndexSpace::Impl *is_impl = domain.get_index_space().impl();
+	  if(!is_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no index space metadata yet", this);
+	    if(just_check) return false;
+
+	    Event e = is_impl->lock.acquire(1, false);
+	    if(e.has_triggered()) {
+	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
+	      is_impl->lock.release();
+	    } else {
+	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
+	      waiter.sleep_on_event(e, is_impl->lock.me);
+	      return false;
+	    }
+	  }
+
+          // we need more than just the metadata - we also need the valid mask
+          {
+            Event e = is_impl->request_valid_mask();
+            if(!e.has_triggered()) {
+              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+	      waiter.sleep_on_event(e);
+              return false;
+            }
+          }
+	}
+        // No need to check the instance, we are on its local node 
+        state = STATE_BEFORE_EVENT;
+      }
+
+      // make sure our functional precondition has occurred
+      if(state == STATE_BEFORE_EVENT) {
+	// has the before event triggered?  if not, wait on it
+	if(before_fill.has_triggered()) {
+	  log_dma.info("request %p - before event triggered", this);
+	  state = STATE_READY;
+	} else {
+	  log_dma.info("request %p - before event not triggered", this);
+	  if(just_check) return false;
+
+	  log_dma.info("request %p - sleeping on before event", this);
+	  waiter.sleep_on_event(before_fill);
+	  return false;
+	}
+      }
+
+      if(state == STATE_READY) {
+	log_dma.info("request %p ready", this);
+	if(just_check) return true;
+
+	state = STATE_QUEUED;
+	assert(rq != 0);
+	log_dma.info("request %p enqueued", this);
+
+	// once we're enqueued, we may be deleted at any time, so no more
+	//  references
+	rq->enqueue_request(this);
+	return true;
+      }
+
+      if(state == STATE_QUEUED)
+	return true;
+
+      assert(0);
+      return false;
+    }
+
+    void FillRequest::perform_dma(void)
+    {
+      // First switch on the memory type
+      Memory::Impl *mem_impl = dst.inst.get_location().impl();
+
+      Memory::Impl::MemoryKind mem_kind = mem_impl->kind;
+      if ((mem_kind == Memory::Impl::MKIND_SYSMEM) ||
+          (mem_kind == Memory::Impl::MKIND_ZEROCOPY) ||
+          (mem_kind == Memory::Impl::MKIND_RDMA))
+      {
+        switch (domain.get_dim()) {
+          case 0:
+            {
+              // Iterate over all the points and get the 
+              IndexSpace::Impl *ispace = domain.get_index_space().impl();
+              assert(ispace->valid_mask_complete);
+              RegionInstance::Impl *inst_impl = dst.inst.impl();
+              off_t field_start; int field_size;
+              find_field_start(inst_impl->metadata.field_sizes, dst.offset,
+                               dst.size, field_start, field_size);
+              assert(field_size <= int(fill_size));
+              int fill_elmts = 1;
+              // Optimize our buffer for the target instance
+              size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
+              Arrays::Mapping<1, 1> *dst_linearization = 
+                inst_impl->metadata.linearization.get_mapping<1>();
+              ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
+              int rstart, elem_count;
+              while(e->get_next(rstart, elem_count)) {
+                int dst_index = dst_linearization->image(rstart); 
+                int done = 0;
+                while (done < elem_count) {
+                  int dst_in_this_block = inst_impl->metadata.block_size - 
+                              ((dst_index + done) % inst_impl->metadata.block_size);
+                  int todo = min(elem_count, dst_in_this_block);
+                  off_t dst_start = calc_mem_loc(inst_impl->metadata.alloc_offset,
+                                                 field_start, field_size, 
+                                                 inst_impl->metadata.elmt_size,
+                                                 inst_impl->metadata.block_size,
+                                                 dst_index + done);
+                  // Record how many we've done
+                  done += todo;
+                  // Now do as many bulk transfers as we can
+                  while (todo >= fill_elmts) {
+                    mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size);
+                    dst_start += fill_elmts_size;
+                    todo -= fill_elmts;
+                  }
+                  // Handle any remainder elemts
+                  if (todo > 0) {
+                    mem_impl->put_bytes(dst_start, fill_buffer, todo*fill_size);
+                  }
+                }
+              }
+              delete e;
+              break;
+            }
+          case 1:
+            {
+              perform_dma_rect<1>(mem_impl);
+              break;
+            }
+          case 2:
+            {
+              perform_dma_rect<2>(mem_impl); 
+              break;
+            }
+          case 3:
+            {
+              perform_dma_rect<3>(mem_impl); 
+              break;
+            }
+          default:
+            assert(false);
+        }
+      } else {
+        // TODO: Implement GASNet, Disk, and Framebuffer
+      }
+      if(after_copy.exists())
+        get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+    }
+
+    template<int DIM>
+    void FillRequest::perform_dma_rect(Memory::Impl *mem_impl)
+    {
+      RegionInstance::Impl *inst_impl = dst.inst.impl();
+      off_t field_start; int field_size;
+      find_field_start(inst_impl->metadata.field_sizes, dst.offset,
+                       dst.size, field_start, field_size);
+      assert(field_size <= fill_size);
+      typename Arrays::Mapping<DIM, 1> *dst_linearization = 
+        inst_impl->metadata.linearization.get_mapping<DIM>();
+      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+      int fill_elmts = 1;
+      // Optimize our buffer for the target instance
+      size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
+      for (typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(rect, 
+            *dst_linearization); lso; lso++) {
+        int dst_index = lso.image_lo[0];
+        int elem_count = lso.subrect.volume();
+        int done = 0; 
+        while (done < elem_count) {
+          int dst_in_this_block = inst_impl->metadata.block_size - 
+                      ((dst_index + done) % inst_impl->metadata.block_size);
+          int todo = min(elem_count, dst_in_this_block);
+          off_t dst_start = calc_mem_loc(inst_impl->metadata.alloc_offset,
+                                         field_start, field_size, 
+                                         inst_impl->metadata.elmt_size,
+                                         inst_impl->metadata.block_size,
+                                         dst_index + done);
+          // Record how many we've done
+          done += todo;
+          // Now do as many bulk transfers as we can
+          while (todo >= fill_elmts) {
+            mem_impl->put_bytes(dst_start, fill_buffer, fill_elmts_size); 
+            dst_start += fill_elmts_size;
+            todo -= fill_elmts;
+          }
+          // Handle any remainder elemts
+          if (todo > 0) {
+            mem_impl->put_bytes(dst_start, fill_buffer, todo*fill_size);
+          }
+        }
+      }
+    }
+
+    size_t FillRequest::optimize_fill_buffer(RegionInstance::Impl *inst_impl, int &fill_elmts)
+    {
+      const size_t max_size = 1024; 
+      // Only do this optimization for "small" fields
+      // which are less than half a page
+      if (fill_size <= max_size)
+      {
+        // If we have a single-field instance or we have a set 
+        // of contiguous elmts then make a bulk buffer to use
+        if ((inst_impl->metadata.elmt_size == fill_size) ||
+            (inst_impl->metadata.block_size > 1)) 
+        {
+          fill_elmts = min(inst_impl->metadata.block_size,2*max_size/fill_size);
+          size_t fill_elmts_size = fill_elmts * fill_size;
+          char *next_buffer = (char*)malloc(fill_elmts_size);
+          char *next_ptr = next_buffer;
+          for (int idx = 0; idx < fill_elmts; idx++) {
+            memcpy(next_ptr, fill_buffer, fill_size);
+            next_ptr += fill_size;
+          }
+          // Free the old buffer and replace it
+          free(fill_buffer);
+          fill_buffer = next_buffer;
+          return fill_elmts_size;
+        }
+      }
+      return fill_size;
+    }
+
     static volatile bool terminate_flag = false;
     static int num_threads = 0;
     static pthread_t *worker_threads = 0;
@@ -4300,9 +4670,8 @@ namespace LegionRuntime {
                        const void *fill_value, size_t fill_value_size,
                        Event wait_on /*= Event::NO_EVENT*/) const
     {
-      // TODO: Implement this
-      assert(false);
-      return Event::NO_EVENT;
+      Realm::ProfilingRequestSet reqs;
+      return Domain::fill(dsts, reqs, fill_value, fill_value_size, wait_on);
     }
 
     Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
@@ -4310,9 +4679,37 @@ namespace LegionRuntime {
                        const void *fill_value, size_t fill_value_size,
                        Event wait_on /*= Event::NO_EVENT*/) const
     {
-      // TODO: Implement this
-      assert(false);
-      return Event::NO_EVENT;
+      std::set<Event> finish_events; 
+      for (std::vector<CopySrcDstField>::const_iterator it = dsts.begin();
+            it != dsts.end(); it++)
+      {
+        Event ev = GenEventImpl::create_genevent()->current_event();
+        FillRequest *r = new FillRequest(*this, *it, fill_value,
+                                         fill_value_size, wait_on,
+                                         ev, 0/*priority*/, requests);
+        Memory mem = it->inst.get_location();
+        int node = ID(mem).node();
+        if (((unsigned)node) == gasnet_mynode()) {
+          r->check_readiness(false, dma_queue);
+        } else {
+          RemoteFillArgs args;
+          args.inst = it->inst;
+          args.offset = it->offset;
+          args.size = it->size;
+          args.before_fill = wait_on;
+          args.after_fill = ev;
+          args.priority = 0;
+
+          size_t msglen = r->compute_size();
+          void *msgdata = malloc(msglen);
+
+          r->serialize(msgdata);
+
+          RemoteFillMessage::request(node, args, msgdata, msglen, PAYLOAD_FREE);
+        }
+        finish_events.insert(ev);
+      }
+      return GenEventImpl::merge_events(finish_events);
     }
     
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
@@ -4379,6 +4776,18 @@ namespace LegionRuntime {
 
 	r->check_readiness(false, dma_queue);
       }
+    }
+
+    void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen)
+    {
+      FillRequest *r = new FillRequest(data, msglen,
+                                       args.inst,
+                                       args.offset,
+                                       args.size,
+                                       args.before_fill,
+                                       args.after_fill,
+                                       args.priority);
+      r->check_readiness(false, dma_queue);
     }
 
     template <typename T> T min(T a, T b) { return (a < b) ? a : b; }

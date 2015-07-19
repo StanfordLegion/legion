@@ -205,7 +205,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
   // only want to print out this information one time, so only
   // do it if we are the mapper for the first processor in the
   // list of all processors in the machine.
-  if ((*(all_procs.begin())) == local_proc)
+  //if ((*(all_procs.begin())) == local_proc)
   {
     // Print out how many processors there are and each
     // of their kinds.
@@ -497,7 +497,7 @@ bool AdversarialMapper::map_task(Task *task)
     // Assign memories in a random order
     while (!mems_copy.empty())
     {
-      unsigned mem_idx = (lrand48() % mems_copy.size());
+      unsigned mem_idx = ((lrand48() + 1) % mems_copy.size());
       std::set<Memory>::iterator it = mems_copy.begin();
       for (unsigned i = 0; i < mem_idx; i++)
         it++;

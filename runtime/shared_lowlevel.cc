@@ -874,7 +874,6 @@ namespace LegionRuntime {
         public:
           enum ThreadState {
             RUNNING_STATE,
-            PAUSING_STATE, // about to pause
             PAUSED_STATE,
             RESUMABLE_STATE,
             SLEEPING_STATE, // about to sleep
@@ -2478,15 +2477,21 @@ namespace LegionRuntime {
     {
       // First set our state to paused 
       assert(state == RUNNING_STATE);
-      state = PAUSING_STATE;
-      // Register ourselves with the event
+      // Mark that this thread is paused
+      state = PAUSED_STATE;
+      // Then tell the processor to pause the thread
+      proc->pause_thread(this);
+      // Now register ourselves with the event
       event->add_waiter(needed, this);
+      // Take our lock and see if we are still in the paused state
+      // It's possible we've already been woken up so check before
+      // going to sleep
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      if (state == PAUSING_STATE)
+      // If we are in the paused state or the resumable state
+      // then we actually do need to go to sleep so we can be woken
+      // up by the processor later
+      if ((state == PAUSED_STATE) || (state == RESUMABLE_STATE))
       {
-        state = PAUSED_STATE;
-        // Tell the processor that this thread is going to sleep
-        proc->pause_thread(this);
         PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
       }
       assert(state == RUNNING_STATE);
@@ -2496,21 +2501,11 @@ namespace LegionRuntime {
     bool ProcessorImpl::ProcessorThread::event_triggered(void)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
-      bool need_resume = false;
-      // If the thread is still trying to go to sleep we
-      // can just mark it runnable again, otherwise it
-      // already went to sleep so we have to mark that
-      // it is resumable
-      if (state == PAUSED_STATE) {
-        need_resume = true;
-        state = RESUMABLE_STATE;
-      } else {
-        state = RUNNING_STATE;
-      }
+      assert(state == PAUSED_STATE);
+      state = RESUMABLE_STATE;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
-      if (need_resume)
-        proc->resume_thread(this);
+      // Now tell the processor that this thread is resumable
+      proc->resume_thread(this);
       return false;
     }
 
@@ -4075,12 +4070,24 @@ namespace LegionRuntime {
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
-        for (Domain::DomainPointIterator itr(domain); itr; itr++)
-        {
-          int index = itr.p.get_index();
-          void *raw_addr = get_address(index, field_start,
-                                       field_size, within_field);
-          memcpy(raw_addr, fill_value, fill_value_size);
+        if (linearization.get_dim() == 1) {
+          Arrays::Mapping<1, 1> *dst_linearization = 
+            linearization.get_mapping<1>();
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = dst_linearization->image(itr.p.get_index());
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
+        } else {
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = itr.p.get_index();
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
         }
       } else {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -5463,9 +5470,7 @@ namespace LegionRuntime {
 	const ReductionOpUntyped *redop = 0;
 	if(redop_id) {
 	  redop = Runtime::Impl::get_runtime()->get_reduction_op(redop_id);
-	  assert(redop->has_identity);
-	  assert(elmt_size == redop->sizeof_rhs);
-	  redop->init(ptr, rounded_num_elmts);
+          // We no longer do reduction initialization in the low-level runtime
 	}
 
 	RegionInstance::Impl* impl = Runtime::Impl::get_runtime()->get_free_instance(m,
@@ -6932,6 +6937,11 @@ namespace LegionRuntime {
 	return;
       }
 
+      // Start the threads for each of the processors (including the utility processors)
+      for (unsigned id=1; id < processors.size(); id++)
+        processors[id]->start_processor();
+      dma_queue->start();
+
       if(task_id != 0) { // no need to check ONE_TASK_ONLY here, since 1 node
 	for(int id = 1; id <= NUM_PROCS; id++) {
 	  Processor p;
@@ -6940,10 +6950,7 @@ namespace LegionRuntime {
 	  if(style != ONE_TASK_PER_PROC) break;
 	}
       }
-      // Start the threads for each of the processors (including the utility processors)
-      for (unsigned id=1; id < processors.size(); id++)
-        processors[id]->start_processor();
-      dma_queue->start();
+      
       // Poll the processors to see if they are done
       while (true)
       {

@@ -625,7 +625,6 @@ namespace LegionRuntime {
                                  bool owner, bool exclusive); 
     protected:
       bool sliced;
-      Barrier must_barrier; // for must parallelism
       ArgumentMap argument_map;
       std::list<SliceTask*> slices;
       std::vector<RestrictInfo> restrict_infos;

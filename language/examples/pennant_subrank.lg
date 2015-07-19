@@ -1487,6 +1487,12 @@ terra wait_for(x : double)
   return x
 end
 
+task continue_simulation(warmup : bool,
+                         cycle : int64, cstop : int64,
+                         time : double, tstop : double)
+  return warmup or (cycle < cstop and time < tstop)
+end
+
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rz_subranks_p : partition(disjoint, rz_all),
               rz_spans_p : partition(disjoint, rz_all),
@@ -1540,7 +1546,7 @@ do
   var cycle : int64 = 0
   var dt = dtmax
   var dthydro = dtmax
-  while warmup or (cycle < cstop and time < tstop) do
+  while continue_simulation(warmup, cycle, cstop, time, tstop) do
     if warmup and cycle > 0 then
       wait_for(dthydro)
       enable = true
@@ -2163,6 +2169,12 @@ terra filter_subranks(i : int64, ncolors : int64, colors : &int64, spans_per_sub
   legionlib.assert(subrank < ncolors, "spans per subrank is too small")
   return subrank
 end
+terra filter_spans(i : int64, ncolors : int64, colors : &int64, spans_per_subrank : int64)
+  legionlib.assert(spans_per_subrank > 0, "spans per subrank must be non-zero")
+  var span = colors[i] % spans_per_subrank
+  legionlib.assert(span < ncolors, "spans per subrank is too small")
+  return span
+end
 
   -- compute_coloring(
   --   conf.npieces, conf.nz, result.rz_all_c, zonecolors, nil, nil, 0)
@@ -2401,6 +2413,9 @@ terra read_input(runtime : c.legion_runtime_t,
     c.legion_accessor_array_destroy(rs_mapss4)
   end
 
+  var nspans_zones_per_subrank = (nspans_zones + conf.nsubranks - 1) / conf.nsubranks
+  var nspans_points_per_subrank = (nspans_points + conf.nsubranks - 1) / conf.nsubranks
+
   -- Create colorings
   var result : mesh_colorings
   result.rz_all_c = c.legion_coloring_create()
@@ -2415,11 +2430,8 @@ terra read_input(runtime : c.legion_runtime_t,
   result.rs_all_c = c.legion_coloring_create()
   result.rs_subranks_c = c.legion_coloring_create()
   result.rs_spans_c = c.legion_coloring_create()
-  result.nspans_zones = nspans_zones
-  result.nspans_points = nspans_points
-
-  var nspans_zones_per_subrank = (nspans_zones + conf.nsubranks - 1) / conf.nsubranks
-  var nspans_points_per_subrank = (nspans_points + conf.nsubranks - 1) / conf.nsubranks
+  result.nspans_zones = nspans_zones_per_subrank
+  result.nspans_points = nspans_points_per_subrank
 
   compute_coloring(
     conf.npieces, conf.nz, result.rz_all_c, zonecolors, nil, nil, 0)
@@ -2427,7 +2439,8 @@ terra read_input(runtime : c.legion_runtime_t,
     conf.nsubranks, conf.nz, result.rz_subranks_c, zonespancolors, nil,
     filter_subranks, nspans_zones_per_subrank)
   compute_coloring(
-    nspans_zones, conf.nz, result.rz_spans_c, zonespancolors, nil, nil, 0)
+    nspans_zones_per_subrank, conf.nz, result.rz_spans_c, zonespancolors, nil,
+    filter_spans, nspans_zones_per_subrank)
 
   compute_coloring(
     2, conf.np, result.rp_all_c, pointcolors, nil, filter_ismulticolor, 0)
@@ -2471,18 +2484,20 @@ terra read_input(runtime : c.legion_runtime_t,
   end
 
   compute_coloring(
-    nspans_points, conf.np, result.rp_spans_c, pointspancolors, nil, nil, 0)
-  compute_coloring(
     conf.nsubranks, conf.np, result.rp_subranks_c, pointspancolors, nil,
     filter_subranks, nspans_points_per_subrank)
+  compute_coloring(
+    nspans_points_per_subrank, conf.np, result.rp_spans_c, pointspancolors, nil,
+    filter_spans, nspans_points_per_subrank)
 
   compute_coloring(
     conf.npieces, conf.nz, result.rs_all_c, zonecolors, zonesize, nil, 0)
   compute_coloring(
-    nspans_zones, conf.nz, result.rs_spans_c, zonespancolors, zonesize, nil, 0)
-  compute_coloring(
     conf.nsubranks, conf.nz, result.rs_subranks_c, zonespancolors, zonesize,
     filter_subranks, nspans_zones_per_subrank)
+  compute_coloring(
+    nspans_zones_per_subrank, conf.nz, result.rs_spans_c, zonespancolors, zonesize,
+    filter_spans, nspans_zones_per_subrank)
 
   -- Free buffers
   c.free(pointpos_x)

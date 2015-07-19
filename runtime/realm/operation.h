@@ -19,6 +19,8 @@ namespace Realm {
   public:
     inline bool perform_capture(void) const { return capture_timeline; }
   protected:
+    void clear_profiling(void);
+    void reconstruct_measurements();
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
     ProfilingRequestSet requests; 
