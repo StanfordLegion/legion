@@ -41,7 +41,6 @@
 #include "lowlevel_gpu.h"
 #endif
 
-typedef u_int aio_context_t;
 
 namespace LegionRuntime{
   namespace LowLevel{
