@@ -25,7 +25,6 @@
 #ifdef USE_DISK
 #include <linux/aio_abi.h>
 #endif  /*USE_DISK*/
-#include <aio.h>
 #include <map>
 #include <vector>
 #include <deque>
