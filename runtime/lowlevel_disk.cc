@@ -176,7 +176,7 @@ namespace LegionRuntime {
                      bool read_only)
 
     {
-        RegionInstance inst = create_instance_local(is,
+      RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
                  list_size, reqs, parent_inst);

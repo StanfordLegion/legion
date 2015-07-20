@@ -1574,7 +1574,6 @@ namespace LegionRuntime {
                                              off_t list_size,
                                              const Realm::ProfilingRequestSet &reqs,
                                              RegionInstance parent_inst);
-      using Memory::Impl::create_instance;
       
       RegionInstance create_instance(IndexSpace is,
                                      const int *linearization_bits,
