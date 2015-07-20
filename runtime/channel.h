@@ -896,17 +896,20 @@ namespace LegionRuntime{
       }
 
       void stop() {
+        pthread_mutex_lock(&enqueue_lock);
         is_stopped = true;
+        pthread_cond_signal(&enqueue_cond);
+        pthread_mutex_unlock(&enqueue_lock);
       }
     public:
       pthread_mutex_t enqueue_lock;
       pthread_cond_t enqueue_cond;
       std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
       bool sleep;
+      bool is_stopped;
     private:
       // maximum allowed num of requests for a single
       long max_nr;
-      bool is_stopped;
       Request** requests;
       XferDesQueue* xd_queue;
     };
@@ -990,7 +993,7 @@ namespace LegionRuntime{
             }
           }
 
-          if (empty) {
+          if (empty && !dma_thread->is_stopped) {
             dma_thread->sleep = true;
             pthread_cond_wait(&dma_thread->enqueue_cond, &dma_thread->enqueue_lock);
           }

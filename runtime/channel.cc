@@ -1085,7 +1085,6 @@ namespace LegionRuntime {
 
       DiskChannel::~DiskChannel()
       {
-        assert(0);
         io_destroy(ctx);
         free(cb);
         free(cbs);
@@ -1123,7 +1122,7 @@ namespace LegionRuntime {
             }
             break;
           default:
-             assert(0);
+            assert(0);
         }
         assert(ns == nr);
         int ret = io_submit(ctx, ns, cbs);
