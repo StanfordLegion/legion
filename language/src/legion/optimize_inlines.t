@@ -205,6 +205,10 @@ function analyze_usage.expr_raw_fields(cx, node)
   return analyze_usage.expr(cx, node.region)
 end
 
+function analyze_usage.expr_raw_value(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
 function analyze_usage.expr_isnull(cx, node)
   return analyze_usage.expr(cx, node.pointer)
 end
@@ -302,6 +306,9 @@ function analyze_usage.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return nil
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return analyze_usage.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return analyze_usage.expr_isnull(cx, node)

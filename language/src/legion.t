@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -81,6 +81,7 @@ local language = {
     "__parallel",
     "__vectorize",
     "__physical",
+    "__raw",
     "__runtime",
     "__inline",
     "__cuda",

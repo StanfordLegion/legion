@@ -30,11 +30,12 @@ namespace LegionRuntime {
     Logger::Category log_field("field_spaces");
     Logger::Category log_region("regions");
     Logger::Category log_inst("instances");
-    Logger::Category log_garbage("gc");
     Logger::Category log_leak("leaks");
     Logger::Category log_variant("variants");
     Logger::Category log_allocation("allocation");
     Logger::Category log_directory("directory");
+    Logger::Category log_prof("legion_prof");
+    Logger::Category log_garbage("legion_gc");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
@@ -59,7 +60,7 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
     namespace LegionProf {
       Logger::Category log_prof("legion_prof");
       unsigned long long legion_prof_init_time;
@@ -1607,7 +1608,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1616,7 +1617,7 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
         impl = NULL;
       }
@@ -1628,7 +1629,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1637,12 +1638,12 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       return *this;
     }
 
@@ -2537,6 +2538,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_index_partition(Context ctx, IndexSpace parent,
+                                               const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace HighLevelRuntime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
@@ -2550,6 +2559,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_subspace(ctx, p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_index_subspace(Context ctx, 
+                                     IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_subspace(ctx, p, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2618,11 +2635,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint HighLevelRuntime::get_index_space_color_point(Context ctx,
+                                                              IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     Color HighLevelRuntime::get_index_partition_color(Context ctx,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint HighLevelRuntime::get_index_partition_color_point(Context ctx,
+                                                          IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color_point(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2736,6 +2769,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_logical_partition_by_color(Context ctx,
+                                     LogicalRegion parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_partition_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition HighLevelRuntime::get_logical_partition_by_tree(
                                             Context ctx, IndexPartition handle, 
                                             FieldSpace fspace, RegionTreeID tid) 
@@ -2766,6 +2807,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_logical_subregion_by_color(Context ctx,
+                                  LogicalPartition parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_subregion_by_color(ctx, parent, c);
     }
 
     //--------------------------------------------------------------------------
@@ -3759,7 +3808,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::enable_profiling();
 #endif
     }
@@ -3768,7 +3817,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::disable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::disable_profiling();
 #endif
     }
@@ -3777,7 +3826,7 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#ifdef OLD_LEGION_PROF
       LegionProf::dump_profiling();
 #endif
     }

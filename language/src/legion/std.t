@@ -16,11 +16,13 @@
 
 local config = require("legion/config")
 local log = require("legion/log")
-local cudahelper = require("legion/cudahelper")
+local cudahelper
 
 local std = {}
 
 std.config, std.args = config.parse_args()
+
+if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 
 -- #####################################
 -- ## Legion Bindings
@@ -1325,7 +1327,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       end
       if std.is_region(bound) and
         not (std.type_eq(bound.fspace_type, self.points_to_type) or
-               std.is_unpack_result(self.points_to_type))
+             (self.points_to_type:isvector() and
+              std.type_eq(bound.fspace_type, self.points_to_type.type)) or
+             std.is_unpack_result(self.points_to_type))
       then
         log.error(nil, tostring(self.index_type) .. " expected region(" ..
                     tostring(self.points_to_type) .. ") as argument " ..
@@ -2660,15 +2664,14 @@ function std.start(main_task)
         4294967295 --[[ AUTO_GENERATE_ID ]],
         c.legion_task_config_options_t {
           leaf = options.leaf,
-          -- FIXME: Inner appears to be broken.
-          inner = false, -- options.inner,
+          inner = options.inner,
           idempotent = options.idempotent,
         },
         [task:getname()],
         [task:getdefinition()])
       end
     end)
-  if terralib.cudacompile then
+  if std.config["cuda"] then
     cudahelper.link_driver_library()
     tasks:map(function(task)
       if task:getcuda() then

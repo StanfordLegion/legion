@@ -52,11 +52,12 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst)
     {
       return create_instance_local(is, linearization_bits, bytes_needed,
                      block_size, element_size, field_sizes, redopid,
-                     list_size, parent_inst);
+                     list_size, reqs, parent_inst);
     }
 
     void DiskMemory::destroy_instance(RegionInstance i,
@@ -148,6 +149,7 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst)
     {
       // we use a new create_instance, which could provide
@@ -165,6 +167,7 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst,
                      const char* file,
                      const std::vector<const char*>& path_names,
@@ -175,7 +178,7 @@ namespace LegionRuntime {
       RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
-                 list_size, parent_inst);
+                 list_size, reqs, parent_inst);
 
       HDFMetadata* new_hdf = new HDFMetadata;
       new_hdf->ndims = domain.get_dim();

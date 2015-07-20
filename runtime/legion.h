@@ -3533,6 +3533,16 @@ namespace LegionRuntime {
                                          Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      /**
+       * Return true if the index space has an index partition
+       * with the specified color.
+       * @param ctx enclosing task context
+       * @param parent index space
+       * @param color of index partition
+       * @return true if an index partition exists with the specified color
+       */
+      bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
 
       /**
        * Return the index subspace of an index partitioning
@@ -3546,6 +3556,17 @@ namespace LegionRuntime {
                                     Color color); 
       IndexSpace get_index_subspace(Context ctx, IndexPartition p,
                                     const DomainPoint &color);
+
+      /**
+       * Return true if the index partition has an index subspace
+       * with the specified color.
+       * @param ctx enclosing task context
+       * @param p parent index partitioning
+       * @param color of the index sub-space
+       * @return true if an index space exists with the specified color
+       */
+      bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
 
       /**
        * Return if the given index space is represented by 
@@ -3778,6 +3799,18 @@ namespace LegionRuntime {
       LogicalPartition get_logical_partition_by_color(Context ctx,
                                                       LogicalRegion parent,
                                                       const DomainPoint &c);
+
+      /**
+       * Return true if the logical region has a logical partition with
+       * the specified color.
+       * @param ctx enclosing task context
+       * @param parent logical region
+       * @param color for the specified logical partition
+       * @return true if the logical partition exists with the specified color
+       */
+      bool has_logical_partition_by_color(Context ctx,
+                                          LogicalRegion parent,
+                                          const DomainPoint &c);
       
       /**
        * Return the logical partition identified by the triple of index
@@ -3819,6 +3852,18 @@ namespace LegionRuntime {
       LogicalRegion get_logical_subregion_by_color(Context ctx,
                                                    LogicalPartition parent,
                                                    const DomainPoint &c);
+
+      /**
+       * Return true if the logical partition has a logical region with
+       * the specified color.
+       * @param ctx enclosing task context
+       * @param parent logical partition
+       * @param color for the specified logical region
+       * @return true if a logical region exists with the specified color
+       */
+      bool has_logical_subregion_by_color(Context ctx,
+                                          LogicalPartition parent,
+                                          const DomainPoint &c);
 
       /**
        * Return the logical partition identified by the triple of index

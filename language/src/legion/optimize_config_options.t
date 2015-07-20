@@ -82,6 +82,10 @@ function analyze_leaf.expr_raw_fields(cx, node)
   return analyze_leaf.expr(cx, node.region)
 end
 
+function analyze_leaf.expr_raw_value(cx, node)
+  return analyze_leaf.expr(cx, node.value)
+end
+
 function analyze_leaf.expr_isnull(cx, node)
   return analyze_leaf.expr(cx, node.pointer)
 end
@@ -155,6 +159,9 @@ function analyze_leaf.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return true
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return analyze_leaf.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return analyze_leaf.expr_isnull(cx, node)
@@ -398,6 +405,10 @@ function analyze_inner.expr_raw_fields(cx, node)
   return analyze_inner.expr(cx, node.region)
 end
 
+function analyze_inner.expr_raw_value(cx, node)
+  return analyze_inner.expr(cx, node.value)
+end
+
 function analyze_inner.expr_isnull(cx, node)
   return analyze_inner.expr(cx, node.pointer)
 end
@@ -491,6 +502,9 @@ function analyze_inner.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return true
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return analyze_inner.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return analyze_inner.expr_isnull(cx, node)

@@ -17,6 +17,7 @@
 #include "mapping_utilities.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -1003,12 +1004,23 @@ namespace LegionRuntime {
         for (set<DomainPoint>::iterator it = points.begin(); it != points.end();
              it++)
         {
-          map<Processor, double>::iterator finder =
-            max_element(total_exec_times.begin(), total_exec_times.end(),
-                        compare_second<Processor>);
-          double exec_time = exec_times[finder->first.kind()].first;
+          double min_exec_time = numeric_limits<double>::max();
+          map<Processor, double>::iterator finder = total_exec_times.end();
+          for (map<Processor, double>::iterator it2 = total_exec_times.begin();
+               it2 != total_exec_times.end(); ++it2)
+          {
+            double exec_time =
+              it2->second + exec_times[it2->first.kind()].first;
+            if (exec_time < min_exec_time)
+            {
+              finder = it2;
+              min_exec_time = exec_time;
+            }
+          }
+
+          assert(finder != total_exec_times.end());
           assignmentMap[finder->first].push_back(*it);
-          finder->second += exec_time;
+          finder->second = min_exec_time;
         }
         return assignmentMap;
       }
