@@ -2455,6 +2455,92 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Event RegionTreeForest::reduce_across(Operation *op,
+                                          Processor local_proc,
+                                          RegionTreeContext src_ctx,
+                                          RegionTreeContext dst_ctx,
+                                          RegionRequirement &src_req,
+                                          const RegionRequirement &dst_req,
+                                          const InstanceRef &dst_ref,
+                                          Event pre)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeForest::reduce_across(Operation *op,
+                                          RegionTreeContext src_ctx, 
+                                          RegionTreeContext dst_ctx,
+                                          const RegionRequirement &src_req,
+                                          const RegionRequirement &dst_req,
+                                          const InstanceRef &src_ref,
+                                          const InstanceRef &dst_ref,
+                                          Event precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      begin_perf_trace(COPY_ACROSS_ANALYSIS);
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+      assert(src_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(src_ref.has_ref());
+      assert(dst_ref.has_ref());
+      assert(dst_req.privilege == REDUCE);
+#endif
+      // We already have the events for using the physical instances
+      // All we need to do is get the offsets for performing the copies
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      LogicalView *src_view = src_ref.get_handle().get_view();
+      LogicalView *dst_view = dst_ref.get_handle().get_view();
+      if (src_view->is_reduction_view())
+      {
+        FieldMask src_mask = src_view->logical_node->column_source->
+                                get_field_mask(src_req.privilege_fields);
+        src_view->as_reduction_view()->reduce_from(dst_req.redop, 
+                                                   src_mask, src_fields);
+      }
+      else
+      {
+        MaterializedView *src_inst_view = 
+          src_view->as_instance_view()->as_materialized_view();
+        src_inst_view->manager->compute_copy_offsets(src_req.instance_fields,
+                                                     src_fields);
+      }
+      FieldMask dst_mask = dst_view->logical_node->column_source->
+                            get_field_mask(dst_req.privilege_fields);
+      dst_view->reduce_to(dst_req.redop, dst_mask, dst_fields); 
+      const bool fold = dst_view->is_reduction_view();
+
+      std::set<Domain> dst_domains;
+      RegionNode *dst_node = get_node(dst_req.region);
+      Event dom_precondition = Event::NO_EVENT;
+      if (dst_node->has_component_domains())
+        dst_domains = dst_node->get_component_domains(dom_precondition);
+      else
+        dst_domains.insert(dst_node->get_domain(dom_precondition));
+
+      Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
+                                           dst_ref.get_ready_event(),
+                                           precondition, dom_precondition);
+      std::set<Event> result_events;
+      for (std::set<Domain>::const_iterator it = dst_domains.begin();
+            it != dst_domains.end(); it++)
+      {
+        Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, fold,
+                                            src_fields, dst_fields, copy_pre);
+        if (copy_result.exists())
+          result_events.insert(copy_result);
+      }
+      Event result = Event::merge_events(result_events);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
                                        const RegionRequirement &req,
                                        const void *value, size_t value_size)
@@ -11029,6 +11115,8 @@ namespace LegionRuntime {
       }
       // We know we don't need any fields to be brought up to date
       result = MappingRef(chosen_inst, FieldMask());
+      // Remove our valid references before we return
+      RegionTreeNode::remove_valid_references(valid_instances);
       return (chosen_inst != NULL);
     }
 
@@ -11038,9 +11126,38 @@ namespace LegionRuntime {
                                                                RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this later
-      assert(false);
-      return false;
+      // If it is restricted reduction, it is possible that we could be
+      // applying this to a reduction instance directly, or we may be 
+      // applying it to a non-reduction instance. Check the reduction
+      // instances for this field first and then if that doesn't work
+      // try the normal instances.
+      std::set<ReductionView*> valid_reductions;
+      PhysicalState *state = 
+        node->acquire_physical_state(info.ctx, false/*exclusive*/);
+      node->find_valid_reduction_views(state, usage.redop,
+                                       user_mask, valid_reductions);
+      node->release_physical_state(state);
+      ReductionView *chosen_inst = NULL;
+      if (!valid_reductions.empty())
+      {
+        if (valid_reductions.size() > 1)
+        {
+          log_run.error("Multiple valid reduction instances for restricted "
+                        "cohernece! This is almost certainly a runtime bug. "
+                        "Please create a minimal test case and report it.");
+          assert(false);
+        }
+        chosen_inst = *(valid_reductions.begin());
+        result = MappingRef(chosen_inst, FieldMask());
+        // Remove our valid references before we return
+        RegionTreeNode::remove_valid_references(valid_reductions);
+      }
+      // If we found something, return because we are done
+      // otherwise try finding the restricted instance in the 
+      // set of normal instances
+      if (chosen_inst != NULL)
+        return true;
+      return map_restricted_physical(node); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -16962,7 +17079,7 @@ namespace LegionRuntime {
       
       // This mirrors the if-else statement in MappingTraverser::visit_region
       // for handling the different instance and reduction cases
-      if (!IS_REDUCE(info.req))
+      if (!view->is_reduction_view())
       {
         MaterializedView *new_view = 
           view->as_instance_view()->as_materialized_view();

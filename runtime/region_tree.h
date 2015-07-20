@@ -390,6 +390,22 @@ namespace LegionRuntime {
                         const InstanceRef &src_ref,
                         const InstanceRef &dst_ref,
                         Event precondition);
+      Event reduce_across(Operation *op,
+                        Processor local_proc,
+                        RegionTreeContext src_ctx,
+                        RegionTreeContext dst_ctx,
+                        RegionRequirement &src_req,
+                        const RegionRequirement &dst_req,
+                        const InstanceRef &dst_ref,
+                        Event precondition);
+      Event reduce_across(Operation *op,
+                        RegionTreeContext src_ctx, 
+                        RegionTreeContext dst_ctx,
+                        const RegionRequirement &src_req,
+                        const RegionRequirement &dst_req,
+                        const InstanceRef &src_ref,
+                        const InstanceRef &dst_ref,
+                        Event precondition);
       // This takes ownership of the value buffer
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
