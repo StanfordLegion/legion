@@ -1,5 +1,5 @@
 # Copyright 2015 Stanford University, NVIDIA Corporation
-#
+# Copyright 2015 Los Alamos National Laboratory 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,6 +16,9 @@
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS := -DDARWIN
+else
+#use disk unless on DARWIN 
+CC_FLAGS := -DUSE_DISK 
 endif
 
 # If using the general low-level runtime

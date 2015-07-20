@@ -1,5 +1,6 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
- *
+ * Copyright 2015 Los Alamos National Laboratory
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -175,7 +176,6 @@ namespace LegionRuntime {
                      bool read_only)
 
     {
-        Realm::ProfilingRequestSet reqs;
         RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,

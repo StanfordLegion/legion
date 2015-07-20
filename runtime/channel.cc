@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University
+ * Copyright 2015 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +18,7 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-#ifndef DARWIN 
+#ifdef USE_DISK 
     inline int io_setup(unsigned nr, aio_context_t *ctxp)
       {
         return syscall(__NR_io_setup, nr, ctxp);
@@ -38,7 +39,7 @@ namespace LegionRuntime {
       {
         return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
       }
-#endif
+#endif /*USE_DISK*/
       static inline int min(int a, int b) { return (a < b) ? a : b; }
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
@@ -350,7 +351,7 @@ namespace LegionRuntime {
         simple_update_bytes_write(mc_req->dst_buf - dst_mem_base, mc_req->nbytes, segments_write);
         available_reqs.push(req);
       }
-
+#ifdef USE_DISK
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
                                     Buffer* _src_buf, Buffer* _dst_buf,
@@ -535,7 +536,7 @@ namespace LegionRuntime {
         available_reqs.push(req);
         //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
-
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       template<unsigned DIM>
       GPUXferDes<DIM>::GPUXferDes(Channel* _channel, bool has_pre_XferDes,
@@ -1050,9 +1051,9 @@ namespace LegionRuntime {
         return capacity;
       }
 
+#ifdef USE_DISK
       DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
       {
-#ifndef DARWIN
         kind = _kind;
         ctx = 0;
         capacity = max_nr;
@@ -1080,22 +1081,19 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-#endif
       }
 
       DiskChannel::~DiskChannel()
       {
-#ifndef DARWIN
+        assert(0);
         io_destroy(ctx);
         free(cb);
         free(cbs);
         free(events);
-#endif
       }
 
       long DiskChannel::submit(Request** requests, long nr)
       {
-#ifndef DARWIN
         int ns = 0;
         switch (kind) {
           case XferDes::XFER_DISK_READ:
@@ -1133,14 +1131,10 @@ namespace LegionRuntime {
           perror("io_submit error");
         }
         return ret;
-#else
-        return 0; 
-#endif 
       }
 
       void DiskChannel::pull()
       {
-#ifndef DARWIN
         int nr = io_getevents(ctx, 0, capacity, events, NULL);
         if (nr < 0)
           perror("io_getevents error");
@@ -1152,19 +1146,14 @@ namespace LegionRuntime {
           req->xd->notify_request_read_done(req);
           req->xd->notify_request_write_done(req);
         }
-#endif
       }
 
       long DiskChannel::available()
       {
-#ifndef DARWIN
         return available_cb.size();
-#else
-        return 0;
-#endif
-
       }
-
+#endif /*USE_DISK*/
+    
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
@@ -1474,9 +1463,11 @@ namespace LegionRuntime {
       template class MemcpyXferDes<1>;
       template class MemcpyXferDes<2>;
       template class MemcpyXferDes<3>;
+#ifdef USE_DISK
       template class DiskXferDes<1>;
       template class DiskXferDes<2>;
       template class DiskXferDes<3>;
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       template class GPUXferDes<1>;
       template class GPUXferDes<2>;

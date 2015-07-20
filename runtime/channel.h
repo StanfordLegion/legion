@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University
+ * Copyright 2015 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +22,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
-#ifndef DARWIN
+#ifdef USE_DISK
 #include <linux/aio_abi.h>
-#endif 
+#endif  /*USE_DISK*/
 #include <aio.h>
 #include <map>
 #include <vector>
@@ -136,7 +137,7 @@ namespace LegionRuntime{
       // a flag indicating whether this request write has been done
       bool is_write_done;
     };
-
+#ifdef USE_DISK
     class DiskReadRequest : public Request {
     public:
       int fd;
@@ -152,7 +153,7 @@ namespace LegionRuntime{
       int64_t dst_offset;
       uint64_t nbytes;
     };
-
+#endif /*USE_DISK*/
     class MemcpyRequest : public Request {
     public:
       char *src_buf, *dst_buf;
@@ -495,7 +496,7 @@ namespace LegionRuntime{
       const char *src_mem_base;
       const char *dst_mem_base;
     };
-
+#ifdef USE_DISK
     template<unsigned DIM>
     class DiskXferDes : public XferDes {
     public:
@@ -531,7 +532,7 @@ namespace LegionRuntime{
       Rect<1> orect, irect;
       const char *mem_base;
     };
-
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
     template<unsigned DIM>
     class GPUXferDes : public XferDes {
@@ -652,6 +653,7 @@ namespace LegionRuntime{
       //MemcpyRequest** cbs;
     };
 
+#ifdef USE_DISK
     class DiskChannel : public Channel {
     public:
       DiskChannel(long max_nr, XferDes::XferKind _kind);
@@ -670,7 +672,8 @@ namespace LegionRuntime{
       //std::deque<Copy_2D*>::iterator iter_2d;
       //uint64_t cur_line;
     };
-
+#endif /*USE_DISK*/
+    
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
@@ -703,8 +706,10 @@ namespace LegionRuntime{
     public:
       ChannelManager(void) {
         memcpy_channel = NULL;
+#ifdef USE_DISK
         disk_read_channel = NULL;
         disk_write_channel = NULL;
+#endif /*USE_DISK*/
 #ifdef USE_HDF
         hdf_read_channel = NULL;
         hdf_write_channel = NULL;
@@ -713,10 +718,12 @@ namespace LegionRuntime{
       ~ChannelManager(void) {
         if (memcpy_channel)
           delete memcpy_channel;
+#ifdef USE_DISK
         if (disk_read_channel)
           delete disk_read_channel;
         if (disk_write_channel)
           delete disk_write_channel;
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
         std::map<GPUProcessor*, GPUChannel*>::iterator it;
         for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
@@ -738,6 +745,7 @@ namespace LegionRuntime{
         memcpy_channel = new MemcpyChannel(max_nr);
         return memcpy_channel;
       }
+#ifdef USE_DISK
       DiskChannel* create_disk_read_channel(long max_nr) {
         assert(disk_read_channel == NULL);
         disk_read_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_READ);
@@ -748,6 +756,7 @@ namespace LegionRuntime{
         disk_write_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_WRITE);
         return disk_write_channel;
       }
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, GPUProcessor* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
@@ -781,12 +790,14 @@ namespace LegionRuntime{
       MemcpyChannel* get_memcpy_channel() {
         return memcpy_channel;
       }
+#ifdef USE_DISK
       DiskChannel* get_disk_read_channel() {
         return disk_read_channel;
       }
       DiskChannel* get_disk_write_channel() {
         return disk_write_channel;
       }
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(GPUProcessor* gpu) {
         std::map<GPUProcessor*, GPUChannel*>::iterator it;
@@ -823,7 +834,9 @@ namespace LegionRuntime{
 #endif
     public:
       MemcpyChannel* memcpy_channel;
+#ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       std::map<GPUProcessor*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif

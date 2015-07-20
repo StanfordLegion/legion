@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
+ * Copyright 2015 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2758,6 +2759,7 @@ namespace LegionRuntime {
             break;
           }
 #endif
+#ifdef USE_DISK
           case Memory::Impl::MKIND_DISK:
           {
             log_dma.info("create mem->disk xferdes\n");
@@ -2769,6 +2771,7 @@ namespace LegionRuntime {
             path.push_back(xd);
             break;
           }
+#endif /*USE_DISK*/
 #ifdef USE_HDF
           case Memory::Impl::MKIND_HDF:
           {
@@ -2816,7 +2819,9 @@ namespace LegionRuntime {
             break;
           }
           case Memory::Impl::MKIND_GPUFB:
+#ifdef USE_DISK
           case Memory::Impl::MKIND_DISK:
+#endif /*USE_DISK*/
 #ifdef USE_HDF
           case Memory::Impl::MKIND_HDF:
 #endif
@@ -2832,7 +2837,8 @@ namespace LegionRuntime {
           }
           break;
         }
-#endif
+#endif /*USE_CUDA*/
+#ifdef USE_DISK
         case Memory::Impl::MKIND_DISK:
         {
           int src_fd = ((DiskMemory*)src_mem.impl())->fd;
@@ -2959,6 +2965,7 @@ namespace LegionRuntime {
           }
           break;
         }
+#endif /*USE_DISK*/
 #ifdef USE_HDF
         case Memory::Impl::MKIND_HDF:
         {
@@ -3003,7 +3010,7 @@ namespace LegionRuntime {
             assert(0);
           }
           break;
-
+          
         }
 #endif
         case Memory::Impl::MKIND_GLOBAL:
@@ -3048,7 +3055,6 @@ namespace LegionRuntime {
     	log_dma.info("set event dependencies");
       }
     }
-
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -4614,8 +4620,10 @@ namespace LegionRuntime {
       MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
       dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
       std::vector<Channel*> async_channels;
+#ifdef USE_DISK
       async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
       async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
+#endif /*USE_DISK*/
 #ifdef USE_CUDA
       std::vector<GPUProcessor*>::iterator it;
       for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
