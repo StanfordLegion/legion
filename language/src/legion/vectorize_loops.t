@@ -513,7 +513,9 @@ function check_vectorizability.stat(cx, node)
       end
 
       local ty = node.types[i]
-      local type_vectorizable = ty:isarray() or check_vectorizability.type(ty)
+      local type_vectorizable =
+        (ty:isarray() and ty.type:isprimitive()) or
+        check_vectorizability.type(ty)
       if not type_vectorizable then
         cx:report_error_when_demanded(node,
           error_prefix .. "a non-primitive variable declaration")
