@@ -19,7 +19,7 @@ local log = require("legion/log")
 local std = require("legion/std")
 local symbol_table = require("legion/symbol_table")
 local traverse_symbols = require("legion/traverse_symbols")
-local cudahelper = require("legion/cudahelper")
+local cudahelper
 
 -- Configuration Variables
 
@@ -38,6 +38,8 @@ local cache_index_iterator = std.config["cached-iterators"]
 -- whenever two regions being placed in different physical regions
 -- would require the use of the divergence-safe code path to be used.
 local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
+
+if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 
 local codegen = {}
 
@@ -299,18 +301,28 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
   local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
   if index_type:is_opaque() then
     local expected_stride = terralib.sizeof(field_type)
-    local actions = quote
-      var accessor = [get_accessor]([accessor_args])
 
-      var [base_pointer] = nil
+    -- Note: This function MUST NOT be inlined. The presence of the
+    -- address-of operator in the body of function causes
+    -- optimizations to be disabled on the base pointer. When inlined,
+    -- this then extends to the caller's scope, causing a significant
+    -- performance regression.
+    local terra get_base(accessor : c.legion_accessor_generic_t) : &field_type
+      var base : &opaque = nil
       var stride : c.size_t = [expected_stride]
       var ok = c.legion_accessor_generic_get_soa_parameters(
-        [accessor], [&&opaque](&[base_pointer]), &stride)
+        [accessor], &base, &stride)
 
       std.assert(ok, "failed to get base pointer")
-      std.assert([base_pointer] ~= nil, "base pointer is nil")
+      std.assert(base ~= nil, "base pointer is nil")
       std.assert(stride == [expected_stride],
                  "stride does not match expected value")
+      return [&field_type](base)
+    end
+
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
+      var [base_pointer] = [get_base](accessor)
     end
     return actions, base_pointer, terralib.newlist({expected_stride})
   else
@@ -604,7 +616,16 @@ function ref:new(value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(index_type, field_type, base_pointer, strides, index)
-  if index_type.fields then
+  -- Note: This code is performance-critical and tends to be sensitive
+  -- to small changes. Please thoroughly performance-test any changes!
+  if not index_type.fields then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+  elseif #index_type.fields == 1 then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    local field = index_type.fields[1]
+    return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
+  else
     local offset
     for i, field in ipairs(index_type.fields) do
       if offset then
@@ -613,9 +634,7 @@ local function get_element_pointer(index_type, field_type, base_pointer, strides
         offset = `([index].__ptr.[ field ] * [ strides[i] ])
       end
     end
-    return `(@[&field_type](&(([&int8](base_pointer))[offset])))
-  else
-    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+    return `(@([&field_type]([&int8](base_pointer) + offset)))
   end
 end
 
@@ -2304,7 +2323,7 @@ function codegen.expr_ispace(cx, node)
       actions = quote
         [actions]
         var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
   else
@@ -3073,6 +3092,8 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    legionlib.assert(std.config["cuda"],
+      "cuda should be enabled to generate cuda kernels")
     legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
       "multi-dimensional index spaces are not supported yet")
 
@@ -4090,22 +4111,25 @@ function codegen.stat_task(cx, node)
         physical_regions_index:insert(physical_region_i)
         physical_region_i = physical_region_i + 1
 
-        local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
-          std.zip(field_paths, field_types):map(
-            function(field)
-              local field_path, field_type = unpack(field)
-              local field_id = field_ids_by_field_path[field_path:hash()]
-              return terralib.newlist({
-                  physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
-        end))))
-        physical_region_actions:insertall(pr_actions or {})
-        base_pointers:insert(pr_base_pointers)
+        if not task:get_config_options().inner then
+          local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
+            std.zip(field_paths, field_types):map(
+              function(field)
+                local field_path, field_type = unpack(field)
+                local field_id = field_ids_by_field_path[field_path:hash()]
+                return terralib.newlist({
+                    physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
+          end))))
 
-        for i, field_path in ipairs(field_paths) do
-          physical_regions_by_field_path[field_path:hash()] = physical_region
-          if privileges_by_field_path[field_path:hash()] ~= "none" then
-            base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
-            strides_by_field_path[field_path:hash()] = pr_strides[i]
+          physical_region_actions:insertall(pr_actions or {})
+          base_pointers:insert(pr_base_pointers)
+
+          for i, field_path in ipairs(field_paths) do
+            physical_regions_by_field_path[field_path:hash()] = physical_region
+            if privileges_by_field_path[field_path:hash()] ~= "none" then
+              base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
+              strides_by_field_path[field_path:hash()] = pr_strides[i]
+            end
           end
         end
       end

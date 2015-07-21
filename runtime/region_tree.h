@@ -530,6 +530,10 @@ namespace LegionRuntime {
                        const std::vector<Domain::CopySrcDstField> &src_fields,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
+      Event issue_fill(const Domain &dom, Operation *op,
+                       const std::vector<Domain::CopySrcDstField> &dst_fields,
+                       const void *fill_value, size_t fill_size,
+                       Event precondition = Event::NO_EVENT);
       Event issue_reduction_copy(const Domain &dom, Operation *op,
                        ReductionOpID redop, bool reduction_fold,
                        const std::vector<Domain::CopySrcDstField> &src_fields,
@@ -659,8 +663,8 @@ namespace LegionRuntime {
         int kind;
         int count;
         unsigned long long total_time;
-        unsigned long long min_time;
         unsigned long long max_time;
+        unsigned long long min_time;
       };
       struct PerfTrace {
       public:
@@ -682,7 +686,7 @@ namespace LegionRuntime {
       };
     protected:
       Reservation perf_trace_lock;
-      std::vector<PerfTrace> traces;
+      std::vector<std::vector<PerfTrace> > traces;
 #endif
     };
 
@@ -694,6 +698,7 @@ namespace LegionRuntime {
       REMAP_PHYSICAL_REGION_ANALYSIS,
       REGISTER_PHYSICAL_REGION_ANALYSIS,
       COPY_ACROSS_ANALYSIS,
+      PERFORM_CLOSE_OPERATIONS_ANALYSIS,
     };
 
     enum CallKind {
@@ -2008,13 +2013,14 @@ namespace LegionRuntime {
      * for a particular version number from the persepective
      * of a given logical region.
      */
-    class VersionState : public Collectable {
+    class VersionState : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
-      VersionState(VersionID vid);
+      VersionState(VersionID vid, Runtime *rt, DistributedID did,
+                   AddressSpaceID owner_space, AddressSpaceID local_space);
       VersionState(const VersionState &rhs);
-      ~VersionState(void);
+      virtual ~VersionState(void);
     public:
       VersionState& operator=(const VersionState &rhs);
       void* operator new(size_t count);
@@ -2028,6 +2034,11 @@ namespace LegionRuntime {
                                  bool path_only) const;
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
+    public:
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
     public:
       const VersionID version_number;
     protected:
@@ -2044,6 +2055,10 @@ namespace LegionRuntime {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
+#ifdef DEBUG_HIGH_LEVEL
+      // Track whether we are valid or not
+      bool currently_valid;
+#endif
     };
 
     /**
@@ -2058,7 +2073,7 @@ namespace LegionRuntime {
      */
     class VersionManager { 
     public:
-      VersionManager(void);
+      VersionManager(RegionTreeForest *context);
       VersionManager(const VersionManager &rhs);
       ~VersionManager(void);
     public:
@@ -2088,6 +2103,10 @@ namespace LegionRuntime {
       void capture_current_states(VersionID vid, const FieldMask &capture_mask,
                                   PhysicalState *state, FieldMask &to_create,
                                   bool advance);
+    protected:
+      VersionState* create_version_state(VersionID vid);
+    public:
+      RegionTreeForest *const context;
     protected:
       Reservation version_lock;
       LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
@@ -2122,7 +2141,7 @@ namespace LegionRuntime {
         if (result != NULL)
           return result;
         // If it didn't have it then we need to make it
-        VersionManager *manager = version_managers.lookup_entry(ctx);
+        VersionManager *manager = version_managers.lookup_entry(ctx, context);
 #ifdef DEBUG_HIGH_LEVEL
         assert(manager != NULL);
 #endif
@@ -3266,11 +3285,10 @@ namespace LegionRuntime {
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void) = 0;
+      virtual void notify_active(void);
+      virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void);
       virtual void notify_invalid(void) = 0;
-      virtual void notify_new_remote(AddressSpaceID sid);
       virtual DistributedID send_manager(AddressSpaceID target, 
                                std::set<PhysicalManager*> &needed_managers) = 0;
     public:
@@ -3286,6 +3304,10 @@ namespace LegionRuntime {
       const Memory memory;
     protected:
       PhysicalInstance instance;
+#ifdef DEBUG_HIGH_LEVEL
+      bool currently_active;
+      bool currenty_valid;
+#endif
     };
 
     /**
@@ -3419,6 +3441,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const = 0;
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
+      virtual Event get_use_event(void) const = 0;
     public:
       virtual DistributedID send_manager(AddressSpaceID target, 
                         std::set<PhysicalManager*> &needed_managers);
@@ -3477,6 +3500,7 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -3494,7 +3518,7 @@ namespace LegionRuntime {
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op);
+                           const ReductionOp *op, Event use_event);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
@@ -3519,6 +3543,9 @@ namespace LegionRuntime {
       virtual bool is_list_manager(void) const;
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+      virtual Event get_use_event(void) const;
+    public:
+      const Event use_event;
     };
 
     /**
@@ -3529,7 +3556,7 @@ namespace LegionRuntime {
      * and will delete themselves once they no longer have
      * any valid handles.
      */
-    class LogicalView : public HierarchicalCollectable {
+    class LogicalView : public DistributedCollectable {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, DistributedID own_did,
@@ -4137,7 +4164,7 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez);
     public:
-      void add_root(CompositeNode *root, const FieldMask &valid);
+      void add_root(CompositeNode *root, const FieldMask &valid, bool top);
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL);
@@ -4246,6 +4273,7 @@ namespace LegionRuntime {
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
+      void set_owner_did(DistributedID owner_did);
     public:
       bool find_field_descriptors(PhysicalUser &user, 
                                   unsigned fid_idx, Processor local_proc, 
@@ -4273,6 +4301,7 @@ namespace LegionRuntime {
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
     protected:
+      DistributedID owner_did;
       FieldMask dirty_mask;
       LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
       LegionMap<InstanceView*,FieldMask>::aligned valid_views;
@@ -4595,8 +4624,6 @@ namespace LegionRuntime {
         get_accessor(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_field_accessor(FieldID fid) const;
-      void add_valid_reference(void);
-      void remove_valid_reference(void);
       void pack_reference(Serializer &rez, AddressSpaceID target);
       static InstanceRef unpack_reference(Deserializer &derez,
                                           RegionTreeForest *context,

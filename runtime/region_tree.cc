@@ -56,11 +56,12 @@ namespace LegionRuntime {
       int max_local_id = 1;
       int local_space = 
         Processor::get_executing_processor().address_space();
-      const std::set<Processor> &procs = runtime->machine->get_all_processors();
+      std::set<Processor> procs;
+      runtime->machine.get_all_processors(procs);
       for (std::set<Processor>::const_iterator it = procs.begin();
             it != procs.end(); it++)
       {
-        if (local_space == it->address_space())
+        if (local_space == int(it->address_space()))
         {
           int local = it->local_id();
           if (local > max_local_id)
@@ -69,6 +70,8 @@ namespace LegionRuntime {
       }
       // Reserve enough space for traces for each processor
       traces.resize(max_local_id+1);
+      for (unsigned idx = 0; idx < traces.size(); idx++)
+        traces[idx].push_back(PerfTrace()); // empty perf trace for no recording
 #endif
     }
 
@@ -484,6 +487,11 @@ namespace LegionRuntime {
         partition_node = create_node(pid, parent_node, partition_color,
                                      color_space, (part_kind == DISJOINT_KIND),
                                      allocable ? MUTABLE : NO_MEMORY);
+#ifdef LEGION_SPY
+      bool disjoint = (part_kind == DISJOINT_KIND);
+      LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+          partition_color.get_point());
+#endif
       // We also need to explicitly instantiate all the children so
       // that they know the domains will be ready at a later time.
       // We instantiate them with an empty domain that will be filled in later
@@ -510,6 +518,9 @@ namespace LegionRuntime {
           create_node(is, handle_ready, domain_ready,
                       partition_node, child_color, parent_node->kind, 
                       allocable ? MUTABLE : NO_MEMORY);
+#ifdef LEGION_SPY
+        LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
+#endif
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
@@ -526,6 +537,9 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DISJOINTNESS_TASK_ID, NULL,
                                          domain_ready);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(domain_ready, disjointness_event);
+#endif
       }
     }
 
@@ -610,6 +624,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_field(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -670,6 +687,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_image(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -732,6 +752,9 @@ namespace LegionRuntime {
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_preimage(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
@@ -812,6 +835,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -854,6 +880,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -898,6 +927,9 @@ namespace LegionRuntime {
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, ready);
+#endif
       return ready;
     }
 
@@ -1784,9 +1816,6 @@ namespace LegionRuntime {
                                                       )
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -1796,6 +1825,9 @@ namespace LegionRuntime {
       {
         return MappingRef(ref.get_handle().get_view(), FieldMask());
       }
+#ifdef DEBUG_PERF
+      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
+#endif
       RegionNode *target_node = get_node(req.region);
       FieldMask user_mask = 
         target_node->column_source->get_field_mask(req.privilege_fields);
@@ -2084,6 +2116,9 @@ namespace LegionRuntime {
                                                    )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
+#endif
       RegionNode *top_node = get_node(req.parent);
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
@@ -2127,6 +2162,9 @@ namespace LegionRuntime {
                                      false/*before*/, true/*premap*/,
                                      true/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2671,6 +2709,7 @@ namespace LegionRuntime {
        const std::set<PhysicalManager*> &needed_managers, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // See which physical managers actually need to send their
       // remote references
       std::deque<DistributedID> send_ids;
@@ -2693,6 +2732,9 @@ namespace LegionRuntime {
         }
         runtime->send_remote_references(target, rez);
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2701,6 +2743,7 @@ namespace LegionRuntime {
        const std::set<PhysicalManager*> &needed_managers, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // See which physical managers actually need to send their
       // remote references
       std::deque<DistributedID> send_ids;
@@ -2727,12 +2770,16 @@ namespace LegionRuntime {
         }
         runtime->send_remote_references(target, rez);
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::handle_remote_references(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       DerezCheck z(derez);
       size_t num_views;
       derez.deserialize(num_views);
@@ -2752,6 +2799,9 @@ namespace LegionRuntime {
         PhysicalManager *manager = find_manager(did);
         manager->add_held_remote_reference();
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3857,6 +3907,24 @@ namespace LegionRuntime {
       else
         return dom.copy(src_fields, dst_fields, precondition);
     }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeForest::issue_fill(const Domain &dom, Operation *op,
+                         const std::vector<Domain::CopySrcDstField> &dst_fields,
+                         const void *fill_value, size_t fill_size,
+                                       Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->profiler != NULL)
+      {
+        Realm::ProfilingRequestSet requests;
+        runtime->profiler->add_fill_request(requests, op);
+        return dom.fill(dst_fields, requests, 
+                        fill_value, fill_size, precondition);
+      }
+      else
+        return dom.fill(dst_fields, fill_value, fill_size, precondition);
+    }
     
     //--------------------------------------------------------------------------
     Event RegionTreeForest::issue_reduction_copy(const Domain &dom, 
@@ -4345,7 +4413,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Processor p = Processor::get_executing_processor();
-      traces[p.local_id()].record_call(kind, time);
+      traces[p.local_id()].back().record_call(kind, time);
     }
 
     //--------------------------------------------------------------------------
@@ -4355,7 +4423,7 @@ namespace LegionRuntime {
       Processor p = Processor::get_executing_processor();
       unsigned long long start = TimeStamp::get_current_time_in_micros();
       assert(p.local_id() < traces.size());
-      traces[p.local_id()] = PerfTrace(kind, start);
+      traces[p.local_id()].push_back(PerfTrace(kind, start));
     }
 
     //--------------------------------------------------------------------------
@@ -4364,13 +4432,15 @@ namespace LegionRuntime {
     {
       Processor p = Processor::get_executing_processor();
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      PerfTrace &trace = traces[p.local_id()];
+      unsigned index = p.local_id();
+      PerfTrace &trace = traces[index].back();
       unsigned long long diff = stop - trace.start;
       if (diff >= tolerance)
       {
         AutoLock t_lock(perf_trace_lock);
         trace.report_trace(diff);
       }
+      traces[index].pop_back();
     }
 
     //--------------------------------------------------------------------------
@@ -4418,6 +4488,11 @@ namespace LegionRuntime {
         case COPY_ACROSS_ANALYSIS:
           {
             fprintf(stdout,"COPY ACROSS ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case PERFORM_CLOSE_OPERATIONS_ANALYSIS:
+          {
+            fprintf(stdout,"PERFORM CLOSE OPERATIONS ANALYSIS: %lld us\n",diff);
             break;
           }
         default:
@@ -7104,6 +7179,9 @@ namespace LegionRuntime {
         Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
         // Now set the domains for all the nodes
         idx = 0;
         for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
@@ -7164,6 +7242,9 @@ namespace LegionRuntime {
         Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
         // Now set the domains for the nodes
         idx = 0;
         for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
@@ -8492,17 +8573,29 @@ namespace LegionRuntime {
       }
       else
       {
-        // Ease case of making a foldable reduction
+        // Easy case of making a foldable reduction
         PhysicalInstance inst = context->create_instance(domain, location,
                                            reduction_op->sizeof_rhs, redop, op);
         if (inst.exists())
         {
           DistributedID did = context->runtime->get_available_distributed_id();
+          // Issue the fill operation to fill in the init values for the field
+          std::vector<Domain::CopySrcDstField> init(1);
+          Domain::CopySrcDstField &dst = init[0];
+          dst.inst = inst;
+          dst.offset = 0;
+          dst.size = reduction_op->sizeof_rhs;
+          // Get the initial value
+          void *init_value = malloc(reduction_op->sizeof_rhs);
+          reduction_op->init(init_value, 1);
+          Event ready_event = context->issue_fill(domain, op, init, init_value, 
+                                                  reduction_op->sizeof_rhs);
+          free(init_value);
           result = legion_new<FoldReductionManager>(context, did,
                                             context->runtime->address_space,
                                             context->runtime->address_space, 
                                             location, inst, node, redop, 
-                                            reduction_op);
+                                            reduction_op, ready_event);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
@@ -11622,7 +11715,7 @@ namespace LegionRuntime {
                                         node->context->runtime->address_space,
                                         node, did, closed_mask);
       // Set the root value
-      composite_view->add_root(root, closed_mask);
+      composite_view->add_root(root, closed_mask, true/*top*/);
       // Update the reduction views for this level
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
@@ -11937,7 +12030,7 @@ namespace LegionRuntime {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_reference()) 
+          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF)) 
             legion_delete(it->first);
         }
       }
@@ -11948,7 +12041,7 @@ namespace LegionRuntime {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_reference()) 
+          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF))
             legion_delete(it->first);
         }
       }
@@ -12003,7 +12096,7 @@ namespace LegionRuntime {
         info.states.find(state);
       if (finder == info.states.end())
       {
-        state->add_reference();
+        state->add_base_valid_ref(PHYSICAL_STATE_REF);
         info.states[state] = state_mask;
       }
       else
@@ -12021,7 +12114,7 @@ namespace LegionRuntime {
         info.states.find(state);
       if (finder == info.states.end())
       {
-        state->add_reference();
+        state->add_base_valid_ref(PHYSICAL_STATE_REF);
         info.states[state] = state_mask;
       }
       else
@@ -12275,15 +12368,26 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    VersionState::VersionState(VersionID vid)
-      : version_number(vid), state_lock(Reservation::create_reservation())
+    VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
+                               AddressSpaceID own_sp, AddressSpaceID local_sp)
+      : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
+        state_lock(Reservation::create_reservation())
+#ifdef DEBUG_HIGH_LEVEL
+        , currently_valid(true)
+#endif
     //--------------------------------------------------------------------------
     {
+      // If we are not the owner, add a valid and resource reference
+      if (!is_owner())
+      {
+        add_base_valid_ref(REMOTE_DID_REF);
+        add_base_resource_ref(REMOTE_DID_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
     VersionState::VersionState(const VersionState &rhs)
-      : version_number(rhs.version_number)
+      : DistributedCollectable(rhs), version_number(rhs.version_number)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12296,29 +12400,16 @@ namespace LegionRuntime {
     {
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
-      // When we get deleted, remove all references to instance views
-      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!currently_valid);
+#endif 
+      // If we are the owner, then remote resource 
+      // references on our remote instances 
+      if (is_owner())
       {
-        if (it->first->remove_valid_reference())
-        {
-          if (it->first->is_deferred_view())
-          {
-            DeferredView *def_view = it->first->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(it->first->as_materialized_view());
-        }
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-          legion_delete(it->first);
+        // If we're the owner, remove our valid references on remote nodes
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this); 
+        map_over_remote_instances(functor);
       }
     }
 
@@ -12363,7 +12454,10 @@ namespace LegionRuntime {
     void VersionState::initialize(LogicalView *new_view, PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
-      new_view->add_valid_reference();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      new_view->add_nested_valid_ref(did);
       if (new_view->is_reduction_view())
       {
         ReductionView *view = new_view->as_reduction_view();
@@ -12397,6 +12491,9 @@ namespace LegionRuntime {
                                              bool path_only) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       if (path_only)
@@ -12415,10 +12512,7 @@ namespace LegionRuntime {
           LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
             iterator finder = state->valid_views.find(it->first);
           if (finder == state->valid_views.end())
-          {
-            it->first->add_valid_reference();
             state->valid_views[it->first] = overlap;
-          }
           else
             finder->second |= overlap;
         }
@@ -12459,10 +12553,7 @@ namespace LegionRuntime {
           LegionMap<InstanceView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
             iterator finder = state->valid_views.find(it->first);
           if (finder == state->valid_views.end())
-          {
-            it->first->add_valid_reference();
             state->valid_views[it->first] = overlap;
-          }
           else
             finder->second |= overlap;
         }
@@ -12479,10 +12570,7 @@ namespace LegionRuntime {
               track_aligned::iterator finder = 
                 state->reduction_views.find(it->first);
             if (finder == state->reduction_views.end())
-            {
-              it->first->add_valid_reference();
               state->reduction_views[it->first] = overlap;
-            }
             else
               finder->second |= overlap;
           }
@@ -12497,6 +12585,9 @@ namespace LegionRuntime {
     {
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
       if (!!state->dirty_mask)
         dirty_mask |= (state->dirty_mask & merge_mask);
       FieldMask reduction_merge = state->reduction_mask & merge_mask;
@@ -12532,7 +12623,7 @@ namespace LegionRuntime {
           track_aligned::iterator finder = valid_views.find(it->first);
         if (finder == valid_views.end())
         {
-          it->first->add_valid_reference();
+          it->first->add_nested_valid_ref(did);
           valid_views[it->first] = overlap;
         }
         else
@@ -12551,7 +12642,7 @@ namespace LegionRuntime {
             track_aligned::iterator finder = reduction_views.find(it->first);
           if (finder == reduction_views.end())
           {
-            it->first->add_valid_reference();
+            it->first->add_nested_valid_ref(did);
             reduction_views[it->first] = overlap;
           }
           else
@@ -12560,19 +12651,85 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void VersionState::notify_active(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing, we only care about valid references
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_inactive(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing we only care about valid references
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid); // should be monotonic
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+      currently_valid = false;
+#endif
+      // When we are no longer valid, remove all references to instance views
+      // No need to hold the lock since no one else should be accessing us
+      if (is_owner())
+      {
+        // If we're the owner, remove our valid references on remote nodes
+        UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this); 
+        map_over_remote_instances(functor);
+      }
+      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        if (it->first->remove_nested_valid_ref(did))
+        {
+          if (it->first->is_deferred_view())
+          {
+            DeferredView *def_view = it->first->as_deferred_view();
+            if (def_view->is_composite_view())
+              legion_delete(def_view->as_composite_view());
+            else
+              legion_delete(def_view->as_fill_view());
+          }
+          else
+            legion_delete(it->first->as_materialized_view());
+        }
+      }
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        if (it->first->remove_nested_valid_ref(did))
+          legion_delete(it->first);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Version Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    VersionManager::VersionManager(void)
-      : version_lock(Reservation::create_reservation())
+    VersionManager::VersionManager(RegionTreeForest *ctx)
+      : context(ctx), version_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
     } 
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(const VersionManager &rhs)
+      : context(rhs.context)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12595,7 +12752,7 @@ namespace LegionRuntime {
       assert(false);
       return *this;
     }
-
+    
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
@@ -12644,8 +12801,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = legion_new<VersionState>(it->first+1);
-              new_state->add_reference();
+              VersionState *new_state = create_version_state(it->first+1);
+              new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
               info.valid_fields |= to_create;
@@ -12676,8 +12833,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = legion_new<VersionState>(it->first);
-              new_state->add_reference();
+              VersionState *new_state = create_version_state(it->first);
+              new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
               info.valid_fields |= to_create;
@@ -12721,7 +12878,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                 info.states.begin(); it != info.states.end(); it++)
           {
-            if (it->first->remove_reference())
+            if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
               legion_delete(it->first);
           }
         }
@@ -12741,7 +12898,7 @@ namespace LegionRuntime {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               info.states.erase(*it);
-              if ((*it)->remove_reference())
+              if ((*it)->remove_base_valid_ref(VERSION_MANAGER_REF))
                 legion_delete(*it);
             }
           }
@@ -12798,7 +12955,7 @@ namespace LegionRuntime {
                   finder->second |= it->second;
                   // Need to remove the old reference, technically we don't
                   // need the check but we'll keep it for completeness
-                  if (it->first->remove_reference())
+                  if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
                     legion_delete(it->first);
                 }
                 else
@@ -12830,7 +12987,7 @@ namespace LegionRuntime {
                   if (!it->second)
                     to_delete.push_back(it->first);
                   else
-                    it->first->add_reference();
+                    it->first->add_base_valid_ref(VERSION_MANAGER_REF);
                 }
                 else
                 {
@@ -12841,7 +12998,7 @@ namespace LegionRuntime {
                     // Didn't flow back so we need to remove the reference
                     // Technically we don't need to check but do it anyway
                     // for completeness
-                    if (it->first->remove_reference())
+                    if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
                       legion_delete(it->first);
                   }
                 }
@@ -12863,7 +13020,7 @@ namespace LegionRuntime {
                 if (!it->second)
                   to_delete.push_back(it->first);
                 else
-                  it->first->add_reference();
+                  it->first->add_base_valid_ref(VERSION_MANAGER_REF);
               }
             }
             if (!to_delete.empty())
@@ -12885,7 +13042,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                 info.states.begin(); it != info.states.end(); it++)
           {
-            if (it->first->remove_reference())
+            if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
               legion_delete(it->first);
           }
         }
@@ -12905,7 +13062,7 @@ namespace LegionRuntime {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               info.states.erase(*it);
-              if ((*it)->remove_reference())
+              if ((*it)->remove_base_valid_ref(VERSION_MANAGER_REF))
                 legion_delete(*it);
             }
           }
@@ -13010,8 +13167,8 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = legion_new<VersionState>(0);
-        init_state->add_reference();
+        VersionState *init_state = create_version_state(0);
+        init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, user);
         current_version_infos[0].valid_fields = user.field_mask;
         current_version_infos[0].states[init_state] = user.field_mask;
@@ -13061,7 +13218,7 @@ namespace LegionRuntime {
         for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_reference())
+          if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
             legion_delete(it->first);
         }
       }
@@ -13073,7 +13230,7 @@ namespace LegionRuntime {
         for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_reference())
+          if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
             legion_delete(it->first);
         }
       }
@@ -13144,6 +13301,16 @@ namespace LegionRuntime {
 #else
       assert(false);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* VersionManager::create_version_state(VersionID vid)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID new_did = context->runtime->get_available_distributed_id();
+      AddressSpace local_space = context->runtime->address_space;
+      return legion_new<VersionState>(vid, context->runtime, new_did,
+                                      local_space, local_space);
     }
 
     //--------------------------------------------------------------------------
@@ -16465,6 +16632,8 @@ namespace LegionRuntime {
       for (std::vector<ReductionView*>::const_iterator it = to_delete.begin();
             it != to_delete.end(); it++)
       {
+        if ((*it)->remove_base_valid_ref(PHYSICAL_STATE_REF))
+          legion_delete(*it);
         state->reduction_views.erase(*it);
       }
     }
@@ -16699,7 +16868,7 @@ namespace LegionRuntime {
 #endif
       if (!version_managers.has_entry(ctx))
         return;
-      VersionManager *manager = version_managers.lookup_entry(ctx);
+      VersionManager *manager = version_managers.lookup_entry(ctx, context);
       manager->check_init();
     }
 
@@ -16712,7 +16881,7 @@ namespace LegionRuntime {
 #endif
       if (!version_managers.has_entry(ctx))
         return;
-      VersionManager *manager = version_managers.lookup_entry(ctx);
+      VersionManager *manager = version_managers.lookup_entry(ctx, context);
       manager->clear(); 
     }
 
@@ -16724,7 +16893,7 @@ namespace LegionRuntime {
     {
       if (!version_managers.has_entry(ctx))
         return;
-      VersionManager *manager = version_managers.lookup_entry(ctx);
+      VersionManager *manager = version_managers.lookup_entry(ctx, context);
       manager->detach_instance(detach_mask, target);
     }
 
@@ -16980,7 +17149,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_DEPENDENCE_CHECKS_CALL);
+      PerfTracer tracer(user.op->runtime->forest, 
+                        PERFORM_DEPENDENCE_CHECKS_CALL);
 #endif
       FieldMask dominator_mask = check_mask;
       // It's not actually sound to assume we dominate something
@@ -17134,7 +17304,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_CLOSING_CHECKS_CALL);
+      PerfTracer tracer(closer.user.op->runtime->forest, 
+                        PERFORM_CLOSING_CHECKS_CALL);
 #endif
       // Since we are performing a close operation on the region
       // tree data structure, we know that we need to register
@@ -18068,7 +18239,8 @@ namespace LegionRuntime {
                                        Processor local_proc)
     //--------------------------------------------------------------------------
     {
-      version_managers.lookup_entry(ctx)->initialize_state(new_view, user);
+      version_managers.lookup_entry(ctx, context)->
+                                        initialize_state(new_view, user);
       return InstanceRef(Event::NO_EVENT, new_view);
     } 
 
@@ -18168,20 +18340,12 @@ namespace LegionRuntime {
       }
       if (deferred_view != NULL)
       {
-        deferred_view->add_valid_reference();
         // If this is a fill view, we either need to make a new physical
         // instance or apply it to all the existing physical instances
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
         deferred_view->find_field_descriptors(user, fid_idx, proc, 
                                               field_data, preconditions);
-        if (deferred_view->remove_valid_reference())
-        {
-          if (deferred_view->is_composite_view())
-            legion_delete(deferred_view->as_composite_view());
-          else
-            legion_delete(deferred_view->as_fill_view());
-        }
       }
     }
 
@@ -18509,7 +18673,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (version_managers.has_entry(ctx))
       {
-        VersionManager *manager = version_managers.lookup_entry(ctx);
+        VersionManager *manager = version_managers.lookup_entry(ctx, context);
         manager->print_physical_state(this, capture_mask, to_traverse, logger);
       }
       else
@@ -18683,7 +18847,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (version_managers.has_entry(ctx))
       {
-        VersionManager *manager = version_managers.lookup_entry(ctx);
+        VersionManager *manager = version_managers.lookup_entry(ctx, context);
         manager->print_physical_state(this, capture_mask, to_traverse, logger);
       }
       else
@@ -19606,7 +19770,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (version_managers.has_entry(ctx))
       {
-        VersionManager *manager = version_managers.lookup_entry(ctx);
+        VersionManager *manager = version_managers.lookup_entry(ctx, context);
         manager->print_physical_state(this, capture_mask, to_traverse, logger);
       }
       else
@@ -19792,7 +19956,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (version_managers.has_entry(ctx))
       {
-        VersionManager *manager = version_managers.lookup_entry(ctx);
+        VersionManager *manager = version_managers.lookup_entry(ctx, context);
         manager->print_physical_state(this, capture_mask, to_traverse, logger);
       }
       else
@@ -20424,9 +20588,15 @@ namespace LegionRuntime {
                                      Memory mem, PhysicalInstance inst)
       : DistributedCollectable(ctx->runtime, did, owner_space, local_space), 
         context(ctx), memory(mem), instance(inst)
+#ifdef DEBUG_HIGH_LEVEL
+        , currently_active(false), current_valid(false)
+#endif
     //--------------------------------------------------------------------------
     {
       context->register_physical_manager(this); 
+      // If we are not the owner, add a resource reference
+      if (!is_owner())
+        add_base_resource_ref(REMOTE_DID_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -20434,7 +20604,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       context->unregister_physical_manager(this->did);
-      if (owner && instance.exists())
+      // If we're the owner remove our resource references
+      if (is_owner())
+      {
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instance(functor);
+      }
+      if (is_owner() && instance.exists())
       {
         log_leak.warning("Leaking physical instance " IDFMT " in memory"
                                IDFMT "",
@@ -20443,13 +20619,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_activate(void)
+    void PhysicalManager::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // No need to do anything
 #ifdef DEBUG_HIGH_LEVEL
-      assert(instance.exists());
+      assert(!currently_active);
+      currently_active = true;
+      if (is_owner())
+        assert(instance.exists());
 #endif
+      // If we are not the owner, send a reference
+      if (!is_owner())
+        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20458,15 +20639,14 @@ namespace LegionRuntime {
     {
       // No need to do anything
 #ifdef DEBUG_HIGH_LEVEL
-      assert(instance.exists());
+      assert(!currently_valid);
+      currently_valid = true;
+      if (is_owner())
+        assert(instance.exists());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::notify_new_remote(AddressSpaceID sid)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything
+      // If we are not the owner, send a reference
+      if (!is_owner())
+        send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -20490,6 +20670,10 @@ namespace LegionRuntime {
       context->runtime->allocate_physical_instance(this);
       // Add a reference to the layout
       layout->add_reference();
+#ifdef LEGION_GC
+      log_garbage.info("GC Instance Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20638,7 +20822,7 @@ namespace LegionRuntime {
         for (std::vector<MaterializedView*>::const_iterator it = 
               to_release.begin(); it != to_release.end(); it++)
         {
-          if ((*it)->remove_resource_reference())
+          if ((*it)->remove_nested_resource_ref(did))
             legion_delete(*it);
         }
       }
@@ -20714,7 +20898,7 @@ namespace LegionRuntime {
             valid_copy.begin(); it != valid_copy.end(); it++)
       {
         (*it)->accumulate_events(recycle_events);
-        if ((*it)->remove_resource_reference())
+        if ((*it)->remove_nested_resource_ref(did))
           legion_delete(*it);
       }
       // Compute the recycle event
@@ -20899,7 +21083,7 @@ namespace LegionRuntime {
       assert(view->depth == depth);
 #endif
       // Add a resource reference so it can't be deleted
-      view->add_resource_reference();
+      view->add_nested_resource_ref(did);
       bool remove_extra_reference = false;
       {
         AutoLock gc(gc_lock);
@@ -20908,7 +21092,7 @@ namespace LegionRuntime {
         else
           remove_extra_reference = true;
       }
-      if (remove_extra_reference && view->remove_resource_reference())
+      if (remove_extra_reference && view->remove_nested_resource_ref(did))
         legion_delete(view);
     }
 
@@ -21169,6 +21353,7 @@ namespace LegionRuntime {
       rez.serialize(region_node->handle);
       rez.serialize(is_foldable());
       rez.serialize(get_pointer_space());
+      rez.serialize(get_use_event());
     }
 
     //--------------------------------------------------------------------------
@@ -21192,6 +21377,8 @@ namespace LegionRuntime {
       derez.deserialize(foldable);
       Domain ptr_space;
       derez.deserialize(ptr_space);
+      Event use_event;
+      derez.deserialize(use_event);
 
       RegionNode *node = context->get_node(handle);
       const ReductionOp *op = Runtime::get_reduction_op(redop);
@@ -21203,7 +21390,7 @@ namespace LegionRuntime {
         if (make)
           return legion_new<FoldReductionManager>(context, did, owner_space,
                                           context->runtime->address_space,
-                                          mem, inst, node, redop, op);
+                                          mem, inst, node, redop, op, use_event);
         else
           return NULL;
       }
@@ -21253,6 +21440,10 @@ namespace LegionRuntime {
     {
       // Tell the runtime so it can update the per memory data structures
       context->runtime->allocate_physical_instance(this);
+#ifdef LEGION_GC
+      log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -21400,6 +21591,13 @@ namespace LegionRuntime {
       return NULL;
     }
 
+    //--------------------------------------------------------------------------
+    Event ListReductionManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Event::NO_EVENT;
+    }
+
     /////////////////////////////////////////////////////////////
     // FoldReductionManager 
     /////////////////////////////////////////////////////////////
@@ -21413,19 +21611,25 @@ namespace LegionRuntime {
                                                PhysicalInstance inst, 
                                                RegionNode *node,
                                                ReductionOpID red,
-                                               const ReductionOp *o)
+                                               const ReductionOp *o,
+                                               Event u_event)
       : ReductionManager(ctx, did, owner_space, local_space, mem, 
-                         inst, node, red, o)
+                         inst, node, red, o), use_event(u_event)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
       context->runtime->allocate_physical_instance(this);
+#ifdef LEGION_GC
+      log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
+                        did, inst.id, mem.id);
+#endif
     }
 
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, Memory::NO_MEMORY,
-                         PhysicalInstance::NO_INST, NULL, 0, NULL)
+                         PhysicalInstance::NO_INST, NULL, 0, NULL),
+        use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -21552,6 +21756,13 @@ namespace LegionRuntime {
       return const_cast<FoldReductionManager*>(this);
     }
 
+    //--------------------------------------------------------------------------
+    Event FoldReductionManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return use_event;
+    }
+
     /////////////////////////////////////////////////////////////
     // LogicalView 
     /////////////////////////////////////////////////////////////
@@ -21603,7 +21814,7 @@ namespace LegionRuntime {
 #endif     
       view->collect_users(term_events);
       // Then remove the gc reference on the object
-      if (view->remove_gc_reference())
+      if (view->remove_base_gc_ref(PENDING_GC_REF))
       {
         if (view->is_reduction_view())
           legion_delete(view->as_reduction_view());
@@ -21679,8 +21890,6 @@ namespace LegionRuntime {
       if (needed_finder == needed_views.end())
       {
         needed_views[this] = send_mask;
-        // Always add a remote reference
-        add_remote_reference();
         DistributedID parent_did = did;
         if (has_parent())
           parent_did = get_parent()->send_state(target, send_mask,
@@ -21702,15 +21911,19 @@ namespace LegionRuntime {
         // and then we are done
         if (result != did)
         {
+          // We always add a remote reference for sending
+          add_nested_remote_ref(result);
           send_updates(result, target, send_mask, 
                        needed_views, needed_managers); 
           return result;
         }
+        DistributedID remote_did = 
+          context->runtime->get_available_distributed_id();
+        // Always add a remote reference
+        add_nested_remote_ref(remote_did);
         // Otherwise if we make it here, we need to pack ourselves up
         // and send ourselves to another node
         Serializer rez;
-        DistributedID remote_did = 
-          context->runtime->get_available_distributed_id();
         // If we don't have a parent save our did as the
         // parent did which will tell the unpack task
         // that there is no parent
@@ -21753,6 +21966,8 @@ namespace LegionRuntime {
         }
         if (lost_race)
         {
+          // Remove the remote reference we added
+          remove_nested_remote_ref(remote_did);
           // Free the distributed ID
           context->runtime->free_distributed_id(remote_did);
           // Send the update
@@ -21828,7 +22043,7 @@ namespace LegionRuntime {
             }
             // Before sending the message add resource reference
             // that will be held by the new owner
-            add_resource_reference();
+            add_nested_resource_ref(new_owner_did);
             // Add a remote reference that we hold on what we sent back
             add_held_remote_reference();
             send_back_packed_view(target, rez);
@@ -21935,7 +22150,7 @@ namespace LegionRuntime {
       // Then add the remote subscriber
       child_view->add_subscriber(source, remote_did);
       // Add a remote reference held by the view that sent this back
-      child_view->add_remote_reference();
+      child_view->add_nested_remote_ref(remote_did);
     }
  
     /////////////////////////////////////////////////////////////
@@ -21957,9 +22172,12 @@ namespace LegionRuntime {
       assert(manager != NULL);
 #endif
       // Add a resource reference to the manager
-      manager->add_resource_reference();
+      manager->add_nested_resource_ref(did);
       // Initialize the current versions to zero
       current_versions[0] = FieldMask(FIELD_ALL_ONES);
+#ifdef LEGION_GC
+      log_garbage.info("GC Materialized View %ld %ld", did, manager->did); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -21977,13 +22195,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Remove our references to the manager
-      if (manager->remove_resource_reference())
+      if (manager->remove_nested_resource_ref(did))
         legion_delete(manager);
       // Remove our resource references on our children
       for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        if (it->second->remove_resource_reference())
+        if (it->second->remove_nested_resource_ref(did))
           legion_delete(it->second);
       }
       if (!atomic_reservations.empty())
@@ -22101,7 +22319,7 @@ namespace LegionRuntime {
       MaterializedView *child_view = legion_new<MaterializedView>(context, 
                                 child_did, owner_addr, child_own_did, 
                                 child_node, manager, this, depth);
-      child_view->add_resource_reference();
+      child_view->add_nested_resource_ref(did);
       // Retake the lock and try and add it, see if 
       // someone else added the child in the meantime
       {
@@ -22111,7 +22329,7 @@ namespace LegionRuntime {
         if (finder != children.end())
         {
           // Guaranteed to succeed
-          if (child_view->remove_resource_reference())
+          if (child_view->remove_nested_resource_ref(did))
             legion_delete(child_view);
           if (child_own_did != child_did)
             context->runtime->free_distributed_id(child_own_did);
@@ -22159,7 +22377,7 @@ namespace LegionRuntime {
           added = false;
       }
       if (added)
-        view->add_resource_reference();
+        view->add_nested_resource_ref(did);
       return added;
     } 
 
@@ -22363,10 +22581,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Add a gc reference to our manager
-      manager->add_gc_reference();
+      manager->add_nested_gc_ref(did);
       // Add a gc reference to our parent if we have one
       if (parent != NULL)
-        parent->add_gc_reference();
+        parent->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -22377,9 +22595,9 @@ namespace LegionRuntime {
       // we know we also hold a resource reference and therefore
       // the manager won't be deleted until we are deleted at
       // the earliest
-      manager->remove_gc_reference();
+      manager->remove_nested_gc_ref(did);
       // Also remove our parent gc reference if we have one
-      if ((parent != NULL) && parent->remove_gc_reference())
+      if ((parent != NULL) && parent->remove_nested_gc_ref(did))
         legion_delete(parent);
     }
 
@@ -22389,7 +22607,7 @@ namespace LegionRuntime {
     {
       if (depth == manager->depth)
       {
-        manager->add_valid_reference();
+        manager->add_nested_valid_ref(did);
         manager->add_valid_view(this);
       }
     }
@@ -22401,7 +22619,7 @@ namespace LegionRuntime {
       if (depth == manager->depth)
       {
         manager->remove_valid_view(this);
-        if (manager->remove_valid_reference())
+        if (manager->remove_nested_valid_ref(did))
           legion_delete(manager);
       }
     }
@@ -23747,7 +23965,7 @@ namespace LegionRuntime {
           // The view already existed so add an alias
           result->set_no_free_did();
           // We always add resource references if did != owner_did
-          if (result->remove_resource_reference())
+          if (result->remove_nested_resource_ref(owner_did))
             legion_delete(result);
           result = parent->get_materialized_subview(view_color);
           result->add_alias_did(did);
@@ -23836,7 +24054,7 @@ namespace LegionRuntime {
       // Add the sender as a subscriber
       result->add_subscriber(sender_addr, sender_did);
       // Add a remote reference held by the view that sent this back
-      result->add_remote_reference();
+      result->add_nested_remote_ref(sender_did);
       // Unpack the rest of the state
       result->unpack_materialized_view(derez, source, need_lock);
     } 
@@ -23978,7 +24196,7 @@ namespace LegionRuntime {
         for (std::set<ReductionView*>::const_iterator it = 
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
-          if ((*it)->remove_resource_reference())
+          if ((*it)->remove_nested_resource_ref(did))
             legion_delete(*it);
         }
       }
@@ -24044,6 +24262,7 @@ namespace LegionRuntime {
       ReductionOpID redop = view->get_redop();
       bool added = false;
       AutoLock v_lock(view_lock);
+      reduction_mask |= valid_mask;
       // Iterate backwards and add to the first epoch that matches
       for (std::deque<ReductionEpoch>::reverse_iterator it = 
             reduction_epochs.rbegin(); it != reduction_epochs.rend(); it++)
@@ -24057,9 +24276,9 @@ namespace LegionRuntime {
 #endif
         if (it->views.find(view) == it->views.end())
         {
-          view->add_resource_reference();
-	  view->add_gc_reference();
-          view->add_valid_reference();
+          view->add_nested_resource_ref(did);
+	  view->add_nested_gc_ref(did);
+          view->add_nested_valid_ref(did);
           it->views.insert(view);
         }
         added = true;
@@ -24069,9 +24288,9 @@ namespace LegionRuntime {
       }
       if (!added)
       {
-        view->add_resource_reference();
-	view->add_gc_reference();
-        view->add_valid_reference();
+        view->add_nested_resource_ref(did);
+	view->add_nested_gc_ref(did);
+        view->add_nested_valid_ref(did);
         reduction_epochs.push_back(ReductionEpoch(view, redop, valid_mask));
       }
     }
@@ -24084,10 +24303,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Iterate over all the reduction epochs and issue reductions
-      std::deque<ReductionEpoch> to_issue;  
+      LegionDeque<ReductionEpoch>::aligned to_issue;  
       {
         AutoLock v_lock(view_lock, 1, false/*exclusive*/);
-        for (std::deque<ReductionEpoch>::const_iterator it = 
+        for (LegionDeque<ReductionEpoch>::aligned::const_iterator it = 
               reduction_epochs.begin(); it != reduction_epochs.end(); it++)
         {
           if (reduce_mask * it->valid_fields)
@@ -24095,7 +24314,7 @@ namespace LegionRuntime {
           to_issue.push_back(*it);
         }
       }
-      for (std::deque<ReductionEpoch>::const_iterator rit = 
+      for (LegionDeque<ReductionEpoch>::aligned::const_iterator rit = 
             to_issue.begin(); rit != to_issue.end(); rit++)
       {
         const ReductionEpoch &epoch = *rit; 
@@ -24216,7 +24435,7 @@ namespace LegionRuntime {
         for (std::set<ReductionView*>::const_iterator it = 
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
-          (*it)->add_gc_reference();
+          (*it)->add_nested_gc_ref(did);
         }
       }
     }
@@ -24235,7 +24454,7 @@ namespace LegionRuntime {
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
           // No need to check for deletion condition since we hold resource refs
-          (*it)->remove_gc_reference();
+          (*it)->remove_nested_gc_ref(did);
         }
       }
     }
@@ -24252,7 +24471,7 @@ namespace LegionRuntime {
         for (std::set<ReductionView*>::const_iterator it = 
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
-          (*it)->add_valid_reference();
+          (*it)->add_nested_valid_ref(did);
         }
       }
     }
@@ -24270,7 +24489,7 @@ namespace LegionRuntime {
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
           // No need to check for deletion condition since we hold resource refs
-          (*it)->remove_valid_reference();
+          (*it)->remove_nested_valid_ref(did);
         }
       }
     }
@@ -24353,8 +24572,9 @@ namespace LegionRuntime {
           ReductionView *red_view = log_view->as_reduction_view();
           if (epoch.views.find(red_view) == epoch.views.end())
           {
-            red_view->add_resource_reference();
-            red_view->add_valid_reference();
+            red_view->add_nested_resource_ref(did);
+            red_view->add_nested_gc_ref(did);
+            red_view->add_nested_valid_ref(did);
             epoch.views.insert(red_view);
           }
           if (i == 0)
@@ -24378,6 +24598,9 @@ namespace LegionRuntime {
         parent(par), valid_mask(mask)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Composite View %ld", did);
+#endif
     }
     
     //--------------------------------------------------------------------------
@@ -24397,7 +24620,7 @@ namespace LegionRuntime {
       for (std::map<ColorPoint,CompositeView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        if (it->second->remove_resource_reference())
+        if (it->second->remove_nested_resource_ref(did))
           legion_delete(it->second);
       }
       children.clear();
@@ -24440,7 +24663,7 @@ namespace LegionRuntime {
     {
       // Add a gc reference to our parent if we have one
       if (parent != NULL)
-        parent->add_gc_reference();
+        parent->add_nested_gc_ref(did);
 
       activate_deferred();
 
@@ -24470,7 +24693,7 @@ namespace LegionRuntime {
 
       garbage_collect_deferred();
 
-      if ((parent != NULL) && parent->remove_gc_reference())
+      if ((parent != NULL) && parent->remove_nested_gc_ref(did))
         legion_delete(parent); 
     }
 
@@ -24513,7 +24736,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::add_root(CompositeNode *root, const FieldMask &valid)
+    void CompositeView::add_root(CompositeNode *root, 
+                                 const FieldMask &valid, bool top)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -24535,6 +24759,8 @@ namespace LegionRuntime {
       }
       else
         finder->second |= valid;
+      if (top)
+        root->set_owner_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -24607,7 +24833,7 @@ namespace LegionRuntime {
       {
         it->first->find_bounding_roots(child_view, it->second); 
       }
-      child_view->add_resource_reference();
+      child_view->add_nested_resource_ref(did);
 
       // Retake the lock and try and add the child, see if
       // someone else added the child in the meantime
@@ -24618,7 +24844,7 @@ namespace LegionRuntime {
         if (finder != children.end())
         {
           // Guaranteed to succeed
-          if (child_view->remove_resource_reference())
+          if (child_view->remove_nested_resource_ref(did))
             legion_delete(child_view);
           return finder->second;
         }
@@ -24667,7 +24893,7 @@ namespace LegionRuntime {
           added = false;
       }
       if (added)
-        view->add_resource_reference();
+        view->add_nested_resource_ref(did);
       return added;
     }
 
@@ -25170,7 +25396,7 @@ namespace LegionRuntime {
         {
           result->set_no_free_did();
           // We always add resource references when did != owner_did
-          if (result->remove_resource_reference())
+          if (result->remove_nested_resource_ref(owner_did))
             legion_delete(result);
           result = parent->get_subview(view_color)->
                     as_deferred_view()->as_composite_view();
@@ -25269,7 +25495,7 @@ namespace LegionRuntime {
       // Add the sender as a subscriber
       result->add_subscriber(sender_addr, sender_did);
       // Add a remote reference held by the view that sent this back
-      result->add_remote_reference();
+      result->add_nested_remote_ref(sender_did);
       // Unpack the rest of the state
       result->unpack_composite_view(derez, source, 
                                     true/*send back*/, need_lock);
@@ -25319,7 +25545,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(RegionTreeNode *logical, CompositeNode *par)
       : Collectable(), context(logical->context), logical_node(logical), 
-        parent(par)
+        parent(par), owner_did(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -25349,7 +25575,7 @@ namespace LegionRuntime {
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_resource_reference())
+        if (it->first->remove_base_resource_ref(COMPOSITE_NODE_REF))
         {
           if (it->first->is_deferred_view())
           {
@@ -25468,7 +25694,7 @@ namespace LegionRuntime {
         valid_views.find(view);
       if (finder == valid_views.end())
       {
-        view->add_resource_reference();
+        view->add_base_resource_ref(COMPOSITE_NODE_REF);
         valid_views[view] = valid_mask;
       }
       else
@@ -25808,12 +26034,24 @@ namespace LegionRuntime {
         // Now see if we have any leftover fields here
         FieldMask local_mask = bounding_mask - single;
         if (!!local_mask)
-          target->add_root(this, local_mask);
+          target->add_root(this, local_mask, false/*top*/);
       }
       else
       {
         // There were no single fields so add ourself
-        target->add_root(this, bounding_mask);
+        target->add_root(this, bounding_mask, false/*top*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::set_owner_did(DistributedID own_did)
+    //--------------------------------------------------------------------------
+    {
+      owner_did = own_did;
+      for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        it->first->set_owner_did(owner_did);
       }
     }
 
@@ -26008,7 +26246,7 @@ namespace LegionRuntime {
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_gc_reference();
+        it->first->add_nested_gc_ref(owner_did);
       }
       for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -26025,7 +26263,7 @@ namespace LegionRuntime {
             valid_views.end(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_gc_reference();
+        it->first->remove_nested_gc_ref(owner_did);
       }
       for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -26041,7 +26279,7 @@ namespace LegionRuntime {
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_valid_reference();
+        it->first->add_nested_valid_ref(owner_did);
       }
       for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -26058,7 +26296,7 @@ namespace LegionRuntime {
             valid_views.end(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_valid_reference();
+        it->first->add_nested_valid_ref(owner_did);
       }
       for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -26227,6 +26465,9 @@ namespace LegionRuntime {
         value(val), value_size(val_size), value_owner(val_owner)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Fill View %ld", did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -26262,7 +26503,7 @@ namespace LegionRuntime {
     {
       // Add a gc reference to our parent if we have one
       if (parent != NULL)
-        parent->add_gc_reference();
+        parent->add_nested_gc_ref(did);
 
       activate_deferred();
     }
@@ -26273,7 +26514,7 @@ namespace LegionRuntime {
     {
       garbage_collect_deferred();
 
-      if ((parent != NULL) && parent->remove_gc_reference())
+      if ((parent != NULL) && parent->remove_nested_gc_ref(did))
         legion_delete(parent);
     }
     
@@ -26328,7 +26569,7 @@ namespace LegionRuntime {
                                                   child_node, value, 
                                                   value_size, false/*own*/,
                                                   this/*parent*/);
-      child_view->add_resource_reference();
+      child_view->add_nested_resource_ref(did);
       // Retake the lock and try and add the child, see if someone else added
       // the child in the meantime
       {
@@ -26337,7 +26578,7 @@ namespace LegionRuntime {
                                                           children.find(c);
         if (finder != children.end())
         {
-          if (child_view->remove_resource_reference())
+          if (child_view->remove_nested_resource_ref(did))
             legion_delete(child_view);
           return finder->second;
         }
@@ -26386,7 +26627,7 @@ namespace LegionRuntime {
           added = false;
       }
       if (added)
-        view->add_resource_reference();
+        view->add_nested_resource_ref(did);
       return added;
     }
 
@@ -26486,8 +26727,9 @@ namespace LegionRuntime {
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(it->fill(dst_fields, value, 
-                                        value_size, fill_pre));
+            post_events.insert(context->issue_fill(*it, info.op,
+                                                   dst_fields, value,
+                                                   value_size, fill_pre));
           }
           fill_post = Event::merge_events(post_events);
         }
@@ -26497,7 +26739,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+          fill_post = context->issue_fill(dom, info.op, dst_fields,
+                                          value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         if (!fill_post.exists())
@@ -26599,8 +26842,8 @@ namespace LegionRuntime {
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(it->fill(dst_fields, value, 
-                                        value_size, fill_pre));
+            post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+                                                  value, value_size, fill_pre));
           }
           fill_post = Event::merge_events(post_events);
         }
@@ -26610,7 +26853,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+          fill_post = context->issue_fill(dom, info.op, dst_fields,
+                                          value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         if (!fill_post.exists())
@@ -26644,8 +26888,8 @@ namespace LegionRuntime {
       for (std::set<Domain>::const_iterator it = overlap_domains.begin();
             it != overlap_domains.end(); it++)
       {
-        post_events.insert(it->fill(dst_fields, value, 
-                                    value_size, precondition));
+        post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+                                              value, value_size, precondition));
       }
       Event post_event = Event::merge_events(post_events); 
       // If we're going to issue a reduction then we can just flush reductions
@@ -26867,7 +27111,7 @@ namespace LegionRuntime {
         {
           result->set_no_free_did();
           // We always add resource references when did != owner_did
-          if (result->remove_resource_reference())
+          if (result->remove_nested_resource_ref(owner_did))
             legion_delete(result);
           result = parent->get_subview(view_color)->
                     as_deferred_view()->as_fill_view();
@@ -26962,7 +27206,7 @@ namespace LegionRuntime {
       // Add the sender as a subscriber
       result->add_subscriber(source, sender_did);
       // Add a remote reference held by the view that sent this back
-      result->add_remote_reference();
+      result->add_nested_remote_ref(sender_did);
       // Unpack the rest of the state
       result->unpack_fill_view(derez, source, true/*send back*/, need_lock);
     }
@@ -27002,7 +27246,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
 #endif
-      manager->add_resource_reference();
+      manager->add_nested_resource_ref(did);
+#ifdef LEGION_GC
+      log_garbage.info("GC Reduction View %ld %ld", did, manager->did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -27018,7 +27265,7 @@ namespace LegionRuntime {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
-      if (manager->remove_resource_reference())
+      if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
           legion_delete(manager->as_list_manager());
@@ -27396,6 +27643,16 @@ namespace LegionRuntime {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
+      Event use_event = manager->get_use_event();
+      if (use_event.exists())
+      {
+        LegionMap<Event,FieldMask>::aligned::iterator finder = 
+            preconditions.find(use_event);
+        if (finder == preconditions.end())
+          preconditions[use_event] = copy_mask;
+        else
+          finder->second |= copy_mask;
+      }
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       if (reading)
       {
@@ -27474,9 +27731,12 @@ namespace LegionRuntime {
       assert(IS_REDUCE(user.usage));
       assert(user.usage.redop == manager->redop);
 #endif
+      std::set<Event> wait_on;
+      Event use_event = manager->get_use_event();
+      if (use_event.exists())
+        wait_on.insert(use_event);
       AutoLock v_lock(view_lock);
       // Wait on any readers currently reading the instance
-      std::set<Event> wait_on;
       for (LegionList<PhysicalUser>::aligned::const_iterator it = 
             reading_users.begin(); it != reading_users.end(); it++)
       {
@@ -27549,7 +27809,7 @@ namespace LegionRuntime {
     void ReductionView::notify_activate(void)
     //--------------------------------------------------------------------------
     {
-      manager->add_gc_reference();
+      manager->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -27558,21 +27818,21 @@ namespace LegionRuntime {
     {
       // No need to check for deletion of the manager since
       // we know that we also hold a resource reference
-      manager->remove_gc_reference();
+      manager->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      manager->add_valid_reference();
+      manager->add_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      manager->remove_valid_reference();
+      manager->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -27940,7 +28200,7 @@ namespace LegionRuntime {
       // Add the subscriber
       result->add_subscriber(send_addr, send_did);
       // Add a remote reference that is held by the person who sent us back
-      result->add_remote_reference();
+      result->add_nested_remote_ref(send_did);
       // Now upack the view
       result->unpack_reduction_view(derez, source);
     }
@@ -27993,8 +28253,6 @@ namespace LegionRuntime {
       : view(v)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-        view->add_gc_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -28002,8 +28260,6 @@ namespace LegionRuntime {
       : view(rhs.view)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-        view->add_gc_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -28011,59 +28267,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (view != NULL)
-      {
-        if (view->remove_gc_reference())
-        {
-          if (view->is_reduction_view())
-            legion_delete(view->as_reduction_view());
-          else
-          {
-            InstanceView *inst_view = view->as_instance_view();
-            if (inst_view->is_deferred_view())
-            {
-              DeferredView *def_view = inst_view->as_deferred_view();
-              if (def_view->is_composite_view())
-                legion_delete(def_view->as_composite_view());
-              else
-                legion_delete(def_view->as_fill_view());
-            }
-            else
-              legion_delete(inst_view->as_materialized_view());
-          }
-        }
         view = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
     ViewHandle& ViewHandle::operator=(const ViewHandle &rhs)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-      {
-        if (view->remove_gc_reference())
-        {
-          if (view->is_reduction_view())
-            legion_delete(view->as_reduction_view());
-          else
-          {
-            InstanceView *inst_view = view->as_instance_view();
-            if (inst_view->is_deferred_view())
-            {
-              DeferredView *def_view = inst_view->as_deferred_view();
-              if (def_view->is_composite_view())
-                legion_delete(def_view->as_composite_view());
-              else
-                legion_delete(def_view->as_fill_view());
-            }
-            else
-              legion_delete(inst_view->as_materialized_view());
-          }
-        }
-      }
       view = rhs.view;
-      if (view != NULL)
-        view->add_gc_reference();
       return *this;
     }
 
@@ -28083,8 +28294,6 @@ namespace LegionRuntime {
       : view(v), needed_fields(needed)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-        view->add_valid_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -28092,33 +28301,12 @@ namespace LegionRuntime {
       : view(rhs.view), needed_fields(rhs.needed_fields)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-        view->add_valid_reference();
     }
 
     //--------------------------------------------------------------------------
     MappingRef::~MappingRef(void)
     //--------------------------------------------------------------------------
     {
-      if ((view != NULL) && view->remove_valid_reference())
-      {
-        if (view->is_reduction_view())
-          legion_delete(view->as_reduction_view());
-        else
-        {
-          InstanceView *inst_view = view->as_instance_view();
-          if (inst_view->is_deferred_view())
-          {
-            DeferredView *def_view = inst_view->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(inst_view->as_materialized_view());
-        }
-      }
       view = NULL;
     }
 
@@ -28126,29 +28314,8 @@ namespace LegionRuntime {
     MappingRef& MappingRef::operator=(const MappingRef &rhs)
     //--------------------------------------------------------------------------
     {
-      if ((view != NULL) && view->remove_valid_reference())
-      {
-        if (view->is_reduction_view())
-          legion_delete(view->as_reduction_view());
-        else
-        {
-          InstanceView *inst_view = view->as_instance_view();
-          if (inst_view->is_deferred_view())
-          {
-            DeferredView *def_view = inst_view->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(inst_view->as_materialized_view());
-        }
-      }
       view = rhs.view;
       needed_fields = rhs.needed_fields;
-      if (view != NULL)
-        view->add_valid_reference();
       return *this;
     }
 
@@ -28216,26 +28383,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return handle.get_manager()->get_field_accessor(fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceRef::add_valid_reference(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(has_ref());
-#endif
-      handle.get_view()->add_valid_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceRef::remove_valid_reference(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(has_ref());
-#endif
-      handle.get_view()->remove_valid_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -28328,7 +28475,6 @@ namespace LegionRuntime {
             manager->add_held_remote_reference();
           return InstanceRef(ready, ViewHandle(view), needed_locks);
         }
-        
       }
       else
         return InstanceRef();

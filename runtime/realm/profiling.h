@@ -72,6 +72,13 @@ namespace Realm {
       typedef unsigned long long timestamp_t;
       static const timestamp_t INVALID_TIMESTAMP = 0;
 
+      OperationTimeline() :
+        create_time(INVALID_TIMESTAMP),
+        ready_time(INVALID_TIMESTAMP),
+        start_time(INVALID_TIMESTAMP),
+        end_time(INVALID_TIMESTAMP)
+      { }
+
       timestamp_t create_time; // when was operation created?
       timestamp_t ready_time;  // when was operation ready to proceed?
       timestamp_t start_time;  // when did operation start?
@@ -81,6 +88,7 @@ namespace Realm {
       inline void record_ready_time(void);
       inline void record_start_time(void);
       inline void record_end_time(void);
+      inline bool is_valid(void);
     };
 
     // Track processor used for tasks

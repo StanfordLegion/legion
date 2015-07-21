@@ -172,17 +172,16 @@ namespace LegionRuntime {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void notify_new_remote(AddressSpaceID);
+      virtual void notify_inactive(void);
     public:
       void register_dependence(Operation *consumer_op);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      bool send_future(AddressSpaceID sid);
+      void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
     public:
       static void handle_future_send(Deserializer &derez, Runtime *rt, 
@@ -761,11 +760,10 @@ namespace LegionRuntime {
         SLICE_REMOTE_MAPPED,
         SLICE_REMOTE_COMPLETE,
         SLICE_REMOTE_COMMIT,
-        DISTRIBUTED_REMOVE_RESOURCE,
-        DISTRIBUTED_REMOVE_REMOTE,
-        DISTRIBUTED_ADD_REMOTE,
-        HIERARCHICAL_REMOVE_RESOURCE,
-        HIERARCHICAL_REMOVE_REMOTE,
+        DISTRIBUTED_REMOTE_REGISTRATION,
+        DISTRIBUTED_VALID_UPDATE,
+        DISTRIBUTED_GC_UPDATE,
+        DISTRIBUTED_RESOURCE_UPDATE,
         SEND_BACK_USER,
         SEND_BACK_ATOMIC,
         SEND_SUBSCRIBER,
@@ -851,11 +849,10 @@ namespace LegionRuntime {
       void send_slice_remote_mapped(Serializer &rez, bool flush);
       void send_slice_remote_complete(Serializer &rez, bool flush);
       void send_slice_remote_commit(Serializer &rez, bool flush);
-      void send_remove_distributed_resource(Serializer &rez, bool flush);
-      void send_remove_distributed_remote(Serializer &rez, bool flush);
-      void send_add_distributed_remote(Serializer &rez, bool flush);
-      void send_remove_hierarchical_resource(Serializer &rez, bool flush);
-      void send_remove_hierarchical_remote(Serializer &rez, bool flush);
+      void send_did_remote_registration(Serializer &rez, bool flush);
+      void send_did_remote_valid_update(Serializer &rez, bool flush);
+      void send_did_remote_gc_update(Serializer &rez, bool flush);
+      void send_did_remote_resource_update(Serializer &rez, bool flush);
       void send_back_user(Serializer &rez, bool flush);
       void send_back_atomic(Serializer &rez, bool flush);
       void send_subscriber(Serializer &rez, bool flush);
@@ -1559,14 +1556,10 @@ namespace LegionRuntime {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
-      void send_remove_distributed_resource(AddressSpaceID target,
-                                            Serializer &rez);
-      void send_remove_distributed_remote(AddressSpaceID target,
-                                          Serializer &rez);
-      void send_add_distributed_remote(AddressSpaceID target, Serializer &rez);
-      void send_remove_hierarchical_resource(AddressSpaceID target,
-                                             Serializer &rez);
-      void send_remove_hierarchical_remote(AddressSpaceID target, 
+      void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
       void send_back_user(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
@@ -1652,12 +1645,11 @@ namespace LegionRuntime {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
-      void handle_distributed_remove_resource(Deserializer &derez);
-      void handle_distributed_remove_remote(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_distributed_add_remote(Deserializer &derez);
-      void handle_hierarchical_remove_resource(Deserializer &derez);
-      void handle_hierarchical_remove_remote(Deserializer &derez);
+      void handle_did_remote_registration(Deserializer &derez, 
+                                          AddressSpaceID source);
+      void handle_did_remote_valid_update(Deserializer &derez);
+      void handle_did_remote_gc_update(Deserializer &derez);
+      void handle_did_remote_resource_update(Deserializer &derez);
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
       void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
@@ -1814,11 +1806,6 @@ namespace LegionRuntime {
                                             DistributedCollectable *dc);
       void unregister_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
-    public:
-      void register_hierarchical_collectable(DistributedID did,
-                                             HierarchicalCollectable *hc);
-      void unregister_hierarchical_collectable(DistributedID did);
-      HierarchicalCollectable* find_hierarchical_collectable(DistributedID did);
     public:
       void register_future(DistributedID did, Future::Impl *impl);
       void unregister_future(DistributedID did);
@@ -2024,9 +2011,6 @@ namespace LegionRuntime {
       Reservation distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
                 RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
-      Reservation hierarchical_collectable_lock;
-      LegionMap<DistributedID,HierarchicalCollectable*,
-                RUNTIME_HIER_COLLECT_ALLOC>::tracked hier_collectables;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
@@ -2250,10 +2234,8 @@ namespace LegionRuntime {
     public:
       static unsigned long long perf_trace_tolerance;
 #endif
-#ifdef LEGION_PROF
     public:
-      static int num_profiling_nodes;
-#endif
+      static unsigned num_profiling_nodes;
     public:
       // The baseline time for profiling
       static const long long init_time;

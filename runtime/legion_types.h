@@ -130,6 +130,7 @@ namespace LegionRuntime {
       HLR_PART_INDEPENDENCE_TASK_ID,
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
+      HLR_DECREMENT_PENDING_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -165,6 +166,7 @@ namespace LegionRuntime {
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
+        "Decrement Pending Task",                                 \
       };
 
     // Forward declarations for user level objects
@@ -301,7 +303,6 @@ namespace LegionRuntime {
     class VersionManager;
 
     class DistributedCollectable;
-    class HierarchicalCollectable;
     class LayoutDescription;
     class PhysicalManager; // base class for instance and reduction
     class LogicalView; // base class for instance and reduction

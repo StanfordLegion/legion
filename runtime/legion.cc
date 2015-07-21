@@ -30,12 +30,12 @@ namespace LegionRuntime {
     Logger::Category log_field("field_spaces");
     Logger::Category log_region("regions");
     Logger::Category log_inst("instances");
-    Logger::Category log_garbage("gc");
     Logger::Category log_leak("leaks");
     Logger::Category log_variant("variants");
     Logger::Category log_allocation("allocation");
     Logger::Category log_directory("directory");
     Logger::Category log_prof("legion_prof");
+    Logger::Category log_garbage("legion_gc");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
@@ -1608,7 +1608,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1617,7 +1617,7 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
         impl = NULL;
       }
@@ -1629,7 +1629,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1638,12 +1638,12 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        if (impl->remove_gc_reference())
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
           legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_gc_reference();
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       return *this;
     }
 

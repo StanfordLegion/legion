@@ -67,6 +67,14 @@ namespace Realm {
                   InitialTime::get_initial_time();
     }
 
+    inline bool OperationTimeline::is_valid(void)
+    {
+      return create_time != INVALID_TIMESTAMP &&
+        ready_time != INVALID_TIMESTAMP &&
+        start_time != INVALID_TIMESTAMP &&
+        end_time != INVALID_TIMESTAMP;
+    }
+
     inline void InstanceTimeline::record_create_time(void)
     {
       create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 

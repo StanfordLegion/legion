@@ -25,7 +25,6 @@
 #include "legion.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
-#include "garbage_collection.h"
 
 // Apple can go screw itself
 #ifndef __MACH__

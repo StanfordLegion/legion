@@ -874,7 +874,6 @@ namespace LegionRuntime {
         public:
           enum ThreadState {
             RUNNING_STATE,
-            PAUSING_STATE, // about to pause
             PAUSED_STATE,
             RESUMABLE_STATE,
             SLEEPING_STATE, // about to sleep
@@ -2478,15 +2477,21 @@ namespace LegionRuntime {
     {
       // First set our state to paused 
       assert(state == RUNNING_STATE);
-      state = PAUSING_STATE;
-      // Register ourselves with the event
+      // Mark that this thread is paused
+      state = PAUSED_STATE;
+      // Then tell the processor to pause the thread
+      proc->pause_thread(this);
+      // Now register ourselves with the event
       event->add_waiter(needed, this);
+      // Take our lock and see if we are still in the paused state
+      // It's possible we've already been woken up so check before
+      // going to sleep
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      if (state == PAUSING_STATE)
+      // If we are in the paused state or the resumable state
+      // then we actually do need to go to sleep so we can be woken
+      // up by the processor later
+      if ((state == PAUSED_STATE) || (state == RESUMABLE_STATE))
       {
-        state = PAUSED_STATE;
-        // Tell the processor that this thread is going to sleep
-        proc->pause_thread(this);
         PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
       }
       assert(state == RUNNING_STATE);
@@ -2496,21 +2501,11 @@ namespace LegionRuntime {
     bool ProcessorImpl::ProcessorThread::event_triggered(void)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
-      bool need_resume = false;
-      // If the thread is still trying to go to sleep we
-      // can just mark it runnable again, otherwise it
-      // already went to sleep so we have to mark that
-      // it is resumable
-      if (state == PAUSED_STATE) {
-        need_resume = true;
-        state = RESUMABLE_STATE;
-      } else {
-        state = RUNNING_STATE;
-      }
+      assert(state == PAUSED_STATE);
+      state = RESUMABLE_STATE;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
-      if (need_resume)
-        proc->resume_thread(this);
+      // Now tell the processor that this thread is resumable
+      proc->resume_thread(this);
       return false;
     }
 
@@ -4075,12 +4070,24 @@ namespace LegionRuntime {
                                 field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
-        for (Domain::DomainPointIterator itr(domain); itr; itr++)
-        {
-          int index = itr.p.get_index();
-          void *raw_addr = get_address(index, field_start,
-                                       field_size, within_field);
-          memcpy(raw_addr, fill_value, fill_value_size);
+        if (linearization.get_dim() == 1) {
+          Arrays::Mapping<1, 1> *dst_linearization = 
+            linearization.get_mapping<1>();
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = dst_linearization->image(itr.p.get_index());
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
+        } else {
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            int index = itr.p.get_index();
+            void *raw_addr = get_address(index, field_start,
+                                         field_size, within_field);
+            memcpy(raw_addr, fill_value, fill_value_size);
+          }
         }
       } else {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -5463,9 +5470,7 @@ namespace LegionRuntime {
 	const ReductionOpUntyped *redop = 0;
 	if(redop_id) {
 	  redop = Runtime::Impl::get_runtime()->get_reduction_op(redop_id);
-	  assert(redop->has_identity);
-	  assert(elmt_size == redop->sizeof_rhs);
-	  redop->init(ptr, rounded_num_elmts);
+          // We no longer do reduction initialization in the low-level runtime
 	}
 
 	RegionInstance::Impl* impl = Runtime::Impl::get_runtime()->get_free_instance(m,
@@ -6802,6 +6807,7 @@ namespace LegionRuntime {
         for (std::set<Processor>::iterator it = procs.begin(); it != procs.end(); it++)
         {
           // Give all processors 32 GB/s to the global memory
+          if (cpu_mem_size_in_mb > 0)
           {
 	    Machine::ProcessorMemoryAffinity global_affin;
             global_affin.p = *it;
@@ -6811,54 +6817,63 @@ namespace LegionRuntime {
             machine->proc_mem_affinities.push_back(global_affin);
           }
           // Give the processor good affinity to its L1, but not to other L1
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if (cpu_l1_size_in_kb > 0)
           {
-            if (id == (it->id+1))
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
             {
-              // Our L1, high bandwidth with low latency
-              Machine::ProcessorMemoryAffinity local_affin;
-              local_affin.p = *it;
-              local_affin.m.id = id;
-              local_affin.bandwidth = 100;
-              local_affin.latency = 1; /* small latency */
-              machine->proc_mem_affinities.push_back(local_affin);
-            }
-            else
-            {
-              // Other L1, low bandwidth with long latency
-              Machine::ProcessorMemoryAffinity other_affin;
-              other_affin.p = *it;
-              other_affin.m.id = id;
-              other_affin.bandwidth = 10;
-              other_affin.latency = 100; /* high latency */
-              machine->proc_mem_affinities.push_back(other_affin);
+              if (id == (it->id+1))
+              {
+                // Our L1, high bandwidth with low latency
+                Machine::ProcessorMemoryAffinity local_affin;
+                local_affin.p = *it;
+                local_affin.m.id = id;
+                local_affin.bandwidth = 100;
+                local_affin.latency = 1; /* small latency */
+                machine->proc_mem_affinities.push_back(local_affin);
+              }
+              else
+              {
+                // Other L1, low bandwidth with long latency
+                Machine::ProcessorMemoryAffinity other_affin;
+                other_affin.p = *it;
+                other_affin.m.id = id;
+                other_affin.bandwidth = 10;
+                other_affin.latency = 100; /* high latency */
+                machine->proc_mem_affinities.push_back(other_affin);
+              }
             }
           }
         }
         // Set up the affinities between the different memories
         {
           // Global to all others
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if ((cpu_mem_size_in_mb > 0) && (cpu_l1_size_in_kb > 0))
           {
-            Machine::MemoryMemoryAffinity global_affin;
-            global_affin.m1.id = 1;
-            global_affin.m2.id = id;
-            global_affin.bandwidth = 32;
-            global_affin.latency = 50;
-            machine->mem_mem_affinities.push_back(global_affin);
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
+            {
+              Machine::MemoryMemoryAffinity global_affin;
+              global_affin.m1.id = 1;
+              global_affin.m2.id = id;
+              global_affin.bandwidth = 32;
+              global_affin.latency = 50;
+              machine->mem_mem_affinities.push_back(global_affin);
+            }
           }
 
           // From any one to any other one
-          for (unsigned id = 2; id <= (num_cpus+1); id++)
+          if (cpu_l1_size_in_kb > 0)
           {
-            for (unsigned other=id+1; other <= (num_cpus+1); other++)
+            for (unsigned id = 2; id <= (num_cpus+1); id++)
             {
-              Machine::MemoryMemoryAffinity pair_affin;
-              pair_affin.m1.id = id;
-              pair_affin.m2.id = other;
-              pair_affin.bandwidth = 10;
-              pair_affin.latency = 100;
-              machine->mem_mem_affinities.push_back(pair_affin);
+              for (unsigned other=id+1; other <= (num_cpus+1); other++)
+              {
+                Machine::MemoryMemoryAffinity pair_affin;
+                pair_affin.m1.id = id;
+                pair_affin.m2.id = other;
+                pair_affin.bandwidth = 10;
+                pair_affin.latency = 100;
+                machine->mem_mem_affinities.push_back(pair_affin);
+              }
             }
           }
         }
@@ -6922,6 +6937,11 @@ namespace LegionRuntime {
 	return;
       }
 
+      // Start the threads for each of the processors (including the utility processors)
+      for (unsigned id=1; id < processors.size(); id++)
+        processors[id]->start_processor();
+      dma_queue->start();
+
       if(task_id != 0) { // no need to check ONE_TASK_ONLY here, since 1 node
 	for(int id = 1; id <= NUM_PROCS; id++) {
 	  Processor p;
@@ -6930,10 +6950,7 @@ namespace LegionRuntime {
 	  if(style != ONE_TASK_PER_PROC) break;
 	}
       }
-      // Start the threads for each of the processors (including the utility processors)
-      for (unsigned id=1; id < processors.size(); id++)
-        processors[id]->start_processor();
-      dma_queue->start();
+      
       // Poll the processors to see if they are done
       while (true)
       {

@@ -187,9 +187,8 @@ namespace LegionRuntime {
       rez.serialize(futures.size());
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
-        bool add_remote_reference = futures[idx].impl->send_future(target);
+        futures[idx].impl->send_future(target);
         rez.serialize(futures[idx].impl->did);
-        rez.serialize(add_remote_reference);
       }
       rez.serialize(grants.size());
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -269,12 +268,6 @@ namespace LegionRuntime {
         DistributedID future_did;
         derez.deserialize(future_did);
         futures[idx] = Future(runtime->find_future(future_did));
-        // See if we need to add a remote reference
-        // to this future
-        bool add_remote_reference;
-        derez.deserialize(add_remote_reference);
-        if (add_remote_reference)
-          futures[idx].impl->add_held_remote_reference();
       }
       size_t num_grants;
       derez.deserialize(num_grants);
@@ -2443,8 +2436,6 @@ namespace LegionRuntime {
       {
         physical_instances[idx] = 
           InstanceRef::unpack_reference(derez, runtime->forest, depth);
-        if (physical_instances[idx].has_ref())
-          physical_instances[idx].add_valid_reference();
       }
       locally_mapped.resize(num_phy,false);
       // Initialize the mapping paths on this node
@@ -3354,8 +3345,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -3420,8 +3412,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -3521,8 +3514,9 @@ namespace LegionRuntime {
                                        std::vector<PhysicalRegion> &conflicting)
     //--------------------------------------------------------------------------
     {
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -4133,13 +4127,6 @@ namespace LegionRuntime {
     void SingleTask::clear_physical_instances(void)
     //--------------------------------------------------------------------------
     {
-      for (LegionDeque<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::tracked::
-            iterator it = physical_instances.begin(); it != 
-            physical_instances.end(); it++)
-      {
-        if (it->has_ref())
-          it->remove_valid_reference();
-      }
       physical_instances.clear();
     }
 
@@ -4301,7 +4288,6 @@ namespace LegionRuntime {
 	    }
 #endif
             physical_instances[idx] = premapped;
-            physical_instances[idx].add_valid_reference();
             continue;
           }
           // Finally, finish setting up the actual instance
@@ -4324,7 +4310,6 @@ namespace LegionRuntime {
                                                           , mapping_paths[idx]
 #endif
                                                           );
-          physical_instances[idx].add_valid_reference();
           if (notify)
             regions[idx].selected_memory = physical_instances[idx].get_memory();
 #ifdef DEBUG_HIGH_LEVEL
@@ -4868,10 +4853,8 @@ namespace LegionRuntime {
         launch_processor = runtime->find_processor_group(additional_procs);
       }
       Realm::ProfilingRequestSet profiling_requests;
-#ifdef LEGION_PROF
       if (runtime->profiler != NULL)
         runtime->profiler->add_task_request(profiling_requests, low_id, this);
-#endif
       Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
                                     sizeof(proxy_this), profiling_requests,
                                     start_condition, task_priority);
@@ -4938,9 +4921,15 @@ namespace LegionRuntime {
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
-      // Decrement the number of pending tasks on the processor which
-      // we originally mapped this task
-      parent_ctx->decrement_pending();
+      // Issue a utility task to decrement the number of outstanding
+      // tasks now that this task has started running
+      {
+        DecrementArgs decrement_args;
+        decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
+        decrement_args.parent_ctx = parent_ctx;
+        runtime->issue_runtime_meta_task(&decrement_args, 
+            sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
+      }
       // Start the profiling if requested
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 
@@ -5184,6 +5173,8 @@ namespace LegionRuntime {
     void MultiTask::deactivate_multi(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_multi_task(this, task_id);
       deactivate_task();
       if (reduction_state != NULL)
       {
@@ -5239,10 +5230,6 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
-
-      // Do this before here since each of the clones will slice themselves
-      if (must_parallelism && (slices.size() > 1))
-        must_barrier = must_barrier.alter_arrival_count(slices.size()-1);
 
       std::set<Event> all_slices_mapped;
 #ifdef DEBUG_HIGH_LEVEL
@@ -5394,8 +5381,6 @@ namespace LegionRuntime {
       this->index_domain = d;
       this->must_parallelism = rhs->must_parallelism;
       this->sliced = !recurse;
-      if (must_parallelism)
-        this->must_barrier = rhs->must_barrier;
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
@@ -5605,7 +5590,6 @@ namespace LegionRuntime {
       RezCheck z(rez);
       pack_base_task(rez, target);
       rez.serialize(sliced);
-      rez.serialize(must_barrier);
       rez.serialize(redop);
       rez.serialize<size_t>(minimal_points.size());
       for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
@@ -5623,7 +5607,6 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       unpack_base_task(derez); 
       derez.deserialize(sliced);
-      derez.deserialize(must_barrier);
       derez.deserialize(redop);
       if (redop > 0)
       {
@@ -6078,8 +6061,8 @@ namespace LegionRuntime {
         else
         {
           // Add references so they aren't garbage collected
-          result.impl->add_gc_reference();
-          predicate_false_future.impl->add_gc_reference();
+          result.impl->add_base_gc_ref(DEFERRED_TASK_REF);
+          predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
           Runtime::DeferredFutureSetArgs args;
           args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
           args.target = result.impl;
@@ -7871,8 +7854,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_multi();
-      if (must_parallelism)
-        must_barrier.destroy_barrier();
       privilege_paths.clear();
       // Remove our reference to the argument map
       argument_map = ArgumentMap();
@@ -7928,8 +7909,6 @@ namespace LegionRuntime {
       tag = launcher.tag;
       is_index_space = true;
       must_parallelism = launcher.must_parallelism;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -8004,8 +7983,6 @@ namespace LegionRuntime {
       tag = launcher.tag;
       is_index_space = true;
       must_parallelism = launcher.must_parallelism;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -8094,8 +8071,6 @@ namespace LegionRuntime {
       tag = t;
       is_index_space = true;
       must_parallelism = must;
-      if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = domain;
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
@@ -8170,8 +8145,6 @@ namespace LegionRuntime {
       tag = t;
       is_index_space = true;
       must_parallelism = must;
-        if (must_parallelism)
-        must_barrier = Barrier::create_barrier(1);
       index_domain = domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -8489,7 +8462,7 @@ namespace LegionRuntime {
           {
             // Add references so things won't be prematurely collected
             future_map.impl->add_reference();
-            predicate_false_future.impl->add_gc_reference();
+            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
             Runtime::DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = future_map.impl;
@@ -8531,8 +8504,8 @@ namespace LegionRuntime {
           else
           {
             // Add references so they aren't garbage collected 
-            reduction_future.impl->add_gc_reference();
-            predicate_false_future.impl->add_gc_reference();
+            reduction_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
+            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
             Runtime::DeferredFutureSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
             args.target = reduction_future.impl;
@@ -9664,9 +9637,6 @@ namespace LegionRuntime {
       // Launch all of our child points
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->launch_task();
-      // If we're doing must parallelism, mark that everyone is ready to run
-      if (must_parallelism)
-        must_barrier.arrive();
     }
 
     //--------------------------------------------------------------------------
@@ -9709,14 +9679,6 @@ namespace LegionRuntime {
       assert(!points.empty());
       assert(mapping_index <= points.size());
 #endif
-      // Watch out for the race condition here of all the points
-      // finishing and cleaning up this context before we are done
-      // Pull everything onto the stack that we need.
-      bool has_barrier = must_parallelism;
-      Barrier must_bar;
-      if (must_parallelism)
-        must_bar = must_barrier;
-
       // Now try mapping and then launching all the points starting
       // at the index of the last known good index
       // Copy the points onto the stack to avoid them being
@@ -9743,13 +9705,6 @@ namespace LegionRuntime {
           // is possible that this slice task object can be recycled
           next_point->launch_task();
         }
-      }
-
-      if (map_success)
-      {
-        // Trigger the must barrier once everyone is launched
-        if (has_barrier)
-          must_bar.arrive();
       }
       return map_success;
     }

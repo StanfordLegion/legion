@@ -25,6 +25,7 @@
 #include "legion_spy.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#include "garbage_collection.h"
 #ifdef HANG_TRACE
 #include <signal.h>
 #include <execinfo.h>
@@ -396,6 +397,13 @@ namespace LegionRuntime {
         runtime->register_future(did, this);
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
+      // If we're not the owner, add a resource reference on ourself that
+      // will be removed when the owner cleans up
+      if (!is_owner())
+        add_base_resource_ref(REMOTE_DID_REF);
+#ifdef LEGION_GC
+      log_garbage.info("GC Future %ld", did);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -411,6 +419,13 @@ namespace LegionRuntime {
     Future::Impl::~Impl(void)
     //--------------------------------------------------------------------------
     {
+      // If we are the owner, remove our resource references on all
+      // the instances on remote nodes
+      if (is_owner())
+      {
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instances(functor);
+      }
       runtime->unregister_future(did);
       // don't want to leak events
       if (!ready_event.has_triggered())
@@ -647,38 +662,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Future::Impl::notify_activate(void)
+    void Future::Impl::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void Future::Impl::garbage_collect(void)
-    //--------------------------------------------------------------------------
-    {
-      // do nothing
+      // If we are not the owner, send a gc reference back to the owner
+      if (!is_owner())
+        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
     void Future::Impl::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      // do nothing
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
     void Future::Impl::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      // do nothing
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
-    void Future::Impl::notify_new_remote(AddressSpaceID sid)
+    void Future::Impl::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-      // do nothing 
+      // If we are not the owner, remove our gc reference
+      if (!is_owner())
+        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -724,61 +738,55 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Future::Impl::send_future(AddressSpaceID sid)
+    void Future::Impl::send_future(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(sid != local_space);
+#endif
+      // Skip any requests to send ourselves to the owner
+      if (sid == owner_space)
+        return;
       // Two phase approach, check first to see if we need to do the send
       bool need_send;
       {
         AutoLock gc(gc_lock,1,false/*exclusive*/);
-        if (remote_spaces.find(sid) != remote_spaces.end())
+        if (remote_instances.contains(sid))
           need_send = false;
         else
           need_send = true;
       }
       // Need to send this first to avoid race
-      bool performed_send = false;
+      bool perform_registration = false;
       if (need_send)
       {
-        Serializer rez;
-        bool send_result = ready_event.has_triggered();
-        {
-          rez.serialize(did);
-          rez.serialize(owner_space);
-          rez.serialize(send_result);
-          if (send_result)
-          {
-            RezCheck z(rez);
-            rez.serialize(result_size);
-            rez.serialize(result,result_size);
-          }
-        }
         // Retake the lock and make sure we didn't lose the race
         AutoLock gc(gc_lock);
-        if (remote_spaces.find(sid) == remote_spaces.end())
+        if (!remote_instances.contains(sid))
         {
-          // Pack up the remaining information
-          rez.serialize<size_t>(remote_spaces.size());
-          for (std::set<AddressSpaceID>::const_iterator it = 
-                remote_spaces.begin(); it != remote_spaces.end(); it++)
+          Serializer rez;
+          bool send_result = ready_event.has_triggered();
           {
-            rez.serialize(*it);
+            rez.serialize(did);
+            rez.serialize(owner_space);
+            rez.serialize(send_result);
+            if (send_result)
+            {
+              RezCheck z(rez);
+              rez.serialize(result_size);
+              rez.serialize(result,result_size);
+            }
           }
           // Actually do the send and then mark that we
           // have already sent an instance there
           runtime->send_future(sid, rez);
-          remote_spaces.insert(sid);
-          // Also if this is the owner mark that we already sent the future
-          if (owner && send_result)
-            registered_waiters.insert(sid);
-          performed_send = true;
+          remote_instances.add(sid);
+          if (!send_result)
+            perform_registration = true;
         }
       }
-      if (performed_send)
+      if (perform_registration)
         register_waiter(sid);
-      // Return whether we need to send a remote 
-      // reference with the packed future
-      return send_remote_reference(sid);
     }
 
     //--------------------------------------------------------------------------
@@ -793,7 +801,8 @@ namespace LegionRuntime {
           if (registered_waiters.find(sid) == registered_waiters.end())
           {
             send_result = ready_event.has_triggered();
-            registered_waiters.insert(sid);
+            if (!send_result)
+              registered_waiters.insert(sid);
           }
           else
             send_result = false;
@@ -840,14 +849,6 @@ namespace LegionRuntime {
         future->unpack_future(derez);
         future->complete_future();
       }
-      size_t num_new_spaces;
-      derez.deserialize(num_new_spaces);
-      for (unsigned idx = 0; idx < num_new_spaces; idx++)
-      {
-        AddressSpaceID new_space;
-        derez.deserialize(new_space);
-        future->update_remote_spaces(new_space);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -884,7 +885,7 @@ namespace LegionRuntime {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
         // collected while we are waiting for the contribution task to run
-        add_gc_reference();
+        add_base_gc_ref(PENDING_COLLECTIVE_REF);
         ContributeCollectiveArgs args;
         args.hlr_id = HLR_CONTRIBUTE_COLLECTIVE_ID;
         args.impl = this;
@@ -908,7 +909,7 @@ namespace LegionRuntime {
       cargs->impl->contribute_to_collective(cargs->barrier, cargs->count);
       // Now remote the garbage collection reference and see if we can 
       // reclaim the future
-      if (cargs->impl->remove_gc_reference())
+      if (cargs->impl->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
         delete cargs->impl;
     }
       
@@ -3271,7 +3272,7 @@ namespace LegionRuntime {
     void MemoryManager::recycle_physical_instance(InstanceManager *instance)
     //--------------------------------------------------------------------------
     {
-      instance->add_resource_reference();
+      instance->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(available_instances.find(instance) == available_instances.end());
@@ -3296,7 +3297,7 @@ namespace LegionRuntime {
         }
       }
       // If we are reclaiming it, remove our resource reference
-      if (reclaim && instance->remove_resource_reference())
+      if (reclaim && instance->remove_base_resource_ref(MEMORY_MANAGER_REF))
         legion_delete(instance);
       return reclaim;
     }
@@ -3335,7 +3336,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -3374,7 +3375,7 @@ namespace LegionRuntime {
         PhysicalInstance result = to_recycle->get_instance();
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
-        if (to_recycle->remove_resource_reference())
+        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
           legion_delete(to_recycle);
         return result;
       }
@@ -3692,43 +3693,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_remove_distributed_resource(Serializer &rez,
-                                                          bool flush)
+    void MessageManager::send_did_remote_registration(Serializer &rez, 
+                                                      bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, DISTRIBUTED_REMOVE_RESOURCE, flush);
+      package_message(rez, DISTRIBUTED_REMOTE_REGISTRATION, flush);
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_remove_distributed_remote(Serializer &rez,
-                                                        bool flush)
+    void MessageManager::send_did_remote_valid_update(Serializer &rez,
+                                                      bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, DISTRIBUTED_REMOVE_REMOTE, flush);
+      package_message(rez, DISTRIBUTED_VALID_UPDATE, flush);
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_add_distributed_remote(Serializer &rez,
-                                                     bool flush)
+    void MessageManager::send_did_remote_gc_update(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, DISTRIBUTED_ADD_REMOTE, flush);
+      package_message(rez, DISTRIBUTED_GC_UPDATE, flush);
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_remove_hierarchical_resource(Serializer &rez,
-                                                           bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, HIERARCHICAL_REMOVE_RESOURCE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_remove_hierarchical_remote(Serializer &rez,
+    void MessageManager::send_did_remote_resource_update(Serializer &rez,
                                                          bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, HIERARCHICAL_REMOVE_REMOTE, flush);
+      package_message(rez, DISTRIBUTED_RESOURCE_UPDATE, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -4312,30 +4304,25 @@ namespace LegionRuntime {
               runtime->handle_slice_remote_commit(derez);
               break;
             }
-          case DISTRIBUTED_REMOVE_RESOURCE:
+          case DISTRIBUTED_REMOTE_REGISTRATION:
             {
-              runtime->handle_distributed_remove_resource(derez); 
-              break;
-            }
-          case DISTRIBUTED_REMOVE_REMOTE:
-            {
-              runtime->handle_distributed_remove_remote(derez,
+              runtime->handle_did_remote_registration(derez, 
                                                       remote_address_space);
               break;
             }
-          case DISTRIBUTED_ADD_REMOTE:
+          case DISTRIBUTED_VALID_UPDATE:
             {
-              runtime->handle_distributed_add_remote(derez); 
+              runtime->handle_did_remote_valid_update(derez);
               break;
             }
-          case HIERARCHICAL_REMOVE_RESOURCE:
+          case DISTRIBUTED_GC_UPDATE:
             {
-              runtime->handle_hierarchical_remove_resource(derez);
+              runtime->handle_did_remote_gc_update(derez); 
               break;
             }
-          case HIERARCHICAL_REMOVE_REMOTE:
+          case DISTRIBUTED_RESOURCE_UPDATE:
             {
-              runtime->handle_hierarchical_remove_remote(derez);
+              runtime->handle_did_remote_resource_update(derez);
               break;
             }
           case SEND_BACK_USER:
@@ -4642,7 +4629,7 @@ namespace LegionRuntime {
       {
         // Add a garbage collection reference to the view, it will
         // be removed in LogicalView::handle_deferred_collect
-        view->add_gc_reference();
+        view->add_base_gc_ref(PENDING_GC_REF);
         collections[view].insert(term);
       }
       else
@@ -4914,11 +4901,10 @@ namespace LegionRuntime {
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
-#ifdef LEGION_PROF
+      // Set up the profiler if it was requested
       // If it is less than zero, all nodes enabled by default, otherwise
       // we have to be less than the maximum number to enable profiling
-      if ((Runtime::num_profiling_nodes < 0) || 
-          (int(address_space) < Runtime::num_profiling_nodes))
+      if (address_space < Runtime::num_profiling_nodes)
       {
         HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
         profiler = new LegionProfiler((local_utils.empty() ? 
@@ -4937,6 +4923,7 @@ namespace LegionRuntime {
         {
           const std::map<VariantID,TaskVariantCollection::Variant> 
             &variants = cit->second->variants;  
+          profiler->register_task_kind(cit->first, cit->second->name);
           for (std::map<VariantID,TaskVariantCollection::Variant>::
                 const_iterator it = variants.begin(); it != 
                 variants.end(); it++)
@@ -4944,6 +4931,14 @@ namespace LegionRuntime {
             profiler->register_task_variant(cit->second->name,
                                             it->second);
           }
+        }
+      }
+#ifdef LEGION_GC
+      {
+        REFERENCE_NAMES_ARRAY(reference_names);
+        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
+        {
+          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
         }
       }
 #endif
@@ -5006,14 +5001,12 @@ namespace LegionRuntime {
         LegionProf::finalize_copy_profiler();
       }
 #endif
-#ifdef LEGION_PROF
       if (profiler != NULL)
       {
         profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
-#endif
       delete high_level;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -5459,7 +5452,7 @@ namespace LegionRuntime {
       // on the task being reported back to the mapper
       UserEvent result = UserEvent::create_user_event();
       // Add a reference to the future impl to prevent it being collected
-      f.impl->add_gc_reference();
+      f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
       MapperTaskArgs args;
       args.hlr_id = HLR_MAPPER_TASK_ID;
@@ -7434,6 +7427,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7481,6 +7478,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_union(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7530,6 +7531,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7579,6 +7584,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_intersection(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -7629,6 +7638,10 @@ namespace LegionRuntime {
       part_op->initialize_index_space_difference(ctx, result, initial, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+#endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
@@ -8648,6 +8661,13 @@ namespace LegionRuntime {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        return execute_must_epoch(ctx, epoch_launcher);
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
@@ -8680,7 +8700,8 @@ namespace LegionRuntime {
             // add the necessary references to prevent premature
             // garbage collection by the runtime
             result->add_reference();
-            launcher.predicate_false_future.impl->add_gc_reference();
+            launcher.predicate_false_future.impl->add_base_gc_ref(
+                                                    FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
@@ -11766,46 +11787,36 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remove_distributed_resource(AddressSpaceID target,
-                                                   Serializer &rez)
+    void Runtime::send_did_remote_registration(AddressSpaceID target, 
+                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_remove_distributed_resource(rez,
-                                                               true/*flush*/);
+      find_messenger(target)->send_did_remote_registration(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remove_distributed_remote(AddressSpaceID target,
-                                                 Serializer &rez)
+    void Runtime::send_did_remote_valid_update(AddressSpaceID target,
+                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_remove_distributed_remote(rez, 
-                                                             true/*flush*/);
+      find_messenger(target)->send_did_remote_valid_update(target,
+                                                           true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_add_distributed_remote(AddressSpaceID target,
-                                              Serializer &rez)
+    void Runtime::send_did_remote_gc_update(AddressSpaceID target,
+                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_add_distributed_remote(rez, true/*flush*/);
+      find_messenger(target)->send_did_remote_gc_update(target, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remove_hierarchical_resource(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_remove_hierarchical_resource(rez, 
-                                                                true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_remove_hierarchical_remote(AddressSpaceID target,
+    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_remove_hierarchical_remote(rez,
+      find_messenger(target)->send_did_remote_resource_update(target, 
                                                               true/*flush*/);
     }
 
@@ -12350,40 +12361,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_distributed_remove_resource(Deserializer &derez)
+    void Runtime::handle_did_remote_registration(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::process_remove_resource_reference(this, derez);
+      DistributedCollectable::handle_remote_registration(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_distributed_remove_remote(Deserializer &derez,
-                                                   AddressSpaceID source)
+    void Runtime::handle_did_remote_valid_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::process_remove_remote_reference(this, source,
-                                                              derez);
+      DistributedCollectable::handle_remote_valid_update(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_distributed_add_remote(Deserializer &derez)
+    void Runtime::handle_did_remote_gc_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::process_add_remote_reference(this, derez); 
+      DistributedCollectable::handle_did_remote_gc_update(this, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_hierarchical_remove_resource(Deserializer &derez)
+    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      HierarchicalCollectable::process_remove_resource_reference(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_hierarchical_remove_remote(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      HierarchicalCollectable::process_remove_remote_reference(this, derez);
+      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
     }
 
     //--------------------------------------------------------------------------
@@ -13466,10 +13469,12 @@ namespace LegionRuntime {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      // Don't recycle distributed IDs if we're doing LegionSpy
+      // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
+#ifndef LEGION_GC
 #ifndef LEGION_SPY
       AutoLock d_lock(distributed_id_lock);
       available_distributed_ids.push_back(did);
+#endif
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       AutoLock dist_lock(distributed_collectable_lock,1,false/*exclusive*/);
@@ -13533,43 +13538,6 @@ namespace LegionRuntime {
       return finder->second;
     }
     
-    //--------------------------------------------------------------------------
-    void Runtime::register_hierarchical_collectable(DistributedID did,
-                                                    HierarchicalCollectable *hc)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock h_lock(hierarchical_collectable_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(hier_collectables.find(did) == hier_collectables.end());
-#endif
-      hier_collectables[did] = hc;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::unregister_hierarchical_collectable(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock h_lock(hierarchical_collectable_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(hier_collectables.find(did) != hier_collectables.end());
-#endif
-      hier_collectables.erase(did);
-    }
-
-    //--------------------------------------------------------------------------
-    HierarchicalCollectable* Runtime::find_hierarchical_collectable(
-                                                              DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock h_lock(hierarchical_collectable_lock,1,false/*exclusive*/);
-      std::map<DistributedID,HierarchicalCollectable*>::const_iterator finder =
-        hier_collectables.find(did);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != hier_collectables.end());
-#endif
-      return finder->second;
-    }
-
     //--------------------------------------------------------------------------
     void Runtime::register_future(DistributedID did, Future::Impl *impl)
     //--------------------------------------------------------------------------
@@ -15067,8 +15035,6 @@ namespace LegionRuntime {
           return "Runtime Distributed IDs";
         case RUNTIME_DIST_COLLECT_ALLOC:
           return "Distributed Collectables";
-        case RUNTIME_HIER_COLLECT_ALLOC:
-          return "Hierarchical Collectables";
         case RUNTIME_GC_EPOCH_ALLOC:
           return "Runtime Garbage Collection Epochs";
         case RUNTIME_FUTURE_ALLOC:
@@ -15391,9 +15357,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
     /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
 #endif
-#ifdef LEGION_PROF
-    /*static*/ int Runtime::num_profiling_nodes = -1;
-#endif
+    /*static*/ unsigned Runtime::num_profiling_nodes = 0;
 
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
@@ -15492,9 +15456,7 @@ namespace LegionRuntime {
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
 #endif
-#ifdef LEGION_PROF
-        num_profiling_nodes = -1;
-#endif
+        num_profiling_nodes = 0;
 #ifdef DEBUG_HIGH_LEVEL
         logging_region_tree_state = false;
         verbose_logging = false;
@@ -15549,17 +15511,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
           INT_ARG("-hl:perf_tol", perf_trace_tolerance);
 #endif
-#ifdef LEGION_PROF
           INT_ARG("-hl:prof", num_profiling_nodes);
-#else
-          if (!strcmp(argv[i],"-hl:prof"))
-          {
-            log_run.warning("WARNING: Legion Prof is disabled.  The "
-                                  "-hl:prof flag will be ignored.  Recompile "
-                                  "with the -DLEGION_PROF flag to enable "
-                                  "profiling.");
-          }
-#endif
         }
 #undef INT_ARG
 #undef BOOL_ARG
@@ -16657,9 +16609,9 @@ namespace LegionRuntime {
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
             future_args->target->complete_future();
-            if (future_args->target->remove_gc_reference())
+            if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->target);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16681,7 +16633,7 @@ namespace LegionRuntime {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_gc_reference())
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -16727,7 +16679,7 @@ namespace LegionRuntime {
             rt->invoke_mapper_task_result(margs->map_id, margs->proc,
                                           margs->event, result, result_size);
             // Now indicate that we are done with the future
-            if (margs->future->remove_gc_reference())
+            if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
             // Finally tell the runtime we have one less top level task
             rt->decrement_outstanding_top_level_tasks();
@@ -16761,6 +16713,13 @@ namespace LegionRuntime {
         case HLR_PENDING_CHILD_TASK_ID:
           {
             IndexPartNode::handle_pending_child_task(args);
+            break;
+          }
+        case HLR_DECREMENT_PENDING_TASK_ID:
+          {
+            SingleTask::DecrementArgs *dargs = 
+              (SingleTask::DecrementArgs*)args;
+            dargs->parent_ctx->decrement_pending();
             break;
           }
         default:

@@ -268,6 +268,10 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
       };
+      struct DecrementArgs {
+        HLRTaskID hlr_id;
+        SingleTask *parent_ctx;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -623,7 +627,6 @@ namespace LegionRuntime {
       void fold_reduction_future(const void *result, size_t result_size,
                                  bool owner, bool exclusive); 
     protected:
-      Barrier must_barrier; // for must parallelism
       std::list<SliceTask*> slices;
       std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
