@@ -247,6 +247,8 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
     end
 
+  elseif node:is(ast.typed.ExprDeref) then
+
   elseif node:is(ast.typed.ExprID) then
 
   elseif node:is(ast.typed.ExprConstant) then
@@ -403,6 +405,9 @@ function min_simd_width.expr(cx, reg_size, node)
   elseif node:is(ast.typed.ExprCast) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.arg))
 
+  elseif node:is(ast.typed.ExprDeref) then
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
 
@@ -490,7 +495,7 @@ end
 
 -- vectorizability check returns truen when the statement is vectorizable
 local check_vectorizability = {}
-local error_prefix = "loop vectorization failed: loop body has "
+local error_prefix = "vectorization failed: loop body has "
 
 function check_vectorizability.block(cx, node)
   cx = cx:new_local_scope()
@@ -518,7 +523,7 @@ function check_vectorizability.stat(cx, node)
         check_vectorizability.type(ty)
       if not type_vectorizable then
         cx:report_error_when_demanded(node,
-          error_prefix .. "a non-primitive variable declaration")
+          error_prefix .. "a variable declaration of an inadmissible type")
         return type_vectorizable
       end
       cx:assign(symbol, V)
@@ -553,7 +558,7 @@ function check_vectorizability.stat(cx, node)
       if not (check_vectorizability.type(std.as_read(lh.expr_type)) and
               check_vectorizability.type(std.as_read(rh.expr_type))) then
         cx:report_error_when_demanded(node, error_prefix ..
-          "an assignment between non-scalar expressions")
+          "an assignment between expressions that have inadmissible types")
         return false
       end
 
@@ -601,7 +606,7 @@ function check_vectorizability.stat(cx, node)
     if not check_vectorizability.expr(cx, node.cond) then return false end
     if cx:lookup_expr_type(node.cond) ~= S then
       cx:report_error_when_demanded(node,
-        error_prefix ..  "a non-scalar if condition")
+        error_prefix ..  "a non-scalar if-condition")
       return false
     end
 
@@ -619,7 +624,7 @@ function check_vectorizability.stat(cx, node)
     if not check_vectorizability.expr(cx, node.cond) then return false end
     if cx:lookup_expr_type(node.cond) ~= S then
       cx:report_error_when_demanded(node,
-        error_prefix ..  "a non-scalar if condition")
+        error_prefix ..  "a non-scalar if-condition")
       return false
     end
 
@@ -670,7 +675,7 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
     if not node.value:is(ast.typed.ExprID) then
-      cx:report_error_when_demanded(node, "loop vectorization failed: " ..
+      cx:report_error_when_demanded(node, "vectorization failed: " ..
         "array access should be in a form of 'a[exp]'")
       return false
     end
@@ -740,6 +745,11 @@ function check_vectorizability.expr(cx, node)
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
+  elseif node:is(ast.typed.ExprDeref) then
+    if not check_vectorizability.expr(cx, node.value) then return false end
+    cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
+    return true
+
   else
     if node:is(ast.typed.ExprMethodCall) then
       cx:report_error_when_demanded(node, error_prefix .. "a method call")
@@ -789,10 +799,6 @@ function check_vectorizability.expr(cx, node)
     elseif node:is(ast.typed.ExprFunction) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a function reference")
-
-    elseif node:is(ast.typed.ExprDeref) then
-      cx:report_error_when_demanded(node,
-        error_prefix .. "a pointer dereference")
 
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
