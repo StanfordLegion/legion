@@ -12373,7 +12373,7 @@ namespace LegionRuntime {
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
         state_lock(Reservation::create_reservation())
 #ifdef DEBUG_HIGH_LEVEL
-        , currently_valid(true)
+        , currently_active(true), currently_valid(true)
 #endif
     //--------------------------------------------------------------------------
     {
@@ -12410,6 +12410,38 @@ namespace LegionRuntime {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this); 
         map_over_remote_instances(functor);
+      }
+      // Remove our resource references
+      if (!valid_views.empty())
+      {
+        for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it =
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          if (it->first->remove_nested_resource_ref(did))
+          {
+            if (it->first->is_deferred_view())
+            {
+              DeferredView *def_view = it->first->as_deferred_view();
+              if (def_view->is_composite_view())
+                legion_delete(def_view->as_composite_view());
+              else
+                legion_delete(def_view->as_fill_view());
+            }
+            else
+              legion_delete(it->first->as_materialized_view());
+          }
+        }
+        valid_views.clear();
+      }
+      if (!reduction_views.empty())
+      {
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          if (it->first->remove_nested_resource_ref(did))
+            legion_delete(it->first);
+        }
+        reduction_views.clear();
       }
     }
 
@@ -12457,6 +12489,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(currently_valid);
 #endif
+      new_view->add_nested_resource_ref(did);
+      new_view->add_nested_gc_ref(did);
       new_view->add_nested_valid_ref(did);
       if (new_view->is_reduction_view())
       {
@@ -12623,6 +12657,8 @@ namespace LegionRuntime {
           track_aligned::iterator finder = valid_views.find(it->first);
         if (finder == valid_views.end())
         {
+          it->first->add_nested_resource_ref(did);
+          it->first->add_nested_gc_ref(did);
           it->first->add_nested_valid_ref(did);
           valid_views[it->first] = overlap;
         }
@@ -12642,6 +12678,8 @@ namespace LegionRuntime {
             track_aligned::iterator finder = reduction_views.find(it->first);
           if (finder == reduction_views.end())
           {
+            it->first->add_nested_resource_ref(did);
+            it->first->add_nested_gc_ref(did);
             it->first->add_nested_valid_ref(did);
             reduction_views[it->first] = overlap;
           }
@@ -12655,7 +12693,9 @@ namespace LegionRuntime {
     void VersionState::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // Do nothing, we only care about valid references
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_active); // should be monotonic
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12663,6 +12703,21 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Do nothing we only care about valid references
+      AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_active);
+      currently_active = false;
+#endif
+      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        it->first->remove_nested_gc_ref(did);
+      }
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        it->first->remove_nested_gc_ref(did);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12694,25 +12749,12 @@ namespace LegionRuntime {
       for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did))
-        {
-          if (it->first->is_deferred_view())
-          {
-            DeferredView *def_view = it->first->as_deferred_view();
-            if (def_view->is_composite_view())
-              legion_delete(def_view->as_composite_view());
-            else
-              legion_delete(def_view->as_fill_view());
-          }
-          else
-            legion_delete(it->first->as_materialized_view());
-        }
+        it->first->remove_nested_valid_ref(did);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did))
-          legion_delete(it->first);
+        it->first->remove_nested_valid_ref(did);
       }
     }
 
@@ -20588,9 +20630,6 @@ namespace LegionRuntime {
                                      Memory mem, PhysicalInstance inst)
       : DistributedCollectable(ctx->runtime, did, owner_space, local_space), 
         context(ctx), memory(mem), instance(inst)
-#ifdef DEBUG_HIGH_LEVEL
-        , currently_active(false), current_valid(false)
-#endif
     //--------------------------------------------------------------------------
     {
       context->register_physical_manager(this); 
@@ -20623,8 +20662,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!currently_active);
-      currently_active = true;
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -20639,8 +20676,6 @@ namespace LegionRuntime {
     {
       // No need to do anything
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!currently_valid);
-      currently_valid = true;
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -20694,8 +20729,9 @@ namespace LegionRuntime {
       // Tell the runtime this instance no longer exists
       // If we were the owner we already did this when we
       // garbage collected the physical instance
-      if (!owner)
+      if (!is_owner())
         context->runtime->free_physical_instance(this);
+
       if (layout->remove_reference())
         delete layout;
     }
@@ -20775,7 +20811,7 @@ namespace LegionRuntime {
 #endif
       bool release_valid_views = true;
       std::vector<MaterializedView*> to_release;
-      if (owner)
+      if (is_owner())
       {
         // Always call this up front to see if we need to reclaim the
         // physical instance from the runtime because we recycled it.
@@ -20817,6 +20853,9 @@ namespace LegionRuntime {
         // Mark that this instance has been garbage collected
         instance = PhysicalInstance::NO_INST;
       }
+      else // Remove our gc reference
+        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
+
       if (release_valid_views)
       {
         for (std::vector<MaterializedView*>::const_iterator it = 
@@ -20828,16 +20867,17 @@ namespace LegionRuntime {
       }
     }
 
+
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     void InstanceManager::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      // No need to do anything
-#ifdef DEBUG_HIGH_LEVEL
       assert(instance.exists());
       assert(!recycled);
-#endif
+      PhysicalManager::notify_valid();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InstanceManager::notify_invalid(void)
@@ -20851,7 +20891,7 @@ namespace LegionRuntime {
       // recycle this physical instance.  Pass on the information to the
       // runtime and save the event that we should trigger to mark that
       // we're done using this physical instance.
-      if (owner)
+      if (is_owner())
       {
         // Tell the runtime this instance is available for recycling
         // Note that doing this relies on the guarantee that notify_invalid
@@ -20867,6 +20907,8 @@ namespace LegionRuntime {
         // Mark that we are recycling this instance
         recycled = true;
       }
+      else // If we are not the owner, remove our valid reference
+        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21269,6 +21311,8 @@ namespace LegionRuntime {
 #endif
         instance = PhysicalInstance::NO_INST;
       }
+      else // If we are not the owner remove our gc reference
+        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21277,6 +21321,9 @@ namespace LegionRuntime {
     {
       // For right now we'll do nothing
       // There doesn't seem like much point in recycling reduction instances
+      // If we are not the owner remove our valid reference
+      if (!is_owner())
+        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21769,9 +21816,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr, DistributedID own_did,
+                             AddressSpaceID own_addr, AddressSpace loc_space,
                              RegionTreeNode *node)
-      : HierarchicalCollectable(ctx->runtime, did, own_addr, own_did), 
+      : DistributedCollectable(ctx->runtime, did, own_addr, loc_space), 
         context(ctx), logical_node(node), 
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -22066,9 +22113,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_proc, DistributedID own_did,
+                               AddressSpaceID owner_sp, AddressSpaceID local_sp,
                                RegionTreeNode *node)
-      : LogicalView(ctx, did, owner_proc, own_did, node)
+      : LogicalView(ctx, did, owner_sp, local_sp, node)
     //--------------------------------------------------------------------------
     {
     }
@@ -22160,10 +22207,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID own_addr, DistributedID own_did,
+                               AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                RegionTreeNode *node, InstanceManager *man,
                                MaterializedView *par, unsigned dep)
-      : InstanceView(ctx, did, own_addr, own_did, node), 
+      : InstanceView(ctx, did, own_addr, loc_addr, node), 
         manager(man), parent(par), depth(dep)
     //--------------------------------------------------------------------------
     {
@@ -22171,8 +22218,16 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
 #endif
-      // Add a resource reference to the manager
-      manager->add_nested_resource_ref(did);
+      // If we are either not a parent or we are a remote parent add 
+      // a resource reference to avoid being collected
+      if (parent != NULL)
+        add_nested_resource_ref(parent->did);
+      else 
+      {
+        manager->add_nested_resource_ref(did);
+        if (!is_owner())
+          add_base_resource_ref(REMOTE_DID_REF);
+      }
       // Initialize the current versions to zero
       current_versions[0] = FieldMask(FIELD_ALL_ONES);
 #ifdef LEGION_GC
@@ -22194,15 +22249,24 @@ namespace LegionRuntime {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our references to the manager
-      if (manager->remove_nested_resource_ref(did))
-        legion_delete(manager);
       // Remove our resource references on our children
       for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
         if (it->second->remove_nested_resource_ref(did))
           legion_delete(it->second);
+      }
+      // If we are the top of the tree on the owner node, remove our
+      // resource references on the remote nodes
+      if (parent == NULL)
+      {
+        if (manager->remove_nested_resource_ref(did));
+          delete manager;
+        if (is_owner())
+        {
+          UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+          map_over_remote_instances(functor);
+        }
       }
       if (!atomic_reservations.empty())
       {
@@ -22577,18 +22641,14 @@ namespace LegionRuntime {
     }
  
     //--------------------------------------------------------------------------
-    void MaterializedView::notify_activate(void)
+    void MaterializedView::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // Add a gc reference to our manager
       manager->add_nested_gc_ref(did);
-      // Add a gc reference to our parent if we have one
-      if (parent != NULL)
-        parent->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::garbage_collect(void)
+    void MaterializedView::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       // No need to worry about handling the deletion case since
@@ -22596,32 +22656,38 @@ namespace LegionRuntime {
       // the manager won't be deleted until we are deleted at
       // the earliest
       manager->remove_nested_gc_ref(did);
-      // Also remove our parent gc reference if we have one
-      if ((parent != NULL) && parent->remove_nested_gc_ref(did))
-        legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      if (depth == manager->depth)
+      // If we are at the top of the tree add a valid reference
+      // Otherwise add our valid reference on our parent
+      if (parent == NULL)
       {
+        if (!is_owner())
+          send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
         manager->add_nested_valid_ref(did);
-        manager->add_valid_view(this);
       }
+      else
+        parent->add_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      if (depth == manager->depth)
+      // If we are at the top of the tree add a valid reference
+      // Otherwise add our valid reference on the parent
+      if (parent == NULL)
       {
-        manager->remove_valid_view(this);
-        if (manager->remove_nested_valid_ref(did))
-          legion_delete(manager);
+        if (!is_owner())
+          send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+        manager->remove_nested_valid_ref(did);
       }
+      else if (parent->remove_nested_valid_ref(did))
+        legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
@@ -24276,9 +24342,17 @@ namespace LegionRuntime {
 #endif
         if (it->views.find(view) == it->views.end())
         {
+          // Look at our state to see how to add the reduction view
+#ifdef DEBUG_HIGH_LEVEL
+          assert((current_state == INACTIVE_STATE) ||
+                 (current_state == ACTIVE_STATE) || 
+                 (current_state == VALID_STATE));
+#endif
           view->add_nested_resource_ref(did);
-	  view->add_nested_gc_ref(did);
-          view->add_nested_valid_ref(did);
+          if (current_state != INACTIVE_STATE)
+            view->add_nested_gc_ref(did);
+          if (current_state == VALID_STATE)
+            view->add_nested_valid_ref(did);
           it->views.insert(view);
         }
         added = true;
@@ -24288,9 +24362,16 @@ namespace LegionRuntime {
       }
       if (!added)
       {
+#ifdef DEBUG_HIGH_LEVEL
+        assert((current_state == INACTIVE_STATE) ||
+               (current_state == ACTIVE_STATE) || 
+               (current_state == VALID_STATE));
+#endif
         view->add_nested_resource_ref(did);
-	view->add_nested_gc_ref(did);
-        view->add_nested_valid_ref(did);
+        if (current_state != INACTIVE_STATE)
+          view->add_nested_gc_ref(did);
+        if (current_state == VALID_STATE)
+          view->add_nested_valid_ref(did);
         reduction_epochs.push_back(ReductionEpoch(view, redop, valid_mask));
       }
     }
@@ -24441,7 +24522,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::garbage_collect_deferred(void)
+    void DeferredView::deactivate_deferred(void)
     //--------------------------------------------------------------------------
     {
       // Hold the lock when accessing the reduction views
@@ -24592,9 +24673,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
-                              DistributedID owner_did, const FieldMask &mask,
+                              AddressSpaceID local_proc, const FieldMask &mask,
                               CompositeView *par/*= NULL*/)
-      : DeferredView(ctx, did, owner_proc, owner_did, node), 
+      : DeferredView(ctx, did, owner_proc, local_proc, node), 
         parent(par), valid_mask(mask)
     //--------------------------------------------------------------------------
     {
@@ -24658,10 +24739,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::notify_activate(void)
+    void CompositeView::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // Add a gc reference to our parent if we have one
       if (parent != NULL)
         parent->add_nested_gc_ref(did);
 
@@ -24679,7 +24759,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::garbage_collect(void)
+    void CompositeView::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
@@ -24691,7 +24771,7 @@ namespace LegionRuntime {
         }
       }
 
-      garbage_collect_deferred();
+      deactivate_deferred();
 
       if ((parent != NULL) && parent->remove_nested_gc_ref(did))
         legion_delete(parent); 
@@ -24701,11 +24781,20 @@ namespace LegionRuntime {
     void CompositeView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
+      if (parent == NULL)
+      {
+        if (!is_owner())
+          send_remove_valid_update(owner_space, 1/*count*/, true/*add*/);
+      }
+      else
+        parent->add_nested_valid_ref(did);
+
       for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
             roots.begin(); it != roots.end(); it++)
       {
         it->first->add_valid_references();
       }
+
       validate_deferred(); 
     }
 
@@ -24718,7 +24807,16 @@ namespace LegionRuntime {
       {
         it->first->remove_valid_references();
       }
+
       invalidate_deferred(); 
+
+      if (parent == NULL)
+      {
+        if (!is_owner())
+          send_remove_valid_update(owner_space, 1/*count*/, false/*add*/);
+      }
+      else if (parent->remove_nested_valid_ref(did))
+        legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
@@ -26458,13 +26556,17 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc, DistributedID owner_did,
+                       AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, const void *val,
                        size_t val_size, bool val_owner, FillView *par)
-      : DeferredView(ctx, did, owner_proc, owner_did, node), parent(par),
+      : DeferredView(ctx, did, owner_proc, local_proc, node), parent(par),
         value(val), value_size(val_size), value_owner(val_owner)
     //--------------------------------------------------------------------------
     {
+      if (parent != NULL)
+        add_nested_resource_ref(parent->did);
+      else if (!is_owner())
+        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %ld", did);
 #endif
@@ -26486,6 +26588,17 @@ namespace LegionRuntime {
       if (value_owner)
         free(const_cast<void*>(value));
       value = NULL;
+      for (std::map<ColorPoint,FillView*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (it->second->remove_nested_resource_ref(did))
+          legion_delete(it->second);
+      }
+      if ((parent == NULL) && is_owner())
+      {
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instances(functor);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -26498,13 +26611,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::notify_activate(void)
+    void FillView::notify_active(void)
     //--------------------------------------------------------------------------
     {
-      // Add a gc reference to our parent if we have one
-      if (parent != NULL)
-        parent->add_nested_gc_ref(did);
-
       activate_deferred();
     }
 
@@ -26512,16 +26621,20 @@ namespace LegionRuntime {
     void FillView::garbage_collect(void)
     //--------------------------------------------------------------------------
     {
-      garbage_collect_deferred();
-
-      if ((parent != NULL) && parent->remove_nested_gc_ref(did))
-        legion_delete(parent);
+      deactivate_deferred();
     }
     
     //--------------------------------------------------------------------------
     void FillView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
+      if (parent == NULL)
+      {
+        if (!is_owner())
+          send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
+      }
+      else 
+        parent->add_nested_valid_ref(did);
       validate_deferred();
     }
 
@@ -26530,6 +26643,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       invalidate_deferred();
+      if (parent == NULL)
+      {
+        if (!is_owner())
+          send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+      }
+      else if (parent->remove_nested_valid_ref(did))
+        legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
@@ -27238,15 +27358,17 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
-                                 AddressSpaceID own_addr, DistributedID own_did,
+                                 AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  RegionTreeNode *node, ReductionManager *man)
-      : LogicalView(ctx, did, own_addr, own_did, node), manager(man)
+      : LogicalView(ctx, did, own_sp, loc_sp, node), manager(man)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
 #endif
       manager->add_nested_resource_ref(did);
+      if (!is_owner())
+        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %ld %ld", did, manager->did);
 #endif
@@ -27265,6 +27387,12 @@ namespace LegionRuntime {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner())
+      {
+        // If we're the owner, remove our valid references on remote nodes
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instances(functor);
+      }
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -27806,14 +27934,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_activate(void)
+    void ReductionView::notify_active(void)
     //--------------------------------------------------------------------------
     {
       manager->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::garbage_collect(void)
+    void ReductionView::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       // No need to check for deletion of the manager since

@@ -2056,7 +2056,8 @@ namespace LegionRuntime {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
 #ifdef DEBUG_HIGH_LEVEL
-      // Track whether we are valid or not
+      // Track our current state 
+      bool currently_active;
       bool currently_valid;
 #endif
     };
@@ -3304,10 +3305,6 @@ namespace LegionRuntime {
       const Memory memory;
     protected:
       PhysicalInstance instance;
-#ifdef DEBUG_HIGH_LEVEL
-      bool currently_active;
-      bool currenty_valid;
-#endif
     };
 
     /**
@@ -3342,8 +3339,10 @@ namespace LegionRuntime {
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const;
-      virtual void garbage_collect(void);
+      virtual void notify_inactive(void);
+#ifdef DEBUG_HIGH_LEVEL
       virtual void notify_valid(void);
+#endif
       virtual void notify_invalid(void);
     public:
       inline Event get_use_event(void) const { return use_event; }
@@ -3425,7 +3424,7 @@ namespace LegionRuntime {
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const = 0;
-      virtual void garbage_collect(void);
+      virtual void notify_inactive(void);
       virtual void notify_invalid(void);
     public:
       virtual bool is_foldable(void) const = 0;
@@ -3559,7 +3558,7 @@ namespace LegionRuntime {
     class LogicalView : public DistributedCollectable {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
-                  AddressSpaceID owner_proc, DistributedID own_did,
+                  AddressSpaceID owner_proc, AddressSpaceID local_space,
                   RegionTreeNode *node);
       virtual ~LogicalView(void);
     public:
@@ -3581,8 +3580,8 @@ namespace LegionRuntime {
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
-      virtual void notify_activate(void) = 0;
-      virtual void garbage_collect(void) = 0;
+      virtual void notify_active(void) = 0;
+      virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
@@ -3647,7 +3646,7 @@ namespace LegionRuntime {
     class InstanceView : public LogicalView {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
-                   AddressSpaceID owner_proc, DistributedID own_did,
+                   AddressSpaceID owner_proc, AddressSpaceID local_space,
                    RegionTreeNode *node);
       virtual ~InstanceView(void);
     public:
@@ -3670,8 +3669,8 @@ namespace LegionRuntime {
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
-      virtual void notify_activate(void) = 0;
-      virtual void garbage_collect(void) = 0;
+      virtual void notify_active(void) = 0;
+      virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
@@ -3738,7 +3737,7 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc, DistributedID own_did,
+                       AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
                        MaterializedView *parent, unsigned depth);
       MaterializedView(const MaterializedView &rhs);
@@ -3786,8 +3785,8 @@ namespace LegionRuntime {
                                  const FieldMask &mask, bool reading);
       virtual InstanceRef add_user(PhysicalUser &user);
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_users);
@@ -3949,8 +3948,8 @@ namespace LegionRuntime {
                              std::vector<Domain::CopySrcDstField> &src_fields)
         { assert(false); return false; }
     public:
-      virtual void notify_activate(void) = 0;
-      virtual void garbage_collect(void) = 0;
+      virtual void notify_active(void) = 0;
+      virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
@@ -4011,7 +4010,7 @@ namespace LegionRuntime {
                                    std::set<Domain> &component_domains);
     protected:
       void activate_deferred(void);
-      void garbage_collect_deferred(void);
+      void deactivate_deferred(void);
       void validate_deferred(void);
       void invalidate_deferred(void);
     public:
@@ -4097,7 +4096,7 @@ namespace LegionRuntime {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    DistributedID owner_did, const FieldMask &mask,
+                    AddressSpaceID local_proc, const FieldMask &mask,
                     CompositeView *parent = NULL);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
@@ -4109,8 +4108,8 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
@@ -4317,7 +4316,7 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
-               AddressSpaceID owner_proc, DistributedID own_did,
+               AddressSpaceID owner_proc, AddressSpaceID local_proc,
                RegionTreeNode *node, const void *value, 
                size_t value_size, bool value_owner = true,
                FillView *parent = NULL);
@@ -4329,8 +4328,8 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
@@ -4437,7 +4436,7 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
-                    AddressSpaceID owner_proc, DistributedID own_did,
+                    AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
@@ -4483,8 +4482,8 @@ namespace LegionRuntime {
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_events);

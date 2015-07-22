@@ -360,8 +360,8 @@ namespace LegionRuntime {
         runtime->find_distributed_collectable(did);
       if (add)
         target->add_base_valid_ref(REMOTE_DID_REF, count);
-      else
-        target->remote_base_valid_ref(REMOTE_DID_REF, count);
+      else if (target->remote_base_valid_ref(REMOTE_DID_REF, count))
+        delete target;
     }
 
     //--------------------------------------------------------------------------
@@ -380,8 +380,8 @@ namespace LegionRuntime {
         runtime->find_distributed_collectable(did);
       if (add)
         target->add_base_gc_ref(REMOTE_DID_REF, count);
-      else
-        target->remote_base_valid_ref(REMOTE_DID_REF, count);
+      else if (target->remote_base_valid_ref(REMOTE_DID_REF, count))
+        delete target;
     }
 
     //--------------------------------------------------------------------------
@@ -400,8 +400,8 @@ namespace LegionRuntime {
         runtime->find_distributed_collectable(did);
       if (add)
         target->add_base_resource_ref(REMOTE_DID_REF, count);
-      else
-        target->remote_base_resource_ref(REMOTE_DID_REF, count);
+      else if (target->remove_base_resource_ref(REMOTE_DID_REF, count))
+        delete target;
     }
 
     //--------------------------------------------------------------------------
