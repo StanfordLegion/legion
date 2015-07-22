@@ -63,7 +63,7 @@ do
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", "-I", root_dir, "-I", runtime_dir)
+  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 -- Include other headers

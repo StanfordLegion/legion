@@ -39,7 +39,7 @@ do
     assert(false)
   end
   terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", "-I", root_dir, "-I", runtime_dir)
+  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = legionlib.c
