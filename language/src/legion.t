@@ -76,6 +76,7 @@ local language = {
   },
   keywords = {
     "__context",
+    "__forbid",
     "__demand",
     "__fields",
     "__parallel",
