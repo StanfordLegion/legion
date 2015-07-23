@@ -36,7 +36,7 @@ before_install:
     fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "clang++" ]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
-  - export LLVM_CONFIG="llvm-config-3.5"
+  - if [ "$(uname)" = "Linux" ]; then export LLVM_CONFIG="llvm-config-3.5"; fi
   - export TERRA_CXX="$CXX"
   - export TERRA_CC="$CC"
   - export TERRA_LINK="$CXX"
