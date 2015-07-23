@@ -33,14 +33,17 @@ namespace LegionRuntime {
     DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
-                                                   AddressSpaceID loc_space)
+                                                   AddressSpaceID loc_space,
+                                                   bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
         local_space(loc_space), current_state(INACTIVE_STATE),
         gc_lock(Reservation::create_reservation()), gc_references(0), 
-        valid_references(0), resource_references(0)
+        valid_references(0), resource_references(0), 
+        registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
-      runtime->register_distributed_collectable(did, this);
+      if (do_registration)
+        runtime->register_distributed_collectable(did, this);
       if (!is_owner())
       {
         // Make a user event for telling our owner node when we
@@ -48,6 +51,8 @@ namespace LegionRuntime {
         destruction_event = UserEvent::create_user_event();
         // Send a notification to the owner that we exist
         send_remote_registration();
+        // Record that we know the owner exists
+        remote_instances.insert(owner_space);
       }
       else
         destruction_event = UserEvent::NO_USER_EVENT; // make a no-user event
@@ -63,7 +68,8 @@ namespace LegionRuntime {
       assert(resource_references == 0);
       assert(current_state == INACTIVE_STATE);
 #endif
-      runtime->unregister_distributed_collectable(did);
+      if (registered_with_runtime)
+        runtime->unregister_distributed_collectable(did);
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
       if (is_owner())
@@ -259,10 +265,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool DistributedCollectable::has_remote_instance(AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return remote_instances.contains(remote_inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::update_remote_instances(AddressSpaceID remote)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_owner()); // This should only happen on non-owner nodes
+#endif
+      if (remote != owner_space)
+      {
+        AutoLock gc(gc_lock);
+        remote_instances.add(remote);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::register_remote_instance(AddressSpaceID source,
                                                           Event destroyed)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner()); // This should only happen on the owner node
+#endif
       AutoLock gc(gc_lock);
       remote_instances.add(source);
       recycle_events.insert(destroyed);
@@ -274,6 +305,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!is_owner());
+      assert(registered_with_runtime);
 #endif
       Serializer rez;
       {
@@ -289,6 +321,9 @@ namespace LegionRuntime {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(registered_with_runtime);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);
@@ -304,6 +339,9 @@ namespace LegionRuntime {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(registered_with_runtime);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);
@@ -319,6 +357,9 @@ namespace LegionRuntime {
                                 AddressSpaceID target, unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(registered_with_runtime);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);

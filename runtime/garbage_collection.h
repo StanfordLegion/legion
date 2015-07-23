@@ -125,7 +125,8 @@ namespace LegionRuntime {
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
-                             AddressSpaceID local_space);
+                             AddressSpaceID local_space,
+                             bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:
       inline void add_base_gc_ref(ReferenceSource source, unsigned cnt = 1);
@@ -165,19 +166,22 @@ namespace LegionRuntime {
       virtual void notify_invalid(void) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
+      bool has_remote_instance(AddressSpaceID remote_space) const;
+      void update_remote_instances(AddressSpaceID remote_space);
     public:
       template<typename FUNCTOR>
       void map_over_remote_instances(FUNCTOR &functor);
     public:
+      // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, Event destroy_event);
     public:
-      void send_remote_registration(void);
-      void send_remote_valid_update(AddressSpaceID target, 
-                                    unsigned count, bool add);
-      void send_remote_gc_update(AddressSpaceID target,
-                                 unsigned count, bool add);
-      void send_remote_resource_update(AddressSpaceID target,
-                                       unsigned count, bool add);
+      virtual void send_remote_registration(void);
+      virtual void send_remote_valid_update(AddressSpaceID target, 
+                                            unsigned count, bool add);
+      virtual void send_remote_gc_update(AddressSpaceID target,
+                                         unsigned count, bool add);
+      virtual void send_remote_resource_update(AddressSpaceID target,
+                                               unsigned count, bool add);
     public:
       static void handle_remote_registration(Runtime *runtime,
                                              Deserializer &derez,
@@ -205,12 +209,16 @@ namespace LegionRuntime {
       unsigned valid_references;
       unsigned resource_references;
     protected:
-      // Only valid on owner
+      // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;
+    protected:
+      // Only valid on owner
       std::set<Event>          recycle_events;
     protected:
       // Only matter on remote nodes
       UserEvent destruction_event;
+    protected:
+      bool registered_with_runtime;
     };
 
     //--------------------------------------------------------------------------

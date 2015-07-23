@@ -3724,6 +3724,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_view_remote_registration(Serializer &rez, 
+                                                       bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, VIEW_REMOTE_REGISTRATION, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_view_remote_valid_update(Serializer &rez,
+                                                       bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, VIEW_VALID_UPDATE, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_view_remote_gc_update(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, VIEW_GC_UPDATE, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_view_remote_resource_update(Serializer &rez,
+                                                          bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, VIEW_RESOURCE_UPDATE, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_back_user(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3735,13 +3766,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_BACK_ATOMIC, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_subscriber(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_SUBSCRIBER, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -4325,6 +4349,27 @@ namespace LegionRuntime {
               runtime->handle_did_remote_resource_update(derez);
               break;
             }
+          case VIEW_REMOTE_REGISTRATION:
+            {
+              runtime->handle_view_remote_registration(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case VIEW_VALID_UPDATE:
+            {
+              runtime->handle_view_remote_valid_update(derez);
+              break;
+            }
+          case VIEW_GC_UPDATE:
+            {
+              runtime->handle_view_remote_gc_update(derez); 
+              break;
+            }
+          case VIEW_RESOURCE_UPDATE:
+            {
+              runtime->handle_view_remote_resource_update(derez);
+              break;
+            }
           case SEND_BACK_USER:
             {
               runtime->handle_send_back_user(derez, remote_address_space);
@@ -4333,11 +4378,6 @@ namespace LegionRuntime {
           case SEND_BACK_ATOMIC:
             {
               runtime->handle_send_back_atomic(derez, remote_address_space);
-              break;
-            }
-          case SEND_SUBSCRIBER:
-            {
-              runtime->handle_send_subscriber(derez, remote_address_space);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
@@ -11821,6 +11861,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_registration(AddressSpaceID target, 
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_view_remote_registration(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_valid_update(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_view_remote_valid_update(target,
+                                                            true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_gc_update(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_view_remote_gc_update(target, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_resource_update(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_view_remote_resource_update(target, 
+                                                               true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_back_user(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11832,13 +11906,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_back_atomic(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_subscriber(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_subscriber(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12390,6 +12457,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_registration(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LogicalView::handle_remote_registration(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_valid_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      LogicalView::handle_remote_valid_update(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_gc_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      LogicalView::handle_view_remote_gc_update(forest, derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_resource_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      LogicalView::handle_view_remote_resource_update(forest, derez); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_send_back_user(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -12406,11 +12502,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_subscriber(Deserializer &derez, 
-                                         AddressSpaceID source)
+    void Runtime::handle_create_subview(Deserializer &derez, 
+                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_subscriber(forest, derez, source);
+      InstanceView::handle_create_subview(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_alias_subview(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_alias_subview(forest, derez);
     }
 
     //--------------------------------------------------------------------------
