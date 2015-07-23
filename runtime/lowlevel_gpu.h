@@ -442,7 +442,7 @@ namespace LegionRuntime {
       static cudaError_t set_shared_memory_config(cudaSharedMemConfig config);
     };
 
-    class GPUFBMemory : public Memory::Impl {
+    class GPUFBMemory : public MemoryImpl {
     public:
       GPUFBMemory(Memory _me, GPUProcessor *_gpu);
 
@@ -499,7 +499,7 @@ namespace LegionRuntime {
       char *base;
     };
 
-    class GPUZCMemory : public Memory::Impl {
+    class GPUZCMemory : public MemoryImpl {
     public:
       GPUZCMemory(Memory _me, GPUProcessor *_gpu);
 

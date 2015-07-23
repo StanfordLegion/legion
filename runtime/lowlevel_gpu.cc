@@ -173,7 +173,7 @@ namespace LegionRuntime {
         gpu->enqueue_copy(this);
       } else {
         log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
-        start_event.impl()->add_waiter(start_event.gen, this);
+	EventImpl::add_waiter(start_event, this);
       }
     }
 
@@ -981,7 +981,7 @@ namespace LegionRuntime {
     // framebuffer memory
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPUProcessor *_gpu)
-      : Memory::Impl(_me, _gpu->get_fbmem_size(), MKIND_GPUFB, 512, Memory::GPU_FB_MEM),
+      : MemoryImpl(_me, _gpu->get_fbmem_size(), MKIND_GPUFB, 512, Memory::GPU_FB_MEM),
 	gpu(_gpu)
     {
       base = (char *)(gpu->get_fbmem_gpu_base());
@@ -1010,7 +1010,7 @@ namespace LegionRuntime {
     // zerocopy memory
 
     GPUZCMemory::GPUZCMemory(Memory _me, GPUProcessor *_gpu)
-      : Memory::Impl(_me, _gpu->get_zcmem_size(), MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM),
+      : MemoryImpl(_me, _gpu->get_zcmem_size(), MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM),
 	gpu(_gpu)
     {
       cpu_base = (char *)(gpu->get_zcmem_cpu_base());
