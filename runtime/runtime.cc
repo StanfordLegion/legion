@@ -12502,21 +12502,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_create_subview(Deserializer &derez, 
-                                        AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_create_subview(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_alias_subview(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_alias_subview(forest, derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_materialized_view(Deserializer &derez, 
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------

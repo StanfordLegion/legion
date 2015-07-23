@@ -3596,6 +3596,8 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual Memory get_location(void) const = 0;
+      virtual bool is_persistent(void) const = 0;
     public:
       static void handle_remote_registration(RegionTreeForest *forest,
                                              Deserializer &derez,
@@ -3684,7 +3686,7 @@ namespace LegionRuntime {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
-                   RegionTreeNode *node);
+                   RegionTreeNode *node, bool register_now);
       virtual ~InstanceView(void);
     public:
       virtual bool is_instance_view(void) const;
@@ -3700,6 +3702,7 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual Memory get_location(void) const = 0;
       virtual bool is_persistent(void) const = 0;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -3752,16 +3755,11 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez) = 0;
     public:
-      void add_alias_did(DistributedID did);
-    public:
       static void handle_create_subview(RegionTreeForest *context,
                                         Deserializer &derez,
                                         AddressSpaceID source);
       static void handle_alias_subview(RegionTreeForest *context,
                                        Deserializer &derez);
-    protected:
-      // A list of aliased distributed IDs for this view
-      std::set<DistributedID> aliases;
     };
 
     /**
@@ -3776,13 +3774,13 @@ namespace LegionRuntime {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, unsigned depth);
+                       MaterializedView *parent, unsigned depth,
+                       bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
     public:
-      Memory get_location(void) const;
       size_t get_blocking_factor(void) const;
       const FieldMask& get_physical_mask(void) const;
     public:
@@ -3812,6 +3810,7 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
       virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual Memory get_location(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -3975,6 +3974,7 @@ namespace LegionRuntime {
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; } 
       virtual LogicalView* get_subvew(const ColorPoint &c);
+      virtual Memory get_location(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -4030,7 +4030,6 @@ namespace LegionRuntime {
       static void handle_send_update(RegionTreeForest *context,
                                 Deserializer &derez, AddressSpaceID source);
     public:
-      Memory get_location(void) const;
       ReductionOpID get_redop(void) const;
     public:
       ReductionManager *const manager;

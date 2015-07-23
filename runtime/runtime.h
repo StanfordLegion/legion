@@ -1667,8 +1667,6 @@ namespace LegionRuntime {
       void handle_view_remote_resource_update(Deserializer &derez);
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
-      void handle_create_subview(Deserializer &derez, AddressSpaceID source);
-      void handle_alias_subview(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
       void handle_send_materialized_update(Deserializer &derez,
