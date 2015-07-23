@@ -575,21 +575,26 @@ function parser.stat_for_list(p, start, name, type_expr, vectorize)
 end
 
 function parser.stat_for(p)
-  local parallel = false
-  local vectorize = false
+  local parallel = "allow"
+  local vectorize = "allow"
+
+  local pragma = false
   if p:nextif("__demand") then
+    pragma = "demand"
+  elseif p:nextif("__forbid") then
+    pragma = "forbid"
+  end
+
+  if pragma then
     p:expect("(")
-    if p:matches("__parallel") then
-      p:expect("__parallel")
-      p:expect(")")
-      parallel = "demand"
-    elseif p:matches("__vectorize") then
-      p:expect("__vectorize")
-      p:expect(")")
-      vectorize = "demand"
+    if p:nextif("__parallel") then
+      parallel = pragma
+    elseif p:nextif("__vectorize") then
+      vectorize = pragma
     else
       p:error("expected __parallel or __vectorize")
     end
+    p:expect(")")
   end
 
   local start = ast.save(p)
@@ -790,7 +795,7 @@ function parser.stat(p)
 
   -- Technically this could be written anywhere but for now it only
   -- applies to for loops.
-  elseif p:matches("__demand") then
+  elseif p:matches("__demand") or p:matches("__forbid") then
     return p:stat_for()
 
   elseif p:matches("for") then

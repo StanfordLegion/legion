@@ -886,6 +886,7 @@ function vectorize_loops.stat_for_num(node)
 end
 
 function vectorize_loops.stat_for_list(node)
+  if node.vectorize == "forbid" then return node end
   local cx = context:new_global_scope()
   cx:assign(node.symbol, V)
   cx.demanded = node.vectorize == "demand"
