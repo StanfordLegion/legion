@@ -90,6 +90,8 @@ bool test_single_xferDes(Memory::Kind src_mem_kind, Memory::Kind dst_mem_kind)
 void top_level_task(const void *args, size_t arglen, Processor p)
 {
   printf("top level task - test DMA functionality\n");
+  if(test_single_xferDes(Memory::SYSTEM_MEM, Memory::SYSTEM_MEM))
+    printf("Test cpu->cpu XferDes passed.\n");
   if(test_single_xferDes(Memory::SYSTEM_MEM, Memory::DISK_MEM))
     printf("Test cpu->disk XferDes passed.\n");
   if(test_single_xferDes(Memory::DISK_MEM, Memory::SYSTEM_MEM))

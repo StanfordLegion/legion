@@ -375,49 +375,6 @@ namespace LegionRuntime {
         available_reqs.push(req);
       }
 
-      GASNetChannel::GASNetChannel(long max_nr, XferDes::XferKind _kind)
-      {
-        kind = _kind;
-        capacity = max_nr;
-      }
-
-      GASNetChannel::~GASNetChannel()
-      {
-      }
-
-      long GASNetChannel::submit(Request** requests, long nr)
-      {
-        switch (kind) {
-          case XferDes::XFER_GASNET_READ:
-            for (int i = 0; i < nr; i++) {
-              GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
-              get_runtime()->global_memory->get_bytes(read_req->offset, read_req->dst_buf, read_req->size);
-              read_req->xd->notify_request_read_done(read_req);
-              read_req->xd->notify_request_write_done(read_req);
-            }
-            break;
-          case XferDes::XFER_GASNET_WRITE:
-            for (int i = 0; i < nr; i++) {
-              GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
-              get_runtime()->global_memory->put_bytes(write_req->offset, write_req->src_buf, write_req->size);
-              write_req->xd->notify_request_read_done(write_req);
-              write_req->xd->notify_request_write_done(write_req);
-            }
-            break;
-          default:
-            assert(0);
-        }
-        return nr;
-      }
-
-      void GASNetChannel::pull()
-      {
-      }
-
-      long GASNetChannel::available()
-      {
-        return capacity;
-      }
 #ifdef USE_DISK
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
@@ -453,28 +410,9 @@ namespace LegionRuntime {
         pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
         complete_event = GenEventImpl::create_genevent()->current_event();
 
-        Rect<DIM> subrect_check;
-        switch (order) {
-          case XferOrder::SRC_FIFO:
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-            orect = dso->image;
-            irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
-            break;
-          case XferOrder::DST_FIFO:
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
-            irect = dsi->image;
-            orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
-            break;
-          case XferOrder::ANY_ORDER:
-            assert(0);
-            break;
-          default:
-            assert(0);
-        }
+        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf->linearization.get_mapping<DIM>(),
+                                                     dst_buf->linearization.get_mapping<DIM>(), order);
+        offset_idx = 0;
 
         switch (kind) {
           case XferDes::XFER_DISK_READ:
@@ -506,15 +444,15 @@ namespace LegionRuntime {
       long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
+        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
           //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
-            size_t req_size = umin(nbytes, max_req_size);
+            size_t req_size = nbytes;
             if (src_buf->is_ib) {
               src_start = src_start % src_buf->buf_size;
               req_size = umin(req_size, src_buf->buf_size - src_start);
@@ -641,28 +579,9 @@ namespace LegionRuntime {
         pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
         complete_event = GenEventImpl::create_genevent()->current_event();
 
-        Rect<DIM> subrect_check;
-        switch (order) {
-          case XferOrder::SRC_FIFO:
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-            orect = dso->image;
-            irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
-            break;
-          case XferOrder::DST_FIFO:
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
-            irect = dsi->image;
-            orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
-            break;
-          case XferOrder::ANY_ORDER:
-            assert(0);
-            break;
-          default:
-            assert(0);
-        }
+        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf->linearization.get_mapping<DIM>(),
+                                                     dst_buf->linearization.get_mapping<DIM>(), order);
+        offset_idx = 0;
 
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
@@ -714,10 +633,10 @@ namespace LegionRuntime {
       long GPUXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
+        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -1114,6 +1033,50 @@ namespace LegionRuntime {
       }
 
       long MemcpyChannel::available()
+      {
+        return capacity;
+      }
+
+      GASNetChannel::GASNetChannel(long max_nr, XferDes::XferKind _kind)
+      {
+        kind = _kind;
+        capacity = max_nr;
+      }
+
+      GASNetChannel::~GASNetChannel()
+      {
+      }
+
+      long GASNetChannel::submit(Request** requests, long nr)
+      {
+        switch (kind) {
+          case XferDes::XFER_GASNET_READ:
+            for (int i = 0; i < nr; i++) {
+              GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
+              get_runtime()->global_memory->get_bytes(read_req->offset, read_req->dst_buf, read_req->size);
+              read_req->xd->notify_request_read_done(read_req);
+              read_req->xd->notify_request_write_done(read_req);
+            }
+            break;
+          case XferDes::XFER_GASNET_WRITE:
+            for (int i = 0; i < nr; i++) {
+              GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
+              get_runtime()->global_memory->put_bytes(write_req->offset, write_req->src_buf, write_req->size);
+              write_req->xd->notify_request_read_done(write_req);
+              write_req->xd->notify_request_write_done(write_req);
+            }
+            break;
+          default:
+            assert(0);
+        }
+        return nr;
+      }
+
+      void GASNetChannel::pull()
+      {
+      }
+
+      long GASNetChannel::available()
       {
         return capacity;
       }

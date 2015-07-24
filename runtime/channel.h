@@ -527,8 +527,6 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
-        delete dsi;
-        delete dso;
         // trigger completion event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -540,9 +538,8 @@ namespace LegionRuntime{
     private:
       Request* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
-      int done, offset_idx, block_start, total;
-      Rect<1> orect, irect;
+      Layouts::GenericLayoutIterator<DIM>* li;
+      int offset_idx;
     };
 
 #ifdef USE_DISK
@@ -562,8 +559,6 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
-        delete dsi;
-        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -576,9 +571,8 @@ namespace LegionRuntime{
       int fd;
       Request* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
-      int done, offset_idx, block_start, total;
-      Rect<1> orect, irect;
+      Layouts::GenericLayoutIterator<DIM>* li;
+      int offset_idx;
       const char *mem_base;
     };
 #endif /*USE_DISK*/
@@ -600,8 +594,6 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
-        delete dsi;
-        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -613,9 +605,8 @@ namespace LegionRuntime{
     private:
       Request* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
-      int done, offset_idx, block_start, total;
-      Rect<1> orect, irect;
+      Layouts::GenericLayoutIterator<DIM>* li;
+      int offset_idx;
       char *src_mem_base;
       char *dst_mem_base;
       GPUProcessor* dst_gpu;

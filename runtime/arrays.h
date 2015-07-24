@@ -567,6 +567,11 @@ namespace LegionRuntime {
       {
 	return t.preimage_is_dense(p);
       }
+
+      virtual int continuous_steps(const Point<IDIM> p, int &direction) const
+      {
+	return t.continuous_steps(p, direction);
+      }
     };
 
     template <unsigned DIM>
@@ -734,6 +739,12 @@ namespace LegionRuntime {
 	return true;
       }
 
+      int continuous_steps(const Point<IDIM> p, int &direction) const
+      {
+	assert(0);
+	return true;
+      }
+
     protected:
       Point<DIM> offset;
     };
@@ -825,6 +836,13 @@ namespace LegionRuntime {
       {
 	return true;
       }
+
+      int continuous_steps(const Point<IDIM> p, int &direction) const
+      {
+	assert(0);
+	return 0;
+      }
+
     };
 
     template <unsigned DIM>

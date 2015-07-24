@@ -7289,7 +7289,12 @@ namespace Realm {
 	switch(get_dim()) {
 	case 1:
 	  {
-	    Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+	    std::vector<Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(Layouts::DIM_X);
+	    size_vec.push_back(get_rect<1>().dim_size(0));
+	    Layouts::SplitDimLinearization<1> cl(kind_vec, size_vec);
+	    //Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<1>(Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<1>());
 	    dl.serialize(linearization_bits);
@@ -9843,6 +9848,11 @@ namespace LegionRuntime {
       Arrays::Mapping<2,1>::register_mapping<Arrays::FortranArrayLinearization<2> >();
       Arrays::Mapping<3,1>::register_mapping<Arrays::FortranArrayLinearization<3> >();
       Arrays::Mapping<1,1>::register_mapping<Translation<1> >();
+
+      // we also register split dim linearization
+      Arrays::Mapping<1,1>::register_mapping<Layouts::SplitDimLinearization<1> >();
+      Arrays::Mapping<2,1>::register_mapping<Layouts::SplitDimLinearization<2> >();
+      Arrays::Mapping<3,1>::register_mapping<Layouts::SplitDimLinearization<3> >();
 
       // Create the key for the thread local data
       CHECK_PTHREAD( pthread_key_create(&thread_timer_key,thread_timer_free) );
