@@ -2721,26 +2721,26 @@ namespace LegionRuntime {
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
         OASVec& oasvec = it->second;
-        RegionInstance::Impl *src_impl = src_inst.impl();
-        RegionInstance::Impl *dst_impl = dst_inst.impl();
+        RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
+        RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
 
-        Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
-        Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
+        MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
+        MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
         std::vector<XferDes*> path;
         // We don't need to care about deallocation of Buffer class
         // This will be handled by XferDes destruction
         Buffer* src_buf = new Buffer(&src_impl->metadata);
         Buffer* dst_buf = new Buffer(&dst_impl->metadata);
         switch (src_kind) {
-        case Memory::Impl::MKIND_SYSMEM:
-        case Memory::Impl::MKIND_ZEROCOPY:
+        case MemoryImpl::MKIND_SYSMEM:
+        case MemoryImpl::MKIND_ZEROCOPY:
         {
-          char* src_mem_base = (char *)(src_mem.impl()->get_direct_ptr(0, src_mem.impl()->size));
+          char* src_mem_base = (char *)(get_runtime()->get_memory_impl(src_mem)->get_direct_ptr(0, 0));
           switch (dst_kind) {
-          case Memory::Impl::MKIND_SYSMEM:
-          case Memory::Impl::MKIND_ZEROCOPY:
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
           {
-            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
             XferDes* xd = new MemcpyXferDes<DIM>(channel_manager->get_memcpy_channel(), false,
                                             src_buf, dst_buf, src_mem_base, dst_mem_base,
                                             domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
@@ -2749,9 +2749,9 @@ namespace LegionRuntime {
             break;
           }
 #ifdef USE_CUDA
-          case Memory::Impl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_GPUFB:
           {
-            GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(dst_mem))->gpu;
             XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
                                          src_buf, dst_buf, src_mem_base, NULL /*dst_mem_base*/,
                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
@@ -2761,10 +2761,10 @@ namespace LegionRuntime {
           }
 #endif
 #ifdef USE_DISK
-          case Memory::Impl::MKIND_DISK:
+          case MemoryImpl::MKIND_DISK:
           {
             log_dma.info("create mem->disk xferdes\n");
-            int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
+            int dst_fd = ((DiskMemory*)get_runtime()->get_memory_impl(dst_mem))->fd;
             XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), false,
                                           src_buf, dst_buf, src_mem_base, dst_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
@@ -2774,11 +2774,11 @@ namespace LegionRuntime {
           }
 #endif /*USE_DISK*/
 #ifdef USE_HDF
-          case Memory::Impl::MKIND_HDF:
+          case MemoryImpl::MKIND_HDF:
           {
             ID id(dst_inst.impl()->me);
             unsigned index = id.index_l();
-            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)dst_mem.impl())->hdf_metadata[index];
+            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
             log_dma.info("create mem->hdf xferdes\n");
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
                                               src_buf, dst_buf, src_mem_base, hdf_metadata,
@@ -2788,12 +2788,12 @@ namespace LegionRuntime {
             break;
           }
 #endif
-          case Memory::Impl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_GLOBAL:
             fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
             assert(0);
             break;
-          case Memory::Impl::MKIND_RDMA:
-          case Memory::Impl::MKIND_REMOTE:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "[DMA] To be implemented: cpu memory -> remote memory\n");
             assert(0);
             break;
@@ -2804,14 +2804,14 @@ namespace LegionRuntime {
           break;
         }
 #ifdef USE_CUDA
-        case Memory::Impl::MKIND_GPUFB:
+        case MemoryImpl::MKIND_GPUFB:
         {
-          GPUProcessor* src_gpu = ((GPUFBMemory*)src_mem.impl())->gpu;
+          GPUProcessor* src_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(src_mem))->gpu;
           switch (dst_kind) {
-          case Memory::Impl::MKIND_SYSMEM:
-          case Memory::Impl::MKIND_ZEROCOPY:
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
           {
-            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
             XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_from_fb_channel(src_gpu), false,
                                               src_buf, dst_buf, NULL, dst_mem_base,
                                               domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
@@ -2819,16 +2819,16 @@ namespace LegionRuntime {
             path.push_back(xd);
             break;
           }
-          case Memory::Impl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_GPUFB:
 #ifdef USE_DISK
-          case Memory::Impl::MKIND_DISK:
+          case MemoryImpl::MKIND_DISK:
 #endif /*USE_DISK*/
 #ifdef USE_HDF
-          case Memory::Impl::MKIND_HDF:
+          case MemoryImpl::MKIND_HDF:
 #endif
-          case Memory::Impl::MKIND_GLOBAL:
-          case Memory::Impl::MKIND_RDMA:
-          case Memory::Impl::MKIND_REMOTE:
+          case MemoryImpl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "[DMA] To be implemented: gpu memory -> remote memory\n");
             assert(0);
             break;
@@ -2840,14 +2840,14 @@ namespace LegionRuntime {
         }
 #endif /*USE_CUDA*/
 #ifdef USE_DISK
-        case Memory::Impl::MKIND_DISK:
+        case MemoryImpl::MKIND_DISK:
         {
-          int src_fd = ((DiskMemory*)src_mem.impl())->fd;
+          int src_fd = ((DiskMemory*)get_runtime()->get_memory_impl(src_mem))->fd;
           switch (dst_kind) {
-          case Memory::Impl::MKIND_SYSMEM:
-          case Memory::Impl::MKIND_ZEROCOPY:
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
           {
-            const char* dst_mem_base = (const char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            const char* dst_mem_base = (const char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
             XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                           src_buf, dst_buf, dst_mem_base, src_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
@@ -2856,9 +2856,9 @@ namespace LegionRuntime {
             break;
           }
 #ifdef USE_CUDA
-          case Memory::Impl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_GPUFB:
           {
-            GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(dst_mem))->gpu;
             /* need to find a cpu memory as intermediate buffer*/
             Machine machine = Machine::get_machine();
             std::set<Memory> mem;
@@ -2870,8 +2870,8 @@ namespace LegionRuntime {
               }
             assert(cpu_mem != Memory::NO_MEMORY);
             size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-            off_t ib_offset = cpu_mem.impl()->alloc_bytes(ib_size);
-            char* ib_mem_base = (char *)(cpu_mem.impl()->get_direct_ptr(ib_offset, ib_size));
+            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
+            char* ib_mem_base = (char *)(get_runtime()->get_memory_impl(cpu_mem)->get_direct_ptr(ib_offset, ib_size));
             OASVec oasvec_src, oasvec_dst;
             std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
             off_t ib_elmnt_size = 0;
@@ -2901,9 +2901,9 @@ namespace LegionRuntime {
             break;
           }
 #endif
-          case Memory::Impl::MKIND_DISK:
+          case MemoryImpl::MKIND_DISK:
           {
-            int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
+            int dst_fd = ((DiskMemory*)get_runtime()->get_memory_impl(dst_mem))->fd;
             /* need to find a cpu memory as intermediate buffer*/
             Machine machine = Machine::get_machine();
             std::set<Memory> mem;
@@ -2915,8 +2915,8 @@ namespace LegionRuntime {
               }
             assert(cpu_mem != Memory::NO_MEMORY);
             size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-            off_t ib_offset = cpu_mem.impl()->alloc_bytes(ib_size);
-            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(ib_offset, ib_size));
+            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
+            const char* ib_mem_base = (const char *)(get_runtime()->get_memory_impl(cpu_mem)->get_direct_ptr(ib_offset, ib_size));
             OASVec oasvec_src, oasvec_dst;
             std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
             off_t ib_elmnt_size = 0;
@@ -2936,27 +2936,27 @@ namespace LegionRuntime {
             XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
             XferDes* xd2 = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), true,
                                            ib_buf, dst_buf, ib_mem_base, dst_fd,
                                            domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_WRITE);
+                                           100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE);
             path.push_back(xd1);
             path.push_back(xd2);
             break;
           }
 #ifdef USE_HDF
-          case Memory::Impl::MKIND_HDF:
+          case MemoryImpl::MKIND_HDF:
             fprintf(stderr, "[DMA] To be implemented:disk memory -> hdf memory\n");
             assert(0);
             break;
 #endif
-          case Memory::Impl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_GLOBAL:
             fprintf(stderr, "[DMA] To be implemented: disk memory -> gasnet memory\n");
             assert(0);
             break;
-          case Memory::Impl::MKIND_RDMA:
-          case Memory::Impl::MKIND_REMOTE:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "[DMA] To be implemented: disk memory -> remote memory\n");
             assert(0);
             break;
@@ -2968,17 +2968,17 @@ namespace LegionRuntime {
         }
 #endif /*USE_DISK*/
 #ifdef USE_HDF
-        case Memory::Impl::MKIND_HDF:
+        case MemoryImpl::MKIND_HDF:
         {
-          ID src_id(src_inst.impl()->me);
+          ID src_id(src_impl->me);
           unsigned src_index = src_id.index_l();
           HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*)src_mem.impl())->hdf_metadata[src_index];
           switch (dst_kind) {
-          case Memory::Impl::MKIND_SYSMEM:
-          case Memory::Impl::MKIND_ZEROCOPY:
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
           {
             printf("hdf->cpu XferDes\n");
-            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_read_channel(), false,
                                               src_buf, dst_buf, dst_mem_base, src_hdf_metadata,
                                               domain, oasvec,
@@ -2987,22 +2987,22 @@ namespace LegionRuntime {
             break;
           }
 #ifdef USE_CUDA
-          case Memory::Impl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_GPUFB:
             fprintf(stderr, "To be implemented: hdf memory -> gpu memory\n");
             assert(0);
             break;
 #endif
-          case Memory::Impl::MKIND_DISK:
-          case Memory::Impl::MKIND_HDF:
+          case MemoryImpl::MKIND_DISK:
+          case MemoryImpl::MKIND_HDF:
             fprintf(stderr, "To be implemented: hdf memory -> hdf memory\n");
             assert(0);
             break;
-          case Memory::Impl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_GLOBAL:
             fprintf(stderr, "To be implemented: hdf memory -> global memory\n");
             assert(0);
             break;
-          case Memory::Impl::MKIND_RDMA:
-          case Memory::Impl::MKIND_REMOTE:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "To be implemented: hdf memory -> remote memory\n");
             assert(0);
             break;
@@ -3014,19 +3014,19 @@ namespace LegionRuntime {
           
         }
 #endif
-        case Memory::Impl::MKIND_GLOBAL:
+        case MemoryImpl::MKIND_GLOBAL:
           fprintf(stderr, "[DMA] To be implemented: gasnet memory transfer\n");
           assert(0);
           switch (dst_kind) {
-          case Memory::Impl::MKIND_SYSMEM:
-          case Memory::Impl::MKIND_ZEROCOPY:
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
 #ifdef USE_CUDA
-          case Memory::Impl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_GPUFB:
 #endif
-          case Memory::Impl::MKIND_DISK:
-          case Memory::Impl::MKIND_GLOBAL:
-          case Memory::Impl::MKIND_RDMA:
-          case Memory::Impl::MKIND_REMOTE:
+          case MemoryImpl::MKIND_DISK:
+          case MemoryImpl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "To be implemented: global memory -> remote memory\n");
             assert(0);
             break;
@@ -3035,8 +3035,8 @@ namespace LegionRuntime {
             assert(0);
           }
           break;
-        case Memory::Impl::MKIND_RDMA:
-        case Memory::Impl::MKIND_REMOTE:
+        case MemoryImpl::MKIND_RDMA:
+        case MemoryImpl::MKIND_REMOTE:
           fprintf(stderr, "Source memory shouldn't be a remote kind\n");
           assert(0);
           break;

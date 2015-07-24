@@ -20,9 +20,8 @@
 #include "utilities.h"
 #include "accessor.h"
 #include "arrays.h"
+#include "layouts.h"
 #include "lowlevel_config.h"
-
-#define USE_DISK
 
 #ifdef USE_HDF
 #include <hdf5.h>

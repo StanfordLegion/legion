@@ -59,7 +59,7 @@ namespace LegionRuntime{
         MKIND_DISK
       };
 
-      Buffer(RegionInstance::Impl::Metadata* metadata)
+      Buffer(RegionInstanceImpl::Metadata* metadata)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
               buf_size(metadata->size), linearization(metadata->linearization),
@@ -77,7 +77,7 @@ namespace LegionRuntime{
         // If this is intermediate buffer,
         // we need to free the buffer
     	if (is_ib) {
-    	  memory.impl()->free_bytes(ib_offset, buf_size);
+          get_runtime()->get_memory_impl(memory)->free_bytes(ib_offset, buf_size);
         }
       }
 
