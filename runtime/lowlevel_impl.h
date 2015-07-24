@@ -37,6 +37,7 @@
 
 #include "realm/operation.h"
 #include "realm/dynamic_table.h"
+#include "realm/id.h"
 
 #include <assert.h>
 
@@ -80,6 +81,9 @@ namespace Realm {
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+    typedef Realm::ID ID;
+
     extern Logger::Category log_mutex;
 
 #ifdef EVENT_TRACING
@@ -284,94 +288,6 @@ namespace LegionRuntime {
       }
     };
      
-    class ID {
-    public:
-#ifdef LEGION_IDS_ARE_64BIT
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 12,
-	INDEX_L_BITS = 32,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
-      };
-#else
-      // two forms of bit pack for IDs:
-      //
-      //  3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
-      //  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-      // +-----+---------------------------------------------------------+
-      // |  TYP  |   NODE  |         INDEX                               |
-      // |  TYP  |   NODE  |  INDEX_H    |           INDEX_L             |
-      // +-----+---------------------------------------------------------+
-
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 7,
-	INDEX_L_BITS = 16,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 32 - TYPE_BITS - INDEX_BITS /* 5 = 32 nodes */
-      };
-#endif
-
-      enum ID_Types {
-	ID_SPECIAL,
-	ID_UNUSED_1,
-	ID_EVENT,
-	ID_BARRIER,
-	ID_LOCK,
-	ID_UNUSED_5,
-	ID_MEMORY,
-	ID_UNUSED_7,
-	ID_PROCESSOR,
-	ID_PROCGROUP,
-	ID_INDEXSPACE,
-	ID_UNUSED_11,
-	ID_ALLOCATOR,
-	ID_UNUSED_13,
-	ID_INSTANCE,
-	ID_UNUSED_15,
-      };
-
-      enum ID_Specials {
-	ID_INVALID = 0,
-	ID_GLOBAL_MEM = (1U << INDEX_H_BITS) - 1,
-      };
-
-      ID(IDType _value) : value(_value) {}
-
-      template <class T>
-      ID(T thing_to_get_id_from) : value(thing_to_get_id_from.id) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		_index) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index_h, IDType _index_l)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		(_index_h << INDEX_L_BITS) |
-		_index_l) {}
-
-      bool operator==(const ID& rhs) const { return value == rhs.value; }
-
-      IDType id(void) const { return value; }
-      ID_Types type(void) const { return (ID_Types)(value >> (NODE_BITS + INDEX_BITS)); }
-      unsigned node(void) const { return ((value >> INDEX_BITS) & ((1U << NODE_BITS)-1)); }
-      IDType index(void) const { return (value & ((((IDType)1) << INDEX_BITS) - 1)); }
-      IDType index_h(void) const { return ((value >> INDEX_L_BITS) & ((((IDType)1) << INDEX_H_BITS)-1)); }
-      IDType index_l(void) const { return (value & ((((IDType)1) << INDEX_L_BITS) - 1)); }
-
-      template <class T>
-      T convert(void) const { T thing_to_return; thing_to_return.id = value; return thing_to_return; }
-
-    protected:
-      IDType value;
-    };
-    
-    template <>
-    inline ID ID::convert<ID>(void) const { return *this; }
-      
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
