@@ -3740,8 +3740,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ LowLevel::ReductionOpTable& HighLevelRuntime::
-                                                      get_reduction_table(void)
+    /*static*/ ReductionOpTable& HighLevelRuntime::get_reduction_table(void)
     //--------------------------------------------------------------------------
     {
       return Runtime::get_reduction_table();

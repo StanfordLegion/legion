@@ -120,7 +120,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(const DefaultMapper &rhs)
       : Mapper(NULL), local_proc(Processor::NO_PROC),
-        local_kind(Processor::LOC_PROC), machine(NULL),
+        local_kind(Processor::LOC_PROC), machine(rhs.machine),
         machine_interface(MappingUtilities::MachineQueryInterface(Machine::get_machine()))
     //--------------------------------------------------------------------------
     {

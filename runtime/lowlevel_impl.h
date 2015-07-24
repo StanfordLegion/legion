@@ -652,7 +652,7 @@ namespace LegionRuntime {
     };
 
     // parent class of GenEventImpl and BarrierImpl
-    class Event::Impl {
+    class EventImpl {
     public:
       // test whether an event has triggered without waiting
       virtual bool has_triggered(Event::gen_t needed_gen) = 0;
@@ -663,9 +663,11 @@ namespace LegionRuntime {
       virtual void external_wait(Event::gen_t needed_gen) = 0;
 
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
+
+      static bool add_waiter(Event needed, EventWaiter *waiter);
     };
 
-    class GenEventImpl : public Event::Impl {
+    class GenEventImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
@@ -712,7 +714,7 @@ namespace LegionRuntime {
       std::vector<EventWaiter *> local_waiters; // set of local threads that are waiting on event
     };
 
-    class BarrierImpl : public Event::Impl {
+    class BarrierImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
 
@@ -781,9 +783,9 @@ namespace LegionRuntime {
 	
     };
 
-    class Reservation::Impl {
+    class ReservationImpl {
     public:
-      Impl(void);
+      ReservationImpl(void);
 
       static const ID::ID_Types ID_TYPE = ID::ID_LOCK;
 
@@ -820,8 +822,8 @@ namespace LegionRuntime {
       bool own_local;
 
       static gasnet_hsl_t freelist_mutex;
-      static Reservation::Impl *first_free;
-      Reservation::Impl *next_free;
+      static ReservationImpl *first_free;
+      ReservationImpl *next_free;
 
       // created a GenEventImpl if needed to describe when reservation is granted
       Event acquire(unsigned new_mode, bool exclusive,
@@ -876,7 +878,7 @@ namespace LegionRuntime {
 
     protected:
       CoherentData *data;
-      Reservation::Impl *lock;
+      ReservationImpl *lock;
     };
 
     template <class T>
@@ -895,7 +897,7 @@ namespace LegionRuntime {
 
     protected:
       CoherentData *data;
-      Reservation::Impl *lock;
+      ReservationImpl *lock;
     };
 
     class ProcessorAssignment {
@@ -950,11 +952,11 @@ namespace LegionRuntime {
       bool capture_proc;
     };
 
-    class Processor::Impl {
+    class ProcessorImpl {
     public:
-      Impl(Processor _me, Processor::Kind _kind);
+      ProcessorImpl(Processor _me, Processor::Kind _kind);
 
-      virtual ~Impl(void);
+      virtual ~ProcessorImpl(void);
 
       void run(Atomic<int> *_run_counter)
       {
@@ -994,7 +996,7 @@ namespace LegionRuntime {
 
     class DeferredTaskSpawn : public EventWaiter {
     public:
-      DeferredTaskSpawn(Processor::Impl *_proc, Task *_task) 
+      DeferredTaskSpawn(ProcessorImpl *_proc, Task *_task) 
         : proc(_proc), task(_task) {}
 
       virtual ~DeferredTaskSpawn(void)
@@ -1006,7 +1008,7 @@ namespace LegionRuntime {
       virtual void print_info(FILE *f);
 
     protected:
-      Processor::Impl *proc;
+      ProcessorImpl *proc;
       Task *task;
     };
 
@@ -1074,7 +1076,7 @@ namespace LegionRuntime {
       return job;
     }
 
-    class ProcessorGroup : public Processor::Impl {
+    class ProcessorGroup : public ProcessorImpl {
     public:
       ProcessorGroup(void);
 
@@ -1111,8 +1113,8 @@ namespace LegionRuntime {
     public: //protected:
       bool members_valid;
       bool members_requested;
-      std::vector<Processor::Impl *> members;
-      Reservation::Impl lock;
+      std::vector<ProcessorImpl *> members;
+      ReservationImpl lock;
       ProcessorGroup *next_free;
 
       void request_group_members(void);
@@ -1219,7 +1221,7 @@ namespace LegionRuntime {
       bool finalize;
     };
 
-    class LocalProcessor : public Processor::Impl {
+    class LocalProcessor : public ProcessorImpl {
     public:
       LocalProcessor(Processor _me, Processor::Kind _kind, 
                      size_t stack_size, const char *name,
@@ -1302,7 +1304,7 @@ namespace LegionRuntime {
       GreenletTask *current_task;
     };
 
-    class GreenletProcessor : public Processor::Impl {
+    class GreenletProcessor : public ProcessorImpl {
     public:
       enum GreenletState {
         GREENLET_IDLE,
@@ -1360,7 +1362,9 @@ namespace LegionRuntime {
       std::vector<GreenletTask*> complete_greenlets;
     };
 
-    class Memory::Impl {
+    class RegionInstanceImpl;
+
+    class MemoryImpl {
     public:
       enum MemoryKind {
 	MKIND_SYSMEM,  // directly accessible from CPU
@@ -1377,13 +1381,13 @@ namespace LegionRuntime {
 #endif
       };
 
-      Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind);
+      MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind);
 
-      virtual ~Impl(void);
+      virtual ~MemoryImpl(void);
 
-      unsigned add_instance(RegionInstance::Impl *i);
+      unsigned add_instance(RegionInstanceImpl *i);
 
-      RegionInstance::Impl *get_instance(RegionInstance i);
+      RegionInstanceImpl *get_instance(RegionInstance i);
 
       RegionInstance create_instance_local(IndexSpace is,
 					   const int *linearization_bits,
@@ -1452,16 +1456,16 @@ namespace LegionRuntime {
       size_t size;
       MemoryKind kind;
       size_t alignment;
-      Kind lowlevel_kind;
+      Memory::Kind lowlevel_kind;
       gasnet_hsl_t mutex; // protection for resizing vectors
-      std::vector<RegionInstance::Impl *> instances;
+      std::vector<RegionInstanceImpl *> instances;
       std::map<off_t, off_t> free_blocks;
 #ifdef REALM_PROFILE_MEMORY_USAGE
       size_t usage, peak_usage, peak_footprint;
 #endif
     };
 
-    class GASNetMemory : public Memory::Impl {
+    class GASNetMemory : public MemoryImpl {
     public:
       static const size_t MEMORY_STRIDE = 1024;
 
@@ -1512,7 +1516,7 @@ namespace LegionRuntime {
       //std::map<off_t, off_t> free_blocks;
     };
 
-    class DiskMemory : public Memory::Impl {
+    class DiskMemory : public MemoryImpl {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -1554,7 +1558,7 @@ namespace LegionRuntime {
     };
 
 #ifdef USE_HDF
-    class HDFMemory : public Memory::Impl {
+    class HDFMemory : public MemoryImpl {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -1654,20 +1658,20 @@ namespace LegionRuntime {
       NodeSet remote_copies;
     };
 
-    class RegionInstance::Impl {
+    class RegionInstanceImpl {
     public:
-      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
-          ReductionOpID _redopid,
-	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
-           const std::vector<size_t>& _field_sizes,
-           const Realm::ProfilingRequestSet &reqs,
-	   off_t _count_offset = -1, off_t _red_list_size = -1, 
-           RegionInstance _parent_inst = NO_INST);
+      RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
+			 ReductionOpID _redopid,
+			 const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
+			 const std::vector<size_t>& _field_sizes,
+			 const Realm::ProfilingRequestSet &reqs,
+			 off_t _count_offset = -1, off_t _red_list_size = -1, 
+			 RegionInstance _parent_inst = RegionInstance::NO_INST);
 
       // when we auto-create a remote instance, we don't know region/offset/linearization
-      Impl(RegionInstance _me, Memory _memory);
+      RegionInstanceImpl(RegionInstance _me, Memory _memory);
 
-      ~Impl(void);
+      ~RegionInstanceImpl(void);
 
 #ifdef POINTER_CHECKS
       void verify_access(unsigned ptr);
@@ -1693,7 +1697,7 @@ namespace LegionRuntime {
       void finalize_instance(void);
 
     public: //protected:
-      friend class RegionInstance;
+      friend class Realm::RegionInstance;
 
       RegionInstance me;
       Memory memory; // not part of metadata because it's determined from ID alone
@@ -1723,13 +1727,13 @@ namespace LegionRuntime {
 
       static const unsigned MAX_LINEARIZATION_LEN = 16;
 
-      Reservation::Impl lock;
+      ReservationImpl lock;
     };
 
-    class IndexSpace::Impl {
+    class IndexSpaceImpl {
     public:
-      Impl(void);
-      ~Impl(void);
+      IndexSpaceImpl(void);
+      ~IndexSpaceImpl(void);
 
       void init(IndexSpace _me, unsigned _init_owner);
 
@@ -1749,8 +1753,8 @@ namespace LegionRuntime {
       Event request_valid_mask(void);
 
       IndexSpace me;
-      Reservation::Impl lock;
-      IndexSpace::Impl *next_free;
+      ReservationImpl lock;
+      IndexSpaceImpl *next_free;
 
       struct StaticData {
 	IndexSpace parent;
@@ -1819,8 +1823,8 @@ namespace LegionRuntime {
 
     typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
-    typedef DynamicTableAllocator<Reservation::Impl, 10, 8> ReservationTableAllocator;
-    typedef DynamicTableAllocator<IndexSpace::Impl, 10, 4> IndexSpaceTableAllocator;
+    typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
+    typedef DynamicTableAllocator<IndexSpaceImpl, 10, 4> IndexSpaceTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
@@ -1829,8 +1833,8 @@ namespace LegionRuntime {
       Node(void);
 
       // not currently resizable
-      std::vector<Memory::Impl *> memories;
-      std::vector<Processor::Impl *> processors;
+      std::vector<MemoryImpl *> memories;
+      std::vector<ProcessorImpl *> processors;
 
       DynamicTable<EventTableAllocator> events;
       DynamicTable<BarrierTableAllocator> barriers;
@@ -1841,7 +1845,7 @@ namespace LegionRuntime {
 
     struct NodeAnnounceData;
 
-    class Machine::Impl {
+    class MachineImpl {
     public:
       void get_all_memories(std::set<Memory>& mset) const;
       void get_all_processors(std::set<Processor>& pset) const;
@@ -1871,20 +1875,21 @@ namespace LegionRuntime {
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
     };
 
-    extern Machine::Impl *machine_singleton;
-    inline Machine::Impl *get_machine(void) { return machine_singleton; }
+    extern MachineImpl *machine_singleton;
+    inline MachineImpl *get_machine(void) { return machine_singleton; }
 
-    class Runtime::Impl {
+    class RuntimeImpl {
     public:
-      Impl(void);
-      ~Impl(void);
+      RuntimeImpl(void);
+      ~RuntimeImpl(void);
 
       bool init(int *argc, char ***argv);
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
 
-      void run(Processor::TaskFuncID task_id = 0, RunStyle style = Runtime::ONE_TASK_ONLY,
+      void run(Processor::TaskFuncID task_id = 0, 
+	       Runtime::RunStyle style = Runtime::ONE_TASK_ONLY,
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of the runtime
@@ -1895,26 +1900,26 @@ namespace LegionRuntime {
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
       //  (e.g. trigger a GenEventImpl or adjust a BarrierImpl)
-      Event::Impl *get_event_impl(Event e);
+      EventImpl *get_event_impl(Event e);
       GenEventImpl *get_genevent_impl(Event e);
       BarrierImpl *get_barrier_impl(Event e);
 
-      Reservation::Impl *get_lock_impl(ID id);
-      Memory::Impl *get_memory_impl(ID id);
-      Processor::Impl *get_processor_impl(ID id);
+      ReservationImpl *get_lock_impl(ID id);
+      MemoryImpl *get_memory_impl(ID id);
+      ProcessorImpl *get_processor_impl(ID id);
       ProcessorGroup *get_procgroup_impl(ID id);
-      IndexSpace::Impl *get_index_space_impl(ID id);
-      RegionInstance::Impl *get_instance_impl(ID id);
+      IndexSpaceImpl *get_index_space_impl(ID id);
+      RegionInstanceImpl *get_instance_impl(ID id);
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
 
     protected:
     public:
-      Machine::Impl *machine;
+      MachineImpl *machine;
 
       Processor::TaskIDTable task_table;
-      ReductionOpTable reduce_op_table;
+      std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
 
 #ifdef NODE_LOGGING
       static const char *prefix;
@@ -1922,7 +1927,7 @@ namespace LegionRuntime {
 
       std::vector<Realm::Module *> modules;
       Node *nodes;
-      Memory::Impl *global_memory;
+      MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
@@ -1938,8 +1943,8 @@ namespace LegionRuntime {
 #endif
     };
 
-    extern Runtime::Impl *runtime_singleton;
-    inline Runtime::Impl *get_runtime(void) { return runtime_singleton; }
+    extern RuntimeImpl *runtime_singleton;
+    inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
 
     template <typename T>
     StaticAccess<T>::StaticAccess(T* thing_with_data, bool already_valid /*= false*/)

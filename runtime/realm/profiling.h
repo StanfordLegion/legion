@@ -24,13 +24,11 @@
 
 #include "lowlevel.h"
 #include "bytearray.h"
+#include "processor.h"
+#include "memory.h"
+#include "instance.h"
 
 namespace Realm {
-  // hacking in references to old namespace for now
-  typedef LegionRuntime::LowLevel::Processor Processor;
-  typedef LegionRuntime::LowLevel::Memory Memory;
-  typedef LegionRuntime::LowLevel::Processor::TaskFuncID TaskFuncID;
-  typedef LegionRuntime::LowLevel::RegionInstance RegionInstance;
 
   // through the wonders of templates, users should never need to work with 
   //  these IDs directly
@@ -140,7 +138,7 @@ namespace Realm {
 
   class ProfilingRequest {
   public:
-    ProfilingRequest(Processor _response_proc, TaskFuncID _response_task_id);
+    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id);
     ProfilingRequest(const ProfilingRequest& to_copy);
 
     ~ProfilingRequest(void);
@@ -160,7 +158,7 @@ namespace Realm {
     friend class ProfilingMeasurementCollection;
 
     Processor response_proc;
-    TaskFuncID response_task_id;
+    Processor::TaskFuncID response_task_id;
     void *user_data;
     size_t user_data_size;
     std::set<ProfilingMeasurementID> requested_measurements;
@@ -176,7 +174,8 @@ namespace Realm {
 
     ProfilingRequestSet& operator=(const ProfilingRequestSet &rhs);
 
-    ProfilingRequest& add_request(Processor response_proc, TaskFuncID response_task_id,
+    ProfilingRequest& add_request(Processor response_proc, 
+				  Processor::TaskFuncID response_task_id,
 				  const void *payload = 0, size_t payload_size = 0);
 
     size_t request_count(void) const;

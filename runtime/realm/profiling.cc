@@ -24,7 +24,8 @@ namespace Realm {
   // class ProfilingRequest
   //
 
-  ProfilingRequest::ProfilingRequest(Processor _response_proc, TaskFuncID _response_task_id)
+  ProfilingRequest::ProfilingRequest(Processor _response_proc, 
+				     Processor::TaskFuncID _response_task_id)
     : response_proc(_response_proc), response_task_id(_response_task_id)
     , user_data(0), user_data_size(0)
   {}
@@ -213,7 +214,8 @@ namespace Realm {
     return *this;
   }
 
-  ProfilingRequest& ProfilingRequestSet::add_request(Processor response_proc, TaskFuncID response_task_id,
+  ProfilingRequest& ProfilingRequestSet::add_request(Processor response_proc, 
+						     Processor::TaskFuncID response_task_id,
 						     const void *payload /*= 0*/, size_t payload_size /*= 0*/)
   {
     ProfilingRequest *pr = new ProfilingRequest(response_proc, response_task_id);
@@ -282,7 +284,7 @@ namespace Realm {
       Processor resp_proc;
       memcpy(&resp_proc,buffer,sizeof(resp_proc));
       buffer += sizeof(resp_proc);
-      TaskFuncID resp_task;
+      Processor::TaskFuncID resp_task;
       memcpy(&resp_task,buffer,sizeof(resp_task));
       buffer += sizeof(resp_task);
       ProfilingRequest *new_req = new ProfilingRequest(resp_proc, resp_task);
