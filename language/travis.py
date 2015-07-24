@@ -21,15 +21,15 @@ def install_dependencies():
     env = dict(os.environ.iteritems())
 
     if platform.system() == 'Darwin':
-        clang_tarball = 'clang+llvm-3.4.2-x86_64-apple-darwin10.9.xz'
-        clang_dir = os.path.abspath('clang+llvm-3.4.2-x86_64-apple-darwin10.9')
+        clang_tarball = 'clang+llvm-3.5.2-x86_64-apple-darwin.tar.xz'
+        clang_dir = os.path.abspath('clang+llvm-3.5.2-x86_64-apple-darwin')
 
-        print('http://llvm.org/releases/3.4.2/%s' % clang_tarball)
+        print('http://llvm.org/releases/3.5.2/%s' % clang_tarball)
         subprocess.check_call(
-            ['curl', '-O', 'http://llvm.org/releases/3.4.2/%s' % clang_tarball])
+            ['curl', '-O', 'http://llvm.org/releases/3.5.2/%s' % clang_tarball])
         shasum = subprocess.Popen(['shasum', '-c'], stdin=subprocess.PIPE)
         shasum.communicate(
-            'b182ca49f8e4933041daa8ed466f1e4a589708bf  %s' % clang_tarball)
+            '547d9a359258ce918750fd8647cd6e1b47feaa51  %s' % clang_tarball)
         assert shasum.wait() == 0
         subprocess.check_call(['tar', 'xfJ', clang_tarball])
 

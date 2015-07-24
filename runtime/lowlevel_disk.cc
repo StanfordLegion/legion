@@ -25,7 +25,7 @@
 namespace LegionRuntime {
   namespace LowLevel {
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-      : Memory::Impl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
+      : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
       printf("file = %s\n", _file.c_str());
       // do not overwrite an existing file
@@ -132,7 +132,7 @@ namespace LegionRuntime {
 
 #ifdef USE_HDF
     HDFMemory::HDFMemory(Memory _me)
-      : Memory::Impl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
+      : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
     {
     }
 

@@ -130,6 +130,7 @@ namespace LegionRuntime {
       HLR_PART_INDEPENDENCE_TASK_ID,
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
+      HLR_DECREMENT_PENDING_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -165,6 +166,7 @@ namespace LegionRuntime {
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
+        "Decrement Pending Task",                                 \
       };
 
     // Forward declarations for user level objects
@@ -383,6 +385,7 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
     typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<LowLevel::ReductionOpID, const LowLevel::ReductionOpUntyped *> ReductionOpTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
     typedef ::legion_color_t Color;
