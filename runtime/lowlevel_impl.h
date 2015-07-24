@@ -33,6 +33,28 @@
 #define NO_USE_REALMS_NODESET
 #ifdef USE_REALMS_NODESET
 #include "realm/dynamic_set.h"
+
+namespace LegionRuntime {
+  namespace LowLevel {
+#if MAX_NUM_NODES <= 65536
+    typedef DynamicSet<unsigned short> NodeSet;
+#else
+    // possibly unnecessary future-proofing...
+    typedef DynamicSet<unsigned int> NodeSet;
+#endif
+  };
+};
+#else
+namespace LegionRuntime {
+  namespace LowLevel {
+    typedef LegionRuntime::HighLevel::NodeSet NodeSet;
+    //typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
+    //                                          NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
+  };
+};
+namespace Realm {
+  typedef LegionRuntime::HighLevel::NodeSet NodeSet;
+};
 #endif
 
 #include "realm/operation.h"
@@ -79,10 +101,21 @@ namespace Realm {
   class ProfilingRequestSet;
 };
 
+#include "realm/event_impl.h"
+
+// namespace importing for backwards compatibility
 namespace LegionRuntime {
   namespace LowLevel {
-
     typedef Realm::ID ID;
+    typedef Realm::EventWaiter EventWaiter;
+    typedef Realm::EventImpl EventImpl;
+    typedef Realm::GenEventImpl GenEventImpl;
+    typedef Realm::BarrierImpl BarrierImpl;
+  };
+};
+
+namespace LegionRuntime {
+  namespace LowLevel {
 
     extern Logger::Category log_mutex;
 
@@ -116,57 +149,6 @@ namespace LegionRuntime {
     public:
       unsigned time_units, lock_id, owner, action;
     };
-#endif
-
-    template <typename LT>
-    class AutoLock {
-    public:
-      AutoLock(LT &mutex) : mutex(mutex), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", &mutex);
-	mutex.lock();
-	log_mutex.spew("MUTEX LOCK HELD %p", &mutex);
-      }
-
-      ~AutoLock(void) 
-      {
-	if(held)
-	  mutex.unlock();
-	log_mutex.spew("MUTEX LOCK OUT %p", &mutex);
-      }
-
-      void release(void)
-      {
-	assert(held);
-	mutex.unlock();
-	held = false;
-      }
-
-      void reacquire(void)
-      {
-	assert(!held);
-	mutex.lock();
-	held = true;
-      }
-    protected:
-      LT &mutex;
-      bool held;
-    };
-
-    typedef AutoLock<GASNetHSL> AutoHSLLock;
-
-    typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
-                                              NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
-
-#ifdef USE_REALMS_NODESET
-#if MAX_NUM_NODES <= 65536
-    typedef DynamicSet<unsigned short> NodeSet;
-#else
-    // possibly unnecessary future-proofing...
-    typedef DynamicSet<unsigned int> NodeSet;
-#endif
-#else
-    typedef LegionRuntime::HighLevel::NodeSet NodeSet;
 #endif
 
     template <class T>
@@ -223,131 +205,6 @@ namespace LegionRuntime {
       }
     };
      
-    class EventWaiter {
-    public:
-      virtual ~EventWaiter(void) {}
-      virtual bool event_triggered(void) = 0;
-      virtual void print_info(FILE *f) = 0;
-    };
-
-    // parent class of GenEventImpl and BarrierImpl
-    class EventImpl {
-    public:
-      // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen) = 0;
-
-      // causes calling thread to block until event has occurred
-      //void wait(Event::gen_t needed_gen);
-
-      virtual void external_wait(Event::gen_t needed_gen) = 0;
-
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
-
-      static bool add_waiter(Event needed, EventWaiter *waiter);
-    };
-
-    class GenEventImpl : public EventImpl {
-    public:
-      static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
-
-      GenEventImpl(void);
-
-      void init(ID _me, unsigned _init_owner);
-
-      static GenEventImpl *create_genevent(void);
-
-      // get the Event (id+generation) for the current (i.e. untriggered) generation
-      Event current_event(void) const { Event e = me.convert<Event>(); e.gen = generation+1; return e; }
-
-      // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen);
-
-      virtual void external_wait(Event::gen_t needed_gen);
-
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
-
-      // creates an event that won't trigger until all input events have
-      static Event merge_events(const std::set<Event>& wait_for);
-      static Event merge_events(Event ev1, Event ev2,
-				Event ev3 = Event::NO_EVENT, Event ev4 = Event::NO_EVENT,
-				Event ev5 = Event::NO_EVENT, Event ev6 = Event::NO_EVENT);
-
-      // record that the event has triggered and notify anybody who cares
-      void trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on = Event::NO_EVENT);
-
-      // if you KNOW you want to trigger the current event (which by definition cannot
-      //   have already been triggered) - this is quicker:
-      void trigger_current(void);
-
-      void check_for_catchup(Event::gen_t implied_trigger_gen);
-
-    public: //protected:
-      ID me;
-      unsigned owner;
-      Event::gen_t generation, gen_subscribed;
-      GenEventImpl *next_free;
-
-      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
-
-      NodeSet remote_waiters;
-      std::vector<EventWaiter *> local_waiters; // set of local threads that are waiting on event
-    };
-
-    class BarrierImpl : public EventImpl {
-    public:
-      static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
-
-      BarrierImpl(void);
-
-      void init(ID _me, unsigned _init_owner);
-
-      static BarrierImpl *create_barrier(unsigned expected_arrivals, ReductionOpID redopid,
-					 const void *initial_value = 0, size_t initial_value_size = 0);
-
-      // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen);
-
-      virtual void external_wait(Event::gen_t needed_gen);
-
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
-
-      // used to adjust a barrier's arrival count either up or down
-      // if delta > 0, timestamp is current time (on requesting node)
-      // if delta < 0, timestamp says which positive adjustment this arrival must wait for
-      void adjust_arrival(Event::gen_t barrier_gen, int delta, 
-			  Barrier::timestamp_t timestamp, Event wait_on,
-			  const void *reduce_value, size_t reduce_value_size);
-
-      bool get_result(Event::gen_t result_gen, void *value, size_t value_size);
-
-    public: //protected:
-      ID me;
-      unsigned owner;
-      Event::gen_t generation, gen_subscribed;
-      Event::gen_t first_generation, free_generation;
-      BarrierImpl *next_free;
-
-      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
-
-      // class to track per-generation status
-      class Generation;
-
-      std::map<Event::gen_t, Generation *> generations;
-
-      // a list of remote waiters and the latest generation they're interested in
-      // also the latest generation that each node (that has ever subscribed) has been told about
-      std::map<unsigned, Event::gen_t> remote_subscribe_gens, remote_trigger_gens;
-      std::map<Event::gen_t, Event::gen_t> held_triggers;
-
-      unsigned base_arrival_count;
-      ReductionOpID redop_id;
-      const ReductionOpUntyped *redop;
-      char *initial_value;  // for reduction barriers
-
-      unsigned value_capacity; // how many values the two allocations below can hold
-      char *final_values;   // results of completed reductions
-    };
-
     struct ElementMaskImpl {
       //int count, offset;
       typedef unsigned long long uint64;

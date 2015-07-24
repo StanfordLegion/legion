@@ -24,6 +24,43 @@
 #include <stdlib.h>
 #include <vector>
 
+    enum ActiveMessageIDs {
+      FIRST_AVAILABLE = 140,
+      NODE_ANNOUNCE_MSGID,
+      SPAWN_TASK_MSGID,
+      LOCK_REQUEST_MSGID,
+      LOCK_RELEASE_MSGID,
+      LOCK_GRANT_MSGID,
+      EVENT_SUBSCRIBE_MSGID,
+      EVENT_TRIGGER_MSGID,
+      REMOTE_MALLOC_MSGID,
+      REMOTE_MALLOC_RPLID,
+      CREATE_ALLOC_MSGID,
+      CREATE_ALLOC_RPLID,
+      CREATE_INST_MSGID,
+      CREATE_INST_RPLID,
+      VALID_MASK_REQ_MSGID,
+      VALID_MASK_DATA_MSGID,
+      ROLL_UP_TIMER_MSGID,
+      ROLL_UP_DATA_MSGID,
+      CLEAR_TIMER_MSGID,
+      DESTROY_INST_MSGID,
+      REMOTE_WRITE_MSGID,
+      REMOTE_REDUCE_MSGID,
+      REMOTE_WRITE_FENCE_MSGID,
+      DESTROY_LOCK_MSGID,
+      REMOTE_REDLIST_MSGID,
+      MACHINE_SHUTDOWN_MSGID,
+      BARRIER_ADJUST_MSGID,
+      BARRIER_SUBSCRIBE_MSGID,
+      BARRIER_TRIGGER_MSGID,
+      METADATA_REQUEST_MSGID,
+      METADATA_RESPONSE_MSGID, // should really be a reply
+      METADATA_INVALIDATE_MSGID,
+      METADATA_INVALIDATE_RPLID,
+    };
+
+
 enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_KEEP, // use payload pointer, guaranteed to be stable
        PAYLOAD_FREE, // take ownership of payload, free when done
@@ -827,5 +864,39 @@ inline void do_some_polling(void) {}
 inline size_t get_lmb_size(int target_node) { return 0; }
 
 #endif // ifdef USE_GASNET
+
+    template <typename LT>
+    class AutoLock {
+    public:
+      AutoLock(LT &mutex) : mutex(mutex), held(true)
+      { 
+	mutex.lock();
+      }
+
+      ~AutoLock(void) 
+      {
+	if(held)
+	  mutex.unlock();
+      }
+
+      void release(void)
+      {
+	assert(held);
+	mutex.unlock();
+	held = false;
+      }
+
+      void reacquire(void)
+      {
+	assert(!held);
+	mutex.lock();
+	held = true;
+      }
+    protected:
+      LT &mutex;
+      bool held;
+    };
+
+    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
 #endif
