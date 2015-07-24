@@ -15,10 +15,10 @@
 
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
-CC_FLAGS := -DDARWIN
+CC_FLAGS += -DDARWIN
 else
 #use disk unless on DARWIN 
-CC_FLAGS := -DUSE_DISK 
+CC_FLAGS += -DUSE_DISK 
 endif
 
 # If using the general low-level runtime
