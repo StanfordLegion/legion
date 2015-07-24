@@ -149,16 +149,15 @@ namespace LegionRuntime {
       PerThreadTimerData(void)
       {
         thread = pthread_self();
-        gasnet_hsl_init(&mutex);
       }
 
       pthread_t thread;
       std::list<TimerStackEntry> timer_stack;
       std::map<int, double> timer_accum;
-      gasnet_hsl_t mutex;
+      GASNetHSL mutex;
     };
 
-    gasnet_hsl_t timer_data_mutex = GASNET_HSL_INITIALIZER;
+    GASNetHSL timer_data_mutex;
     std::vector<PerThreadTimerData *> timer_data;
     pthread_key_t thread_timer_key;
     //__thread PerThreadTimerData *thread_timer_data;
@@ -282,8 +281,8 @@ namespace LegionRuntime {
       void handle_data(const void *data, size_t datalen);
 
     protected:
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       std::map<int,double> *timerp;
       volatile int count_left;
     };
@@ -334,10 +333,8 @@ namespace LegionRuntime {
     }
 
     MultiNodeRollUp::MultiNodeRollUp(std::map<int,double>& _timers)
-      : timerp(&_timers)
+      : condvar(mutex), timerp(&_timers)
     {
-      gasnet_hsl_init(&mutex);
-      gasnett_cond_init(&condvar);
       count_left = 0;
     }
 
@@ -358,7 +355,7 @@ namespace LegionRuntime {
 	AutoHSLLock al(mutex);
 
 	if(count_left > 0)
-	  gasnett_cond_wait(&condvar, &mutex.lock);
+	  condvar.wait();
       }
       assert(count_left == 0);
     }
@@ -383,7 +380,7 @@ namespace LegionRuntime {
 
       count_left--;
       if(count_left == 0)
-	gasnett_cond_signal(&condvar);
+	condvar.signal();
     }
 
 #ifdef DETAILED_TIMING
@@ -597,7 +594,6 @@ namespace LegionRuntime {
       valid_mask_complete = false;
       valid_mask_event = Event::NO_EVENT;
       valid_mask_event_impl = 0;
-      gasnet_hsl_init(&valid_mask_mutex);
     }
 
     void IndexSpaceImpl::init(IndexSpace _me, IndexSpace _parent,
@@ -617,7 +613,6 @@ namespace LegionRuntime {
       valid_mask_complete = true;
       valid_mask_event = Event::NO_EVENT;
       valid_mask_event_impl = 0;
-      gasnet_hsl_init(&valid_mask_mutex);
       if(_frozen) {
 	avail_mask = 0;
 	locked_data.first_elmt = valid_mask->first_enabled();
@@ -3167,7 +3162,7 @@ namespace LegionRuntime {
     // Reservations 
 
     /*static*/ ReservationImpl *ReservationImpl::first_free = 0;
-    /*static*/ gasnet_hsl_t ReservationImpl::freelist_mutex = GASNET_HSL_INITIALIZER;
+    /*static*/ GASNetHSL ReservationImpl::freelist_mutex;
 
     ReservationImpl::ReservationImpl(void)
     {
@@ -3185,8 +3180,6 @@ namespace LegionRuntime {
       log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id, &count, count);
       mode = 0;
       in_use = false;
-      mutex = new gasnet_hsl_t;
-      gasnet_hsl_init(mutex);
       remote_waiter_mask = NodeSet(); 
       remote_sharer_mask = NodeSet();
       requested = false;
@@ -3989,7 +3982,6 @@ namespace LegionRuntime {
       , usage(0), peak_usage(0), peak_footprint(0)
 #endif
     {
-      gasnet_hsl_init(&mutex);
     }
 
     MemoryImpl::~MemoryImpl(void)
@@ -4366,7 +4358,7 @@ namespace LegionRuntime {
 
     typedef std::map<PartialWriteKey, PartialWriteEntry> PartialWriteMap;
     static PartialWriteMap partial_remote_writes;
-    static gasnet_hsl_t partial_remote_writes_lock = GASNET_HSL_INITIALIZER;
+    static GASNetHSL partial_remote_writes_lock;
 
     struct RemoteWriteArgs : public BaseMedium {
       Memory mem;
@@ -4441,7 +4433,7 @@ namespace LegionRuntime {
         PartialWriteKey key;
         key.sender = args.sender;
         key.sequence_id = args.sequence_id;
-        gasnet_hsl_lock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.lock();
 	PartialWriteMap::iterator it = partial_remote_writes.find(key);
 	if(it == partial_remote_writes.end()) {
 	  // first reference to this one
@@ -4469,13 +4461,13 @@ namespace LegionRuntime {
 	    //  trigger
 	    Event e = entry.event;
 	    partial_remote_writes.erase(it);
-	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    partial_remote_writes_lock.unlock();
 	    if(e.exists())
 	      get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
-        gasnet_hsl_unlock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.unlock();
       }
     }
 
@@ -4535,7 +4527,7 @@ namespace LegionRuntime {
         PartialWriteKey key;
         key.sender = args.sender;
         key.sequence_id = args.sequence_id;
-        gasnet_hsl_lock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.lock();
 	PartialWriteMap::iterator it = partial_remote_writes.find(key);
 	if(it == partial_remote_writes.end()) {
 	  // first reference to this one
@@ -4563,13 +4555,13 @@ namespace LegionRuntime {
 	    //  trigger
 	    Event e = entry.event;
 	    partial_remote_writes.erase(it);
-	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    partial_remote_writes_lock.unlock();
 	    if(e.exists())
 	      get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
-        gasnet_hsl_unlock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.unlock();
       }
     }
 
@@ -4596,7 +4588,7 @@ namespace LegionRuntime {
         PartialWriteKey key;
         key.sender = args.sender;
         key.sequence_id = args.sequence_id;
-        gasnet_hsl_lock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.lock();
 	PartialWriteMap::iterator it = partial_remote_writes.find(key);
 	if(it == partial_remote_writes.end()) {
 	  // first reference to this one
@@ -4627,13 +4619,13 @@ namespace LegionRuntime {
 	    // this fence came after all the writes, so trigger
 	    Event e = entry.event;
 	    partial_remote_writes.erase(it);
-	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    partial_remote_writes_lock.unlock();
 	    if(e.exists())
 	      get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
-        gasnet_hsl_unlock(&partial_remote_writes_lock);
+	partial_remote_writes_lock.unlock();
       }
     }
 
@@ -5889,10 +5881,9 @@ namespace LegionRuntime {
 
     LocalThread::LocalThread(LocalProcessor *p)
       : PreemptableThread(), proc(p), state(RUNNING_STATE),
+	thread_cond(thread_mutex),
         initialize(false), finalize(false)
     {
-      gasnet_hsl_init(&thread_mutex);
-      gasnett_cond_init(&thread_cond);
     }
 
     LocalThread::~LocalThread(void)
@@ -5933,15 +5924,15 @@ namespace LegionRuntime {
       // Take our lock and see if we are still in the paused state
       // It's possible that we've already been woken up so check before
       // going to sleep
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       // If we are in the paused state or the resumable state then we actually
       // do need to go to sleep so we can be woken up by the processor later
       if ((state == PAUSED_STATE) || (state == RESUMABLE_STATE))
       {
-        gasnett_cond_wait(&thread_cond, &thread_mutex.lock);
+	thread_cond.wait();
       }
       assert(state == RUNNING_STATE);
-      gasnet_hsl_unlock(&thread_mutex);
+      thread_mutex.unlock();
 #ifdef EVENT_GRAPH_TRACE
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
       Event enclosing = find_enclosing_termination_event();
@@ -5953,10 +5944,10 @@ namespace LegionRuntime {
 
     bool LocalThread::event_triggered(void)
     {
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       assert(state == PAUSED_STATE);
       state = RESUMABLE_STATE;
-      gasnet_hsl_unlock(&thread_mutex);
+      thread_mutex.unlock();
       // Now tell the processor that this thread is resumable
       proc->resume_thread(this);
       return false;
@@ -5969,26 +5960,26 @@ namespace LegionRuntime {
 
     void LocalThread::awake(void)
     {
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       assert((state == SLEEPING_STATE) || (state == SLEEP_STATE));
       // Only need to signal if the thread is actually asleep
       if (state == SLEEP_STATE)
-        gasnett_cond_signal(&thread_cond);
+	thread_cond.signal();
       state = RUNNING_STATE;
-      gasnet_hsl_unlock(&thread_mutex);
+      thread_mutex.unlock();
     }
 
     void LocalThread::sleep(void)
     {
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       assert((state == SLEEPING_STATE) || (state == RUNNING_STATE));
       // If we haven't been told to stay awake, then go to sleep
       if (state == SLEEPING_STATE) {
         state = SLEEP_STATE;
-        gasnett_cond_wait(&thread_cond, &thread_mutex.lock);
+	thread_cond.wait();
       }
       assert(state == RUNNING_STATE);
-      gasnet_hsl_unlock(&thread_mutex);
+      thread_mutex.unlock();
     }
 
     void LocalThread::prepare_to_sleep(void)
@@ -6000,21 +5991,21 @@ namespace LegionRuntime {
 
     void LocalThread::resume(void)
     {
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       assert(state == RESUMABLE_STATE);
       state = RUNNING_STATE;
-      gasnett_cond_signal(&thread_cond);
-      gasnet_hsl_unlock(&thread_mutex);
+      thread_cond.signal();
+      thread_mutex.unlock();
     }
 
     void LocalThread::shutdown(void)
     {
       // wake up the thread
-      gasnet_hsl_lock(&thread_mutex);
+      thread_mutex.lock();
       state = RUNNING_STATE;
-      gasnett_cond_signal(&thread_cond);
-      gasnet_hsl_unlock(&thread_mutex);
-      // Now wait to joing with the thread
+      thread_cond.signal();
+      thread_mutex.unlock();
+      // Now wait to join with the thread
       void *result;
       pthread_join(thread, &result);
     }
@@ -6023,10 +6014,9 @@ namespace LegionRuntime {
                                    size_t stacksize, const char *name, int _core)
       : ProcessorImpl(_me, _kind), core_id(_core), 
         stack_size(stacksize), processor_name(name),
+	condvar(mutex),
         shutdown(false), shutdown_trigger(false), running_thread(0)
     {
-      gasnet_hsl_init(&mutex);
-      gasnett_cond_init(&condvar);
     }
 
     LocalProcessor::~LocalProcessor(void)
@@ -6048,9 +6038,9 @@ namespace LegionRuntime {
       // we distinguish deadlock from just normal termination
       // from all the processors being idle
       std::vector<LocalThread*> to_shutdown;
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       if (!shutdown_trigger)
-        gasnett_cond_wait(&condvar, &mutex.lock);
+	condvar.wait();
       assert(shutdown_trigger);
       shutdown = true;
       to_shutdown = available_threads;
@@ -6058,7 +6048,7 @@ namespace LegionRuntime {
         to_shutdown.push_back(running_thread);
       assert(resumable_threads.empty());
       assert(paused_threads.empty());
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
       //printf("Processor " IDFMT " needed %ld threads\n", 
       //        proc.id, to_shutdown.size());
       // We can now read this outside the lock since we know
@@ -6106,7 +6096,7 @@ namespace LegionRuntime {
 
     bool LocalProcessor::execute_task(LocalThread *thread)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       // Sanity check, we should be the running thread if we are in here
       assert(thread == running_thread);
       // First check to see if there are any resumable threads
@@ -6123,7 +6113,7 @@ namespace LegionRuntime {
         // Make this the running thread
         running_thread = to_resume;
         // Release the lock
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         // Wake up the resumable thread
         to_resume->resume();
         // Put ourselves to sleep
@@ -6135,7 +6125,7 @@ namespace LegionRuntime {
         thread->prepare_to_sleep();
         available_threads.push_back(thread);
         running_thread = NULL;
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         thread->sleep();
       }
       else
@@ -6147,8 +6137,8 @@ namespace LegionRuntime {
           finished();
           // Mark that we received the shutdown trigger
           shutdown_trigger = true;
-          gasnett_cond_signal(&condvar);
-          gasnet_hsl_unlock(&mutex);
+	  condvar.signal();
+	  mutex.unlock();
           // Trigger the completion task
           if (__sync_fetch_and_add(&(task->run_count),1) == 0)
             get_runtime()->get_genevent_impl(task->finish_event)->
@@ -6157,7 +6147,7 @@ namespace LegionRuntime {
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
         } else {
-          gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
           // Common case: just run the task
           if (__sync_fetch_and_add(&task->run_count,1) == 0)
             thread->run_task(task, me);
@@ -6174,7 +6164,7 @@ namespace LegionRuntime {
       LocalThread *to_wake = 0;
       LocalThread *to_start = 0;
       LocalThread *to_resume = 0;
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       assert(running_thread == thread);
       // Put this on the list of paused threads
       paused_threads.insert(thread);
@@ -6198,7 +6188,7 @@ namespace LegionRuntime {
         // Nothing else to do, so mark that no one is running
         running_thread = 0;
       }
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
       // Wake up any threads while not holding the lock
       if (to_wake)
         to_wake->awake();
@@ -6211,7 +6201,7 @@ namespace LegionRuntime {
     void LocalProcessor::resume_thread(LocalThread *thread)
     {
       bool resume_now = false;
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       std::set<LocalThread*>::iterator finder = 
         paused_threads.find(thread);
       assert(finder != paused_threads.end());
@@ -6224,7 +6214,7 @@ namespace LegionRuntime {
         // Easy case, just add it to the list of resumable threads
         resumable_threads.push_back(thread);
       }
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
       if (resume_now)
         thread->resume();
     }
@@ -6235,7 +6225,7 @@ namespace LegionRuntime {
       task->mark_ready();
       LocalThread *to_wake = 0;
       LocalThread *to_start = 0;
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       task_queue.insert(task, task->priority);
       // Figure out if we need to wake someone up
       if (running_thread == NULL) {
@@ -6248,7 +6238,7 @@ namespace LegionRuntime {
           running_thread = to_start;
         }
       }
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
       if (to_wake)
         to_wake->awake();
       if (to_start)
@@ -6521,11 +6511,11 @@ namespace LegionRuntime {
                                          size_t _stack_size, int init_stack_size,
                                          const char *name, int _core_id)
       : ProcessorImpl(_me, _kind), core_id(_core_id), proc_stack_size(_stack_size), 
-        processor_name(name), shutdown(false), shutdown_trigger(false), 
+        processor_name(name),
+	condvar(mutex),
+	shutdown(false), shutdown_trigger(false), 
         greenlet_thread(0), thread_state(GREENLET_RUNNING)
     {
-      gasnet_hsl_init(&mutex);
-      gasnett_cond_init(&condvar);
     }
 
     GreenletProcessor::~GreenletProcessor(void)
@@ -6541,14 +6531,14 @@ namespace LegionRuntime {
 
     void GreenletProcessor::shutdown_processor(void)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       if (!shutdown_trigger)
-        gasnett_cond_wait(&condvar, &mutex.lock);
+	condvar.wait();
       assert(shutdown_trigger);
       shutdown = true;
       // Signal our thread in case it is asleep
-      gasnett_cond_signal(&condvar);
-      gasnet_hsl_unlock(&mutex);
+      condvar.signal();
+      mutex.unlock();
       greenlet_thread->wait_for_shutdown();
     }
 
@@ -6582,15 +6572,15 @@ namespace LegionRuntime {
     {
       // Mark this task as ready
       task->mark_ready();
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       task_queue.insert(task, task->priority); 
       // Wake someone up if we aren't running
       if (thread_state == GREENLET_IDLE)
       {
         thread_state = GREENLET_RUNNING;
-        gasnett_cond_signal(&condvar);
+	condvar.signal();
       }
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
     }
 
     void GreenletProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -6642,7 +6632,7 @@ namespace LegionRuntime {
 
     bool GreenletProcessor::execute_task(void)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       // We should be running
       assert(thread_state == GREENLET_RUNNING);
       if (!resumable_tasks.empty())
@@ -6650,17 +6640,17 @@ namespace LegionRuntime {
         // If we have tasks that are ready to resume, run them
         GreenletTask *to_resume = resumable_tasks.front();
         resumable_tasks.pop_front();
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         greenlet_thread->resume_task(to_resume);
       }
       else if (task_queue.empty())
       {
         // Nothing to do, so let's go to sleep
         thread_state = GREENLET_IDLE;
-        gasnett_cond_wait(&condvar, &mutex.lock);
+	condvar.wait();
         if (!shutdown)
           assert(thread_state == GREENLET_RUNNING);
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
       }
       else
       {
@@ -6671,8 +6661,8 @@ namespace LegionRuntime {
           finished();
           // Mark that we received the shutdown trigger
           shutdown_trigger = true;
-          gasnett_cond_signal(&condvar);
-          gasnet_hsl_unlock(&mutex);
+	  condvar.signal();
+	  mutex.unlock();
           // Trigger the completion task
           if (__sync_fetch_and_add(&(task->run_count),1) == 0)
             get_runtime()->get_genevent_impl(task->finish_event)->
@@ -6681,7 +6671,7 @@ namespace LegionRuntime {
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
         } else {
-          gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
           if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
             GreenletStack stack;
             if (!allocate_stack(stack))
@@ -6713,7 +6703,7 @@ namespace LegionRuntime {
 
     void GreenletProcessor::pause_task(GreenletTask *paused_task)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       bool found = false;
       // Go through and see if the task is already ready
       for (std::list<GreenletTask*>::reverse_iterator it = 
@@ -6730,7 +6720,7 @@ namespace LegionRuntime {
       // If we found it we're already ready so just return
       if (found)
       {
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         return;
       }
       // Add it to the list of paused tasks
@@ -6741,7 +6731,7 @@ namespace LegionRuntime {
         // Pick a task to resume and run it
         GreenletTask *to_resume = resumable_tasks.front();
         resumable_tasks.pop_front();
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         greenlet_thread->resume_task(to_resume);
       }
       else if (!task_queue.empty())
@@ -6753,8 +6743,8 @@ namespace LegionRuntime {
           finished();
           // Mark that we received the shutdown trigger
           shutdown_trigger = true;
-          gasnett_cond_signal(&condvar);
-          gasnet_hsl_unlock(&mutex);
+	  condvar.signal();
+	  mutex.unlock();
           // Trigger the completion task
           if (__sync_fetch_and_add(&(task->run_count),1) == 0)
             get_runtime()->get_genevent_impl(task->finish_event)->
@@ -6763,7 +6753,7 @@ namespace LegionRuntime {
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
         } else {
-          gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
           if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
             GreenletStack stack;
             if (!allocate_stack(stack))
@@ -6780,7 +6770,7 @@ namespace LegionRuntime {
       }
       else
       {
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         // Nothing to do, send us back to the root at which
         // point we'll likely go to sleep
         greenlet_thread->return_to_root(); 
@@ -6789,15 +6779,15 @@ namespace LegionRuntime {
 
     void GreenletProcessor::unpause_task(GreenletTask *paused_task)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       paused_tasks.erase(paused_task);
       resumable_tasks.push_back(paused_task);
       if (thread_state == GREENLET_IDLE)
       {
         thread_state = GREENLET_RUNNING;
-        gasnett_cond_signal(&condvar);
+	condvar.signal();
       }
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
     }
 
     bool GreenletProcessor::allocate_stack(GreenletStack &stack)
@@ -9098,7 +9088,7 @@ namespace LegionRuntime {
 				      MachineShutdownRequestArgs,
 				      handle_machine_shutdown_request> MachineShutdownRequestMessage;
 
-    static gasnet_hsl_t announcement_mutex = GASNET_HSL_INITIALIZER;
+    static GASNetHSL announcement_mutex;
     static unsigned announcements_received = 0;
 
     enum {
@@ -9127,13 +9117,14 @@ namespace LegionRuntime {
 
       // do the parsing of this data inside a mutex because it touches common
       //  data structures
-      gasnet_hsl_lock(&announcement_mutex);
+      {
+	AutoHSLLock al(announcement_mutex);
 
-      get_machine()->parse_node_announce_data(data, datalen,
-					      annc_data, true);
+	get_machine()->parse_node_announce_data(data, datalen,
+						annc_data, true);
 
-      announcements_received++;
-      gasnet_hsl_unlock(&announcement_mutex);
+	announcements_received++;
+      }
     }
 
     typedef ActiveMessageMediumNoReply<NODE_ANNOUNCE_MSGID,

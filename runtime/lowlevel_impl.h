@@ -118,106 +118,42 @@ namespace LegionRuntime {
     };
 #endif
 
-    // gasnet_hsl_t in object form for templating goodness
-    class GASNetHSL {
+    template <typename LT>
+    class AutoLock {
     public:
-      GASNetHSL(void) { gasnet_hsl_init(&mutex); }
-      // Should never be copied
-      GASNetHSL(const GASNetHSL &rhs) { assert(false); }
-      ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
-
-      // Should never be copied
-      GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
-
-      void lock(void) { gasnet_hsl_lock(&mutex); }
-      void unlock(void) { gasnet_hsl_unlock(&mutex); }
-
-    protected:
-      friend class AutoHSLLock;
-      friend class GASNetCondVar;
-      gasnet_hsl_t mutex;
-    };
-
-    class AutoHSLLock {
-    public:
-      AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
+      AutoLock(LT &mutex) : mutex(mutex), held(true)
       { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", &mutex);
+	mutex.lock();
+	log_mutex.spew("MUTEX LOCK HELD %p", &mutex);
       }
-      AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      AutoHSLLock(GASNetHSL &mutex) : mutexp(&mutex.mutex), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      ~AutoHSLLock(void) 
+
+      ~AutoLock(void) 
       {
 	if(held)
-	  gasnet_hsl_unlock(mutexp);
-	log_mutex.spew("MUTEX LOCK OUT %p", mutexp);
-	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
+	  mutex.unlock();
+	log_mutex.spew("MUTEX LOCK OUT %p", &mutex);
       }
+
       void release(void)
       {
 	assert(held);
-	gasnet_hsl_unlock(mutexp);
+	mutex.unlock();
 	held = false;
       }
+
       void reacquire(void)
       {
 	assert(!held);
-	gasnet_hsl_lock(mutexp);
+	mutex.lock();
 	held = true;
       }
     protected:
-      gasnet_hsl_t *mutexp;
+      LT &mutex;
       bool held;
     };
 
-    class GASNetCondVar {
-    public:
-      GASNetCondVar(GASNetHSL &_mutex) 
-	: mutex(_mutex)
-      {
-	gasnett_cond_init(&cond);
-      }
-
-      ~GASNetCondVar(void)
-      {
-	gasnett_cond_destroy(&cond);
-      }
-
-      // these require that you hold the lock when you call
-      void signal(void)
-      {
-	gasnett_cond_signal(&cond);
-      }
-
-      void wait(void)
-      {
-	gasnett_cond_wait(&cond, &mutex.mutex.lock);
-      }
-
-    public:
-      GASNetHSL &mutex;
-
-    protected:
-      gasnett_cond_t cond;
-    };
+    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
     typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
                                               NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
@@ -238,7 +174,6 @@ namespace LegionRuntime {
     public:
       Atomic(T _value) : value(_value)
       {
-	gasnet_hsl_init(&mutex);
 	//printf("%d: atomic %p = %d\n", gasnet_mynode(), this, value);
       }
 
@@ -254,7 +189,7 @@ namespace LegionRuntime {
 
     protected:
       T value;
-      gasnet_hsl_t mutex;
+      GASNetHSL mutex;
     };
 
     // prioritized list that maintains FIFO order within a priority level
@@ -452,7 +387,7 @@ namespace LegionRuntime {
 
       enum { MODE_EXCL = 0, ZERO_COUNT = 0x11223344 };
 
-      gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible lock)
+      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible lock)
 
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
       NodeSet remote_waiter_mask, remote_sharer_mask;
@@ -465,7 +400,7 @@ namespace LegionRuntime {
       size_t local_data_size;
       bool own_local;
 
-      static gasnet_hsl_t freelist_mutex;
+      static GASNetHSL freelist_mutex;
       static ReservationImpl *first_free;
       ReservationImpl *next_free;
 
@@ -859,8 +794,8 @@ namespace LegionRuntime {
       LocalProcessor *const proc;
     protected:
       ThreadState state;
-      gasnet_hsl_t thread_mutex;
-      gasnett_cond_t thread_cond;
+      GASNetHSL thread_mutex;
+      GASNetCondVar thread_cond;
       bool initialize;
       bool finalize;
     };
@@ -898,8 +833,8 @@ namespace LegionRuntime {
       const int core_id;
       const size_t stack_size;
       const char *const processor_name;
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
@@ -993,8 +928,8 @@ namespace LegionRuntime {
       const size_t proc_stack_size;
       const char *const processor_name;
     protected:
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
@@ -1101,7 +1036,7 @@ namespace LegionRuntime {
       MemoryKind kind;
       size_t alignment;
       Memory::Kind lowlevel_kind;
-      gasnet_hsl_t mutex; // protection for resizing vectors
+      GASNetHSL mutex; // protection for resizing vectors
       std::vector<RegionInstanceImpl *> instances;
       std::map<off_t, off_t> free_blocks;
 #ifdef REALM_PROFILE_MEMORY_USAGE
@@ -1415,7 +1350,7 @@ namespace LegionRuntime {
       };
 
       CoherentData locked_data;
-      gasnet_hsl_t valid_mask_mutex;
+      GASNetHSL valid_mask_mutex;
       ElementMask *valid_mask;
       int valid_mask_count;
       bool valid_mask_complete;

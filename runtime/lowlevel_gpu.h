@@ -197,8 +197,8 @@ namespace LegionRuntime {
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
       std::map<GPUProcessor*,std::deque<GPUJob*> > complete_jobs;
       bool copies_empty, jobs_empty;
-      gasnet_hsl_t   worker_lock;
-      gasnett_cond_t worker_cond;
+      GASNetHSL worker_lock;
+      GASNetCondVar worker_cond;
       bool worker_shutdown_requested;
     };
 
