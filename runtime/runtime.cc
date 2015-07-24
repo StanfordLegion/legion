@@ -583,7 +583,7 @@ namespace LegionRuntime {
     {
       // Should only happen on the owner
 #ifdef DEBUG_HIGH_LEVEL
-      assert(owner);
+      assert(is_owner());
 #endif
       // Clean out any previous results we've save
       if (result != NULL)
@@ -633,7 +633,7 @@ namespace LegionRuntime {
 #endif
       ready_event.trigger();
       // If we're the owner send our result to any remote spaces
-      if (owner)
+      if (is_owner())
         broadcast_result();
     }
 
@@ -719,7 +719,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(owner);
+      assert(is_owner());
 #endif
       Serializer rez;
       {
@@ -793,7 +793,7 @@ namespace LegionRuntime {
     void Future::Impl::register_waiter(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
-      if (owner)
+      if (is_owner())
       {
         bool send_result;
         {
@@ -843,7 +843,7 @@ namespace LegionRuntime {
       // Check to see if the runtime already has this future
       // if not then we need to make one
       Future::Impl *future = runtime->find_or_create_future(did, own_space);
-      future->update_remote_spaces(source); 
+      future->update_remote_instances(source); 
       if (is_complete)
       {
         future->unpack_future(derez);
@@ -1146,9 +1146,6 @@ namespace LegionRuntime {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
-      // Remove any valid references we might have
-      if (!leaf_region && reference.has_ref())
-        reference.remove_valid_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -1391,11 +1388,7 @@ namespace LegionRuntime {
     void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-      if (!leaf_region && reference.has_ref())
-        reference.remove_valid_reference();
       reference = ref;
-      if (!leaf_region && reference.has_ref())
-        reference.add_valid_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -1406,11 +1399,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
-      if (!leaf_region && reference.has_ref())
-        reference.remove_valid_reference();
       reference = ref;
-      if (!leaf_region && reference.has_ref())
-        reference.add_valid_reference();
       termination_event = term_event;
       trigger_on_unmap = true;
     }
@@ -3755,13 +3744,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_back_user(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_USER, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_back_atomic(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -4370,11 +4352,6 @@ namespace LegionRuntime {
               runtime->handle_view_remote_resource_update(derez);
               break;
             }
-          case SEND_BACK_USER:
-            {
-              runtime->handle_send_back_user(derez, remote_address_space);
-              break;
-            }
           case SEND_BACK_ATOMIC:
             {
               runtime->handle_send_back_atomic(derez, remote_address_space);
@@ -4753,7 +4730,6 @@ namespace LegionRuntime {
         distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         distributed_collectable_lock(Reservation::create_reservation()),
-        hierarchical_collectable_lock(Reservation::create_reservation()),
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         future_lock(Reservation::create_reservation()),
         remote_lock(Reservation::create_reservation()),
@@ -5080,8 +5056,6 @@ namespace LegionRuntime {
       distributed_id_lock = Reservation::NO_RESERVATION;
       distributed_collectable_lock.destroy_reservation();
       distributed_collectable_lock = Reservation::NO_RESERVATION;
-      hierarchical_collectable_lock.destroy_reservation();
-      hierarchical_collectable_lock = Reservation::NO_RESERVATION;
       gc_epoch_lock.destroy_reservation();
       gc_epoch_lock = Reservation::NO_RESERVATION;
       future_lock.destroy_reservation();
@@ -11839,8 +11813,7 @@ namespace LegionRuntime {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_valid_update(target,
-                                                           true/*flush*/);
+      find_messenger(target)->send_did_remote_valid_update(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11848,7 +11821,7 @@ namespace LegionRuntime {
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_gc_update(target, true/*flush*/);
+      find_messenger(target)->send_did_remote_gc_update(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11856,7 +11829,7 @@ namespace LegionRuntime {
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_resource_update(target, 
+      find_messenger(target)->send_did_remote_resource_update(rez, 
                                                               true/*flush*/);
     }
 
@@ -11873,7 +11846,7 @@ namespace LegionRuntime {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_valid_update(target,
+      find_messenger(target)->send_view_remote_valid_update(rez,
                                                             true/*flush*/);
     }
 
@@ -11882,7 +11855,7 @@ namespace LegionRuntime {
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_gc_update(target, true/*flush*/);
+      find_messenger(target)->send_view_remote_gc_update(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11890,15 +11863,8 @@ namespace LegionRuntime {
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_resource_update(target, 
+      find_messenger(target)->send_view_remote_resource_update(rez, 
                                                                true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_back_user(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_user(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12432,14 +12398,14 @@ namespace LegionRuntime {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::handle_remote_registration(this, derez, source);
+      DistributedCollectable::handle_did_remote_registration(this,derez,source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_valid_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::handle_remote_valid_update(this, derez);
+      DistributedCollectable::handle_did_remote_valid_update(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -12461,14 +12427,14 @@ namespace LegionRuntime {
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      LogicalView::handle_remote_registration(forest, derez, source);
+      LogicalView::handle_view_remote_registration(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_view_remote_valid_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      LogicalView::handle_remote_valid_update(forest, derez);
+      LogicalView::handle_view_remote_valid_update(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -12483,14 +12449,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_remote_resource_update(forest, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_user(Deserializer &derez, 
-                                        AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_send_back_user(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -13567,8 +13525,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       AutoLock dist_lock(distributed_collectable_lock,1,false/*exclusive*/);
       assert(dist_collectables.find(did) == dist_collectables.end());
-      AutoLock hier_lock(hierarchical_collectable_lock,1,false/*exclusive*/);
-      assert(hier_collectables.find(did) == hier_collectables.end());
 #endif
     }
 

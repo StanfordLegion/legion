@@ -3596,18 +3596,17 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
-      virtual Memory get_location(void) const = 0;
       virtual bool is_persistent(void) const = 0;
     public:
-      static void handle_remote_registration(RegionTreeForest *forest,
-                                             Deserializer &derez,
-                                             AddressSpaceID source);
-      static void handle_remote_valid_update(RegionTreeForest *forest,
-                                             Deserializer &derez);
-      static void handle_remote_gc_update(RegionTreeForest *forest,
-                                          Deserializer &derez);
-      static void handle_remote_resource_update(RegionTreeForest *forest,
-                                                Deserializer &derez);
+      static void handle_view_remote_registration(RegionTreeForest *forest,
+                                                  Deserializer &derez,
+                                                  AddressSpaceID source);
+      static void handle_view_remote_valid_update(RegionTreeForest *forest,
+                                                  Deserializer &derez);
+      static void handle_view_remote_gc_update(RegionTreeForest *forest,
+                                               Deserializer &derez);
+      static void handle_view_remote_resource_update(RegionTreeForest *forest,
+                                                     Deserializer &derez);
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -3628,13 +3627,6 @@ namespace LegionRuntime {
       virtual void collect_users(const std::set<Event> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
                                           const std::set<Event> &term_events);
-    public:
-      void send_back_user(const PhysicalUser &user);
-      virtual void process_send_back_user(AddressSpaceID source,
-                                          PhysicalUser &user) = 0;
-      static void handle_send_back_user(RegionTreeForest *context,
-                                        Deserializer &derez,
-                                        AddressSpaceID source);
     public:
       DistributedID send_state(AddressSpaceID target,
                                const FieldMask &send_mask,
@@ -3721,9 +3713,6 @@ namespace LegionRuntime {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void collect_users(const std::set<Event> &term_events) = 0;
-    public:
-      virtual void process_send_back_user(AddressSpaceID source,
-                                          PhysicalUser &user) = 0;
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
@@ -3824,8 +3813,6 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_users);
-      virtual void process_send_back_user(AddressSpaceID source,
-                                          PhysicalUser &user);
     protected:
       void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
       template<bool ABOVE>
@@ -3940,7 +3927,8 @@ namespace LegionRuntime {
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
-                    RegionTreeNode *node, ReductionManager *manager);
+                    RegionTreeNode *node, ReductionManager *manager,
+                    bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -3973,8 +3961,9 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; } 
-      virtual LogicalView* get_subvew(const ColorPoint &c);
+      virtual LogicalView* get_subview(const ColorPoint &c);
       virtual Memory get_location(void) const;
+      virtual bool is_persistent(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -3984,6 +3973,12 @@ namespace LegionRuntime {
       virtual InstanceRef add_user(PhysicalUser &user);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual void copy_to(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual void copy_from(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual bool has_war_dependence(const RegionUsage &usage, 
+                                      const FieldMask &user_mask);
     public:
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
@@ -3993,8 +3988,6 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_events);
-      virtual void process_send_back_user(AddressSpaceID source,
-                                          PhysicalUser &user);
     public:
       virtual void send_updates(DistributedID remote_did, 
                                 AddressSpaceID target, FieldMask send_mask,
@@ -4066,8 +4059,8 @@ namespace LegionRuntime {
       };
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
-                   AddressSpaceID owner_proc, DistributedID own_did,
-                   RegionTreeNode *node);
+                   AddressSpaceID owner_space, AddressSpaceID local_space,
+                   RegionTreeNode *node, bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -4100,9 +4093,6 @@ namespace LegionRuntime {
     public:
       // Should never be called
       virtual void collect_users(const std::set<Event> &term_events)
-        { assert(false); }
-      virtual void process_send_back_user(AddressSpaceID source,
-                                          PhysicalUser &user)
         { assert(false); }
     public:
       virtual bool is_instance_view(void) const { return false; }
@@ -4239,7 +4229,7 @@ namespace LegionRuntime {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, const FieldMask &mask,
-                    CompositeView *parent = NULL);
+                    bool register_now, CompositeView *parent = NULL);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -4249,6 +4239,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -4388,7 +4379,7 @@ namespace LegionRuntime {
                                   FieldMask &complete_mask);
       void update_parent_info(const FieldMask &mask);
       void update_child_info(CompositeNode *child, const FieldMask &mask);
-      void update_instance_views(InstanceView *view,
+      void update_instance_views(LogicalView *view,
                                  const FieldMask &valid_mask);
     public:
       void issue_update_copies(const MappableInfo &info,
@@ -4456,7 +4447,7 @@ namespace LegionRuntime {
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
-               RegionTreeNode *node, const void *value, 
+               RegionTreeNode *node, bool reg_now, const void *value, 
                size_t value_size, bool value_owner = true,
                FillView *parent = NULL);
       FillView(const FillView &rhs);
@@ -4466,6 +4457,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);

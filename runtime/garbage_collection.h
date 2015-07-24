@@ -166,11 +166,13 @@ namespace LegionRuntime {
       virtual void notify_invalid(void) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
+      inline Event get_destruction_event(void) const 
+        { return destruction_event; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
     public:
       template<typename FUNCTOR>
-      void map_over_remote_instances(FUNCTOR &functor);
+      inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, Event destroy_event);
@@ -183,15 +185,15 @@ namespace LegionRuntime {
       virtual void send_remote_resource_update(AddressSpaceID target,
                                                unsigned count, bool add);
     public:
-      static void handle_remote_registration(Runtime *runtime,
-                                             Deserializer &derez,
-                                             AddressSpaceID source);
-      static void handle_remote_valid_update(Runtime *runtime,
-                                             Deserializer &derez);
-      static void handle_remote_gc_update(Runtime *runtime,
-                                          Deserializer &derez);
-      static void handle_remote_resource_update(Runtime *runtime,
-                                                Deserializer &derez);
+      static void handle_did_remote_registration(Runtime *runtime,
+                                                 Deserializer &derez,
+                                                 AddressSpaceID source);
+      static void handle_did_remote_valid_update(Runtime *runtime,
+                                                 Deserializer &derez);
+      static void handle_did_remote_gc_update(Runtime *runtime,
+                                              Deserializer &derez);
+      static void handle_did_remote_resource_update(Runtime *runtime,
+                                                    Deserializer &derez);
     protected:
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
