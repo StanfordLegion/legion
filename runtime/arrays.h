@@ -496,6 +496,8 @@ namespace LegionRuntime {
       virtual Rect<IDIM> preimage(const Point<ODIM> p) const { assert(0); return Rect<IDIM>(); }//= 0;
       virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); return false; }//= 0;
       
+      virtual int continuous_steps(const Point<IDIM> p, int &direction) const {assert(0); return 0;} // = 0
+
       inline void add_reference(void)
       {
         __sync_fetch_and_add(&references, 1);

@@ -161,6 +161,21 @@ namespace LegionRuntime{
       //long num_flying_aios;
     };
 
+    class GASNetReadRequest : public Request {
+    public:
+      char *dst_buf;
+      off_t offset;
+      size_t size;
+    };
+
+    class GASNetWriteRequest : public Request {
+    public:
+      char *src_buf;
+      off_t offset;
+      size_t size;
+    };
+
+
 #ifdef USE_CUDA
     class GPUtoFBRequest : public Request {
     public:
@@ -213,6 +228,7 @@ namespace LegionRuntime{
     };
 #endif
 
+    typedef class Layouts::XferOrder XferOrder;
     class XferDes {
     public:
       enum XferKind {
@@ -225,13 +241,10 @@ namespace LegionRuntime{
         XFER_GPU_IN_FB,
         XFER_GPU_PEER_FB,
         XFER_MEM_CPY,
+        XFER_GASNET_READ,
+        XFER_GASNET_WRITE,
         XFER_HDF_READ,
         XFER_HDF_WRITE
-      };
-      enum XferOrder {
-        SRC_FIFO,
-        DST_FIFO,
-        ANY_ORDER
       };
     protected:
       uint64_t /*bytes_submit, */bytes_read, bytes_write, bytes_total;
@@ -258,7 +271,7 @@ namespace LegionRuntime{
       // XferKind of the Xfer Descriptor
       XferKind kind;
       // XferOrder of the Xfer Descriptor
-      XferOrder order;
+      XferOrder::Type order;
       // channel this XferDes describes
       Channel* channel;
       // priority of the containing XferDes
@@ -269,6 +282,12 @@ namespace LegionRuntime{
       virtual ~XferDes() {};
 
       virtual long get_requests(Request** requests, long nr) = 0;
+
+      template<unsigned DIM>
+      bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
+                              Layouts::GenericLayoutIterator<DIM>* li,
+                              int &offset_idx, int available_slots);
+
 
       template<unsigned DIM>
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
@@ -466,7 +485,7 @@ namespace LegionRuntime{
                     Buffer* _src_buf, Buffer* _dst_buf,
                     const char *_src_mem_base, const char *_dst_mem_base,
                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                    uint64_t max_req_size, long max_nr, XferOrder _order);
+                    uint64_t max_req_size, long max_nr, XferOrder::Type _order);
 
       ~MemcpyXferDes()
       {
@@ -475,8 +494,6 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
-        delete dsi;
-        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -488,12 +505,46 @@ namespace LegionRuntime{
     private:
       MemcpyRequest* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
-      int done, offset_idx, block_start, total;
-      Rect<1> orect, irect;
+      Layouts::GenericLayoutIterator<DIM>* li;
+      int offset_idx;
       const char *src_mem_base;
       const char *dst_mem_base;
     };
+
+    template<unsigned DIM>
+    class GASNetXferDes : public XferDes {
+    public:
+      GASNetXferDes(Channel* _channel, bool has_pre_XferDes,
+                    Buffer* _src_buf, Buffer* _dst_buf,
+                    const char *_mem_base,
+                    Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                    uint64_t _max_req_size, long max_nr,
+                    XferOrder::Type _order, XferKind _kind);
+
+      ~GASNetXferDes()
+      {
+        delete src_buf;
+        if(!next_XferDes)
+          delete dst_buf;
+        free(requests);
+        delete dsi;
+        delete dso;
+        // trigger completion event
+        get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+
+    private:
+      Request* requests;
+      std::map<int64_t, uint64_t> segments_read, segments_write;
+      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
+      int done, offset_idx, block_start, total;
+      Rect<1> orect, irect;
+    };
+
 #ifdef USE_DISK
     template<unsigned DIM>
     class DiskXferDes : public XferDes {
@@ -503,7 +554,7 @@ namespace LegionRuntime{
                   const char *_mem_base, int _fd,
                   Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                   uint64_t _max_req_size, long max_nr,
-                  XferOrder _order, XferKind _kind);
+                  XferOrder::Type _order, XferKind _kind);
 
       ~DiskXferDes() {
         // deallocate buffers
@@ -540,7 +591,7 @@ namespace LegionRuntime{
                  char* _src_mem_base, char* _dst_mem_base,
                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                  uint64_t _max_req_size, long max_nr,
-                 XferOrder _order, XferKind _kind,
+                 XferOrder::Type _order, XferKind _kind,
                  GPUProcessor* _dst_gpu = NULL);
       ~GPUXferDes()
       {
@@ -579,7 +630,7 @@ namespace LegionRuntime{
                  Buffer* src_buf, Buffer* _dst_buf,
                  char* _mem_base, HDFMemory::HDFMetadata* hdf_metadata,
                  Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
-                 long max_nr, XferOrder _order, XferKind _kind);
+                 long max_nr, XferOrder::Type _order, XferKind _kind);
       ~HDFXferDes()
       {
         //deallocate buffers
@@ -651,6 +702,18 @@ namespace LegionRuntime{
       //MemcpyRequest** cbs;
     };
 
+    class GASNetChannel : public Channel {
+    public:
+      GASNetChannel(long max_nr, XferDes::XferKind _kind);
+      ~GASNetChannel();
+      long submit(Request** requests, long nr);
+      void pull();
+      long available();
+    private:
+      long capacity;
+    };
+
+
 #ifdef USE_DISK
     class DiskChannel : public Channel {
     public:
@@ -704,6 +767,7 @@ namespace LegionRuntime{
     public:
       ChannelManager(void) {
         memcpy_channel = NULL;
+        gasnet_read_channel = gasnet_write_channel = NULL;
 #ifdef USE_DISK
         disk_read_channel = NULL;
         disk_write_channel = NULL;
@@ -716,6 +780,10 @@ namespace LegionRuntime{
       ~ChannelManager(void) {
         if (memcpy_channel)
           delete memcpy_channel;
+        if (gasnet_read_channel)
+          delete gasnet_read_channel;
+        if (gasnet_write_channel)
+          delete gasnet_write_channel;
 #ifdef USE_DISK
         if (disk_read_channel)
           delete disk_read_channel;
@@ -742,6 +810,16 @@ namespace LegionRuntime{
         assert(memcpy_channel == NULL);
         memcpy_channel = new MemcpyChannel(max_nr);
         return memcpy_channel;
+      }
+      GASNetChannel* create_gasnet_read_channel(long max_nr) {
+        assert(gasnet_read_channel == NULL);
+        gasnet_read_channel = new GASNetChannel(max_nr, XferDes::XFER_GASNET_READ);
+        return gasnet_read_channel;
+      }
+      GASNetChannel* create_gasnet_write_channel(long max_nr) {
+        assert(gasnet_write_channel == NULL);
+        gasnet_write_channel = new GASNetChannel(max_nr, XferDes::XFER_GASNET_WRITE);
+        return gasnet_write_channel;
       }
 #ifdef USE_DISK
       DiskChannel* create_disk_read_channel(long max_nr) {
@@ -788,6 +866,12 @@ namespace LegionRuntime{
       MemcpyChannel* get_memcpy_channel() {
         return memcpy_channel;
       }
+      GASNetChannel* get_gasnet_read_channel() {
+        return gasnet_read_channel;
+      }
+      GASNetChannel* get_gasnet_write_channel() {
+        return gasnet_write_channel;
+      }
 #ifdef USE_DISK
       DiskChannel* get_disk_read_channel() {
         return disk_read_channel;
@@ -832,6 +916,7 @@ namespace LegionRuntime{
 #endif
     public:
       MemcpyChannel* memcpy_channel;
+      GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
 #ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
 #endif /*USE_DISK*/
@@ -885,13 +970,13 @@ namespace LegionRuntime{
         free(requests);
         pthread_mutex_destroy(&enqueue_lock);
       }
-      void dma_therad_loop();
+      void dma_thread_loop();
       // Thread start function that takes an input of DMAThread
       // instance, and start to execute the requests from XferDes
       // by using its channels.
       static void* start(void* arg) {
         DMAThread* dma_thread = (DMAThread*) arg;
-        dma_thread->dma_therad_loop();
+        dma_thread->dma_thread_loop();
         return NULL;
       }
 

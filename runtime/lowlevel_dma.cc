@@ -2743,7 +2743,7 @@ namespace LegionRuntime {
             XferDes* xd = new MemcpyXferDes<DIM>(channel_manager->get_memcpy_channel(), false,
                                             src_buf, dst_buf, src_mem_base, dst_mem_base,
                                             domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                            100/*max_nr*/, XferDes::DST_FIFO);
+                                            100/*max_nr*/, XferOrder::DST_FIFO);
             path.push_back(xd);
             break;
           }
@@ -2754,7 +2754,7 @@ namespace LegionRuntime {
             XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
                                          src_buf, dst_buf, src_mem_base, NULL /*dst_mem_base*/,
                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                         100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_GPU_TO_FB);
+                                         100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_TO_FB);
             path.push_back(xd);
             break;
           }
@@ -2767,7 +2767,7 @@ namespace LegionRuntime {
             XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), false,
                                           src_buf, dst_buf, src_mem_base, dst_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_WRITE);
+                                          100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_WRITE);
             path.push_back(xd);
             break;
           }
@@ -2782,7 +2782,7 @@ namespace LegionRuntime {
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
                                               src_buf, dst_buf, src_mem_base, hdf_metadata,
                                               domain, oasvec, 100/*max_nr*/,
-                                              XferDes::DST_FIFO, XferDes::XFER_HDF_WRITE);
+                                              XferOrder::DST_FIFO, XferDes::XFER_HDF_WRITE);
             path.push_back(xd);
             break;
           }
@@ -2814,7 +2814,7 @@ namespace LegionRuntime {
             XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_from_fb_channel(src_gpu), false,
                                               src_buf, dst_buf, NULL, dst_mem_base,
                                               domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                              100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_GPU_FROM_FB);
+                                              100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_FROM_FB);
             path.push_back(xd);
             break;
           }
@@ -2850,7 +2850,7 @@ namespace LegionRuntime {
             XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                           src_buf, dst_buf, dst_mem_base, src_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_READ);
+                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_READ);
             path.push_back(xd);
             break;
           }
@@ -2890,11 +2890,11 @@ namespace LegionRuntime {
             XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
             XferDes* xd2 = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), true,
                                           ib_buf, dst_buf, ib_mem_base, NULL/*dst_mem_base*/,
                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
+                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
             path.push_back(xd1);
             path.push_back(xd2);
             break;

@@ -59,6 +59,49 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
+      bool XferDes::simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
+                              Layouts::GenericLayoutIterator<DIM>* li,
+                              int &offset_idx, int available_slots)
+      {
+        assert(offset_idx < oas_vec.size());
+        assert(li->any_left());
+        int src_idx, dst_idx;
+        // cannot exceed the max_req_size
+        int todo = min(max_req_size / oas_vec[offset_idx].size, li->continuous_steps(src_idx, dst_idx));
+        int src_in_block = src_buf->block_size - src_idx % src_buf->block_size;
+        int dst_in_block = dst_buf->block_size - dst_idx % dst_buf->block_size;
+        todo = min(todo, min(src_in_block, dst_in_block));
+        src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                 src_buf->elmt_size, src_buf->block_size, src_idx);
+        dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                 dst_buf->elmt_size, dst_buf->block_size, dst_idx);
+        bool scatter_src_ib = false, scatter_dst_ib = false;
+        // make sure we have source data ready
+        if (src_buf->is_ib) {
+          todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+          scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf->buf_size);
+        }
+        // make sure there are enough space in destination
+        if (dst_buf->is_ib) {
+          todo = min(todo, max(0, next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
+          scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf->buf_size);
+        }
+        if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
+        ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
+          return false; // case we don't have enough slots
+
+        src_start += src_buf->alloc_offset;
+        dst_start += dst_buf->alloc_offset;
+        nbytes = todo * oas_vec[offset_idx].size;
+        li->move(todo);
+        if (!li->any_left()) {
+          li->reset();
+          offset_idx ++;
+        }
+        return true;
+      }
+
+      template<unsigned DIM>
       bool XferDes::simple_get_request(
                     off_t &src_start, off_t &dst_start, size_t &nbytes,
                     Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
@@ -109,19 +152,19 @@ namespace LegionRuntime {
         }
 
         if (nbytes > 0 &&
-        (((done + irect.lo) % src_buf->block_size == 0 && done + irect.lo > block_start && order == SRC_FIFO)
-        ||((done + orect.lo) % dst_buf->block_size == 0 && done + orect.lo > block_start && order == DST_FIFO)
+        (((done + irect.lo) % src_buf->block_size == 0 && done + irect.lo > block_start && order == XferOrder::SRC_FIFO)
+        ||((done + orect.lo) % dst_buf->block_size == 0 && done + orect.lo > block_start && order == XferOrder::DST_FIFO)
         || (done == total))) {
           offset_idx ++;
           if (offset_idx < oas_vec.size()) {
             switch (order) {
-              case SRC_FIFO:
+              case XferOrder::SRC_FIFO:
                 done = block_start - irect.lo;
                 break;
-              case DST_FIFO:
+              case XferOrder::DST_FIFO:
                 done = block_start - orect.lo;
                 break;
-              case ANY_ORDER:
+              case XferOrder::ANY_ORDER:
                 assert(0);
                 break;
               default:
@@ -131,7 +174,7 @@ namespace LegionRuntime {
           else {
             int new_block_start;
             switch (order) {
-              case SRC_FIFO:
+              case XferOrder::SRC_FIFO:
                 new_block_start = block_start + src_buf->block_size;
                 new_block_start = new_block_start - new_block_start % src_buf->block_size;
                 block_start = new_block_start;
@@ -154,7 +197,7 @@ namespace LegionRuntime {
                   }
                 }
                 break;
-              case DST_FIFO:
+              case XferOrder::DST_FIFO:
                 new_block_start = block_start + dst_buf->block_size;
                 new_block_start = new_block_start - new_block_start % dst_buf->block_size;
                 block_start = new_block_start;
@@ -177,7 +220,7 @@ namespace LegionRuntime {
                   }
                 }
                 break;
-              case ANY_ORDER:
+              case XferOrder::ANY_ORDER:
                 assert(0);
                 break;
               default:
@@ -233,13 +276,12 @@ namespace LegionRuntime {
         }
       }
 
-
       template<unsigned DIM>
       MemcpyXferDes<DIM>::MemcpyXferDes(Channel* _channel, bool has_pre_XferDes,
                                         Buffer* _src_buf, Buffer* _dst_buf,
                                         const char* _src_mem_base, const char* _dst_mem_base,
                                         Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr, XferOrder _order)
+                                        uint64_t _max_req_size, long max_nr, XferOrder::Type _order)
       {
         kind = XferDes::XFER_MEM_CPY;
         channel = _channel;
@@ -266,28 +308,9 @@ namespace LegionRuntime {
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
         order = _order;
-        Rect<DIM> subrect_check;
-        switch (order) {
-          case SRC_FIFO:
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-            orect = dso->image;
-            irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
-            break;
-          case DST_FIFO:
-            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
-            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
-            irect = dsi->image;
-            orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
-            break;
-          case ANY_ORDER:
-            assert(0);
-            break;
-          default:
-            assert(0);
-        }
+        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf->linearization.get_mapping<DIM>(),
+                                                     dst_buf->linearization.get_mapping<DIM>(), order);
+        offset_idx = 0;
         requests = (MemcpyRequest*) calloc(max_nr, sizeof(MemcpyRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
@@ -301,10 +324,10 @@ namespace LegionRuntime {
       {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
+        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
           //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
@@ -351,6 +374,50 @@ namespace LegionRuntime {
         simple_update_bytes_write(mc_req->dst_buf - dst_mem_base, mc_req->nbytes, segments_write);
         available_reqs.push(req);
       }
+
+      GASNetChannel::GASNetChannel(long max_nr, XferDes::XferKind _kind)
+      {
+        kind = _kind;
+        capacity = max_nr;
+      }
+
+      GASNetChannel::~GASNetChannel()
+      {
+      }
+
+      long GASNetChannel::submit(Request** requests, long nr)
+      {
+        switch (kind) {
+          case XferDes::XFER_GASNET_READ:
+            for (int i = 0; i < nr; i++) {
+              GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
+              get_runtime()->global_memory->get_bytes(read_req->offset, read_req->dst_buf, read_req->size);
+              read_req->xd->notify_request_read_done(read_req);
+              read_req->xd->notify_request_write_done(read_req);
+            }
+            break;
+          case XferDes::XFER_GASNET_WRITE:
+            for (int i = 0; i < nr; i++) {
+              GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
+              get_runtime()->global_memory->put_bytes(write_req->offset, write_req->src_buf, write_req->size);
+              write_req->xd->notify_request_read_done(write_req);
+              write_req->xd->notify_request_write_done(write_req);
+            }
+            break;
+          default:
+            assert(0);
+        }
+        return nr;
+      }
+
+      void GASNetChannel::pull()
+      {
+      }
+
+      long GASNetChannel::available()
+      {
+        return capacity;
+      }
 #ifdef USE_DISK
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
@@ -358,7 +425,7 @@ namespace LegionRuntime {
                                     const char *_mem_base, int _fd,
                                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                     uint64_t _max_req_size, long max_nr,
-                                    XferOrder _order, XferKind _kind)
+                                    XferOrder::Type _order, XferKind _kind)
       {
         kind = _kind;
         channel = _channel;
@@ -388,21 +455,21 @@ namespace LegionRuntime {
 
         Rect<DIM> subrect_check;
         switch (order) {
-          case SRC_FIFO:
+          case XferOrder::SRC_FIFO:
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
             done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
-          case DST_FIFO:
+          case XferOrder::DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
             done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
-          case ANY_ORDER:
+          case XferOrder::ANY_ORDER:
             assert(0);
             break;
           default:
@@ -447,7 +514,7 @@ namespace LegionRuntime {
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
-            size_t req_size = nbytes;
+            size_t req_size = umin(nbytes, max_req_size);
             if (src_buf->is_ib) {
               src_start = src_start % src_buf->buf_size;
               req_size = umin(req_size, src_buf->buf_size - src_start);
@@ -544,7 +611,7 @@ namespace LegionRuntime {
                                   char* _src_mem_base, char* _dst_mem_base,
                                   Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                   uint64_t _max_req_size, long max_nr,
-                                  XferOrder _order, XferKind _kind,
+                                  XferOrder::Type _order, XferKind _kind,
                                   GPUProcessor* _dst_gpu)
       {
         kind = _kind;
@@ -576,21 +643,21 @@ namespace LegionRuntime {
 
         Rect<DIM> subrect_check;
         switch (order) {
-          case SRC_FIFO:
+          case XferOrder::SRC_FIFO:
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
             orect = dso->image;
             irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
             done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi[0] - irect.lo[0] + 1;
             break;
-          case DST_FIFO:
+          case XferOrder::DST_FIFO:
             dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
             dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
             irect = dsi->image;
             orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
             done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi[0] - orect.lo[0] + 1;
             break;
-          case ANY_ORDER:
+          case XferOrder::ANY_ORDER:
             assert(0);
             break;
           default:
@@ -654,7 +721,7 @@ namespace LegionRuntime {
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
-            size_t req_size = nbytes;
+            size_t req_size = umin(nbytes, max_req_size);
             if (src_buf->is_ib) {
               src_start = src_start % src_buf->buf_size;
               req_size = umin(req_size, src_buf->buf_size - src_start);
@@ -779,7 +846,7 @@ namespace LegionRuntime {
                                   Buffer* _src_buf, Buffer* _dst_buf,
                                   char* _mem_base, HDFMemory::HDFMetadata* _hdf_metadata,
                                   Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  long max_nr, XferOrder _order, XferKind _kind)
+                                  long max_nr, XferOrder::Type _order, XferKind _kind)
       {
         kind = _kind;
         channel = _channel;
@@ -1375,7 +1442,8 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
-      void DMAThread::dma_therad_loop() {
+      void DMAThread::dma_thread_loop()
+      {
         while (!is_stopped) {
           bool is_empty = true;
           std::map<Channel*, PriorityXferDesQueue*>::iterator it;

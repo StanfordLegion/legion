@@ -29,6 +29,8 @@
 #include "accessor.h"
 #include "arrays.h"
 
+#define USE_DISK
+
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
