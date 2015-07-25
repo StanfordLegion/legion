@@ -1796,19 +1796,25 @@ namespace LegionRuntime {
     public:
       CompositeNode* get_composite_node(RegionTreeNode *tree_node,
                                         CompositeNode *parent);
-      void update_reduction_views(ReductionView *view,
-                                  const FieldMask &valid_fields);
-      void update_valid_views(PhysicalState *state,
-                              CompositeNode *root,
-                              const FieldMask &closed_mask);
+      void create_valid_view(PhysicalState *state,
+                             CompositeNode *root,
+                             const FieldMask &closed_mask);
+      void capture_physical_state(CompositeNode *target,
+                                  RegionTreeNode *node,
+                                  PhysicalState *state,
+                                  const FieldMask &capture_mask,
+                                  FieldMask &dirty_mask);
+      void update_capture_mask(RegionTreeNode *node,
+                               const FieldMask &capture_mask);
+      void filter_capture_mask(RegionTreeNode *node,
+                               FieldMask &capture_mask);
     public:
       const ContextID ctx;
       const bool permit_leave_open;
       VersionInfo &version_info;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
-      LegionMap<CompositeNode*,FieldMask>::aligned collapsed_nodes;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
     };
 
     /**
@@ -3608,16 +3614,6 @@ namespace LegionRuntime {
       static void handle_view_remote_resource_update(RegionTreeForest *forest,
                                                      Deserializer &derez);
     public:
-      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
-                                           const FieldMask &copy_mask,
-                     LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
-      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user) = 0;
-      virtual bool reduce_to(ReductionOpID redop, 
-                             const FieldMask &reduce_mask,
-                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
-    public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
@@ -3697,27 +3693,33 @@ namespace LegionRuntime {
       virtual Memory get_location(void) const = 0;
       virtual bool is_persistent(void) const = 0;
     public:
+      // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading) = 0;
       virtual InstanceRef add_user(PhysicalUser &user) = 0;
-      virtual bool reduce_to(ReductionOpID redop, 
-                             const FieldMask &reduce_mask,
-                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
+      // Reference counting state change functions
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
+      // Instance recycling
       virtual void collect_users(const std::set<Event> &term_events) = 0;
     public:
+      // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+      virtual bool reduce_to(ReductionOpID redop, 
+                             const FieldMask &reduce_mask,
+                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+      virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
+                       std::vector<Domain::CopySrcDstField> &src_fields) = 0;
       virtual bool has_war_dependence(const RegionUsage &usage, 
                                       const FieldMask &user_mask) = 0;
     public:
@@ -3789,6 +3791,8 @@ namespace LegionRuntime {
                    std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
+                       std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool has_war_dependence(const RegionUsage &usage, 
                               const FieldMask &user_mask);
     public:
@@ -3934,7 +3938,7 @@ namespace LegionRuntime {
     public:
       ReductionView& operator=(const ReductionView&rhs);
     public:
-      void perform_reduction(LogicalView *target, const FieldMask &copy_mask, 
+      void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              Processor local_proc, Operation *op,
                              CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
@@ -4073,18 +4077,6 @@ namespace LegionRuntime {
       // Deferred views are never persistent
       virtual bool is_persistent(void) const { return false; }
     public:
-      // These virtual function should never be called for deferred views
-      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
-                                           const FieldMask &copy_mask,
-                      LegionMap<Event,FieldMask>::aligned &preconditions)
-        { assert(false); }
-      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading)
-                                 { assert(false); }
-      virtual InstanceRef add_user(PhysicalUser &user);
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &reduce_mask,
-                             std::vector<Domain::CopySrcDstField> &src_fields)
-        { assert(false); return false; }
     public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;
@@ -4105,17 +4097,6 @@ namespace LegionRuntime {
       virtual bool is_fill_view(void) const = 0;
       virtual FillView* as_fill_view(void) const = 0;
       virtual CompositeView* as_composite_view(void) const = 0;
-    public:
-      // Deferred instances should never be copied to or from directly
-      virtual void copy_to(const FieldMask &copy_mask,
-                    std::vector<Domain::CopySrcDstField> &dst_fields)
-        { assert(false); }
-      virtual void copy_from(const FieldMask &copy_mask,
-                    std::vector<Domain::CopySrcDstField> &src_fields)
-        { assert(false); }
-      virtual bool has_war_dependence(const RegionUsage &usage,
-                                      const FieldMask &user_mask)
-        { assert(false); return false; }
     public:
       void update_reduction_views(ReductionView *view, 
                                   const FieldMask &valid_mask,
@@ -4254,6 +4235,8 @@ namespace LegionRuntime {
         { return const_cast<CompositeView*>(this); }
     public:
       void update_valid_mask(const FieldMask &mask);
+      CompositeView* flatten_composite_view(FieldMask &global_dirt,
+              const FieldMask &flatten_mask, CompositeCloser &closer);
     public:
       virtual void find_field_descriptors(PhysicalUser &user,
                                           unsigned fid_idx,
@@ -4376,11 +4359,22 @@ namespace LegionRuntime {
                                   const FieldMask &capture_mask,
                                   CompositeCloser &closer,
                                   FieldMask &global_dirty,
-                                  FieldMask &complete_mask);
+                                  const FieldMask &other_dirty_mask,
+                                  const FieldMask &other_reduction_mask,
+                const LegionMap<LogicalView*,FieldMask,
+                        VALID_VIEW_ALLOC>::track_aligned &other_valid_views,
+                const LegionMap<ReductionView*,FieldMask,
+                  VALID_REDUCTION_ALLOC>::track_aligned &other_reduction_views);
+      CompositeNode* flatten(const FieldMask &flatten_mask, 
+                             CompositeCloser &closer,
+                             CompositeNode *parent,
+                             FieldMask &global_dirt);
       void update_parent_info(const FieldMask &mask);
       void update_child_info(CompositeNode *child, const FieldMask &mask);
       void update_instance_views(LogicalView *view,
                                  const FieldMask &valid_mask);
+      void update_reduction_views(ReductionView*,
+                                  const FieldMask &reduc_mask);
     public:
       void issue_update_copies(const MappableInfo &info,
                                MaterializedView *dst,
@@ -4411,13 +4405,18 @@ namespace LegionRuntime {
                                   std::set<Event> &preconditions,
                              std::vector<LowLevel::IndexSpace> &already_handled,
                                   std::set<Event> &already_preconditions);
-  public:
+    public:
       void add_gc_references(void);
       void remove_gc_references(void);
       void add_valid_references(void);
       void remove_valid_references(void);
     protected:
       bool dominates(RegionTreeNode *dst);
+      template<typename MAP_TYPE>
+      void capture_instances(const FieldMask &capture_mask, 
+                             FieldMask &need_flatten,
+          LegionMap<CompositeView*,FieldMask>::aligned &to_flatten,
+          const MAP_TYPE &instances);
     public:
       void pack_composite_node(Serializer &rez, bool send_back,
                                AddressSpaceID target,
@@ -4432,8 +4431,12 @@ namespace LegionRuntime {
     protected:
       DistributedID owner_did;
       FieldMask dirty_mask;
+      FieldMask reduction_mask;
       LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
+      LegionMap<LogicalView*,FieldMask,
+                VALID_VIEW_ALLOC>::track_aligned valid_views;
+      LegionMap<ReductionView*,FieldMask,
+                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     };
 
     /**
