@@ -11682,6 +11682,14 @@ namespace LegionRuntime {
                                    closed_mask, true/*register now*/);
       // Set the root value
       composite_view->add_root(root, closed_mask, true/*top*/);
+      if (!reduction_views.empty())
+      {
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          composite_view->update_reduction_views(it->first, it->second);
+        }
+      }
       // Now update the state of the node
       node->update_valid_views(state,closed_mask,true/*dirty*/,composite_view);
     }
@@ -11697,8 +11705,27 @@ namespace LegionRuntime {
       // Do the capture and then update capture mask
       target->capture_physical_state(node, state, capture_mask, *this,
                                      dirty_mask, state->dirty_mask,
-                                     state->reduction_mask, state->valid_views,
-                                     state->reduction_views);
+                                     state->valid_views);
+      // Capture any reduction views
+      FieldMask reduction_capture = capture_mask & state->reduction_mask;
+      if (!!reduction_capture)
+      {
+        dirty_mask |= reduction_capture;
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
+        {
+          FieldMask overlap = capture_mask & it->second;
+          if (!overlap)
+            continue;
+          LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
+            reduction_views.find(it->first);
+          if (finder == reduction_views.end())
+            reduction_views[it->first] = overlap;
+          else
+            finder->second |= overlap;
+        }
+      }
       // Record that we've captured the fields for this node
       update_capture_mask(node, capture_mask);
     }
@@ -24492,6 +24519,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DeferredView::update_reduction_epochs(const ReductionEpoch &epoch,
+                                               const FieldMask &epoch_mask)
+    //--------------------------------------------------------------------------
+    {
+      // This should be the parent and have no children
+#ifdef DEBUG_HIGH_LEVEL
+      assert(get_parent() == NULL);
+#endif
+      reduction_epochs.push_back(epoch);
+      ReductionEpoch &last = reduction_epochs.back();
+      last.valid_fields = epoch_mask;
+    }
+
+    //--------------------------------------------------------------------------
     void DeferredView::update_reduction_views_above(ReductionView *view,
                                                     const FieldMask &valid,
                                                     DeferredView *from_child)
@@ -25216,6 +25257,18 @@ namespace LegionRuntime {
             new_roots.begin(); it != new_roots.end(); it++)
       {
         result->add_root(it->first, it->second, true/*top*/);
+      }
+      // See if we have any reduction views to update as well
+      if (!reduction_epochs.empty())
+      {
+        for (LegionDeque<ReductionEpoch>::aligned::const_iterator it = 
+              reduction_epochs.begin(); it != reduction_epochs.end(); it++)
+        {
+          FieldMask overlap = it->valid_fields & flatten_mask; 
+          if (!overlap)
+            continue;
+          result->update_reduction_epochs(*it, overlap);
+        }
       }
 #ifdef UNIMPLEMENTED_VERSIONING
       // TODO: As an optimization, send the new composite view to all the 
@@ -25959,21 +26012,16 @@ namespace LegionRuntime {
                                                CompositeCloser &closer,
                                                FieldMask &global_dirt,
                                              const FieldMask &other_dirty_mask,
-                                         const FieldMask &other_reduction_mask,
             const LegionMap<LogicalView*,FieldMask,
-                            VALID_VIEW_ALLOC>::track_aligned &other_valid_views,
-            const LegionMap<ReductionView*,FieldMask,
-                   VALID_REDUCTION_ALLOC>::track_aligned &other_reduction_views)
+                            VALID_VIEW_ALLOC>::track_aligned &other_valid_views)
     //--------------------------------------------------------------------------
     {
       // Capture the global dirt we are passing back
-      global_dirt |= capture_mask & (other_dirty_mask | other_reduction_mask);
+      global_dirt |= (capture_mask & other_dirty_mask);
       // Also track the fields that we have dirty data for
       FieldMask local_dirty = capture_mask & other_dirty_mask;
       // Record the local dirty fields
       dirty_mask |= local_dirty;
-      // Update the reduction mask
-      reduction_mask |= (capture_mask & other_reduction_mask);
       LegionMap<CompositeView*,FieldMask>::aligned to_flatten;
       FieldMask need_flatten = capture_mask;
       if ((parent == NULL) && (state != NULL))
@@ -26016,15 +26064,6 @@ namespace LegionRuntime {
               break;
           }
         }
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            other_reduction_views.begin(); it != 
-            other_reduction_views.end(); it++)
-      {
-        FieldMask overlap = it->second & capture_mask;
-        if (!overlap)
-          continue;
-        update_reduction_views(it->first, overlap);
       }
     }
 
@@ -26100,9 +26139,7 @@ namespace LegionRuntime {
       }
       // Then capture ourself
       result->capture_physical_state(logical_node, NULL/*state*/, flatten_mask,
-                                     closer, global_dirt, dirty_mask,
-                                     reduction_mask, valid_views, 
-                                     reduction_views);
+                                 closer, global_dirt, dirty_mask, valid_views); 
       // Finally update the closer with the capture fields
       closer.update_capture_mask(logical_node, flatten_mask);
       return result;
@@ -26150,22 +26187,6 @@ namespace LegionRuntime {
       }
       else
         finder->second |= valid_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::update_reduction_views(ReductionView *view,
-                                               const FieldMask &reduc_mask)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
-        reduction_views.find(view);
-      if (finder == reduction_views.end())
-      {
-        view->add_base_resource_ref(COMPOSITE_NODE_REF);
-        reduction_views[view] = reduc_mask;
-      }
-      else
-        finder->second |= reduc_mask;
     }
 
     //--------------------------------------------------------------------------

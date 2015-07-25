@@ -1815,6 +1815,7 @@ namespace LegionRuntime {
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**
@@ -4101,6 +4102,8 @@ namespace LegionRuntime {
       void update_reduction_views(ReductionView *view, 
                                   const FieldMask &valid_mask,
                                   bool update_parent = true);
+      void update_reduction_epochs(const ReductionEpoch &epoch,
+                                   const FieldMask &epoch_mask);
     protected:
       void update_reduction_views_above(ReductionView *view,
                                         const FieldMask &valid_mask,
@@ -4360,11 +4363,8 @@ namespace LegionRuntime {
                                   CompositeCloser &closer,
                                   FieldMask &global_dirty,
                                   const FieldMask &other_dirty_mask,
-                                  const FieldMask &other_reduction_mask,
                 const LegionMap<LogicalView*,FieldMask,
-                        VALID_VIEW_ALLOC>::track_aligned &other_valid_views,
-                const LegionMap<ReductionView*,FieldMask,
-                  VALID_REDUCTION_ALLOC>::track_aligned &other_reduction_views);
+                        VALID_VIEW_ALLOC>::track_aligned &other_valid_views);
       CompositeNode* flatten(const FieldMask &flatten_mask, 
                              CompositeCloser &closer,
                              CompositeNode *parent,
@@ -4431,12 +4431,9 @@ namespace LegionRuntime {
     protected:
       DistributedID owner_did;
       FieldMask dirty_mask;
-      FieldMask reduction_mask;
       LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
       LegionMap<LogicalView*,FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
-      LegionMap<ReductionView*,FieldMask,
-                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     };
 
     /**
