@@ -312,6 +312,7 @@ namespace LegionRuntime {
     class DeferredView;
     class MaterializedView;
     class CompositeView;
+    class CompositeVersionInfo;
     class CompositeNode;
     class FillView;
     class MappingRef;

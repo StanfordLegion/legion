@@ -1813,6 +1813,7 @@ namespace LegionRuntime {
       const bool permit_leave_open;
       VersionInfo &version_info;
     public:
+      CompositeVersionInfo *composite_version_info;
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
@@ -2341,6 +2342,7 @@ namespace LegionRuntime {
                         const std::vector<Domain::CopySrcDstField> &dst_fields);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
+                                   const VersionInfo &version_info,
                                    Processor local_proc,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op,
@@ -3697,10 +3699,14 @@ namespace LegionRuntime {
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
+                                           const VersionInfo &version_info,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   const VersionInfo &version_info) = 0;
+      virtual void add_initial_user(const PhysicalUser &user) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(void) = 0;
@@ -3808,10 +3814,14 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
+                                           const VersionInfo &version_info,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(PhysicalUser &user);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   const VersionInfo &version_info);
+      virtual void add_initial_user(const PhysicalUser &user);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -3940,10 +3950,12 @@ namespace LegionRuntime {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
+                             const VersionInfo &version_info,
                              Processor local_proc, Operation *op,
                              CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
+                                        const VersionInfo &version_info,
                                         const std::set<Event> &preconditions,
                                         const std::set<Domain> &reduce_domains,
                                         Event domain_precondition,
@@ -3952,6 +3964,7 @@ namespace LegionRuntime {
                                               FieldID dst_field,
                                               FieldID src_field,
                                               unsigned src_index,
+                                       const VersionInfo &version_info,
                                        const std::set<Event> &preconditions,
                                        const std::set<Domain> &reduce_domains,
                                        Event domain_precondition,
@@ -3972,10 +3985,15 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
+                                           const VersionInfo &version_info,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(PhysicalUser &user);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   const VersionInfo &version_info);
+      virtual void add_initial_user(const PhysicalUser &user);
+    public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
       virtual void copy_to(const FieldMask &copy_mask, 
@@ -4060,7 +4078,6 @@ namespace LegionRuntime {
         FieldMask valid_fields;
         ReductionOpID redop;
         std::set<ReductionView*> views;
-        NodeSet remote_nodes;
       };
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
@@ -4330,6 +4347,25 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class CompositeVersionInfo
+     * This is a wrapper class for keeping track of the version
+     * information for all the composite nodes in a composite instance.
+     */
+    class CompositeVersionInfo : public Collectable {
+    public:
+      CompositeVersionInfo(const VersionInfo &info);
+      CompositeVersionInfo(const CompositeVersionInfo &rhs);
+      ~CompositeVersionInfo(void);
+    public:
+      CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
+    public:
+      inline const VersionInfo& get_version_info(void) const 
+        { return version_info; }
+    protected:
+      VersionInfo version_info;
+    };
+
+    /**
      * \class CompositeNode
      * A helper class for representing the frozen state of a region
      * tree as part of one or more composite views.
@@ -4349,7 +4385,8 @@ namespace LegionRuntime {
         FieldMask open_fields;
       };
     public:
-      CompositeNode(RegionTreeNode *logical, CompositeNode *parent);
+      CompositeNode(RegionTreeNode *logical, CompositeNode *parent,
+                    CompositeVersionInfo *version_info);
       CompositeNode(const CompositeNode &rhs);
       ~CompositeNode(void);
     public:
@@ -4373,8 +4410,6 @@ namespace LegionRuntime {
       void update_child_info(CompositeNode *child, const FieldMask &mask);
       void update_instance_views(LogicalView *view,
                                  const FieldMask &valid_mask);
-      void update_reduction_views(ReductionView*,
-                                  const FieldMask &reduc_mask);
     public:
       void issue_update_copies(const MappableInfo &info,
                                MaterializedView *dst,
@@ -4428,6 +4463,7 @@ namespace LegionRuntime {
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
+      CompositeVersionInfo *const version_info;
     protected:
       DistributedID owner_did;
       FieldMask dirty_mask;

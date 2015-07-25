@@ -2266,7 +2266,8 @@ namespace LegionRuntime {
         LegionMap<Event,FieldMask>::aligned &preconditions = 
                                           src_preconditions[it->first];
         it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                           it->second, preconditions);
+                                           it->second, src_version_info,
+                                           preconditions);
       }
       for (unsigned idx = 0; idx < src_req.instance_fields.size(); idx++)
       {
@@ -2305,6 +2306,7 @@ namespace LegionRuntime {
             // Register the users of the post condition
             FieldMask local_src; local_src.set_bit(src_index);
             sit->first->add_copy_user(0/*redop*/, copy_post,
+                                      src_version_info,
                                       local_src, true/*reading*/);
             // No need to register a user for the destination because
             // we've already mapped it.
@@ -2338,16 +2340,8 @@ namespace LegionRuntime {
         {
           Event result = Event::merge_events(local_results);
           if (result.exists())
-          {
-            // Register a user on the destination
-            unsigned dst_index = src_node->column_source->get_field_index(
-                                              dst_req.instance_fields[idx]);
-            FieldMask local_dst; local_dst.set_bit(dst_index);
-            dst_view->add_copy_user(0/*redop*/, result,
-                                    local_dst, false/*reading*/);
             // Add the event to the result events
             result_events.insert(result);
-          }
         }
       }
       Event result = Event::merge_events(result_events);
@@ -9988,7 +9982,7 @@ namespace LegionRuntime {
           valid_reductions[it->first] = overlap;
       }
       if (!valid_reductions.empty())
-        node->issue_update_reductions(target, close_mask, 
+        node->issue_update_reductions(target, close_mask, version_info, 
                                       local_proc, valid_reductions, op);
       return true;
     }
@@ -10008,7 +10002,7 @@ namespace LegionRuntime {
           valid_reductions[it->first] = overlap;
       }
       if (!valid_reductions.empty())
-        node->issue_update_reductions(target, close_mask, 
+        node->issue_update_reductions(target, close_mask, version_info,
                                       local_proc, valid_reductions, op);
       return true;
     }
@@ -11627,6 +11621,7 @@ namespace LegionRuntime {
       : ctx(c), permit_leave_open(open), version_info(info)
     //--------------------------------------------------------------------------
     {
+      composite_version_info = new CompositeVersionInfo(info);
     }
 
     //--------------------------------------------------------------------------
@@ -11642,6 +11637,9 @@ namespace LegionRuntime {
     CompositeCloser::~CompositeCloser(void)
     //--------------------------------------------------------------------------
     {
+      // Only delete the version info if there are no constructed nodes
+      if (constructed_nodes.empty())
+        delete composite_version_info;
     }
 
     //--------------------------------------------------------------------------
@@ -11662,7 +11660,8 @@ namespace LegionRuntime {
         constructed_nodes.find(node);
       if (finder != constructed_nodes.end())
         return finder->second;
-      CompositeNode *result = legion_new<CompositeNode>(node, parent);
+      CompositeNode *result = legion_new<CompositeNode>(node, parent,
+                                                        composite_version_info);
       constructed_nodes[node] = result;
       return result;
     }
@@ -12525,7 +12524,7 @@ namespace LegionRuntime {
         else
           finder->second |= user.field_mask;
         reduction_mask |= user.field_mask;
-        inst_view->add_user(user);
+        inst_view->add_initial_user(user);
       }
       else
       {
@@ -12537,7 +12536,7 @@ namespace LegionRuntime {
           finder->second |= user.field_mask;
         if (HAS_WRITE(user.usage))
           dirty_mask |= user.field_mask;
-        inst_view->add_user(user);
+        inst_view->add_initial_user(user);
       }
     }
 
@@ -15330,7 +15329,7 @@ namespace LegionRuntime {
         for (std::vector<MaterializedView*>::const_iterator it = 
               targets.begin(); it != targets.end(); it++)
         {
-          issue_update_reductions(*it, reduc_fields,
+          issue_update_reductions(*it, reduc_fields, closer.info.version_info,
                                   closer.info.local_proc, 
                                   valid_reductions, closer.info.op, &closer);
         }
@@ -15660,12 +15659,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(ctx_id, version_info);
-      CompositeNode *root = 
-             legion_new<CompositeNode>(this, ((CompositeNode*)NULL/*parent*/));
       FieldMask dirty_mask, complete_mask; 
       const bool capture_children = !is_region();
       LegionMap<ColorPoint,FieldMask>::aligned complete_children;
       CompositeCloser closer(ctx_id, version_info, leave_open);
+      CompositeNode *root = closer.get_composite_node(this, NULL/*parent*/);
       for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
             it != targets.end(); it++)
       {
@@ -16122,12 +16120,14 @@ namespace LegionRuntime {
           assert(!!it->second);
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             it->second, preconditions);
+                                             it->second, info.version_info,
+                                             preconditions);
           update_mask |= it->second;
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                     update_mask, preconditions);
+                                     update_mask, info.version_info,
+                                     preconditions);
 
         LegionMap<Event,FieldMask>::aligned postconditions;
         if (!has_component_domains())
@@ -16152,7 +16152,7 @@ namespace LegionRuntime {
         for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
         {
-          dst->add_copy_user(0/*redop*/, it->first, 
+          dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
                              it->second, false/*reading*/);
         }
       }
@@ -16464,7 +16464,7 @@ namespace LegionRuntime {
           for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
                 it = update_views.begin(); it != update_views.end(); it++)
           {
-            it->first->add_copy_user(0/*redop*/, copy_post,
+            it->first->add_copy_user(0/*redop*/, copy_post, info.version_info,
                                      it->second, true/*reading*/);
           }
           postconditions[copy_post] = pre_set.set_mask;
@@ -16627,6 +16627,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_update_reductions(LogicalView *target,
                                                  const FieldMask &mask,
+                                                const VersionInfo &version_info,
                                                  Processor local_proc,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                                  Operation *op,
@@ -16672,8 +16673,8 @@ namespace LegionRuntime {
           assert(!(it->second - copy_mask));
 #endif
           // Then we have a reduction to perform
-          it->first->perform_reduction(inst_target, copy_mask, local_proc, 
-                                       op, tracker);
+          it->first->perform_reduction(inst_target, copy_mask, version_info,
+                                       local_proc, op, tracker);
         }
       }
     }
@@ -16928,8 +16929,8 @@ namespace LegionRuntime {
               valid_views.begin(); it != valid_views.end(); it++)
         {
           FieldMask overlap = flush_mask & it->second; 
-          issue_update_reductions(it->first, overlap, info.local_proc,
-                                  reduction_views, info.op, tracker);
+          issue_update_reductions(it->first, overlap, info.version_info,
+                    info.local_proc, reduction_views, info.op, tracker);
           // Save the overlap fields
           it->second = overlap;
 #ifdef DEBUG_HIGH_LEVEL
@@ -18360,7 +18361,7 @@ namespace LegionRuntime {
                              false/*dirty*/, new_view);
         }
         // Now add ourselves as a user of this region
-        return new_view->add_user(user);
+        return new_view->add_user(user, info.version_info);
       }
       else
       {
@@ -18376,7 +18377,7 @@ namespace LegionRuntime {
         // it was performed as part of the premapping operation
         update_reduction_views(state, user.field_mask, new_view);
         // Now we can add ourselves as a user of this region
-        return new_view->add_user(user);
+        return new_view->add_user(user, info.version_info);
       }
     }
 
@@ -18411,7 +18412,7 @@ namespace LegionRuntime {
                                user.field_mask, info.version_info, 
                                info.local_proc, info.op);
         visit_node(&closer);
-        InstanceRef result = target_view->add_user(user);
+        InstanceRef result = target_view->add_user(user, info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
@@ -18473,7 +18474,7 @@ namespace LegionRuntime {
             field_data.push_back(FieldDataDescriptor());
             view->set_descriptor(field_data.back(), fid_idx);
             // Register ourselves as user of this instance
-            InstanceRef ref = view->add_user(user);  
+            InstanceRef ref = view->add_user(user, version_info);  
             Event ready_event = ref.get_ready_event();
             if (ready_event.exists())
               preconditions.insert(ready_event);
@@ -22753,6 +22754,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user(ReductionOpID redop, Event copy_term,
+                                         const VersionInfo &version_info,
                                      const FieldMask &copy_mask, bool reading)
     //--------------------------------------------------------------------------
     {
@@ -22790,7 +22792,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef MaterializedView::add_user(PhysicalUser &user) 
+    InstanceRef MaterializedView::add_user(PhysicalUser &user,
+                                           const VersionInfo &version_info) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -22839,6 +22842,13 @@ namespace LegionRuntime {
       if (IS_ATOMIC(user.usage))
         find_atomic_reservations(result, user.field_mask);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_initial_user(const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      curr_epoch_users.push_back(user);
     }
  
     //--------------------------------------------------------------------------
@@ -23209,6 +23219,7 @@ namespace LegionRuntime {
     void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
                                                    bool reading, 
                                                    const FieldMask &copy_mask,
+                                                const VersionInfo &version_info,
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -24589,8 +24600,6 @@ namespace LegionRuntime {
           it->views.insert(view);
         }
         added = true;
-        // Clear the set since it has been updated
-        it->remote_nodes.clear();
         break;
       }
       if (!added)
@@ -24649,8 +24658,9 @@ namespace LegionRuntime {
           std::set<Domain> component_domains;
           Event dom_pre = find_component_domains(*it, component_domains);
           Event result = (*it)->perform_deferred_reduction(dst,
-                                  epoch.valid_fields, preconditions,
-                                  component_domains, dom_pre, info.op);
+                                  epoch.valid_fields, info.version_info, 
+                                  preconditions, component_domains, 
+                                  dom_pre, info.op);
           if (result.exists())
             postconditions.insert(result);
         }
@@ -24700,6 +24710,7 @@ namespace LegionRuntime {
             Event dom_pre = find_component_domains(*it, component_domains);
             Event result = (*it)->perform_deferred_across_reduction(dst,
                                             dst_field, src_field, src_index,
+                                            info.version_info,
                                             preconditions, component_domains,
                                             dom_pre, info.op);
             if (result.exists())
@@ -24823,11 +24834,14 @@ namespace LegionRuntime {
       {
         if (update_mask * it->valid_fields)
           continue;
+#ifdef UNIMPLEMENTED_VERSIONING
         if (it->remote_nodes.contains(target))
           continue;
+#endif
         send_count++;
       }
       rez.serialize<size_t>(send_count);
+#if UNIMPLEMENTED_VERSIONING
       if (send_count > 0)
       {
         for (unsigned idx = 0; idx < reduction_epochs.size(); idx++)
@@ -24845,6 +24859,7 @@ namespace LegionRuntime {
           }
         }
       }
+#endif
       return (send_count > 0);
     }
 
@@ -25366,7 +25381,7 @@ namespace LegionRuntime {
 #endif
       LegionMap<Event,FieldMask>::aligned preconditions;
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   copy_mask, preconditions);
+                                   copy_mask, info.version_info, preconditions);
       // Iterate over all the roots and issue copies to update the 
       // target instance from this particular view
       LegionMap<Event,FieldMask>::aligned postconditions;
@@ -25409,7 +25424,7 @@ namespace LegionRuntime {
         Event postcondition = Event::merge_events(post_set.preconditions);
         if (postcondition.exists())
         {
-          dst->add_copy_user(0/*redop*/, postcondition,
+          dst->add_copy_user(0/*redop*/, postcondition, info.version_info,
                              post_set.set_mask, false/*reading*/);
           if (tracker != NULL)
             tracker->add_copy_event(postcondition);
@@ -25944,16 +25959,57 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeNode::CompositeNode(RegionTreeNode *logical, CompositeNode *par)
-      : Collectable(), context(logical->context), logical_node(logical), 
-        parent(par), owner_did(0)
+    CompositeVersionInfo::CompositeVersionInfo(const VersionInfo &ver_info)
+      : version_info(ver_info)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
+    CompositeVersionInfo::CompositeVersionInfo(const CompositeVersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeVersionInfo::~CompositeVersionInfo(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeVersionInfo& CompositeVersionInfo::operator=(
+                                                const CompositeVersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CompositeNode 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeNode::CompositeNode(RegionTreeNode *logical, CompositeNode *par,
+                                 CompositeVersionInfo *ver_info)
+      : Collectable(), context(logical->context), logical_node(logical), 
+        parent(par), version_info(ver_info), owner_did(0)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(version_info != NULL);
+#endif
+      version_info->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(const CompositeNode &rhs)
-      : Collectable(), context(NULL), logical_node(NULL), parent(NULL)
+      : Collectable(), context(NULL), logical_node(NULL), 
+        parent(NULL), version_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -25980,6 +26036,8 @@ namespace LegionRuntime {
           LogicalView::delete_logical_view(it->first);
       }
       valid_views.clear();
+      if (version_info->remove_reference())
+        delete version_info;
     }
 
     //--------------------------------------------------------------------------
@@ -26121,7 +26179,8 @@ namespace LegionRuntime {
                                           FieldMask &global_dirt)
     //--------------------------------------------------------------------------
     {
-      CompositeNode *result = legion_new<CompositeNode>(logical_node, parent);
+      CompositeNode *result = legion_new<CompositeNode>(logical_node, 
+                                                        parent, version_info);
       // First capture down the tree  
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -26247,7 +26306,8 @@ namespace LegionRuntime {
               assert(!!it->second);
 #endif
               it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             it->second, update_preconditions);
+                                it->second, version_info->get_version_info(), 
+                                update_preconditions);
               update_mask |= it->second;
             }
             // Also get the set of destination preconditions
@@ -26389,7 +26449,8 @@ namespace LegionRuntime {
             MaterializedView *src = (src_instances.begin())->first;
             LegionMap<Event,FieldMask>::aligned src_preconditions;
             src->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                         src_mask, src_preconditions);
+                          src_mask, version_info->get_version_info(), 
+                          src_preconditions);
             for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
                   src_preconditions.begin(); it != 
                   src_preconditions.end(); it++)
@@ -26415,6 +26476,7 @@ namespace LegionRuntime {
               // Only need to record the source user as the destination
               // user will be recorded by the copy across operation
               src->add_copy_user(0/*redop*/, copy_post,
+                                 version_info->get_version_info(),
                                  src_mask, true/*reading*/);
               // Also add the event to the dst_preconditions and 
               // our post conditions
@@ -26690,7 +26752,8 @@ namespace LegionRuntime {
               
             field_data.back().index_space = remaining_space;
             // Register ourselves as a user of this instance
-            InstanceRef ref = view->add_user(user);
+            InstanceRef ref = view->add_user(user, 
+                                        version_info->get_version_info());
             Event ready_event = Event::merge_events(ref.get_ready_event(),
                                                     remaining_precondition);
             if (ready_event.exists())
@@ -27167,7 +27230,7 @@ namespace LegionRuntime {
     {
       LegionMap<Event,FieldMask>::aligned preconditions;
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   copy_mask, preconditions);
+                                   copy_mask, info.version_info, preconditions);
       // Compute the precondition sets
       LegionList<EventSet>::aligned precondition_sets;
       RegionTreeNode::compute_event_sets(copy_mask, preconditions,
@@ -27258,7 +27321,7 @@ namespace LegionRuntime {
             {
               if (tracker != NULL)
                 tracker->add_copy_event(reduce_post);
-              dst->add_copy_user(0/*redop*/, reduce_post,
+              dst->add_copy_user(0/*redop*/, reduce_post, info.version_info,
                                  it->set_mask, false/*reading*/);
             }
           }
@@ -27267,7 +27330,7 @@ namespace LegionRuntime {
         {
           if (tracker != NULL)
             tracker->add_copy_event(fill_post);
-          dst->add_copy_user(0/*redop*/, fill_post, 
+          dst->add_copy_user(0/*redop*/, fill_post, info.version_info,
                              pre_set.set_mask, false/*reading*/);
         }
       }
@@ -27796,6 +27859,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void ReductionView::perform_reduction(InstanceView *target,
                                           const FieldMask &reduce_mask,
+                                          const VersionInfo &version_info,
                                           Processor local_proc,
                                           Operation *op,
                                           CopyTracker *tracker /*= NULL*/)
@@ -27811,9 +27875,9 @@ namespace LegionRuntime {
 
       LegionMap<Event,FieldMask>::aligned preconditions;
       target->find_copy_preconditions(manager->redop, false/*reading*/, 
-                                      reduce_mask, preconditions); 
+                                      reduce_mask, version_info, preconditions);
       this->find_copy_preconditions(manager->redop, true/*reading*/, 
-                                    reduce_mask, preconditions);
+                                    reduce_mask, version_info, preconditions);
       std::set<Event> event_preconds;
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             preconditions.begin(); it != preconditions.end(); it++)
@@ -27880,9 +27944,9 @@ namespace LegionRuntime {
         reduce_post = new_reduce_post;
       }
 #endif
-      target->add_copy_user(manager->redop, reduce_post,
+      target->add_copy_user(manager->redop, reduce_post, version_info,
                             reduce_mask, false/*reading*/);
-      this->add_copy_user(manager->redop, reduce_post,
+      this->add_copy_user(manager->redop, reduce_post, version_info,
                           reduce_mask, true/*reading*/);
       if (tracker != NULL)
         tracker->add_copy_event(reduce_post);
@@ -27919,6 +27983,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event ReductionView::perform_deferred_reduction(MaterializedView *target,
                                                     const FieldMask &red_mask,
+                                                const VersionInfo &version_info,
                                                     const std::set<Event> &pre,
                                          const std::set<Domain> &reduce_domains,
                                                     Event dom_precondition,
@@ -27937,7 +28002,7 @@ namespace LegionRuntime {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/,
-                              red_mask, src_pre);
+                              red_mask, version_info, src_pre);
       std::set<Event> preconditions = pre;
       if (dom_precondition.exists())
         preconditions.insert(dom_precondition);
@@ -27974,7 +28039,7 @@ namespace LegionRuntime {
       Event reduce_post = Event::merge_events(post_events);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post,
+      add_copy_user(manager->redop, reduce_post, version_info,
                     red_mask, true/*reading*/);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
       IndexSpace reduce_index_space =
@@ -28020,6 +28085,7 @@ namespace LegionRuntime {
     Event ReductionView::perform_deferred_across_reduction(
                               MaterializedView *target, FieldID dst_field, 
                               FieldID src_field, unsigned src_index, 
+                              const VersionInfo &version_info,
                               const std::set<Event> &preconds,
                               const std::set<Domain> &reduce_domains,
                               Event dom_precondition, Operation *op)
@@ -28039,7 +28105,7 @@ namespace LegionRuntime {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/,
-                              red_mask, src_pre);
+                              red_mask, version_info, src_pre);
       std::set<Event> preconditions = preconds;
       if (dom_precondition.exists())
         preconditions.insert(dom_precondition);
@@ -28076,7 +28142,7 @@ namespace LegionRuntime {
       Event reduce_post = Event::merge_events(post_events);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post,
+      add_copy_user(manager->redop, reduce_post, version_info,
                     red_mask, true/*reading*/);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
       IndexSpace reduce_index_space =
@@ -28165,6 +28231,7 @@ namespace LegionRuntime {
     void ReductionView::find_copy_preconditions(ReductionOpID redop,
                                                 bool reading,
                                                 const FieldMask &copy_mask,
+                                                const VersionInfo &version_info,
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -28211,6 +28278,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void ReductionView::add_copy_user(ReductionOpID redop, Event copy_term,
+                                      const VersionInfo &version_info,
                                       const FieldMask &mask, bool reading)
     //--------------------------------------------------------------------------
     {
@@ -28242,7 +28310,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef ReductionView::add_user(PhysicalUser &user)
+    InstanceRef ReductionView::add_user(PhysicalUser &user,
+                                        const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -28290,6 +28359,16 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
       return InstanceRef(result, ViewHandle(this));
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::add_initial_user(const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_READ_ONLY(user.usage))
+        reading_users.push_back(user);
+      else
+        reduction_users.push_back(user);
     }
  
     //--------------------------------------------------------------------------
