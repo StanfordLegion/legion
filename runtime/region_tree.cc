@@ -1718,9 +1718,6 @@ namespace LegionRuntime {
       MappableInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask); 
       PremapTraverser traverser(path, info);
-      // Mark that we are beginning the premapping
-      UserEvent premap_event = 
-        parent_ctx->begin_premapping(req.parent.tree_id, user_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      parent_node, ctx.get_id(), 
@@ -1739,8 +1736,6 @@ namespace LegionRuntime {
                                        FieldMask(FIELD_ALL_ONES), user_mask);
       }
 #endif
-      // Indicate that we are done premapping
-      parent_ctx->end_premapping(req.parent.tree_id, premap_event);
 #ifdef DEBUG_PERF
       end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
@@ -9090,6 +9085,34 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    VersionInfo::NodeInfo::NodeInfo(const NodeInfo &rhs)
+      : physical_state((rhs.physical_state == NULL) ? NULL : 
+                        rhs.physical_state->clone(!rhs.needs_capture)),
+            version_numbers(rhs.version_numbers),
+            premap_only(rhs.premap_only), path_only(rhs.path_only),
+            advance(rhs.advance), needs_capture(rhs.needs_capture)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo::NodeInfo& VersionInfo::NodeInfo::operator=(const NodeInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(physical_state == NULL);
+#endif
+      if (rhs.physical_state != NULL)
+        physical_state = rhs.physical_state->clone(!rhs.needs_capture);
+      version_numbers = rhs.version_numbers;
+      premap_only = rhs.premap_only;
+      path_only = rhs.path_only;
+      advance = rhs.advance;
+      needs_capture = rhs.needs_capture;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
       : upper_bound_node(NULL), advance(false)
     //--------------------------------------------------------------------------
@@ -9229,7 +9252,11 @@ namespace LegionRuntime {
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (it->second.physical_state != NULL)
-          it->second.needs_reset = true;
+        {
+          // First reset the physical state
+          it->second.physical_state->reset();
+          it->second.needs_capture = true;
+        }
       }
     }
 
@@ -9294,24 +9321,20 @@ namespace LegionRuntime {
       assert(finder != node_infos.end());
 #endif
       // Check to see if we need a reset
-      if (finder->second.needs_reset)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder->second.physical_state != NULL);
-#endif
-        // First reset the physical state
-        finder->second.physical_state->reset();
+      if ((finder->second.physical_state != NULL) &&
+           finder->second.needs_capture)
+      { 
         // Recapture the state if we had to be reset
         finder->second.physical_state->capture_state(
                                         finder->second.premap_only);
-        finder->second.needs_reset = false;
+        finder->second.needs_capture = false;
       }
       return finder->second.physical_state;
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* VersionInfo::create_physical_state(
-                    RegionTreeNode *node, VersionManager *manager, bool advance)
+    PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node, 
+                         VersionManager *manager, bool initialize, bool capture)
     //--------------------------------------------------------------------------
     {
       std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
@@ -9324,11 +9347,50 @@ namespace LegionRuntime {
       PhysicalState *result = manager->construct_state(node, 
                                           finder->second.version_numbers, 
                                           finder->second.path_only, 
-                                          finder->second.advance);
+                                          finder->second.advance,
+                                          initialize, capture);
       // Save the resulting physical state
       finder->second.physical_state = result;
+      finder->second.needs_capture = false;
       return result;
     } 
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::make_local(std::set<Event> &preconditions, 
+                                 ContextID ctx, bool path_only)
+    //--------------------------------------------------------------------------
+    {
+      // This will also have the effect of localizing everything
+      if (packed)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!path_only); // shouldn't be doing this if we are unpacking
+#endif
+        unpack_buffer(preconditions, ctx);
+      }
+      else
+      {
+        // Iterate over all version state infos and build physical states
+        // without actually capturing any data
+        for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+              node_infos.begin(); it != node_infos.end(); it++)
+        {
+          NodeInfo &info = it->second;
+          // Skip any unnecessary entries if we are doing path only
+          if (path_only && !info.path_only)
+            continue;
+          if (info.physical_state == NULL)
+          {
+            info.physical_state = it->first->get_physical_state(ctx, *this,
+                                                         false/*initialize*/,
+                                                         false/*capture*/);
+            info.needs_capture = true;                                                 
+            // Now get the preconditions for the state
+            info.physical_state->make_local(preconditions, info.advance);
+          }
+        }
+      }
+    }
     
     /////////////////////////////////////////////////////////////
     // RestrictInfo 
@@ -12267,6 +12329,86 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalState* PhysicalState::clone(bool capture_state) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalState *result = legion_new<PhysicalState>(node);
+#else
+      PhysicalState *result = legion_new<PhysicalState>();
+#endif
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
+            version_states.begin(); it1 != version_states.end(); it1++)
+      {
+        const VersionStateInfo &info = it1->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          result->add_version_state(it->first, it->second);
+        }
+      }
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
+            advance_states.begin(); it1 != advance_states.end(); it1++)
+      {
+        const VersionStateInfo &info = it1->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          result->add_advance_state(it->first, it->second);
+        }
+      }
+      if (capture_state)
+      {
+        // No need to copy over the close mask
+        result->dirty_mask = dirty_mask;
+        result->reduction_mask = reduction_mask;
+        result->children = children;
+        result->valid_views = valid_views;
+        result->reduction_views = reduction_views;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::make_local(std::set<Event> &preconditions, bool advance)
+    //--------------------------------------------------------------------------
+    {
+      if (advance)
+      {
+        // Request all the version states in final mode meaning they
+        // have up to date data from all instances
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1
+              = version_states.begin(); it1 != version_states.end(); it1++)
+        {
+          const VersionStateInfo &info = it1->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            Event ready = it->first->request_final_version_state();
+            if (ready.exists() && !ready.has_triggered())
+              preconditions.insert(ready);
+          }
+        }
+      }
+      else
+      {
+        // Request an up-to-date version of the data from any instance
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1
+              = version_states.begin(); it1 != version_states.end(); it1++)
+        {
+          const VersionStateInfo &info = it1->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            Event ready = it->first->request_initial_version_state();
+            if (ready.exists() && !ready.has_triggered())
+              preconditions.insert(ready);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalState::print_physical_state(const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                              TreeStateLogger *logger)
@@ -12400,12 +12542,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
-                               AddressSpaceID own_sp, AddressSpaceID local_sp)
+                AddressSpaceID own_sp, AddressSpaceID local_sp, bool initialize)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
-        state_lock(Reservation::create_reservation())
+        state_lock(Reservation::create_reservation()),
 #ifdef DEBUG_HIGH_LEVEL
-        , currently_active(true), currently_valid(true)
+        currently_active(true), currently_valid(true),
 #endif
+        meta_state(initialize ? INITIAL_VERSION_STATE : INVALID_VERSION_STATE),
+        initial_ready(Event::NO_EVENT), final_ready(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, add a valid and resource reference
@@ -12779,6 +12923,371 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    Event VersionState::request_initial_version_state(void)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent result;
+      {
+        AutoLock s_lock(state_lock);
+        if (meta_state == FINAL_VERSION_STATE)
+          return final_ready;
+        if (meta_state == INITIAL_VERSION_STATE)
+          return initial_ready;
+        result = UserEvent::create_user_event();
+        initial_ready = result;
+        meta_state = INITIAL_VERSION_STATE;
+      }
+      // If we make it here we have to send a request to get the data 
+      // Send a request to the owner for the state which will either
+      // be handled there or sent to someone who can, unless we are
+      // the owner in which case we pick someone to send a request to
+      AddressSpaceID target = owner_space;
+      if (is_owner())
+      {
+        // If we are the owner, look up someone who has the state
+        // and send a request, for right now just pick the first one
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!remote_instances.empty());
+#endif
+        target = remote_instances.find_first_set();
+      }
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(local_space);
+        rez.serialize(result);
+      }
+      runtime->send_version_state_request(target, rez);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::RequestBroadcast::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent to_trigger = UserEvent::create_user_event();
+      Serializer rez;
+      {
+        rez.serialize(did);
+        rez.serialize(source);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_version_state_request(target, rez);
+      ready_events.insert(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    Event VersionState::request_final_version_state(void)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent result;
+      {
+        AutoLock s_lock(state_lock);
+        if (meta_state == FINAL_VERSION_STATE)
+          return final_ready;
+        result = UserEvent::create_user_event();
+        final_ready = result;
+        meta_state = FINAL_VERSION_STATE;
+      }
+      // If we made it here, we actually have to send the requests
+      if (is_owner())
+      {
+        // If we are the owner, send requests to all the users
+        std::set<Event> ready_events;
+        RequestBroadcast broadcaster(ready_events, runtime, local_space, did);
+        map_over_remote_instances(broadcaster);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ready_events.empty());
+#endif
+        result.trigger(Event::merge_events(ready_events));
+      }
+      else
+      {
+        // Otherwise send a request to the owner for remote instances
+        // so we can do the broadcast ourselves
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(result);
+        }
+        runtime->send_version_state_broadcast_request(owner_space, rez);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::send_version_state(AddressSpaceID target,
+                                          UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(to_trigger);
+        // TODO: send information for the version state
+      }
+      runtime->send_version_state_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_request(AddressSpaceID source,
+                                                    UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      bool can_handle = true;
+      if (is_owner())
+      {
+        // If we're the owner see if can handle it, if so fall through
+        // otherwise forward on the request to someone who can
+        AutoLock s_lock(state_lock);
+        if (meta_state == INVALID_VERSION_STATE)
+          can_handle = false;
+      }
+      if (!can_handle)
+      {
+        AddressSpaceID target;
+        {
+          AutoLock gc(gc_lock,1,false/*exclusive*/);
+          target = remote_instances.find_first_set();
+          if (target == source)
+          {
+            NodeSet copy = remote_instances;
+            copy.remove(source);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!copy.empty());
+#endif
+            target = copy.find_first_set();
+          }
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(target != source);
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(source);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_version_state_request(target, rez);
+        return;
+      }
+      // Get the precondition for doing the send and launch a task
+      // to actually do the send to avoid blocking the message handling
+      Event precondition;
+      {
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(meta_state != INVALID_VERSION_STATE);
+#endif
+        if (meta_state == INITIAL_VERSION_STATE)
+          precondition = initial_ready;
+        else
+          precondition = final_ready;
+      }
+      SendVersionStateArgs args;
+      args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
+      args.proxy_this = this;
+      args.target = source;
+      args.to_trigger = to_trigger;
+      runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                       HLR_SEND_VERSION_STATE_TASK_ID, 
+                                       NULL/*op*/, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_broadcast_request(
+                                    AddressSpaceID source, UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner()); // should only get this request on the owner node
+#endif
+      Event precondition = Event::NO_EVENT;
+      bool locally_valid = false;
+      // See if we are the only valid ones in which case we can handle
+      // everything locally, otherwise, just send everything
+      {
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        if (meta_state == INITIAL_VERSION_STATE)
+        {
+          precondition = initial_ready;
+          locally_valid = true;
+        }
+        else if (meta_state == FINAL_VERSION_STATE)
+        {
+          precondition = final_ready;
+          locally_valid = true;
+        }
+      }
+      bool handle_locally = false;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(to_trigger);
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        bool contains_source = remote_instances.contains(source);
+        if ((remote_instances.size() == 1) && contains_source)
+          handle_locally = true;
+        else
+        {
+          // Count how many to send
+          size_t count = remote_instances.size();
+          if (locally_valid)
+            count++;
+          if (contains_source)
+            count--;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(count > 0); // should be more than zero
+#endif
+          rez.serialize(count);
+          RequestResponse response(rez, source);
+          remote_instances.map(response);
+        }
+      }
+      if (handle_locally)
+      {
+        SendVersionStateArgs args;
+        args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
+        args.proxy_this = this;
+        args.target = source;
+        args.to_trigger = to_trigger;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_SEND_VERSION_STATE_TASK_ID,
+                                         NULL/*op*/, precondition);
+      }
+      else // Then send the response
+        runtime->send_version_state_broadcast_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_response(AddressSpaceID source,
+                                      UserEvent to_trigger, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: do the unpacking, remember to convert field masks!
+
+      // Finally trigger the event saying we have the data
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_broadcast_response(
+                                      UserEvent to_trigger, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t target_count;
+      derez.deserialize(target_count);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(target_count > 0);
+#endif
+      std::set<Event> preconditions;
+      for (unsigned idx = 0; idx < target_count; idx++)
+      {
+        AddressSpaceID target;
+        derez.deserialize(target);
+        UserEvent precondition = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(local_space);
+          rez.serialize(precondition);
+        }
+        runtime->send_version_state_request(target, rez);
+        preconditions.insert(precondition);
+      }
+      to_trigger.trigger(Event::merge_events(preconditions)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_request(Runtime *rt,
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_request(source, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_broadcast_request(
+                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_broadcast_request(source, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_response(Runtime *rt,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_response(source, to_trigger, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_broadcast_response(
+                                               Runtime *rt, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_broadcast_response(to_trigger, derez);
+    }
+
     /////////////////////////////////////////////////////////////
     // Version Manager 
     /////////////////////////////////////////////////////////////
@@ -12819,7 +13328,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
-                                                   bool path_only, bool advance)
+                    bool path_only, bool advance, bool initialize, bool capture)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -12864,7 +13373,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = create_version_state(it->first+1);
+              VersionState *new_state = 
+                create_version_state(it->first+1, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
@@ -12896,7 +13406,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = create_version_state(it->first);
+              VersionState *new_state = 
+                create_version_state(it->first, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
@@ -12911,7 +13422,8 @@ namespace LegionRuntime {
       }
       // Now that we've got the set of states, tell the physical state
       // to capture from them
-      state->capture_state(path_only);
+      if (capture)
+        state->capture_state(path_only);
       return state;
     } 
 
@@ -13234,7 +13746,7 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = create_version_state(0);
+        VersionState *init_state = create_version_state(0, true/*initialize*/);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, user);
         current_version_infos[0].valid_fields = user.field_mask;
@@ -13371,13 +13883,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionManager::create_version_state(VersionID vid)
+    VersionState* VersionManager::create_version_state(VersionID vid, 
+                                                       bool initialize)
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = context->runtime->get_available_distributed_id();
       AddressSpace local_space = context->runtime->address_space;
       return legion_new<VersionState>(vid, context->runtime, new_did,
-                                      local_space, local_space);
+                                      local_space, local_space, initialize);
     }
 
     //--------------------------------------------------------------------------

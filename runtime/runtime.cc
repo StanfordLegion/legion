@@ -2898,19 +2898,28 @@ namespace LegionRuntime {
       args.hlr_id = HLR_TRIGGER_OP_ID;
       args.manager = this;
       args.op = op;
-      if (!prev_failure)
+      Event precondition = op->invoke_state_analysis();
+      // Only do executing throttling if we don't have an even to wait on
+      if (precondition.has_triggered())
       {
-        AutoLock l_lock(local_queue_lock); 
-        Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                      HLR_TRIGGER_OP_ID, op,
-                              local_scheduler_preconditions[next_local_index]);
-        local_scheduler_preconditions[next_local_index++] = next;
-        if (next_local_index == superscalar_width)
-          next_local_index = 0;
+        if (!prev_failure)
+        {
+          
+          AutoLock l_lock(local_queue_lock); 
+          Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                        HLR_TRIGGER_OP_ID, op,
+                             local_scheduler_preconditions[next_local_index]);
+          local_scheduler_preconditions[next_local_index++] = next;
+          if (next_local_index == superscalar_width)
+            next_local_index = 0;
+        }
+        else
+          runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                           HLR_TRIGGER_OP_ID, op);
       }
       else
-        runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                         HLR_TRIGGER_OP_ID, op);
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_TRIGGER_OP_ID, op, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -3112,7 +3121,7 @@ namespace LegionRuntime {
                  ((*vis_it)->target_proc != local_proc));
 #endif
           (*vis_it)->deactivate_outstanding_task();
-          Event wait_on = (*vis_it)->defer_mapping();
+          Event wait_on = (*vis_it)->invoke_state_analysis();
           // We give a slight priority to triggering the execution
           // of tasks relative to other runtime operations because
           // they actually have a feedback mechanism controlling
@@ -4002,10 +4011,48 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_subscribe_remote_context(Serializer &rez, 
+                                                       bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_SUBSCRIBE_REMOTE_CONTEXT, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_free_remote_context(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_FREE_REMOTE_CONTEXT, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_version_state_request(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_VERSION_STATE_REQUEST, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_version_state_broadcast_request(Serializer &rez,
+                                                              bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_VERSION_STATE_BROADCAST_REQUEST, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_version_state_response(Serializer &rez,bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_VERSION_STATE_RESPONSE, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_version_state_broadcast_response(Serializer &rez,
+                                                               bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_VERSION_STATE_BROADCAST_RESPONSE, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -4543,9 +4590,37 @@ namespace LegionRuntime {
               runtime->handle_logical_partition_semantic_info(derez);
               break;
             }
+          case SEND_SUBSCRIBE_REMOTE_CONTEXT:
+            {
+              runtime->handle_subscribe_remote_context(derez, 
+                                                       remote_address_space);
+              break;
+            }
           case SEND_FREE_REMOTE_CONTEXT:
             {
               runtime->handle_free_remote_context(derez);
+              break;
+            }
+          case SEND_VERSION_STATE_REQUEST:
+            {
+              runtime->handle_version_state_request(derez);
+              break;
+            }
+          case SEND_VERSION_STATE_BROADCAST_REQUEST:
+            {
+              runtime->handle_version_state_broadcast_request(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_VERSION_STATE_RESPONSE:
+            {
+              runtime->handle_version_state_response(derez,
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_VERSION_STATE_BROADCAST_RESPONSE:
+            {
+              runtime->handle_version_state_broadcast_response(derez);
               break;
             }
           default:
@@ -5408,7 +5483,8 @@ namespace LegionRuntime {
         // Get an individual task to be the top-level task
         IndividualTask *top_task = get_available_individual_task();
         // Get a remote task to serve as the top of the top-level task
-        RemoteTask *top_context = find_or_init_remote_context(0/*fake uid*/);
+        RemoteTask *top_context = get_available_remote_task();
+        top_context->initialize_remote();
         // Set the executing processor
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -5450,7 +5526,8 @@ namespace LegionRuntime {
       // Get an individual task to be the top-level task
       IndividualTask *mapper_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      RemoteTask *map_context = find_or_init_remote_context(0/*fake uid*/);
+      RemoteTask *map_context = get_available_remote_task();
+      map_context->initialize_remote();
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -5474,6 +5551,7 @@ namespace LegionRuntime {
       args.map_id = map_id;
       args.proc = proc;
       args.event = result;
+      args.context = map_context;
       Event pre = f.impl->get_ready_event();
       Event post = issue_runtime_meta_task(&args, sizeof(args), 
                                            HLR_MAPPER_TASK_ID, NULL, pre);
@@ -12136,11 +12214,53 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_subscribe_remote_context(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_subscribe_remote_context(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_free_remote_context(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_free_remote_context(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_state_request(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_version_state_request(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_state_broadcast_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_version_state_broadcast_request(rez,
+                                                                true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_state_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_version_state_response(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_state_broadcast_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_version_state_broadcast_response(rez,
+                                                                true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12750,6 +12870,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_subscribe_remote_context(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID owner_uid;
+      derez.deserialize(owner_uid);
+      SingleTask *receiver;
+      {
+        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
+        std::map<UniqueID,SingleTask*>::const_iterator finder = 
+          remote_receivers.find(owner_uid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != remote_receivers.end());
+#endif
+        receiver = finder->second;
+      }
+      receiver->record_remote_instance(source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_free_remote_context(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -12770,6 +12911,37 @@ namespace LegionRuntime {
       }
       // Now we can deactivate it
       remote_task->deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_broadcast_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_broadcast_request(this, derez,
+                                                            source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_response(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_response(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_broadcast_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_broadcast_response(this, derez);
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -14639,20 +14811,64 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid)
+    RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid,
+                                                     Processor orig_proc)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
+        std::map<UniqueID,RemoteTask*>::const_iterator finder = 
+          remote_contexts.find(uid);
+        if (finder != remote_contexts.end())
+          return finder->second;
+      }
+      // Otherwise we need to make one
+      RemoteTask *remote_ctx = get_available_remote_task();
+      RemoteTask *result = remote_ctx;
+      bool lost_race = false;
+      {
+        AutoLock rem_lock(remote_lock);
+        std::map<UniqueID,RemoteTask*>::const_iterator finder = 
+          remote_contexts.find(uid);
+        if (finder != remote_contexts.end())
+        {
+          lost_race = true;
+          result = finder->second;
+        }
+        else // Put it in the map
+          remote_contexts[uid] = remote_ctx;
+      }
+      if (lost_race)
+        free_remote_task(remote_ctx);
+      else
+      {
+        remote_ctx->initialize_remote();
+        // Send back the subscription message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(uid);
+        }
+        AddressSpaceID target = find_address_space(orig_proc);
+        send_subscribe_remote_context(target, rez);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_remote_receiver(UniqueID uid, SingleTask *receiver)
     //--------------------------------------------------------------------------
     {
       AutoLock rem_lock(remote_lock);
-      std::map<UniqueID,RemoteTask*>::const_iterator finder = 
-        remote_contexts.find(uid);
-      if (finder != remote_contexts.end())
-        return finder->second;
-      // Otherwise we need to make one
-      RemoteTask *result = get_available_remote_task();
-      result->initialize_remote();
-      // Put it in the map
-      remote_contexts[uid] = result;
-      return result;
+      remote_receivers[uid] = receiver;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_remote_receiver(UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock rem_lock(remote_lock);
+      remote_receivers.erase(uid);
     }
 
     //--------------------------------------------------------------------------
@@ -16707,10 +16923,11 @@ namespace LegionRuntime {
             Future::Impl::handle_contribute_to_collective(args);
             break;
           }
-        case HLR_CHECK_STATE_ID:
+        case HLR_STATE_ANALYSIS_ID:
           {
-            TaskOp::CheckStateArgs *cargs = (TaskOp::CheckStateArgs*)args;
-            cargs->task_op->check_state(cargs->ready_event);
+            Operation::StateAnalysisArgs *sargs = 
+              (Operation::StateAnalysisArgs*)args;
+            sargs->proxy_op->trigger_remote_state_analysis(sargs->ready_event);
             break;
           }
         case HLR_MAPPER_TASK_ID:
@@ -16727,6 +16944,8 @@ namespace LegionRuntime {
               delete margs->future;
             // Finally tell the runtime we have one less top level task
             rt->decrement_outstanding_top_level_tasks();
+            // We can also deactivate the enclosing context 
+            margs->context->deactivate();
             break;
           }
         case HLR_DISJOINTNESS_TASK_ID:
@@ -16764,6 +16983,14 @@ namespace LegionRuntime {
             SingleTask::DecrementArgs *dargs = 
               (SingleTask::DecrementArgs*)args;
             dargs->parent_ctx->decrement_pending();
+            break;
+          }
+        case HLR_SEND_VERSION_STATE_TASK_ID:
+          {
+            VersionState::SendVersionStateArgs *vargs = 
+              (VersionState::SendVersionStateArgs*)args;
+            vargs->proxy_this->send_version_state(vargs->target, 
+                                                  vargs->to_trigger);
             break;
           }
         default:

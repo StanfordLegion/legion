@@ -1074,6 +1074,7 @@ namespace LegionRuntime {
       inline bool contains(IT index) const;
       inline void add(IT index);
       inline void remove(IT index);
+      inline IT find_first_set(void) const;
       // The functor class must have an 'apply' method that
       // take one argument of type IT. This method will map
       // the functor over all the entries in the set.
@@ -6060,6 +6061,27 @@ namespace LegionRuntime {
       }
       else
         set_ptr.sparse->erase(index);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IT IntegerSet<IT,DT,BIDIR>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!set_ptr.sparse->empty());
+#endif
+        return *(set_ptr.sparse->begin());
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!!(set_ptr.dense->set));
+#endif
+        return set_ptr.dense->set.find_first_set();
+      }
     }
 
     //-------------------------------------------------------------------------

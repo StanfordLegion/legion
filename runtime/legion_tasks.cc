@@ -2059,7 +2059,6 @@ namespace LegionRuntime {
       mapping_paths.clear();
       safe_cast_domains.clear();
       restricted_trees.clear();
-      premapping_events.clear();
       frame_events.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
@@ -2305,70 +2304,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return physical_regions;
-    }
-
-    //--------------------------------------------------------------------------
-    UserEvent SingleTask::begin_premapping(RegionTreeID tid, 
-                                           const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      UserEvent result = UserEvent::create_user_event();
-      Event wait_on = Event::NO_EVENT;
-      std::set<Event> wait_on_events;
-      {
-        AutoLock o_lock(op_lock);
-        std::map<RegionTreeID,LegionMap<Event,FieldMask>::aligned >::iterator 
-          finder = premapping_events.find(tid);
-        if (finder == premapping_events.end())
-        {
-          // Couldn't find it, so add it
-          premapping_events[tid][result] = mask;   
-        }
-        else
-        {
-          LegionMap<Event,FieldMask>::aligned &pre_events = finder->second;
-          for (LegionMap<Event,FieldMask>::aligned::iterator it = 
-                pre_events.begin(); it != pre_events.end(); it++)
-          {
-            // See if we have anything to wait on
-            if (!(it->second * mask))
-            {
-              wait_on_events.insert(it->first);
-              // Mark that this is no longer the most recent
-              // pre-mapping operation on the overlapping fields
-              it->second -= mask;
-            }
-          }
-          // Put ourselves in the map
-          pre_events[result] = mask;
-        }
-      }
-      // Merge any events we need to wait on
-      if (!wait_on_events.empty())
-        wait_on = Event::merge_events(wait_on_events);
-      // Since we shouldn't be holding any locks here, it should be safe
-      // to wait withinout blocking the processor.
-      if (wait_on.exists())
-        wait_on.wait();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::end_premapping(RegionTreeID tid, UserEvent term_premap)
-    //--------------------------------------------------------------------------
-    {
-      // Trigger our event
-      term_premap.trigger();
-      AutoLock o_lock(op_lock);
-      // Remove it from the map
-      std::map<RegionTreeID,LegionMap<Event,FieldMask>::aligned >::iterator 
-        finder = premapping_events.find(tid);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != premapping_events.end());
-#endif
-      finder->second.erase(term_premap);
-      if (finder->second.empty())
-        premapping_events.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -5439,6 +5374,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MultiTask::trigger_remote_state_analysis(UserEvent ready_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+      // Tasks are a little weird for this stage. If we're local we only
+      // localize the pre-mapping nodes now so we can premap in which
+      // case we might be sent remotely. If we decide to map locally, we
+      // localize those states on demand. If we are remote though, we assume
+      // we are going to be mapping here and request all the state now.
+      std::set<Event> preconditions;
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        version_infos[idx].make_local(preconditions, 
+            enclosing_physical_contexts[idx].get_id(), !is_remote());
+      if (preconditions.empty())
+        ready_event.trigger();
+      else
+        ready_event.trigger(Event::merge_events(preconditions));
+    }
+
+    //--------------------------------------------------------------------------
     bool MultiTask::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
@@ -5720,6 +5677,7 @@ namespace LegionRuntime {
       remote_unique_id = get_unique_task_id();
       sent_remotely = false;
       top_level_task = false;
+      has_remote_subtasks = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5730,6 +5688,19 @@ namespace LegionRuntime {
       if (top_level_task)
         parent_ctx->deactivate();
       deactivate_single();
+      if (has_remote_subtasks)
+      {
+        UniqueID local_uid = get_unique_task_id();
+        runtime->unregister_remote_receiver(local_uid);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        RemoteReleaser releaser(rez, runtime);
+        remote_instances.map(releaser);
+        remote_instances.clear();
+      }
       if (future_store != NULL)
       {
         legion_free(FUTURE_RESULT_ALLOC, future_store, future_size);
@@ -6014,6 +5985,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::trigger_remote_state_analysis(UserEvent ready_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+      // Tasks are a little weird for this stage. If we're local we only
+      // localize the pre-mapping nodes now so we can premap in which
+      // case we might be sent remotely. If we decide to map locally, we
+      // localize those states on demand. If we are remote though, we assume
+      // we are going to be mapping here and request all the state now.
+      std::set<Event> preconditions; 
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        version_infos[idx].make_local(preconditions, 
+            enclosing_physical_contexts[idx].get_id(), !is_remote());
+      if (preconditions.empty())
+        ready_event.trigger();
+      else
+        ready_event.trigger(Event::merge_events(preconditions));
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::report_aliased_requirements(unsigned idx1, 
                                                      unsigned idx2)
     //--------------------------------------------------------------------------
@@ -6157,27 +6150,7 @@ namespace LegionRuntime {
         return premap_task();
     }
 
-    //--------------------------------------------------------------------------
-    Event IndividualTask::defer_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we're remote, check to see if we have valid state for
-      // all of our region trees
-      if (is_remote() && !is_locally_mapped())
-      {
-        UserEvent ready_event = UserEvent::create_user_event();
-        CheckStateArgs args;
-        args.hlr_id = HLR_CHECK_STATE_ID;
-        args.task_op = this;
-        args.ready_event = ready_event;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_CHECK_STATE_ID, this);
-        return ready_event;
-      }
-      // No need to defer otherwise
-      return Event::NO_EVENT;
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     void IndividualTask::check_state(UserEvent ready_event)
     //--------------------------------------------------------------------------
@@ -6234,6 +6207,7 @@ namespace LegionRuntime {
       else
         ready_event.trigger();
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool IndividualTask::distribute_task(void)
@@ -6251,6 +6225,22 @@ namespace LegionRuntime {
     bool IndividualTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
+      // Check to see if we need to localize anymore state before starting
+      if (!is_remote() && parent_ctx->has_remote_state())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+        std::set<Event> preconditions;
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].make_local(preconditions,
+              enclosing_physical_contexts[idx].get_id());
+        if (!preconditions.empty())
+        {
+          Event wait_on = Event::merge_events(preconditions);
+          wait_on.wait();
+        }
+      }
       // Before we try mapping the task, ask the mapper to pick a task variant
       runtime->invoke_mapper_select_variant(current_proc, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -6361,6 +6351,32 @@ namespace LegionRuntime {
       assert(parent_ctx != NULL);
 #endif
       return parent_ctx->find_outermost_physical_context();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::has_remote_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      return has_remote_subtasks;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_remote_state(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock since this is monotonic
+      // It's alright for there to be races in the registration
+      if (!has_remote_subtasks)
+        runtime->register_remote_receiver(get_unique_task_id(), this);
+      has_remote_subtasks = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_remote_instance(AddressSpaceID remote_instance)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      remote_instances.add(remote_instance);
     }
 
     //--------------------------------------------------------------------------
@@ -6486,9 +6502,13 @@ namespace LegionRuntime {
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      // If we haven't been moved remotely yet, record our contexts
       if (!is_remote())
+      {
+        // Notify our enclosing parent task that we are being sent remotely
+        parent_ctx->record_remote_state();
+        // If we haven't been moved remotely yet, record our contexts
         remote_contexts = enclosing_physical_contexts;
+      }
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       AddressSpaceID addr_target = runtime->find_address_space(target);
@@ -6548,7 +6568,7 @@ namespace LegionRuntime {
         derez.deserialize(remote_contexts[idx]);
       derez.deserialize(remote_owner_uid);
       RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid);
+        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
       unpack_restrict_infos(derez, restrict_infos);
       // Add our enclosing parent regions to the list of 
@@ -6952,6 +6972,7 @@ namespace LegionRuntime {
     {
       activate_single();
       slice_owner = NULL;
+      has_remote_subtasks = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6959,6 +6980,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_single();
+      if (has_remote_subtasks)
+      {
+        UniqueID local_uid = get_unique_task_id();
+        runtime->unregister_remote_receiver(local_uid);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        RemoteReleaser releaser(rez, runtime);
+        remote_instances.map(releaser);
+        remote_instances.clear();
+      }
       version_infos.clear();
       runtime->free_point_task(this);
     }
@@ -6995,23 +7029,6 @@ namespace LegionRuntime {
       // should never be called
       assert(false);
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    Event PointTask::defer_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return Event::NO_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::check_state(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -7105,6 +7122,32 @@ namespace LegionRuntime {
       assert(parent_ctx != NULL);
 #endif
       return parent_ctx->find_outermost_physical_context();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::has_remote_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      return has_remote_subtasks;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_remote_state(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock since this is monotonic
+      // It's alright for there to be races in the registration
+      if (!has_remote_subtasks)
+        runtime->register_remote_receiver(get_unique_task_id(), this);
+      has_remote_subtasks = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_remote_instance(AddressSpaceID remote_instance)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      remote_instances.add(remote_instance);
     }
 
     //--------------------------------------------------------------------------
@@ -7354,23 +7397,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event WrapperTask::defer_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return Event::NO_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::check_state(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     bool WrapperTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -7589,6 +7615,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RemoteTask::has_remote_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true; // Definitely does!
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTask::record_remote_state(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     Event RemoteTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
@@ -7721,6 +7770,31 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return enclosing->find_outermost_physical_context();
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineTask::has_remote_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineTask::record_remote_state(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineTask::record_remote_instance(AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -8601,22 +8675,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event IndexTask::defer_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // never need to defer an index task mapping since it never goes anywhere
-      return Event::NO_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::check_state(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     bool IndexTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -9463,27 +9521,7 @@ namespace LegionRuntime {
       return true;
     }
 
-    //--------------------------------------------------------------------------
-    Event SliceTask::defer_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we are remote check to see if iwe have valid state
-      // for all of region trees
-      if (is_remote() && !is_locally_mapped())
-      {
-        UserEvent ready_event = UserEvent::create_user_event();
-        CheckStateArgs args;
-        args.hlr_id = HLR_CHECK_STATE_ID;
-        args.task_op = this;
-        args.ready_event = ready_event;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_CHECK_STATE_ID, this);
-        return ready_event;
-      }
-      // No need to defer otherwise
-      return Event::NO_EVENT;
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     void SliceTask::check_state(UserEvent ready_event)
     //--------------------------------------------------------------------------
@@ -9539,6 +9577,7 @@ namespace LegionRuntime {
       else
         ready_event.trigger();
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
@@ -9727,9 +9766,13 @@ namespace LegionRuntime {
     bool SliceTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      // If we haven't been moved remotely record our contexts
       if (!is_remote())
+      {
+        // Tell our parent task that we are being sent remotely
+        parent_ctx->record_remote_state();
+        // If we haven't been moved remotely record our contexts
         remote_contexts = enclosing_physical_contexts;
+      }
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped
@@ -9818,7 +9861,7 @@ namespace LegionRuntime {
         derez.deserialize(remote_contexts[idx]);
       derez.deserialize(remote_owner_uid);
       RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid);
+        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
       unpack_restrict_infos(derez, restrict_infos);
       // Add our parent regions to the list of top regions
@@ -10020,6 +10063,22 @@ namespace LegionRuntime {
     void SliceTask::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
+      // Check to see if we need to localize anymore state before starting
+      if (!is_remote() && parent_ctx->has_remote_state())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+        std::set<Event> preconditions;
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].make_local(preconditions,
+              enclosing_physical_contexts[idx].get_id());
+        if (!preconditions.empty())
+        {
+          Event wait_on = Event::merge_events(preconditions);
+          wait_on.wait();
+        }
+      }
       // Before we enumerate the points, ask the mapper to pick the
       // task variant to be used for all of these points so when
       // we clone each of the point tasks, they will get the right

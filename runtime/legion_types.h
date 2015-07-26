@@ -124,13 +124,14 @@ namespace LegionRuntime {
       HLR_RESOLVE_FUTURE_PRED_ID,
       HLR_MPI_RANK_ID,
       HLR_CONTRIBUTE_COLLECTIVE_ID,
-      HLR_CHECK_STATE_ID,
+      HLR_STATE_ANALYSIS_ID,
       HLR_MAPPER_TASK_ID,
       HLR_DISJOINTNESS_TASK_ID,
       HLR_PART_INDEPENDENCE_TASK_ID,
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
       HLR_DECREMENT_PENDING_TASK_ID,
+      HLR_SEND_VERSION_STATE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -160,13 +161,14 @@ namespace LegionRuntime {
         "Resolve Future Predicate",                               \
         "Update MPI Rank Info",                                   \
         "Contribute Collective",                                  \
-        "Check State",                                            \
+        "State Analaysis",                                        \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
+        "Send Version State",                                     \
       };
 
     // Forward declarations for user level objects

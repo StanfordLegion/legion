@@ -1386,28 +1386,17 @@ namespace LegionRuntime {
       public:
         NodeInfo(void)
           : physical_state(NULL), premap_only(false), 
-            path_only(false), advance(false), needs_reset(false) { }
-        // Don't ever copy over the physical state
-        NodeInfo(const NodeInfo &rhs)
-          : physical_state(NULL), version_numbers(rhs.version_numbers),
-            premap_only(rhs.premap_only), path_only(rhs.path_only),
-            advance(rhs.advance), needs_reset(rhs.needs_reset) { }
-        NodeInfo& operator=(const NodeInfo &rhs)
-        {
-          version_numbers = rhs.version_numbers;
-          premap_only = rhs.premap_only;
-          path_only = rhs.path_only;
-          advance = rhs.advance;
-          needs_reset = rhs.needs_reset;
-          return *this;
-        }
+            path_only(false), advance(false), needs_capture(true) { }
+        // Always make deep copies of the physical state
+        NodeInfo(const NodeInfo &rhs);
+        NodeInfo& operator=(const NodeInfo &rhs);
       public:
         PhysicalState *physical_state;
         RegionVersions version_numbers;
         bool premap_only; // state needed for premapping only
         bool path_only; // state needed for intermediate path
         bool advance;
-        bool needs_reset;
+        bool needs_capture;
       };
     public:
       VersionInfo(void);
@@ -1436,11 +1425,20 @@ namespace LegionRuntime {
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       PhysicalState* create_physical_state(RegionTreeNode *node,
                                            VersionManager *manager,
-                                           bool advance);
+                                           bool initialize, bool capture);
+    public:
+      void make_local(std::set<Event> &preconditions, 
+                      ContextID ctx, bool path_only = false);
+    protected:
+      void unpack_buffer(std::set<Event> &preconditions, ContextID ctx);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       RegionTreeNode *upper_bound_node;
       bool advance;
+    protected:
+      bool packed;
+      void *packed_buffer;
+      size_t packed_size;
     };
 
     /**
@@ -1981,6 +1979,9 @@ namespace LegionRuntime {
       void apply_state(bool advance) const;
       void reset(void);
     public:
+      PhysicalState* clone(bool clone_state) const;
+      void make_local(std::set<Event> &preconditions, bool advance);
+    public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
@@ -2018,8 +2019,51 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
+      enum VersionMetaState {
+        INVALID_VERSION_STATE,
+        INITIAL_VERSION_STATE,
+        FINAL_VERSION_STATE,
+      };
+    public:
+      class RequestBroadcast {
+      public:
+        RequestBroadcast(std::set<Event> &events, Runtime *rt, 
+                         AddressSpaceID src, DistributedID d)
+          : ready_events(events), runtime(rt), source(src), did(d) { }
+      public:
+        void apply(AddressSpaceID target);
+      protected:
+        std::set<Event> &ready_events;
+        Runtime *const runtime;
+        const AddressSpaceID source;
+        const DistributedID did;
+      };
+      class RequestResponse {
+      public:
+        RequestResponse(Serializer &r, AddressSpaceID src)
+          : rez(r), source(src) { }
+      public:
+        inline void apply(AddressSpaceID target)
+        {
+          if (target != source)
+            rez.serialize(target);
+        }
+      protected:
+        Serializer &rez;
+        const AddressSpaceID source;
+      };
+    public:
+      struct SendVersionStateArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *proxy_this;
+        AddressSpaceID target;
+        UserEvent to_trigger;
+      };
+    public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
-                   AddressSpaceID owner_space, AddressSpaceID local_space);
+                   AddressSpaceID owner_space, AddressSpaceID local_space, 
+                   bool initialize);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2041,6 +2085,28 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
+      Event request_initial_version_state(void);
+      Event request_final_version_state(void);
+      void send_version_state(AddressSpaceID target, UserEvent to_trigger);
+    public:
+      void handle_version_state_request(AddressSpaceID source, 
+                                        UserEvent to_trigger);
+      void handle_version_state_broadcast_request(AddressSpaceID source, 
+                                                  UserEvent to_trigger);
+      void handle_version_state_response(AddressSpaceID source,
+                             UserEvent to_trigger, Deserializer &derez);
+      void handle_version_state_broadcast_response(UserEvent to_trigger,
+                                                   Deserializer &derez);
+    public:
+      static void process_version_state_request(Runtime *rt, 
+                                                Deserializer &derez);
+      static void process_version_state_broadcast_request(Runtime *rt,
+                              Deserializer &derez, AddressSpaceID source);
+      static void process_version_state_response(Runtime *rt,
+                              Deserializer &derez, AddressSpaceID source);
+      static void process_version_state_broadcast_response(Runtime *rt,
+                                                     Deserializer &derez);
+    public:
       const VersionID version_number;
     protected:
       Reservation state_lock;
@@ -2061,6 +2127,9 @@ namespace LegionRuntime {
       bool currently_active;
       bool currently_valid;
 #endif
+    protected:
+      VersionMetaState meta_state;
+      Event initial_ready, final_ready;
     };
 
     /**
@@ -2083,7 +2152,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-                                     bool path_only, bool advance);
+          bool path_only, bool advance, bool initialize, bool capture);
       void initialize_state(LogicalView *view, PhysicalUser &user);
       void filter_states(const FieldMask &filter_mask);
       void check_init(void);
@@ -2106,7 +2175,7 @@ namespace LegionRuntime {
                                   PhysicalState *state, FieldMask &to_create,
                                   bool advance);
     protected:
-      VersionState* create_version_state(VersionID vid);
+      VersionState* create_version_state(VersionID vid, bool initialize);
     public:
       RegionTreeForest *const context;
     protected:
@@ -2136,7 +2205,9 @@ namespace LegionRuntime {
     public:
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info)
+      inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
+                                               bool initialize = true,
+                                               bool capture = true)
       {
         // First check to see if the version info already has a state
         PhysicalState *result = info.find_physical_state(this);  
@@ -2148,7 +2219,7 @@ namespace LegionRuntime {
         assert(manager != NULL);
 #endif
         // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager, info.will_advance());
+        result = info.create_physical_state(this, manager, initialize, capture);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif

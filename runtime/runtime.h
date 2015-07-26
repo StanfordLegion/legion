@@ -804,7 +804,12 @@ namespace LegionRuntime {
         SEND_FIELD_SEMANTIC_INFO,
         SEND_LOGICAL_REGION_SEMANTIC_INFO,
         SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
+        SEND_SUBSCRIBE_REMOTE_CONTEXT,
         SEND_FREE_REMOTE_CONTEXT,
+        SEND_VERSION_STATE_REQUEST,
+        SEND_VERSION_STATE_BROADCAST_REQUEST,
+        SEND_VERSION_STATE_RESPONSE,
+        SEND_VERSION_STATE_BROADCAST_RESPONSE,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -895,7 +900,12 @@ namespace LegionRuntime {
       void send_field_semantic_info(Serializer &rez, bool flush);
       void send_logical_region_semantic_info(Serializer &rez, bool flush);
       void send_logical_partition_semantic_info(Serializer &rez, bool flush);
+      void send_subscribe_remote_context(Serializer &rez, bool flush);
       void send_free_remote_context(Serializer &rez, bool flush);
+      void send_version_state_request(Serializer &rez, bool flush);
+      void send_version_state_broadcast_request(Serializer &rez, bool flush);
+      void send_version_state_response(Serializer &rez, bool flush);
+      void send_version_state_broadcast_response(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -1030,6 +1040,7 @@ namespace LegionRuntime {
         MapperID map_id;
         Processor proc;
         Event event;
+        RemoteTask *context;
       };
     public:
       struct ProcessorGroupInfo {
@@ -1611,7 +1622,14 @@ namespace LegionRuntime {
                                              Serializer &rez);
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
+      void send_subscribe_remote_context(AddressSpaceID target,Serializer &rez);
       void send_free_remote_context(AddressSpaceID target, Serializer &rez);
+      void send_version_state_request(AddressSpaceID target, Serializer &rez);
+      void send_version_state_broadcast_request(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_version_state_response(AddressSpaceID target, Serializer &rez);
+      void send_version_state_broadcast_response(AddressSpaceID target,
+                                                 Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1714,7 +1732,15 @@ namespace LegionRuntime {
       void handle_field_semantic_info(Deserializer &derez);
       void handle_logical_region_semantic_info(Deserializer &derez);
       void handle_logical_partition_semantic_info(Deserializer &derez);
+      void handle_subscribe_remote_context(Deserializer &derez,
+                                           AddressSpaceID source);
       void handle_free_remote_context(Deserializer &derez);
+      void handle_version_state_request(Deserializer &derez);
+      void handle_version_state_broadcast_request(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_version_state_response(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_version_state_broadcast_response(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1889,7 +1915,10 @@ namespace LegionRuntime {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
     public:
-      RemoteTask* find_or_init_remote_context(UniqueID uid); 
+      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig); 
+      void register_remote_receiver(UniqueID uid, SingleTask *receiver);
+      void unregister_remote_receiver(UniqueID uid);
+    public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
     public:
@@ -2038,6 +2067,8 @@ namespace LegionRuntime {
       Reservation remote_lock;
       LegionMap<UniqueID,RemoteTask*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+      LegionMap<UniqueID,SingleTask*,
+                RUNTIME_REMOTE_ALLOC>::tracked remote_receivers;
     protected:
       // For generating random numbers
       Reservation random_lock;

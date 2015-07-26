@@ -101,6 +101,12 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
+      struct StateAnalysisArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_op;
+        UserEvent ready_event;
+      };
     public:
       Operation(Runtime *rt);
       virtual ~Operation(void);
@@ -165,6 +171,12 @@ namespace LegionRuntime {
       // In general put this on the ready queue so the runtime
       // can invoke the trigger mapping call.
       virtual void trigger_mapping(void);
+      // For operations which are operating in a context which
+      // has remote state, this call will be invoked by the 
+      // runtime prior to calling trigger_execution to allow
+      // the operation to specify an event precondition to wait
+      // on for all remote state to arrive on the necessary node.
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       // The function to call for executing an operation
       // Note that this one is not invoked by the Operation class
       // but by the runtime, therefore any operations must be
@@ -275,6 +287,8 @@ namespace LegionRuntime {
       // additional dependences can be registered.
       void add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
+      // Ask the operation to perform the state analysis
+      Event invoke_state_analysis(void);
     public:
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
@@ -514,6 +528,7 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
       virtual void trigger_commit(void);
@@ -568,6 +583,7 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
       virtual void trigger_commit(void);
@@ -760,6 +776,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void) = 0;
       virtual bool is_close_op(void) const { return true; }
     public:
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void deferred_complete(void);
       virtual void trigger_commit(void);
     protected:
@@ -880,6 +897,7 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
@@ -936,6 +954,7 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
@@ -1176,6 +1195,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
@@ -1588,6 +1608,7 @@ namespace LegionRuntime {
       inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1653,6 +1674,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
       virtual void resolve_true(void);
@@ -1702,6 +1724,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
@@ -1745,6 +1768,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
