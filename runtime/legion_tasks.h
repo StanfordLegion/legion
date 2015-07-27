@@ -102,6 +102,11 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
     protected:
+      void pack_version_infos(Serializer &rez,
+                              std::vector<VersionInfo> &infos);
+      void unpack_version_infos(Deserializer &derez,
+                                std::vector<VersionInfo> &infos);
+    protected:
       void pack_restrict_infos(Serializer &rez, 
                                std::vector<RestrictInfo> &infos);
       void unpack_restrict_infos(Deserializer &derez,
@@ -697,23 +702,13 @@ namespace LegionRuntime {
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     protected:
-      void pack_remote_mapped(Serializer &rez);
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
-      void unpack_remote_mapped(Deserializer &derez, AddressSpaceID source);
+      void unpack_remote_mapped(Deserializer &derez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
     public:
-      void send_remote_state(AddressSpaceID target,
-                             const std::vector<unsigned> &index_shapes,
-                             const std::vector<unsigned> &region_shapes,
-                             const std::vector<unsigned> &invalid);
-      static void handle_individual_request(Runtime *rt, Deserializer &derez,
-                                            AddressSpaceID source);
-      static void handle_individual_return(Runtime *rt, Deserializer &derez);
-    public:
-      static void process_unpack_remote_mapped(Deserializer &derez,
-                                               AddressSpaceID source);
+      static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
     protected: 
@@ -730,7 +725,6 @@ namespace LegionRuntime {
       Event remote_completion_event;
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
-      std::deque<RegionTreeContext> remote_contexts;
       UniqueID remote_owner_uid;
     protected:
       Future predicate_false_future;
@@ -800,12 +794,6 @@ namespace LegionRuntime {
                                  size_t res_size, bool owned);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
-      void send_back_remote_state(AddressSpaceID target, unsigned index,
-                                  RegionTreeContext remote_context,
-                                  std::set<PhysicalManager*> &needed_managers);
-      void send_back_created_state(AddressSpaceID target, unsigned start_idx, 
-                                   RegionTreeContext remote_outermost,
-                                   std::set<PhysicalManager*> &needed_managers);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -1072,13 +1060,6 @@ namespace LegionRuntime {
                                        AddressSpaceID source);
       static void process_slice_complete(Deserializer &derez);
       static void process_slice_commit(Deserializer &derez);
-    public:
-      void send_remote_state(AddressSpaceID target,
-                             const std::vector<unsigned> &index_shapes,
-                             const std::vector<unsigned> &region_shapes,
-                             const std::vector<unsigned> &invalid);
-      static void handle_slice_request(Runtime *rt, Deserializer &derez,
-                                       AddressSpaceID source);
     protected:
       friend class SliceTask;
       ArgumentMap argument_map;
@@ -1184,7 +1165,6 @@ namespace LegionRuntime {
       IndexTask *index_owner;
       Event index_complete;
       UniqueID remote_unique_id;
-      std::deque<RegionTreeContext> remote_contexts;
       RegionTreeContext remote_outermost_context;
       bool locally_mapped;
       UniqueID remote_owner_uid;

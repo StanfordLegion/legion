@@ -3774,24 +3774,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_back_materialized_view(Serializer &rez,bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_MATERIALIZED_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_composite_view(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_COMPOSITE_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_back_composite_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_COMPOSITE_VIEW, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3806,13 +3792,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_FILL_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_back_fill_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_FILL_VIEW, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3837,13 +3816,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_back_reduction_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_REDUCTION_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_instance_manager(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3858,66 +3830,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_region_state(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_REGION_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_partition_state(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_PARTITION_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_back_region_state(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_REGION_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_back_partition_state(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_PARTITION_STATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_remote_references(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_REMOTE_REFERENCES, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_individual_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDIVIDUAL_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_individual_return(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDIVIDUAL_RETURN, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_slice_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_SLICE_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_slice_return(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_SLICE_RETURN, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -4328,8 +4244,7 @@ namespace LegionRuntime {
             }
           case INDIVIDUAL_REMOTE_MAPPED:
             {
-              runtime->handle_individual_remote_mapped(derez, 
-                                                       remote_address_space);
+              runtime->handle_individual_remote_mapped(derez); 
               break;
             }
           case INDIVIDUAL_REMOTE_COMPLETE:
@@ -4416,21 +4331,9 @@ namespace LegionRuntime {
                                                        remote_address_space);
               break;
             }
-          case SEND_BACK_MATERIALIZED_VIEW:
-            {
-              runtime->handle_send_back_materialized_view(derez, 
-                                                          remote_address_space);
-              break;
-            }
           case SEND_COMPOSITE_VIEW:
             {
               runtime->handle_send_composite_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_BACK_COMPOSITE_VIEW:
-            {
-              runtime->handle_send_back_composite_view(derez, 
-                                                       remote_address_space);
               break;
             }
           case SEND_COMPOSITE_UPDATE:
@@ -4442,11 +4345,6 @@ namespace LegionRuntime {
           case SEND_FILL_VIEW:
             {
               runtime->handle_send_fill_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_BACK_FILL_VIEW:
-            {
-              runtime->handle_send_back_fill_view(derez, remote_address_space);
               break;
             }
           case SEND_FILL_UPDATE:
@@ -4465,12 +4363,6 @@ namespace LegionRuntime {
                                                     remote_address_space);
               break;
             }
-          case SEND_BACK_REDUCTION_VIEW:
-            {
-              runtime->handle_send_back_reduction_view(derez, 
-                                                       remote_address_space);
-              break;
-            }
           case SEND_INSTANCE_MANAGER:
             {
               runtime->handle_send_instance_manager(derez, 
@@ -4483,51 +4375,9 @@ namespace LegionRuntime {
                                                      remote_address_space);
               break;
             }
-          case SEND_REGION_STATE:
-            {
-              runtime->handle_send_region_state(derez, remote_address_space);
-              break;
-            }
-          case SEND_PARTITION_STATE:
-            {
-              runtime->handle_send_partition_state(derez, remote_address_space);
-              break;
-            }
-          case SEND_BACK_REGION_STATE:
-            {
-              runtime->handle_send_back_region_state(derez, 
-                                                     remote_address_space);
-              break;
-            }
-          case SEND_BACK_PARTITION_STATE:
-            {
-              runtime->handle_send_back_partition_state(derez, 
-                                                        remote_address_space);
-              break;
-            }
           case SEND_REMOTE_REFERENCES:
             {
               runtime->handle_send_remote_references(derez);
-              break;
-            }
-          case SEND_INDIVIDUAL_REQUEST:
-            {
-              runtime->handle_individual_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_INDIVIDUAL_RETURN:
-            {
-              runtime->handle_individual_return(derez);
-              break;
-            }
-          case SEND_SLICE_REQUEST:
-            {
-              runtime->handle_slice_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_SLICE_RETURN:
-            {
-              runtime->handle_slice_return(derez);
               break;
             }
           case SEND_FUTURE:
@@ -11968,27 +11818,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_materialized_view(AddressSpaceID target, 
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_materialized_view(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_composite_view(rez, false/*flush*/);
     } 
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_back_composite_view(AddressSpaceID target,
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_composite_view(rez, false/*flush*/);
-    }
 
     //--------------------------------------------------------------------------
     void Runtime::send_composite_update(AddressSpaceID target, Serializer &rez)
@@ -12004,13 +11838,6 @@ namespace LegionRuntime {
       find_messenger(target)->send_fill_view(rez, false/*flush*/);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::send_back_fill_view(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_fill_view(rez, false/*flush*/);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::send_fill_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -12033,14 +11860,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_reduction_view(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_reduction_view(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_instance_manager(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -12055,68 +11874,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_region_state(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_region_state(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_partition_state(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_partition_state(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_back_region_state(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_region_state(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_back_partition_state(AddressSpaceID target, 
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_back_partition_state(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_remote_references(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_remote_references(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_individual_request(AddressSpaceID target, 
-                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_individual_request(rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_individual_return(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_individual_return(rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_slice_request(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_slice_request(rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_slice_return(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_slice_return(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12470,11 +12231,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_mapped(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndividualTask::process_unpack_remote_mapped(derez, source);
+      IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -12584,7 +12344,7 @@ namespace LegionRuntime {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_materialized_view(forest, derez, source); 
+      //MaterializedView::handle_send_materialized_view(forest, derez, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -12592,16 +12352,7 @@ namespace LegionRuntime {
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_updates(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_materialized_view(Deserializer &derez,
-                                                     AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_send_back_materialized_view(forest, derez, 
-                                                           source);
+      //MaterializedView::handle_send_updates(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12609,15 +12360,7 @@ namespace LegionRuntime {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CompositeView::handle_send_composite_view(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_composite_view(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CompositeView::handle_send_back_composite_view(forest, derez, source);
+      //CompositeView::handle_send_composite_view(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12625,7 +12368,7 @@ namespace LegionRuntime {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CompositeView::handle_send_composite_update(forest, derez, source);
+      //CompositeView::handle_send_composite_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12633,15 +12376,7 @@ namespace LegionRuntime {
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FillView::handle_send_fill_view(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_fill_view(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      FillView::handle_send_back_fill_view(forest, derez, source);
+      //FillView::handle_send_fill_view(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12649,7 +12384,7 @@ namespace LegionRuntime {
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FillView::handle_fill_update(forest, derez, source);
+      //FillView::handle_fill_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12657,7 +12392,7 @@ namespace LegionRuntime {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ReductionView::handle_send_reduction_view(forest, derez, source);
+      //ReductionView::handle_send_reduction_view(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12665,15 +12400,7 @@ namespace LegionRuntime {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ReductionView::handle_send_update(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_reduction_view(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ReductionView::handle_send_back_reduction_view(forest, derez, source);
+      //ReductionView::handle_send_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12693,72 +12420,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_region_state(Deserializer &derez, 
-                                           AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode::handle_send_state(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_partition_state(Deserializer &derez,
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      PartitionNode::handle_send_state(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_region_state(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode::handle_send_back_state(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_partition_state(Deserializer &derez,
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      PartitionNode::handle_send_back_state(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_remote_references(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       forest->handle_remote_references(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_individual_request(Deserializer &derez, 
-                                            AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndividualTask::handle_individual_request(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_individual_return(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndividualTask::handle_individual_return(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_slice_request(Deserializer &derez, 
-                                       AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexTask::handle_slice_request(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_slice_return(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      SliceTask::handle_slice_return(this, derez);
     }
 
     //--------------------------------------------------------------------------

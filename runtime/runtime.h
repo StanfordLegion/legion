@@ -771,27 +771,15 @@ namespace LegionRuntime {
         SEND_BACK_ATOMIC,
         SEND_MATERIALIZED_VIEW,
         SEND_MATERIALIZED_UPDATE,
-        SEND_BACK_MATERIALIZED_VIEW,
         SEND_COMPOSITE_VIEW,
-        SEND_BACK_COMPOSITE_VIEW,
         SEND_COMPOSITE_UPDATE,
         SEND_FILL_VIEW,
-        SEND_BACK_FILL_VIEW,
         SEND_FILL_UPDATE,
         SEND_REDUCTION_VIEW,
         SEND_REDUCTION_UPDATE,
-        SEND_BACK_REDUCTION_VIEW,
         SEND_INSTANCE_MANAGER,
         SEND_REDUCTION_MANAGER,
-        SEND_REGION_STATE,
-        SEND_PARTITION_STATE,
-        SEND_BACK_REGION_STATE,
-        SEND_BACK_PARTITION_STATE,
         SEND_REMOTE_REFERENCES,
-        SEND_INDIVIDUAL_REQUEST,
-        SEND_INDIVIDUAL_RETURN,
-        SEND_SLICE_REQUEST,
-        SEND_SLICE_RETURN,
         SEND_FUTURE,
         SEND_FUTURE_RESULT,
         SEND_FUTURE_SUBSCRIPTION,
@@ -866,28 +854,16 @@ namespace LegionRuntime {
       void send_view_remote_resource_update(Serializer &rez, bool flush);
       void send_back_atomic(Serializer &rez, bool flush);
       void send_materialized_view(Serializer &rez, bool flush);
-      void send_back_materialized_view(Serializer &rez, bool flush);
       void send_materialized_update(Serializer &rez, bool flush);
       void send_composite_view(Serializer &rez, bool flush);
       void send_composite_update(Serializer &rez, bool flush);
-      void send_back_composite_view(Serializer &rez, bool flush);
       void send_fill_view(Serializer &rez, bool flush);
-      void send_back_fill_view(Serializer &rez, bool flush);
       void send_fill_update(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
       void send_reduction_update(Serializer &rez, bool flush);
-      void send_back_reduction_view(Serializer &rez, bool flush);
       void send_instance_manager(Serializer &rez, bool flush);
       void send_reduction_manager(Serializer &rez, bool flush);
-      void send_region_state(Serializer &rez, bool flush);
-      void send_partition_state(Serializer &rez, bool flush);
-      void send_back_region_state(Serializer &rez, bool flush);
-      void send_back_partition_state(Serializer &rez, bool flush);
       void send_remote_references(Serializer &rez, bool flush);
-      void send_individual_request(Serializer &rez, bool flush);
-      void send_individual_return(Serializer &rez, bool flush);
-      void send_slice_request(Serializer &rez, bool flush);
-      void send_slice_return(Serializer &rez, bool flush);
       void send_future(Serializer &rez, bool flush);
       void send_future_result(Serializer &rez, bool flush);
       void send_future_subscription(Serializer &rez, bool flush);
@@ -1584,27 +1560,15 @@ namespace LegionRuntime {
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
-      void send_back_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_composite_update(AddressSpaceID target, Serializer &rez);
-      void send_back_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
-      void send_back_fill_view(AddressSpaceID target, Serializer &rez);
       void send_fill_update(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_update(AddressSpaceID target, Serializer &rez);
-      void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
-      void send_region_state(AddressSpaceID target, Serializer &rez);
-      void send_partition_state(AddressSpaceID target, Serializer &rez);
-      void send_back_region_state(AddressSpaceID target, Serializer &rez);
-      void send_back_partition_state(AddressSpaceID target, Serializer &rez);
       void send_remote_references(AddressSpaceID target, Serializer &rez);
-      void send_individual_request(AddressSpaceID target, Serializer &rez);
-      void send_individual_return(AddressSpaceID target, Serializer &rez);
-      void send_slice_request(AddressSpaceID target, Serializer &rez);
-      void send_slice_return(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -1662,8 +1626,7 @@ namespace LegionRuntime {
                                                 AddressSpaceID source);
       void handle_field_allocation(Deserializer &derez, AddressSpaceID source);
       void handle_field_destruction(Deserializer &derez, AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez, 
-                                           AddressSpaceID source);
+      void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -1685,41 +1648,21 @@ namespace LegionRuntime {
                                          AddressSpaceID source);
       void handle_send_materialized_update(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_send_back_materialized_view(Deserializer &derez,
-                                              AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_composite_update(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_send_back_composite_view(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
-      void handle_send_back_fill_view(Deserializer &derez, 
-                                      AddressSpaceID source);
       void handle_send_fill_update(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_reduction_update(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_send_back_reduction_view(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_send_region_state(Deserializer &derez, AddressSpaceID source);
-      void handle_send_partition_state(Deserializer &derez, 
-                                       AddressSpaceID source);
-      void handle_send_back_region_state(Deserializer &derez, 
-                                         AddressSpaceID source);
-      void handle_send_back_partition_state(Deserializer &derez, 
-                                            AddressSpaceID source);
       void handle_send_remote_references(Deserializer &derez);
-      void handle_individual_request(Deserializer &derez, 
-                                     AddressSpaceID source);
-      void handle_individual_return(Deserializer &derez);
-      void handle_slice_request(Deserializer &derez, AddressSpaceID source);
-      void handle_slice_return(Deserializer &derez);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);

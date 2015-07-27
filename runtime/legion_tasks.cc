@@ -238,8 +238,6 @@ namespace LegionRuntime {
             early_mapped_regions.end(); it++)
       {
         rez.serialize(it->first);
-        // Need to send the region tree shape for this reference
-        runtime->forest->send_tree_shape(regions[it->first], target);
         it->second.pack_reference(rez, target);
       }
     }
@@ -560,27 +558,67 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::pack_version_infos(Serializer &rez,
+                                    std::vector<VersionInfo> &infos)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_locally_mapped())
+      {
+        RezCheck z(rez);
+        AddressSpaceID local_space = runtime->address_space;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(infos.size() == regions.size());
+        assert(enclosing_physical_contexts.size() == regions.size());
+#endif
+        for (unsigned idx = 0; idx < infos.size(); idx++)
+        {
+          infos[idx].pack_version_info(rez, local_space, 
+                                    enclosing_physical_contexts[idx].get_id()); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::unpack_version_infos(Deserializer &derez,
+                                      std::vector<VersionInfo> &infos)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_locally_mapped())
+      {
+        DerezCheck z(derez);
+        infos.resize(regions.size());
+        for (unsigned idx = 0; idx < infos.size(); idx++)
+        {
+          infos[idx].unpack_version_info(derez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::pack_restrict_infos(Serializer &rez,
                                      std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      RezCheck z(rez);
-      size_t count = 0;
-      for (unsigned idx = 0; idx < infos.size(); idx++)
+      if (!is_locally_mapped())
       {
-        if (infos[idx].has_restrictions())
-          count++;
-      }
-      rez.serialize(count);
-      if (count > 0)
-      {
-        rez.serialize(runtime->address_space);
+        RezCheck z(rez);
+        size_t count = 0;
         for (unsigned idx = 0; idx < infos.size(); idx++)
         {
           if (infos[idx].has_restrictions())
+            count++;
+        }
+        rez.serialize(count);
+        if (count > 0)
+        {
+          rez.serialize(runtime->address_space);
+          for (unsigned idx = 0; idx < infos.size(); idx++)
           {
-            rez.serialize(idx);
-            infos[idx].pack_info(rez);
+            if (infos[idx].has_restrictions())
+            {
+              rez.serialize(idx);
+              infos[idx].pack_info(rez);
+            }
           }
         }
       }
@@ -591,20 +629,23 @@ namespace LegionRuntime {
                                        std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      // Always resize the restrictions
-      infos.resize(regions.size());
-      size_t num_restrictions;
-      derez.deserialize(num_restrictions);
-      if (num_restrictions > 0)
+      if (!is_locally_mapped())
       {
-        AddressSpaceID source;
-        derez.deserialize(source);
-        for (unsigned idx = 0; idx < num_restrictions; idx++)
+        DerezCheck z(derez);
+        // Always resize the restrictions
+        infos.resize(regions.size());
+        size_t num_restrictions;
+        derez.deserialize(num_restrictions);
+        if (num_restrictions > 0)
         {
-          unsigned index;
-          derez.deserialize(index);
-          infos[index].unpack_info(derez, source, runtime->forest);
+          AddressSpaceID source;
+          derez.deserialize(source);
+          for (unsigned idx = 0; idx < num_restrictions; idx++)
+          {
+            unsigned index;
+            derez.deserialize(index);
+            infos[index].unpack_info(derez, source, runtime->forest);
+          }
         }
       }
     }
@@ -975,7 +1016,6 @@ namespace LegionRuntime {
             created_regions.begin(); it != created_regions.end(); it++)
       {
         rez.serialize(*it);
-        runtime->forest->send_tree_shape(*it, target);
       }
       rez.serialize<size_t>(deleted_regions.size());
       for (std::set<LogicalRegion>::const_iterator it =
@@ -1003,7 +1043,6 @@ namespace LegionRuntime {
             created_field_spaces.end(); it++)
       {
         rez.serialize(*it);
-        runtime->forest->send_tree_shape(*it, target);
       }
       rez.serialize<size_t>(deleted_field_spaces.size());
       for (std::set<FieldSpace>::const_iterator it = 
@@ -1018,7 +1057,6 @@ namespace LegionRuntime {
             created_index_spaces.end(); it++)
       {
         rez.serialize(*it);
-        runtime->forest->send_tree_shape(*it, target);
       }
       rez.serialize<size_t>(deleted_index_spaces.size());
       for (std::set<IndexSpace>::const_iterator it = 
@@ -2335,15 +2373,6 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
         physical_instances[idx].pack_reference(rez, target);
-      }
-      // Finally always send the region tree shapes for our regions
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        runtime->forest->send_tree_shape(indexes[idx], target);
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        runtime->forest->send_tree_shape(regions[idx], target);
       }
     }
 
@@ -6150,65 +6179,6 @@ namespace LegionRuntime {
         return premap_task();
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void IndividualTask::check_state(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if the physical state is valid for each region 
-      // requirement, if it is ready for all of them trigger the event, 
-      // otherwise figure out where to go to get the valid data
-      std::vector<unsigned> index_shapes, region_shapes, invalid; 
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        bool valid = runtime->forest->check_remote_shape(indexes[idx]);
-        if (!valid)
-          index_shapes.push_back(idx);
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Always check to see if the shape is valid
-        bool valid = runtime->forest->check_remote_shape(regions[idx]);
-        if (!valid)
-          region_shapes.push_back(idx);
-        // If we early mapped, then we are done
-        if ((early_mapped_regions.find(idx) != early_mapped_regions.end()) ||
-            ((idx < physical_instances.size()) && physical_instances[idx].has_ref()))
-          continue;
-        // If we were either didn't have the shape or the state
-        // is not valid then we need to update it
-        if (!valid || runtime->forest->check_remote_state(regions[idx],
-                                              enclosing_physical_contexts[idx],
-                                                          version_infos[idx]))
-          invalid.push_back(idx);
-      }
-      if (!index_shapes.empty() || !region_shapes.empty() || !invalid.empty())
-      {
-        // We don't have a valid copy of the region tree state
-        // so send a message to retrieve it from the origin
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(orig_task);
-          rez.serialize(ready_event);
-          rez.serialize<size_t>(index_shapes.size());
-          for (unsigned idx = 0; idx < index_shapes.size(); idx++)
-            rez.serialize(index_shapes[idx]);
-          rez.serialize<size_t>(region_shapes.size());
-          for (unsigned idx = 0; idx < region_shapes.size(); idx++)
-            rez.serialize(region_shapes[idx]);
-          rez.serialize<size_t>(invalid.size());
-          for (unsigned idx = 0; idx < invalid.size(); idx++)
-            rez.serialize(invalid[idx]);
-        }
-        runtime->send_individual_request(
-            runtime->find_address_space(orig_proc), rez);
-      }
-      else
-        ready_event.trigger();
-    }
-#endif
-
     //--------------------------------------------------------------------------
     bool IndividualTask::distribute_task(void)
     //--------------------------------------------------------------------------
@@ -6275,7 +6245,8 @@ namespace LegionRuntime {
         {
           // Send back the message saying that we finished mapping
           Serializer rez;
-          pack_remote_mapped(rez);
+          // Only need to send back the pointer to the task instance
+          rez.serialize(orig_task);
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
         // Mark that we have completed mapping
@@ -6416,7 +6387,8 @@ namespace LegionRuntime {
         if (num_virtual_mappings > 0)
         {
           Serializer rez;
-          pack_remote_mapped(rez);
+          // Only need to send back the pointer to the task instance
+          rez.serialize(orig_task);
           runtime->send_individual_remote_mapped(orig_proc,rez,false/*flush*/);
         }
         Serializer rez;
@@ -6506,43 +6478,19 @@ namespace LegionRuntime {
       {
         // Notify our enclosing parent task that we are being sent remotely
         parent_ctx->record_remote_state();
-        // If we haven't been moved remotely yet, record our contexts
-        remote_contexts = enclosing_physical_contexts;
       }
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       AddressSpaceID addr_target = runtime->find_address_space(target);
-      if (!spawn_task && !is_remote())
-      {
-        std::vector<unsigned> index_shapes(indexes.size());
-        for (unsigned idx = 0; idx < indexes.size(); idx++)
-          index_shapes[idx] = idx;
-        // Only send state for unmapped regions, otherwise we
-        // just need to send the shape of the tree
-        std::vector<unsigned> region_shapes, invalid;
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if ((idx < physical_instances.size()) &&
-              (physical_instances[idx].has_ref()))
-            region_shapes.push_back(idx);
-          else
-            invalid.push_back(idx);
-        }
-        send_remote_state(addr_target, index_shapes, region_shapes, invalid);
-      }
       RezCheck z(rez);
       pack_single_task(rez, addr_target);
       rez.serialize(orig_task);
       rez.serialize(remote_completion_event);
       rez.serialize(remote_unique_id);
       rez.serialize(remote_outermost_context);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == remote_contexts.size());
-#endif
-      for (unsigned idx = 0; idx < remote_contexts.size(); idx++)
-        rez.serialize(remote_contexts[idx]);
       rez.serialize(remote_owner_uid);
       parent_ctx->pack_parent_task(rez);
+      pack_version_infos(rez, version_infos);
       pack_restrict_infos(rez, restrict_infos);
       // Mark that we sent this task remotely
       sent_remotely = true;
@@ -6563,13 +6511,11 @@ namespace LegionRuntime {
       derez.deserialize(remote_unique_id);
       derez.deserialize(remote_outermost_context);
       current_proc = current;
-      remote_contexts.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        derez.deserialize(remote_contexts[idx]);
       derez.deserialize(remote_owner_uid);
       RemoteTask *remote_ctx = 
         runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
+      unpack_version_infos(derez, version_infos);
       unpack_restrict_infos(derez, restrict_infos);
       // Add our enclosing parent regions to the list of 
       // top regions maintained by the remote context
@@ -6681,41 +6627,7 @@ namespace LegionRuntime {
     }  
 
     //--------------------------------------------------------------------------
-    void IndividualTask::pack_remote_mapped(Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(remote_contexts.size() <= regions.size());
-      assert(remote_contexts.size() <= enclosing_physical_contexts.size());
-      assert(remote_contexts.size() <= mapping_paths.size());
-#endif
-      // First send back any region tree state that can be sent back
-      // This includes everything for which we have remote context information
-      // and which was locally mapped.  Note this includes things that are
-      // virtually mapped for which we own the state here.
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      std::set<PhysicalManager*> needed_managers;
-      for (unsigned idx = 0; idx < remote_contexts.size(); idx++)
-      {
-        if (locally_mapped[idx])
-        {
-          runtime->forest->send_back_physical_state(
-                                    enclosing_physical_contexts[idx],
-                                    remote_contexts[idx],
-                                    mapping_paths[idx],
-                                    regions[idx], target,
-                                    needed_managers);
-        }
-      }
-      if (!needed_managers.empty())
-        runtime->forest->send_remote_references(needed_managers, target);
-      // Only need to send back the pointer to the task instance
-      rez.serialize(orig_task);
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndividualTask::unpack_remote_mapped(Deserializer &derez,
-                                              AddressSpaceID source)
+    void IndividualTask::unpack_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing more to unpack, we know everything is mapped
@@ -6728,28 +6640,13 @@ namespace LegionRuntime {
     void IndividualTask::pack_remote_complete(Serializer &rez) 
     //--------------------------------------------------------------------------
     {
+      AddressSpaceID target = runtime->find_address_space(orig_proc);
+#ifdef UNIMPLEMENTED_VERSIONING
       // First send back any created region tree state.  Note to do
       // this we can start at the index of the remote contexts since we
       // know that any additional region beyond this are ones for which
       // we have created the privileges.
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      std::set<PhysicalManager*> needed_managers;
-      for (unsigned idx = remote_contexts.size(); idx < regions.size(); idx++)
-      {
-        if (locally_mapped[idx] && !region_deleted[idx])
-        {
-          RegionTreePath path;
-          // Initialize a path to use
-          initialize_mapping_path(path, regions[idx], regions[idx].parent);
-          runtime->forest->send_back_physical_state(
-                                    enclosing_physical_contexts[idx],
-                                    remote_outermost_context,
-                                    path, regions[idx], target,
-                                    needed_managers);
-        }
-      }
-      if (!needed_managers.empty())
-        runtime->forest->send_remote_references(needed_managers, target);
+#endif
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
@@ -6810,105 +6707,13 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void IndividualTask::send_remote_state(AddressSpaceID target, 
-                                     const std::vector<unsigned> &index_shapes,
-                                     const std::vector<unsigned> &region_shapes,
-                                     const std::vector<unsigned> &invalid)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_remote());
-#endif
-      // Send state for anything that was not premapped and has not
-      // already been mapped
-      LegionMap<LogicalView*,FieldMask>::aligned needed_views;
-      std::set<PhysicalManager*> needed_managers;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_physical_contexts.size() == regions.size());
-#endif
-      for (std::vector<unsigned>::const_iterator it = index_shapes.begin();
-            it != index_shapes.end(); it++)
-      {
-        runtime->forest->send_tree_shape(indexes[*it], target);
-      }
-      for (std::vector<unsigned>::const_iterator it = region_shapes.begin();
-            it != region_shapes.end(); it++)
-      {
-        runtime->forest->send_tree_shape(regions[*it], target);
-      }
-      for (std::vector<unsigned>::const_iterator it = invalid.begin();
-            it != invalid.end(); it++)
-      {
-        runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
-                                             regions[*it],
-                                             target, remote_owner_uid,
-                                             needed_views,
-                                             needed_managers); 
-      }
-      if (!needed_views.empty() || !needed_managers.empty())
-        runtime->forest->send_remote_references(needed_views,
-                                                needed_managers, target);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndividualTask::handle_individual_request(Runtime *runtime,
-                                                          Deserializer &derez,
-                                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndividualTask *local_task;
-      derez.deserialize(local_task);
-      UserEvent ready_event;
-      derez.deserialize(ready_event);
-      size_t num_indexes;
-      derez.deserialize(num_indexes);
-      std::vector<unsigned> index_shapes(num_indexes);
-      for (unsigned idx = 0; idx < num_indexes; idx++)
-        derez.deserialize(index_shapes[idx]);
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      std::vector<unsigned> region_shapes(num_regions);
-      for (unsigned idx = 0; idx < num_regions; idx++)
-        derez.deserialize(region_shapes[idx]);
-      size_t num_invalid;
-      derez.deserialize(num_invalid);
-      std::vector<unsigned> invalid(num_invalid);
-      for (unsigned idx = 0; idx < num_invalid; idx++)
-        derez.deserialize(invalid[idx]);
-      // Send the state back to the source
-      local_task->send_remote_state(source, index_shapes, 
-                                    region_shapes, invalid);
-      // Now send a message back to the remote task saying the
-      // state has been sent, since we know messages are delivered
-      // in order we can have this message trigger the ready event
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(ready_event);
-      }
-      runtime->send_individual_return(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndividualTask::handle_individual_return(Runtime *runtime,
-                                                          Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UserEvent ready_event;
-      derez.deserialize(ready_event);
-      ready_event.trigger();
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void IndividualTask::process_unpack_remote_mapped(
-                                     Deserializer &derez, AddressSpaceID source)
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndividualTask *task;
       derez.deserialize(task);
-      task->unpack_remote_mapped(derez, source);
+      task->unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -7300,28 +7105,7 @@ namespace LegionRuntime {
       }
     } 
 
-    //--------------------------------------------------------------------------
-    void PointTask::send_back_remote_state(AddressSpaceID target, unsigned idx,
-                                           RegionTreeContext remote_context,
-                                   std::set<PhysicalManager*> &needed_managers)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(idx < regions.size());
-      assert(idx < mapping_paths.size());
-      assert(idx < enclosing_physical_contexts.size());
-#endif
-      if (locally_mapped[idx])
-      {
-        runtime->forest->send_back_physical_state(
-                                    enclosing_physical_contexts[idx],
-                                    remote_context,
-                                    mapping_paths[idx],
-                                    regions[idx], target,
-                                    needed_managers);
-      }
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     void PointTask::send_back_created_state(AddressSpaceID target, 
                                             unsigned start,
@@ -7344,6 +7128,7 @@ namespace LegionRuntime {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Wrapper Task 
@@ -8967,7 +8752,6 @@ namespace LegionRuntime {
                                    this->task_id);
       result->clone_multi_from(this, d, p, recurse, stealable);
       result->enclosing_physical_contexts = this->enclosing_physical_contexts;
-      result->remote_contexts = this->enclosing_physical_contexts;
       result->remote_outermost_context = 
         parent_ctx->find_outermost_physical_context()->get_context();
 #ifdef DEBUG_HIGH_LEVEL
@@ -9331,87 +9115,6 @@ namespace LegionRuntime {
       task->unpack_slice_commit(derez);
     }
 
-    //--------------------------------------------------------------------------
-    void IndexTask::send_remote_state(AddressSpaceID target,
-                                    const std::vector<unsigned> &index_shapes,
-                                    const std::vector<unsigned> &region_shapes,
-                                    const std::vector<unsigned> &invalid)
-    //--------------------------------------------------------------------------
-    {
-      // Send state for anything that was not premapped and has not
-      // already been mapped
-      LegionMap<LogicalView*,FieldMask>::aligned needed_views;
-      std::set<PhysicalManager*> needed_managers;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_physical_contexts.size() == regions.size());
-#endif
-      for (std::vector<unsigned>::const_iterator it = index_shapes.begin();
-            it != index_shapes.end(); it++)
-      {
-        runtime->forest->send_tree_shape(indexes[*it], target);
-      }
-      for (std::vector<unsigned>::const_iterator it = region_shapes.begin();
-            it != region_shapes.end(); it++)
-      {
-        runtime->forest->send_tree_shape(regions[*it], target);
-      }
-      for (std::vector<unsigned>::const_iterator it = invalid.begin();
-            it != invalid.end(); it++)
-      {
-        // Otherwise we need to send the state
-        runtime->forest->send_physical_state(enclosing_physical_contexts[*it],
-                                             regions[*it], target, 
-                                             parent_ctx->get_unique_task_id(),
-                                             needed_views, needed_managers);
-      }
-      // If we had any needed views or needed managers send 
-      // their remote references
-      if (!needed_views.empty() || !needed_managers.empty())
-        runtime->forest->send_remote_references(needed_views,
-                                                needed_managers, target);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexTask::handle_slice_request(Runtime *rt, 
-                                                    Deserializer &derez,
-                                                    AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexTask *owner_task;
-      derez.deserialize(owner_task);
-      UserEvent ready_event;
-      derez.deserialize(ready_event);
-      size_t num_indexes;
-      derez.deserialize(num_indexes);
-      std::vector<unsigned> index_shapes(num_indexes);
-      for (unsigned idx = 0; idx < num_indexes; idx++)
-        derez.deserialize(index_shapes[idx]);
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      std::vector<unsigned> region_shapes(num_regions);
-      for (unsigned idx = 0; idx < num_regions; idx++)
-        derez.deserialize(region_shapes[idx]);
-      size_t num_invalid;
-      derez.deserialize(num_invalid);
-      std::vector<unsigned> invalid(num_invalid);
-      for (unsigned idx = 0; idx < num_invalid; idx++)
-        derez.deserialize(invalid[idx]);
-      // Send the state
-      owner_task->send_remote_state(source, index_shapes, 
-                                    region_shapes, invalid);
-      // Send the message back saying the state is sent
-      // This will trigger the event.  Since we know that 
-      // messages are delivered in order we know this will
-      // only happen once all of the states have been unpacked
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(ready_event);
-      }
-      rt->send_slice_return(source, rez);
-    }
-
     /////////////////////////////////////////////////////////////
     // Slice Task 
     /////////////////////////////////////////////////////////////
@@ -9483,7 +9186,6 @@ namespace LegionRuntime {
         legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
       }
       temporary_futures.clear();
-      remote_contexts.clear();
       runtime->free_slice_task(this);
     }
 
@@ -9520,64 +9222,6 @@ namespace LegionRuntime {
 #endif
       return true;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void SliceTask::check_state(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if the physical state is valid for each region 
-      // requirement, if it is ready for all of them trigger the event, 
-      // otherwise figure out where to go to get the valid data
-      std::vector<unsigned> index_shapes, region_shapes, invalid; 
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        bool valid = runtime->forest->check_remote_shape(indexes[idx]);
-        if (!valid)
-          index_shapes.push_back(idx);
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Always check to see if the shape is valid
-        bool valid = runtime->forest->check_remote_shape(regions[idx]);
-        if (!valid)
-          region_shapes.push_back(idx);
-        // If we early mapped then we are done 
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          continue;
-        // If we didn't have a valid shape or we don't have valid state
-        // then also mark that we need the state
-        if (!valid || runtime->forest->check_remote_state(regions[idx],
-                                              enclosing_physical_contexts[idx],
-                                                          version_infos[idx]))
-          invalid.push_back(idx);
-      }
-      if (!index_shapes.empty() || !region_shapes.empty() || !invalid.empty())
-      {
-        // We don't have a valid copy of the region tree state
-        // so send a message to retrieve it from the origin
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(index_owner);
-          rez.serialize(ready_event);
-          rez.serialize<size_t>(index_shapes.size());
-          for (unsigned idx = 0; idx < index_shapes.size(); idx++)
-            rez.serialize(index_shapes[idx]);
-          rez.serialize<size_t>(region_shapes.size());
-          for (unsigned idx = 0; idx < region_shapes.size(); idx++)
-            rez.serialize(region_shapes[idx]);
-          rez.serialize<size_t>(invalid.size());
-          for (unsigned idx = 0; idx < invalid.size(); idx++)
-            rez.serialize(invalid[idx]);
-        }
-        runtime->send_slice_request(
-            runtime->find_address_space(orig_proc), rez);
-      }
-      else
-        ready_event.trigger();
-    }
-#endif
 
     //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
@@ -9770,45 +9414,11 @@ namespace LegionRuntime {
       {
         // Tell our parent task that we are being sent remotely
         parent_ctx->record_remote_state();
-        // If we haven't been moved remotely record our contexts
-        remote_contexts = enclosing_physical_contexts;
       }
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped
       AddressSpaceID addr_target = runtime->find_address_space(target);
-      if (!spawn_task && sliced && !is_remote())
-      {
-        if (points.empty() || (num_unmapped_points > 0))
-        {
-          std::vector<unsigned> index_shapes(indexes.size());
-          for (unsigned idx = 0; idx < indexes.size(); idx++)
-            index_shapes[idx] = idx;
-          std::vector<unsigned> region_shapes(0);
-          std::vector<unsigned> invalid(regions.size());
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            invalid[idx] = idx;
-          // Just send the state now
-          index_owner->send_remote_state(addr_target, index_shapes, 
-                                         region_shapes, invalid);
-          locally_mapped = false;
-        }
-        else
-        {
-          // Otherwise we are locally mapped so there is 
-          // no need to send the state 
-          locally_mapped = true;
-          // We do still need to send the tree shapes though
-          for (unsigned idx = 0; idx < indexes.size(); idx++)
-          {
-            runtime->forest->send_tree_shape(indexes[idx], addr_target);
-          }
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-          {
-            runtime->forest->send_tree_shape(regions[idx], addr_target);
-          }
-        }
-      }
       RezCheck z(rez);
       // Preamble used in TaskOp::unpack
       rez.serialize(points.size());
@@ -9819,15 +9429,9 @@ namespace LegionRuntime {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_outermost_context);
       rez.serialize(locally_mapped);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(remote_contexts.size() == regions.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        rez.serialize(remote_contexts[idx]);
-      }
       rez.serialize(remote_owner_uid);
       parent_ctx->pack_parent_task(rez);
+      pack_version_infos(rez, version_infos);
       if (is_remote())
         pack_restrict_infos(rez, restrict_infos);
       else
@@ -9856,13 +9460,11 @@ namespace LegionRuntime {
       derez.deserialize(remote_unique_id); 
       derez.deserialize(remote_outermost_context);
       derez.deserialize(locally_mapped);
-      remote_contexts.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        derez.deserialize(remote_contexts[idx]);
       derez.deserialize(remote_owner_uid);
       RemoteTask *remote_ctx = 
         runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
+      unpack_version_infos(derez, version_infos);
       unpack_restrict_infos(derez, restrict_infos);
       // Add our parent regions to the list of top regions
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -9945,7 +9547,6 @@ namespace LegionRuntime {
                                    this->task_id);
       result->clone_multi_from(this, d, p, recurse, stealable);
       result->enclosing_physical_contexts = this->enclosing_physical_contexts;
-      result->remote_contexts = this->remote_contexts;
       result->remote_outermost_context = this->remote_outermost_context;
       result->index_complete = this->index_complete;
       result->denominator = this->denominator * scale_denominator;
@@ -10304,63 +9905,6 @@ namespace LegionRuntime {
     void SliceTask::pack_remote_mapped(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Send back any state owned by this slice.  For read-only and reduce
-      // requirements, we can just send back the entire state from this slice.
-      // For any read-write requirements that were not early mapped they have
-      // to be projection in which case we ask each of the children to send
-      // them back individually.
-      if (!locally_mapped)
-      {
-        AddressSpaceID target = runtime->find_address_space(orig_proc);
-        std::set<PhysicalManager*> needed_managers;
-        for (unsigned idx = 0; idx < remote_contexts.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-            continue;
-          if (IS_WRITE(regions[idx]))
-          {
-#ifdef DEBUG_HIGH_LEVEL
-            assert((regions[idx].handle_type == PART_PROJECTION) ||
-                    (regions[idx].handle_type == REG_PROJECTION));
-            assert(idx < remote_contexts.size());
-#endif
-            // Ask each of the points to send back their remote state
-            for (std::deque<PointTask*>::const_iterator it = 
-                  points.begin(); it != points.end(); it++)
-            {
-              (*it)->send_back_remote_state(target, idx, 
-                  remote_contexts[idx], needed_managers);
-            }
-          }
-          else
-          {
-            // Since this state is going to get merged we can send
-            // the whole state back from this region requirement
-            RegionTreePath path;
-            if (regions[idx].handle_type == PART_PROJECTION)
-            {
-              runtime->forest->initialize_path(
-                  regions[idx].partition.get_index_partition(),
-                  regions[idx].partition.get_index_partition(),
-                                                         path);
-            }
-            else
-            {
-              runtime->forest->initialize_path(
-                  regions[idx].region.get_index_space(),
-                  regions[idx].region.get_index_space(),
-                                                   path);
-            }
-            runtime->forest->send_back_physical_state(
-                                      enclosing_physical_contexts[idx],
-                                      remote_contexts[idx],
-                                      path, regions[idx], target,
-                                      needed_managers);
-          }
-        }
-        if (!needed_managers.empty())
-          runtime->forest->send_remote_references(needed_managers, target);
-      }
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize(points.size());
@@ -10383,15 +9927,10 @@ namespace LegionRuntime {
     {
       // Send back any created state that our point tasks made
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      std::set<PhysicalManager*> needed_managers;
-      for (std::deque<PointTask*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-      {
-        (*it)->send_back_created_state(target, remote_contexts.size(),
-                             remote_outermost_context, needed_managers);
-      }
-      if (!needed_managers.empty())
-        runtime->forest->send_remote_references(needed_managers, target);
+#ifdef UNIMPLEMENTED_VERSIONING
+      // Send back any newly created state
+      // See PointTask::send_back_created_state
+#endif
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
