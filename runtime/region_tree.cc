@@ -8917,7 +8917,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
       : node_infos(rhs.node_infos), upper_bound_node(rhs.upper_bound_node), 
-        advance(rhs.advance), packed(false)
+        advance(rhs.advance), packed(false), packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
       // This shouldn't be called when packed

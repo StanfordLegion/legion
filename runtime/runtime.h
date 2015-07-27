@@ -714,6 +714,61 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class VirtualChannel
+     * This class provides the basic support for sending and receiving
+     * messages for a single virtual channel.
+     */
+    class VirtualChannel {
+    public:
+      // Implement a three-state state-machine for sending
+      // messages.  Either fully self-contained messages
+      // or chains of partial messages followed by a final
+      // message.
+      enum MessageHeader {
+        FULL_MESSAGE,
+        PARTIAL_MESSAGE,
+        FINAL_MESSAGE,
+      };
+    public:
+      VirtualChannel(VirtualChannelKind kind, 
+          AddressSpaceID local_address_space, size_t max_message_size);
+      VirtualChannel(const VirtualChannel &rhs);
+      ~VirtualChannel(void);
+    public:
+      VirtualChannel& operator=(const VirtualChannel &rhs);
+    public:
+      void package_message(Serializer &rez, MessageKind k, bool flush,
+                           Runtime *runtime, Processor target);
+      void process_message(const void *args, size_t arglen, 
+                         Runtime *runtime, AddressSpaceID remote_address_space);
+    private:
+      void send_message(bool complete, Runtime *runtime, Processor target);
+      void handle_messages(unsigned num_messages, Runtime *runtime, 
+                           AddressSpaceID remote_address_space,
+                           const char *args, size_t arglen);
+      void buffer_messages(unsigned num_messages,
+                           const void *args, size_t arglen);
+    public:
+      Event notify_pending_shutdown(void);
+    private:
+      Reservation send_lock;
+      char *const sending_buffer;
+      unsigned sending_index;
+      const size_t sending_buffer_size;
+      Event last_message_event;
+      MessageHeader header;
+      unsigned packaged_messages;
+      bool partial;
+      // State for receiving messages
+      // No lock for receiving messages since we know
+      // that they are ordered
+      char *receiving_buffer;
+      unsigned receiving_index;
+      size_t receiving_buffer_size;
+      unsigned received_messages;
+    }; 
+
+    /**
      * \class MessageManager
      * This class manages sending and receiving of message between
      * instances of the Runtime residing on different nodes.
@@ -731,83 +786,7 @@ namespace LegionRuntime {
      * manager waits until it has received all the active messages
      * before handling the message.
      */
-    class MessageManager {
-    public:
-      enum MessageKind {
-        TASK_MESSAGE,
-        STEAL_MESSAGE,
-        ADVERTISEMENT_MESSAGE,
-        SEND_INDEX_SPACE_NODE,
-        SEND_INDEX_SPACE_REQUEST,
-        SEND_INDEX_SPACE_RETURN,
-        SEND_INDEX_PARTITION_NODE,
-        SEND_INDEX_PARTITION_REQUEST,
-        SEND_INDEX_PARTITION_RETURN,
-        SEND_FIELD_SPACE_NODE,
-        SEND_FIELD_SPACE_REQUEST,
-        SEND_FIELD_SPACE_RETURN,
-        SEND_LOGICAL_REGION_NODE,
-        INDEX_SPACE_DESTRUCTION_MESSAGE,
-        INDEX_PARTITION_DESTRUCTION_MESSAGE,
-        FIELD_SPACE_DESTRUCTION_MESSAGE,
-        LOGICAL_REGION_DESTRUCTION_MESSAGE,
-        LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-        FIELD_ALLOCATION_MESSAGE,
-        FIELD_DESTRUCTION_MESSAGE,
-        INDIVIDUAL_REMOTE_MAPPED,
-        INDIVIDUAL_REMOTE_COMPLETE,
-        INDIVIDUAL_REMOTE_COMMIT,
-        SLICE_REMOTE_MAPPED,
-        SLICE_REMOTE_COMPLETE,
-        SLICE_REMOTE_COMMIT,
-        DISTRIBUTED_REMOTE_REGISTRATION,
-        DISTRIBUTED_VALID_UPDATE,
-        DISTRIBUTED_GC_UPDATE,
-        DISTRIBUTED_RESOURCE_UPDATE,
-        VIEW_REMOTE_REGISTRATION,
-        VIEW_VALID_UPDATE,
-        VIEW_GC_UPDATE,
-        VIEW_RESOURCE_UPDATE,
-        SEND_BACK_ATOMIC,
-        SEND_MATERIALIZED_VIEW,
-        SEND_MATERIALIZED_UPDATE,
-        SEND_COMPOSITE_VIEW,
-        SEND_COMPOSITE_UPDATE,
-        SEND_FILL_VIEW,
-        SEND_FILL_UPDATE,
-        SEND_REDUCTION_VIEW,
-        SEND_REDUCTION_UPDATE,
-        SEND_INSTANCE_MANAGER,
-        SEND_REDUCTION_MANAGER,
-        SEND_REMOTE_REFERENCES,
-        SEND_FUTURE,
-        SEND_FUTURE_RESULT,
-        SEND_FUTURE_SUBSCRIPTION,
-        SEND_MAKE_PERSISTENT,
-        SEND_MAPPER_MESSAGE,
-        SEND_MAPPER_BROADCAST,
-        SEND_INDEX_SPACE_SEMANTIC_INFO,
-        SEND_INDEX_PARTITION_SEMANTIC_INFO,
-        SEND_FIELD_SPACE_SEMANTIC_INFO,
-        SEND_FIELD_SEMANTIC_INFO,
-        SEND_LOGICAL_REGION_SEMANTIC_INFO,
-        SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
-        SEND_SUBSCRIBE_REMOTE_CONTEXT,
-        SEND_FREE_REMOTE_CONTEXT,
-        SEND_VERSION_STATE_REQUEST,
-        SEND_VERSION_STATE_BROADCAST_REQUEST,
-        SEND_VERSION_STATE_RESPONSE,
-        SEND_VERSION_STATE_BROADCAST_RESPONSE,
-      };
-      // Implement a three-state state-machine for sending
-      // messages.  Either fully self-contained messages
-      // or chains of partial messages followed by a final
-      // message.
-      enum MessageHeader {
-        FULL_MESSAGE,
-        PARTIAL_MESSAGE,
-        FINAL_MESSAGE,
-      };
+    class MessageManager { 
     public:
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
@@ -883,39 +862,20 @@ namespace LegionRuntime {
       void send_version_state_response(Serializer &rez, bool flush);
       void send_version_state_broadcast_response(Serializer &rez, bool flush);
     public:
-      // Receiving message method
-      void process_message(const void *args, size_t arglen);
-    private:
-      void package_message(Serializer &rez, MessageKind k, bool flush);
-      void send_message(bool complete);
-      void handle_messages(unsigned num_messages, 
-                           const char *args, size_t arglen);
-      void buffer_messages(unsigned num_messages,
-                           const void *args, size_t arglen);
-    public:
       Event notify_pending_shutdown(void);
     public:
-      const AddressSpaceID local_address_space;
+      void package_message(Serializer &rez, MessageKind kind, bool flush);
+      void send_message(Serializer &rez, MessageKind kind, 
+                        VirtualChannelKind channel, bool flush);
+
+      void receive_message(const void *args, size_t arglen);
+    public:
       const AddressSpaceID remote_address_space;
     private:
       Runtime *const runtime;
       // State for sending messages
       Processor target;
-      Reservation send_lock;
-      char *const sending_buffer;
-      unsigned sending_index;
-      const size_t sending_buffer_size;
-      Event last_message_event;
-      MessageHeader header;
-      unsigned packaged_messages;
-      bool partial;
-      // State for receiving messages
-      // No lock for receiving messages since we know
-      // that they are ordered
-      char *receiving_buffer;
-      unsigned receiving_index;
-      size_t receiving_buffer_size;
-      unsigned received_messages; 
+      VirtualChannel *const channels; 
     };
 
     /**

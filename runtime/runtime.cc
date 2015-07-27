@@ -3403,15 +3403,13 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
-    // Message Manager 
+    // Virtual Channel 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MessageManager::MessageManager(AddressSpaceID remote,
-                                   Runtime *rt, size_t max_message_size,
-                                   const std::set<Processor> &remote_util_procs)
-      : local_address_space(rt->address_space), remote_address_space(remote),
-        runtime(rt), sending_buffer((char*)malloc(max_message_size)), 
+    VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
+        AddressSpaceID local_address_space, size_t max_message_size)
+      : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size)
     //--------------------------------------------------------------------------
     {
@@ -3423,6 +3421,617 @@ namespace LegionRuntime {
       assert(sending_buffer != NULL);
       assert(receiving_buffer != NULL);
 #endif
+      // Set up the buffer for sending the first batch of messages
+      // Only need to write the processor once
+      *((HLRTaskID*)sending_buffer) = HLR_MESSAGE_ID;
+      sending_index = sizeof(HLRTaskID);
+      *((AddressSpaceID*)
+          (((char*)sending_buffer)+sending_index)) = local_address_space;
+      sending_index += sizeof(local_address_space);
+      *((VirtualChannelKind*)
+          (((char*)sending_buffer)+sending_index)) = kind;
+      sending_index += sizeof(kind);
+      header = FULL_MESSAGE;
+      sending_index += sizeof(header);
+      packaged_messages = 0;
+      sending_index += sizeof(packaged_messages);
+      last_message_event = Event::NO_EVENT;
+      partial = false;
+      // Set up the receiving buffer
+      received_messages = 0;
+      receiving_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
+      : sending_buffer(NULL), sending_buffer_size(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualChannel::~VirtualChannel(void)
+    //--------------------------------------------------------------------------
+    {
+      send_lock.destroy_reservation();
+      send_lock = Reservation::NO_RESERVATION;
+      free(sending_buffer);
+      free(receiving_buffer);
+      receiving_buffer = NULL;
+      receiving_buffer_size = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::package_message(Serializer &rez, MessageKind k,
+                                 bool flush, Runtime *runtime, Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if the message fits in the current buffer    
+      // including the overhead for the message: kind and size
+      size_t buffer_size = rez.get_used_bytes();
+      const char *buffer = (const char*)rez.get_buffer();
+      // Need to hold the lock when manipulating the buffer
+      AutoLock s_lock(send_lock);
+      if ((sending_index+buffer_size+sizeof(k)+sizeof(buffer_size)) > 
+          sending_buffer_size)
+      {
+        // Make sure we can at least get the meta-data into the buffer
+        // Since there is no partial data we can fake the flush
+        if ((sending_buffer_size - sending_index) <= 
+            (sizeof(k)+sizeof(buffer_size)))
+          send_message(true/*complete*/, runtime, target);
+        // Now can package up the meta data
+        packaged_messages++;
+        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        sending_index += sizeof(k);
+        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        sending_index += sizeof(buffer_size);
+        while (buffer_size > 0)
+        {
+          unsigned remaining = sending_buffer_size - sending_index;
+          if (remaining == 0)
+            send_message(false/*complete*/, runtime, target);
+          remaining = sending_buffer_size - sending_index;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(remaining > 0); // should be space after the send
+#endif
+          // Figure out how much to copy into the buffer
+          unsigned to_copy = (remaining < buffer_size) ? 
+                                            remaining : buffer_size;
+          memcpy(sending_buffer+sending_index,buffer,to_copy);
+          buffer_size -= to_copy;
+          buffer += to_copy;
+          sending_index += to_copy;
+        } 
+      }
+      else
+      {
+        packaged_messages++;
+        // Package up the kind and the size first
+        *((MessageKind*)(sending_buffer+sending_index)) = k;
+        sending_index += sizeof(k);
+        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
+        sending_index += sizeof(buffer_size);
+        // Then copy over the buffer
+        memcpy(sending_buffer+sending_index,buffer,buffer_size); 
+        sending_index += buffer_size;
+      }
+      if (flush)
+        send_message(true/*complete*/, runtime, target);
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::send_message(bool complete, Runtime *runtime,
+                                      Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to switch the header file
+      // and update the state of partial
+      if (!complete)
+      {
+        header = PARTIAL_MESSAGE;
+        partial = true;
+      }
+      else if (partial)
+      {
+        header = FINAL_MESSAGE;
+        partial = false;
+      }
+      // Save the header and the number of messages into the buffer
+      const size_t base_size = sizeof(HLRTaskID) + sizeof(AddressSpaceID) 
+                                + sizeof(VirtualChannelKind);
+      *((MessageHeader*)(sending_buffer + base_size)) = header;
+      *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
+                                                            packaged_messages;
+      // Send the message
+      Event next_event = runtime->issue_runtime_meta_task(sending_buffer, 
+                                      sending_index, HLR_MESSAGE_ID, NULL,
+                                      last_message_event, 0/*priority*/,target);
+      // Update the event
+      last_message_event = next_event;
+      // Reset the state of the buffer
+      sending_index = base_size + sizeof(header) + sizeof(unsigned);
+      if (partial)
+        header = PARTIAL_MESSAGE;
+      else
+        header = FULL_MESSAGE;
+      packaged_messages = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::process_message(const void *args, size_t arglen,
+                          Runtime *runtime, AddressSpaceID remote_address_space)
+    //--------------------------------------------------------------------------
+    {
+      // Strip off our header and the number of messages, the 
+      // processor part was already stipped off by the Legion runtime
+      const char *buffer = (const char*)args;
+      MessageHeader head = *((const MessageHeader*)buffer);
+      buffer += sizeof(head);
+      arglen -= sizeof(head);
+      unsigned num_messages = *((const unsigned*)buffer);
+      buffer += sizeof(num_messages);
+      arglen -= sizeof(num_messages);
+      switch (head)
+      {
+        case FULL_MESSAGE:
+          {
+            // Can handle these messages directly
+            handle_messages(num_messages, runtime, 
+                            remote_address_space, buffer, arglen);
+            break;
+          }
+        case PARTIAL_MESSAGE:
+          {
+            // Save these messages onto the receiving buffer
+            // but do not handle them
+            buffer_messages(num_messages, buffer, arglen);
+            break;
+          }
+        case FINAL_MESSAGE:
+          {
+            // Save the remaining messages onto the receiving
+            // buffer, then handle them and reset the state.
+            buffer_messages(num_messages, buffer, arglen);
+            handle_messages(received_messages, runtime,
+                            remote_address_space,
+                            receiving_buffer, receiving_index);
+            receiving_index = 0;
+            received_messages = 0;
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::handle_messages(unsigned num_messages,Runtime *runtime,
+                                         AddressSpaceID remote_address_space,
+                                         const char *args, size_t arglen)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < num_messages; idx++)
+      {
+        // Pull off the message kind and the size of the message
+#ifdef DEBUG_HIGH_LEVEL
+        assert(arglen > (sizeof(MessageKind)+sizeof(size_t)));
+#endif
+        MessageKind kind = *((const MessageKind*)args);
+        args += sizeof(kind);
+        arglen -= sizeof(kind);
+        size_t message_size = *((const size_t*)args);
+        args += sizeof(message_size);
+        arglen -= sizeof(message_size);
+#ifdef DEBUG_HIGH_LEVEL
+        if (idx == (num_messages-1))
+          assert(message_size == arglen);
+#endif
+        // Build the deserializer
+        Deserializer derez(args,message_size);
+        switch (kind)
+        {
+          case TASK_MESSAGE:
+            {
+              runtime->handle_task(derez);
+              break;
+            }
+          case STEAL_MESSAGE:
+            {
+              runtime->handle_steal(derez);
+              break;
+            }
+          case ADVERTISEMENT_MESSAGE:
+            {
+              runtime->handle_advertisement(derez);
+              break;
+            }
+          case SEND_INDEX_SPACE_NODE:
+            {
+              runtime->handle_index_space_node(derez, remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_REQUEST:
+            {
+              runtime->handle_index_space_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_RETURN:
+            {
+              runtime->handle_index_space_return(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_NODE:
+            {
+              runtime->handle_index_partition_node(derez, remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_REQUEST:
+            {
+              runtime->handle_index_partition_request(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_RETURN:
+            {
+              runtime->handle_index_partition_return(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_NODE:
+            {
+              runtime->handle_field_space_node(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_REQUEST:
+            {
+              runtime->handle_field_space_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_RETURN:
+            {
+              runtime->handle_field_space_return(derez);
+              break;
+            }
+          case SEND_LOGICAL_REGION_NODE:
+            {
+              runtime->handle_logical_region_node(derez, remote_address_space);
+              break;
+            }
+          case INDEX_SPACE_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_index_space_destruction(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case INDEX_PARTITION_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_index_partition_destruction(derez, 
+                                                          remote_address_space);
+              break;
+            }
+          case FIELD_SPACE_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_field_space_destruction(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case LOGICAL_REGION_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_logical_region_destruction(derez, 
+                                                         remote_address_space);
+              break;
+            }
+          case LOGICAL_PARTITION_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_logical_partition_destruction(derez, 
+                                                          remote_address_space);
+              break;
+            }
+          case FIELD_ALLOCATION_MESSAGE:
+            {
+              runtime->handle_field_allocation(derez, remote_address_space);
+              break;
+            }
+          case FIELD_DESTRUCTION_MESSAGE:
+            {
+              runtime->handle_field_destruction(derez, remote_address_space);
+              break;
+            }
+          case INDIVIDUAL_REMOTE_MAPPED:
+            {
+              runtime->handle_individual_remote_mapped(derez); 
+              break;
+            }
+          case INDIVIDUAL_REMOTE_COMPLETE:
+            {
+              runtime->handle_individual_remote_complete(derez);
+              break;
+            }
+          case INDIVIDUAL_REMOTE_COMMIT:
+            {
+              runtime->handle_individual_remote_commit(derez);
+              break;
+            }
+          case SLICE_REMOTE_MAPPED:
+            {
+              runtime->handle_slice_remote_mapped(derez, remote_address_space);
+              break;
+            }
+          case SLICE_REMOTE_COMPLETE:
+            {
+              runtime->handle_slice_remote_complete(derez);
+              break;
+            }
+          case SLICE_REMOTE_COMMIT:
+            {
+              runtime->handle_slice_remote_commit(derez);
+              break;
+            }
+          case DISTRIBUTED_REMOTE_REGISTRATION:
+            {
+              runtime->handle_did_remote_registration(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case DISTRIBUTED_VALID_UPDATE:
+            {
+              runtime->handle_did_remote_valid_update(derez);
+              break;
+            }
+          case DISTRIBUTED_GC_UPDATE:
+            {
+              runtime->handle_did_remote_gc_update(derez); 
+              break;
+            }
+          case DISTRIBUTED_RESOURCE_UPDATE:
+            {
+              runtime->handle_did_remote_resource_update(derez);
+              break;
+            }
+          case VIEW_REMOTE_REGISTRATION:
+            {
+              runtime->handle_view_remote_registration(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case VIEW_VALID_UPDATE:
+            {
+              runtime->handle_view_remote_valid_update(derez);
+              break;
+            }
+          case VIEW_GC_UPDATE:
+            {
+              runtime->handle_view_remote_gc_update(derez); 
+              break;
+            }
+          case VIEW_RESOURCE_UPDATE:
+            {
+              runtime->handle_view_remote_resource_update(derez);
+              break;
+            }
+          case SEND_BACK_ATOMIC:
+            {
+              runtime->handle_send_back_atomic(derez, remote_address_space);
+              break;
+            }
+          case SEND_MATERIALIZED_VIEW:
+            {
+              runtime->handle_send_materialized_view(derez, 
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_MATERIALIZED_UPDATE:
+            {
+              runtime->handle_send_materialized_update(derez,
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_COMPOSITE_VIEW:
+            {
+              runtime->handle_send_composite_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_COMPOSITE_UPDATE:
+            {
+              runtime->handle_send_composite_update(derez, 
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_FILL_VIEW:
+            {
+              runtime->handle_send_fill_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_FILL_UPDATE:
+            {
+              runtime->handle_send_fill_update(derez, remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_VIEW:
+            {
+              runtime->handle_send_reduction_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_UPDATE:
+            {
+              runtime->handle_send_reduction_update(derez, 
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_MANAGER:
+            {
+              runtime->handle_send_instance_manager(derez, 
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_MANAGER:
+            {
+              runtime->handle_send_reduction_manager(derez,
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_REFERENCES:
+            {
+              runtime->handle_send_remote_references(derez);
+              break;
+            }
+          case SEND_FUTURE:
+            {
+              runtime->handle_future_send(derez, remote_address_space);
+              break;
+            }
+          case SEND_FUTURE_RESULT:
+            {
+              runtime->handle_future_result(derez);
+              break;
+            }
+          case SEND_FUTURE_SUBSCRIPTION:
+            {
+              runtime->handle_future_subscription(derez);
+              break;
+            }
+          case SEND_MAKE_PERSISTENT:
+            {
+              runtime->handle_make_persistent(derez, remote_address_space);
+              break;
+            }
+          case SEND_MAPPER_MESSAGE:
+            {
+              runtime->handle_mapper_message(derez);
+              break;
+            }
+          case SEND_MAPPER_BROADCAST:
+            {
+              runtime->handle_mapper_broadcast(derez);
+              break;
+            }
+          case SEND_INDEX_SPACE_SEMANTIC_INFO:
+            {
+              runtime->handle_index_space_semantic_info(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_SEMANTIC_INFO:
+            {
+              runtime->handle_index_partition_semantic_info(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_SEMANTIC_INFO:
+            {
+              runtime->handle_field_space_semantic_info(derez);
+              break;
+            }
+          case SEND_FIELD_SEMANTIC_INFO:
+            {
+              runtime->handle_field_semantic_info(derez);
+              break;
+            }
+          case SEND_LOGICAL_REGION_SEMANTIC_INFO:
+            {
+              runtime->handle_logical_region_semantic_info(derez);
+              break;
+            }
+          case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
+            {
+              runtime->handle_logical_partition_semantic_info(derez);
+              break;
+            }
+          case SEND_SUBSCRIBE_REMOTE_CONTEXT:
+            {
+              runtime->handle_subscribe_remote_context(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_FREE_REMOTE_CONTEXT:
+            {
+              runtime->handle_free_remote_context(derez);
+              break;
+            }
+          case SEND_VERSION_STATE_REQUEST:
+            {
+              runtime->handle_version_state_request(derez);
+              break;
+            }
+          case SEND_VERSION_STATE_BROADCAST_REQUEST:
+            {
+              runtime->handle_version_state_broadcast_request(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_VERSION_STATE_RESPONSE:
+            {
+              runtime->handle_version_state_response(derez,
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_VERSION_STATE_BROADCAST_RESPONSE:
+            {
+              runtime->handle_version_state_broadcast_response(derez);
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+        // Update the args and arglen
+        args += message_size;
+        arglen -= message_size;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(arglen == 0); // make sure we processed everything
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::buffer_messages(unsigned num_messages,
+                                         const void *args, size_t arglen)
+    //--------------------------------------------------------------------------
+    {
+      received_messages += num_messages;
+      // Check to see if it fits
+      if (receiving_buffer_size < (receiving_index+arglen))
+      {
+        // Figure out what the new size should be
+        // Keep doubling until it's larger
+        size_t new_buffer_size = receiving_buffer_size;
+        while (new_buffer_size < (receiving_index+arglen))
+          new_buffer_size *= 2;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(new_buffer_size != 0); // would cause deallocation
+#endif
+        // Now realloc the memory
+        void *new_ptr = legion_realloc(MESSAGE_BUFFER_ALLOC, receiving_buffer,
+                                       receiving_buffer_size, new_buffer_size);
+        receiving_buffer_size = new_buffer_size;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(new_ptr != NULL);
+#endif
+        receiving_buffer = (char*)new_ptr;
+      }
+      // Copy the data in
+      memcpy(receiving_buffer+receiving_index,args,arglen);
+      receiving_index += arglen;
+    }
+
+    //--------------------------------------------------------------------------
+    Event VirtualChannel::notify_pending_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      return last_message_event;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Message Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MessageManager::MessageManager(AddressSpaceID remote,
+                                   Runtime *rt, size_t max_message_size,
+                                   const std::set<Processor> &remote_util_procs)
+      : remote_address_space(remote), runtime(rt), channels((VirtualChannel*)
+                      malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
+    //--------------------------------------------------------------------------
+    {
       // Figure out which processor to send to based on our address
       // space ID.  If there is an explicit utility processor for one
       // of the processors in our set then we use that.  Otherwise we
@@ -3430,7 +4039,7 @@ namespace LegionRuntime {
       // remote node to avoid over-burdening any one of them with messages.
       {
         unsigned idx = 0;
-        const unsigned target_idx = local_address_space % 
+        const unsigned target_idx = rt->address_space % 
                                     remote_util_procs.size();
         // Iterate over all the processors and either choose a 
         // utility processor to be our target or get the target processor
@@ -3446,28 +4055,17 @@ namespace LegionRuntime {
         assert(target.exists());
 #endif
       }
-      // Set up the buffer for sending the first batch of messages
-      // Only need to write the processor once
-      *((HLRTaskID*)sending_buffer) = HLR_MESSAGE_ID;
-      sending_index = sizeof(HLRTaskID);
-      *((AddressSpaceID*)
-          (((char*)sending_buffer)+sending_index)) = local_address_space;
-      sending_index += sizeof(local_address_space);
-      header = FULL_MESSAGE;
-      sending_index += sizeof(header);
-      packaged_messages = 0;
-      sending_index += sizeof(packaged_messages);
-      last_message_event = Event::NO_EVENT;
-      partial = false;
-      // Set up the receiving buffer
-      received_messages = 0;
-      receiving_index = 0;
+      // Initialize our virtual channels 
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+      {
+        new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
+                              rt->address_space, max_message_size);
+      }
     }
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : local_address_space(0), remote_address_space(0), runtime(NULL),
-        sending_buffer(NULL), sending_buffer_size(0)
+      : remote_address_space(0), runtime(NULL), channels(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3478,12 +4076,11 @@ namespace LegionRuntime {
     MessageManager::~MessageManager(void)
     //--------------------------------------------------------------------------
     {
-      send_lock.destroy_reservation();
-      send_lock = Reservation::NO_RESERVATION;
-      free(sending_buffer);
-      free(receiving_buffer);
-      receiving_buffer = NULL;
-      receiving_buffer_size = 0;
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+      {
+        channels[idx].~VirtualChannel();
+      }
+      free(channels);
     }
 
     //--------------------------------------------------------------------------
@@ -3972,555 +4569,44 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::package_message(Serializer &rez, MessageKind k,
-                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      // First check to see if the message fits in the current buffer    
-      // including the overhead for the message: kind and size
-      size_t buffer_size = rez.get_used_bytes();
-      const char *buffer = (const char*)rez.get_buffer();
-      // Need to hold the lock when manipulating the buffer
-      AutoLock s_lock(send_lock);
-      if ((sending_index+buffer_size+sizeof(k)+sizeof(buffer_size)) > 
-          sending_buffer_size)
-      {
-        // Make sure we can at least get the meta-data into the buffer
-        // Since there is no partial data we can fake the flush
-        if ((sending_buffer_size - sending_index) <= 
-            (sizeof(k)+sizeof(buffer_size)))
-          send_message(true/*complete*/);
-        // Now can package up the meta data
-        packaged_messages++;
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
-        sending_index += sizeof(k);
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
-        sending_index += sizeof(buffer_size);
-        while (buffer_size > 0)
-        {
-          unsigned remaining = sending_buffer_size - sending_index;
-          if (remaining == 0)
-            send_message(false/*complete*/);
-          remaining = sending_buffer_size - sending_index;
-#ifdef DEBUG_HIGH_LEVEL
-          assert(remaining > 0); // should be space after the send
-#endif
-          // Figure out how much to copy into the buffer
-          unsigned to_copy = (remaining < buffer_size) ? 
-                                            remaining : buffer_size;
-          memcpy(sending_buffer+sending_index,buffer,to_copy);
-          buffer_size -= to_copy;
-          buffer += to_copy;
-          sending_index += to_copy;
-        } 
-      }
-      else
-      {
-        packaged_messages++;
-        // Package up the kind and the size first
-        *((MessageKind*)(sending_buffer+sending_index)) = k;
-        sending_index += sizeof(k);
-        *((size_t*)(sending_buffer+sending_index)) = buffer_size;
-        sending_index += sizeof(buffer_size);
-        // Then copy over the buffer
-        memcpy(sending_buffer+sending_index,buffer,buffer_size); 
-        sending_index += buffer_size;
-      }
-      if (flush)
-        send_message(true/*complete*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_message(bool complete)
-    //--------------------------------------------------------------------------
-    {
-      // See if we need to switch the header file
-      // and update the state of partial
-      if (!complete)
-      {
-        header = PARTIAL_MESSAGE;
-        partial = true;
-      }
-      else if (partial)
-      {
-        header = FINAL_MESSAGE;
-        partial = false;
-      }
-      // Save the header and the number of messages into the buffer
-      *((MessageHeader*)(sending_buffer + sizeof(HLRTaskID) +
-                          sizeof(local_address_space))) = header;
-      *((unsigned*)(sending_buffer + sizeof(HLRTaskID) +
-            sizeof(local_address_space) + sizeof(header))) = packaged_messages;
-      // Send the message
-      Event next_event = runtime->issue_runtime_meta_task(sending_buffer, 
-                                      sending_index, HLR_MESSAGE_ID, NULL,
-                                      last_message_event, 0/*priority*/,target);
-      // Update the event
-      last_message_event = next_event;
-      // Reset the state of the buffer
-      sending_index = sizeof(HLRTaskID) + sizeof(local_address_space) + 
-                      sizeof(header) + sizeof(unsigned);
-      if (partial)
-        header = PARTIAL_MESSAGE;
-      else
-        header = FULL_MESSAGE;
-      packaged_messages = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::process_message(const void *args, size_t arglen)
-    //--------------------------------------------------------------------------
-    {
-      // Strip off our header and the number of messages, the 
-      // processor part was already stipped off by the Legion runtime
-      const char *buffer = (const char*)args;
-      MessageHeader head = *((const MessageHeader*)buffer);
-      buffer += sizeof(head);
-      arglen -= sizeof(head);
-      unsigned num_messages = *((const unsigned*)buffer);
-      buffer += sizeof(num_messages);
-      arglen -= sizeof(num_messages);
-      switch (head)
-      {
-        case FULL_MESSAGE:
-          {
-            // Can handle these messages directly
-            handle_messages(num_messages, buffer, arglen);
-            break;
-          }
-        case PARTIAL_MESSAGE:
-          {
-            // Save these messages onto the receiving buffer
-            // but do not handle them
-            buffer_messages(num_messages, buffer, arglen);
-            break;
-          }
-        case FINAL_MESSAGE:
-          {
-            // Save the remaining messages onto the receiving
-            // buffer, then handle them and reset the state.
-            buffer_messages(num_messages, buffer, arglen);
-            handle_messages(received_messages, receiving_buffer, 
-                            receiving_index);
-            receiving_index = 0;
-            received_messages = 0;
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::handle_messages(unsigned num_messages,
-                                         const char *args, size_t arglen)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < num_messages; idx++)
-      {
-        // Pull off the message kind and the size of the message
-#ifdef DEBUG_HIGH_LEVEL
-        assert(arglen > (sizeof(MessageKind)+sizeof(size_t)));
-#endif
-        MessageKind kind = *((const MessageKind*)args);
-        args += sizeof(kind);
-        arglen -= sizeof(kind);
-        size_t message_size = *((const size_t*)args);
-        args += sizeof(message_size);
-        arglen -= sizeof(message_size);
-#ifdef DEBUG_HIGH_LEVEL
-        if (idx == (num_messages-1))
-          assert(message_size == arglen);
-#endif
-        // Build the deserializer
-        Deserializer derez(args,message_size);
-        switch (kind)
-        {
-          case TASK_MESSAGE:
-            {
-              runtime->handle_task(derez);
-              break;
-            }
-          case STEAL_MESSAGE:
-            {
-              runtime->handle_steal(derez);
-              break;
-            }
-          case ADVERTISEMENT_MESSAGE:
-            {
-              runtime->handle_advertisement(derez);
-              break;
-            }
-          case SEND_INDEX_SPACE_NODE:
-            {
-              runtime->handle_index_space_node(derez, remote_address_space);
-              break;
-            }
-          case SEND_INDEX_SPACE_REQUEST:
-            {
-              runtime->handle_index_space_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_INDEX_SPACE_RETURN:
-            {
-              runtime->handle_index_space_return(derez);
-              break;
-            }
-          case SEND_INDEX_PARTITION_NODE:
-            {
-              runtime->handle_index_partition_node(derez, remote_address_space);
-              break;
-            }
-          case SEND_INDEX_PARTITION_REQUEST:
-            {
-              runtime->handle_index_partition_request(derez, 
-                                                      remote_address_space);
-              break;
-            }
-          case SEND_INDEX_PARTITION_RETURN:
-            {
-              runtime->handle_index_partition_return(derez);
-              break;
-            }
-          case SEND_FIELD_SPACE_NODE:
-            {
-              runtime->handle_field_space_node(derez, remote_address_space);
-              break;
-            }
-          case SEND_FIELD_SPACE_REQUEST:
-            {
-              runtime->handle_field_space_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_FIELD_SPACE_RETURN:
-            {
-              runtime->handle_field_space_return(derez);
-              break;
-            }
-          case SEND_LOGICAL_REGION_NODE:
-            {
-              runtime->handle_logical_region_node(derez, remote_address_space);
-              break;
-            }
-          case INDEX_SPACE_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_index_space_destruction(derez, 
-                                                      remote_address_space);
-              break;
-            }
-          case INDEX_PARTITION_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_index_partition_destruction(derez, 
-                                                          remote_address_space);
-              break;
-            }
-          case FIELD_SPACE_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_field_space_destruction(derez, 
-                                                      remote_address_space);
-              break;
-            }
-          case LOGICAL_REGION_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_logical_region_destruction(derez, 
-                                                         remote_address_space);
-              break;
-            }
-          case LOGICAL_PARTITION_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_logical_partition_destruction(derez, 
-                                                          remote_address_space);
-              break;
-            }
-          case FIELD_ALLOCATION_MESSAGE:
-            {
-              runtime->handle_field_allocation(derez, remote_address_space);
-              break;
-            }
-          case FIELD_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_field_destruction(derez, remote_address_space);
-              break;
-            }
-          case INDIVIDUAL_REMOTE_MAPPED:
-            {
-              runtime->handle_individual_remote_mapped(derez); 
-              break;
-            }
-          case INDIVIDUAL_REMOTE_COMPLETE:
-            {
-              runtime->handle_individual_remote_complete(derez);
-              break;
-            }
-          case INDIVIDUAL_REMOTE_COMMIT:
-            {
-              runtime->handle_individual_remote_commit(derez);
-              break;
-            }
-          case SLICE_REMOTE_MAPPED:
-            {
-              runtime->handle_slice_remote_mapped(derez, remote_address_space);
-              break;
-            }
-          case SLICE_REMOTE_COMPLETE:
-            {
-              runtime->handle_slice_remote_complete(derez);
-              break;
-            }
-          case SLICE_REMOTE_COMMIT:
-            {
-              runtime->handle_slice_remote_commit(derez);
-              break;
-            }
-          case DISTRIBUTED_REMOTE_REGISTRATION:
-            {
-              runtime->handle_did_remote_registration(derez, 
-                                                      remote_address_space);
-              break;
-            }
-          case DISTRIBUTED_VALID_UPDATE:
-            {
-              runtime->handle_did_remote_valid_update(derez);
-              break;
-            }
-          case DISTRIBUTED_GC_UPDATE:
-            {
-              runtime->handle_did_remote_gc_update(derez); 
-              break;
-            }
-          case DISTRIBUTED_RESOURCE_UPDATE:
-            {
-              runtime->handle_did_remote_resource_update(derez);
-              break;
-            }
-          case VIEW_REMOTE_REGISTRATION:
-            {
-              runtime->handle_view_remote_registration(derez, 
-                                                       remote_address_space);
-              break;
-            }
-          case VIEW_VALID_UPDATE:
-            {
-              runtime->handle_view_remote_valid_update(derez);
-              break;
-            }
-          case VIEW_GC_UPDATE:
-            {
-              runtime->handle_view_remote_gc_update(derez); 
-              break;
-            }
-          case VIEW_RESOURCE_UPDATE:
-            {
-              runtime->handle_view_remote_resource_update(derez);
-              break;
-            }
-          case SEND_BACK_ATOMIC:
-            {
-              runtime->handle_send_back_atomic(derez, remote_address_space);
-              break;
-            }
-          case SEND_MATERIALIZED_VIEW:
-            {
-              runtime->handle_send_materialized_view(derez, 
-                                                     remote_address_space);
-              break;
-            }
-          case SEND_MATERIALIZED_UPDATE:
-            {
-              runtime->handle_send_materialized_update(derez,
-                                                       remote_address_space);
-              break;
-            }
-          case SEND_COMPOSITE_VIEW:
-            {
-              runtime->handle_send_composite_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_COMPOSITE_UPDATE:
-            {
-              runtime->handle_send_composite_update(derez, 
-                                                    remote_address_space);
-              break;
-            }
-          case SEND_FILL_VIEW:
-            {
-              runtime->handle_send_fill_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_FILL_UPDATE:
-            {
-              runtime->handle_send_fill_update(derez, remote_address_space);
-              break;
-            }
-          case SEND_REDUCTION_VIEW:
-            {
-              runtime->handle_send_reduction_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_REDUCTION_UPDATE:
-            {
-              runtime->handle_send_reduction_update(derez, 
-                                                    remote_address_space);
-              break;
-            }
-          case SEND_INSTANCE_MANAGER:
-            {
-              runtime->handle_send_instance_manager(derez, 
-                                                    remote_address_space);
-              break;
-            }
-          case SEND_REDUCTION_MANAGER:
-            {
-              runtime->handle_send_reduction_manager(derez,
-                                                     remote_address_space);
-              break;
-            }
-          case SEND_REMOTE_REFERENCES:
-            {
-              runtime->handle_send_remote_references(derez);
-              break;
-            }
-          case SEND_FUTURE:
-            {
-              runtime->handle_future_send(derez, remote_address_space);
-              break;
-            }
-          case SEND_FUTURE_RESULT:
-            {
-              runtime->handle_future_result(derez);
-              break;
-            }
-          case SEND_FUTURE_SUBSCRIPTION:
-            {
-              runtime->handle_future_subscription(derez);
-              break;
-            }
-          case SEND_MAKE_PERSISTENT:
-            {
-              runtime->handle_make_persistent(derez, remote_address_space);
-              break;
-            }
-          case SEND_MAPPER_MESSAGE:
-            {
-              runtime->handle_mapper_message(derez);
-              break;
-            }
-          case SEND_MAPPER_BROADCAST:
-            {
-              runtime->handle_mapper_broadcast(derez);
-              break;
-            }
-          case SEND_INDEX_SPACE_SEMANTIC_INFO:
-            {
-              runtime->handle_index_space_semantic_info(derez);
-              break;
-            }
-          case SEND_INDEX_PARTITION_SEMANTIC_INFO:
-            {
-              runtime->handle_index_partition_semantic_info(derez);
-              break;
-            }
-          case SEND_FIELD_SPACE_SEMANTIC_INFO:
-            {
-              runtime->handle_field_space_semantic_info(derez);
-              break;
-            }
-          case SEND_FIELD_SEMANTIC_INFO:
-            {
-              runtime->handle_field_semantic_info(derez);
-              break;
-            }
-          case SEND_LOGICAL_REGION_SEMANTIC_INFO:
-            {
-              runtime->handle_logical_region_semantic_info(derez);
-              break;
-            }
-          case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
-            {
-              runtime->handle_logical_partition_semantic_info(derez);
-              break;
-            }
-          case SEND_SUBSCRIBE_REMOTE_CONTEXT:
-            {
-              runtime->handle_subscribe_remote_context(derez, 
-                                                       remote_address_space);
-              break;
-            }
-          case SEND_FREE_REMOTE_CONTEXT:
-            {
-              runtime->handle_free_remote_context(derez);
-              break;
-            }
-          case SEND_VERSION_STATE_REQUEST:
-            {
-              runtime->handle_version_state_request(derez);
-              break;
-            }
-          case SEND_VERSION_STATE_BROADCAST_REQUEST:
-            {
-              runtime->handle_version_state_broadcast_request(derez,
-                                                          remote_address_space);
-              break;
-            }
-          case SEND_VERSION_STATE_RESPONSE:
-            {
-              runtime->handle_version_state_response(derez,
-                                                     remote_address_space);
-              break;
-            }
-          case SEND_VERSION_STATE_BROADCAST_RESPONSE:
-            {
-              runtime->handle_version_state_broadcast_response(derez);
-              break;
-            }
-          default:
-            assert(false); // should never get here
-        }
-        // Update the args and arglen
-        args += message_size;
-        arglen -= message_size;
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(arglen == 0); // make sure we processed everything
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::buffer_messages(unsigned num_messages,
-                                         const void *args, size_t arglen)
-    //--------------------------------------------------------------------------
-    {
-      received_messages += num_messages;
-      // Check to see if it fits
-      if (receiving_buffer_size < (receiving_index+arglen))
-      {
-        // Figure out what the new size should be
-        // Keep doubling until it's larger
-        size_t new_buffer_size = receiving_buffer_size;
-        while (new_buffer_size < (receiving_index+arglen))
-          new_buffer_size *= 2;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(new_buffer_size != 0); // would cause deallocation
-#endif
-        // Now realloc the memory
-        void *new_ptr = legion_realloc(MESSAGE_BUFFER_ALLOC, receiving_buffer,
-                                       receiving_buffer_size, new_buffer_size);
-        receiving_buffer_size = new_buffer_size;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(new_ptr != NULL);
-#endif
-        receiving_buffer = (char*)new_ptr;
-      }
-      // Copy the data in
-      memcpy(receiving_buffer+receiving_index,args,arglen);
-      receiving_index += arglen;
-    }
-
-    //--------------------------------------------------------------------------
     Event MessageManager::notify_pending_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      return last_message_event;
+      std::set<Event> wait_events;
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+      {
+        wait_events.insert(channels[idx].notify_pending_shutdown());
+      }
+      return Event::merge_events(wait_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::package_message(Serializer &rez, MessageKind kind,
+                                         bool flush)
+    //--------------------------------------------------------------------------
+    {
+      send_message(rez, kind, DEFAULT_VIRTUAL_CHANNEL, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_message(Serializer &rez, MessageKind kind,
+                                      VirtualChannelKind channel, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      channels[channel].package_message(rez, kind, flush, runtime, target);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::receive_message(const void *args, size_t arglen)
+    //--------------------------------------------------------------------------
+    {
+      // Pull the channel off to do the receiving
+      const char *buffer = (const char*)args;
+      VirtualChannelKind channel = *((const VirtualChannelKind*)buffer);
+      buffer += sizeof(channel);
+      arglen -= sizeof(channel);
+      channels[channel].process_message(buffer, arglen, runtime, 
+                                        remote_address_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12708,7 +12794,7 @@ namespace LegionRuntime {
       AddressSpaceID sender = *((const AddressSpaceID*)buffer);
       buffer += sizeof(sender);
       arglen -= sizeof(sender);
-      find_messenger(sender)->process_message(buffer,arglen);
+      find_messenger(sender)->receive_message(buffer,arglen);
 #ifdef OLD_LEGION_PROF
       LegionProf::register_event(0, PROF_END_MESSAGE);
 #endif
