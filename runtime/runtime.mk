@@ -263,7 +263,10 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
+		   $(LG_RT_DIR)/realm/event_impl.cc \
+		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
+		   $(LG_RT_DIR)/realm/machine_impl.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
 		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
 		   $(LG_RT_DIR)/greenlet/greenlet-cc.cc
@@ -275,11 +278,7 @@ LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
-		   $(LG_RT_DIR)/realm/operation.cc \
-		   $(LG_RT_DIR)/realm/event_impl.cc \
-		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
-		   $(LG_RT_DIR)/realm/machine_impl.cc
-
+		   $(LG_RT_DIR)/realm/operation.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
