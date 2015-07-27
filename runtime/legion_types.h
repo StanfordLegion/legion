@@ -176,8 +176,9 @@ namespace LegionRuntime {
       INDEX_AND_FIELD_VIRTUAL_CHANNEL = 1,
       LOGICAL_TREE_VIRTUAL_CHANNEL = 2,
       PHYSICAL_STATE_VIRTUAL_CHANNEL = 3,
-      MAPPER_VIRTUAL_CHANNEL = 4,
-      MAX_NUM_VIRTUAL_CHANNELS = 5, // this one must be last
+      DISTRIBUTED_VIRTUAL_CHANNEL = 4,
+      MAPPER_VIRTUAL_CHANNEL = 5,
+      MAX_NUM_VIRTUAL_CHANNELS = 6, // this one must be last
     };
 
     enum MessageKind {

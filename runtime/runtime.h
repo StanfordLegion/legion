@@ -796,75 +796,8 @@ namespace LegionRuntime {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      // Methods for sending tasks
-      void send_task(Serializer &rez, bool flush);
-      void send_steal_request(Serializer &rez, bool flush);
-      void send_advertisement(Serializer &rez, bool flush);
-      void send_index_space_node(Serializer &rez, bool flush);
-      void send_index_space_request(Serializer &rez, bool flush);
-      void send_index_space_return(Serializer &rez, bool flush);
-      void send_index_partition_node(Serializer &rez, bool flush);
-      void send_index_partition_request(Serializer &rez, bool flush);
-      void send_index_partition_return(Serializer &rez, bool flush);
-      void send_field_space_node(Serializer &rez, bool flush);
-      void send_field_space_request(Serializer &rez, bool flush);
-      void send_field_space_return(Serializer &rez, bool flush);
-      void send_logical_region_node(Serializer &rez, bool flush);
-      void send_index_space_destruction(Serializer &rez, bool flush);
-      void send_index_partition_destruction(Serializer &rez, bool flush);
-      void send_field_space_destruction(Serializer &rez, bool flush);
-      void send_logical_region_destruction(Serializer &rez, bool flush);
-      void send_logical_partition_destruction(Serializer &rez, bool flush);
-      void send_field_allocation(Serializer &rez, bool flush);
-      void send_field_destruction(Serializer &rez, bool flush);
-      void send_individual_remote_mapped(Serializer &rez, bool flush);
-      void send_individual_remote_complete(Serializer &rez, bool flush);
-      void send_individual_remote_commit(Serializer &rez, bool flush);
-      void send_slice_remote_mapped(Serializer &rez, bool flush);
-      void send_slice_remote_complete(Serializer &rez, bool flush);
-      void send_slice_remote_commit(Serializer &rez, bool flush);
-      void send_did_remote_registration(Serializer &rez, bool flush);
-      void send_did_remote_valid_update(Serializer &rez, bool flush);
-      void send_did_remote_gc_update(Serializer &rez, bool flush);
-      void send_did_remote_resource_update(Serializer &rez, bool flush);
-      void send_view_remote_registration(Serializer &rez, bool flush);
-      void send_view_remote_valid_update(Serializer &rez, bool flush);
-      void send_view_remote_gc_update(Serializer &rez, bool flush);
-      void send_view_remote_resource_update(Serializer &rez, bool flush);
-      void send_back_atomic(Serializer &rez, bool flush);
-      void send_materialized_view(Serializer &rez, bool flush);
-      void send_materialized_update(Serializer &rez, bool flush);
-      void send_composite_view(Serializer &rez, bool flush);
-      void send_composite_update(Serializer &rez, bool flush);
-      void send_fill_view(Serializer &rez, bool flush);
-      void send_fill_update(Serializer &rez, bool flush);
-      void send_reduction_view(Serializer &rez, bool flush);
-      void send_reduction_update(Serializer &rez, bool flush);
-      void send_instance_manager(Serializer &rez, bool flush);
-      void send_reduction_manager(Serializer &rez, bool flush);
-      void send_remote_references(Serializer &rez, bool flush);
-      void send_future(Serializer &rez, bool flush);
-      void send_future_result(Serializer &rez, bool flush);
-      void send_future_subscription(Serializer &rez, bool flush);
-      void send_make_persistent(Serializer &rez, bool flush);
-      void send_mapper_message(Serializer &rez, bool flush);
-      void send_mapper_broadcast(Serializer &rez, bool flush);
-      void send_index_space_semantic_info(Serializer &rez, bool flush);
-      void send_index_partition_semantic_info(Serializer &rez, bool flush);
-      void send_field_space_semantic_info(Serializer &rez, bool flush);
-      void send_field_semantic_info(Serializer &rez, bool flush);
-      void send_logical_region_semantic_info(Serializer &rez, bool flush);
-      void send_logical_partition_semantic_info(Serializer &rez, bool flush);
-      void send_subscribe_remote_context(Serializer &rez, bool flush);
-      void send_free_remote_context(Serializer &rez, bool flush);
-      void send_version_state_request(Serializer &rez, bool flush);
-      void send_version_state_broadcast_request(Serializer &rez, bool flush);
-      void send_version_state_response(Serializer &rez, bool flush);
-      void send_version_state_broadcast_response(Serializer &rez, bool flush);
-    public:
       Event notify_pending_shutdown(void);
     public:
-      void package_message(Serializer &rez, MessageKind kind, bool flush);
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush);
 

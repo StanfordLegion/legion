@@ -4093,482 +4093,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_task(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, TASK_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_steal_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, STEAL_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_advertisement(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, ADVERTISEMENT_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_space_node(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_SPACE_NODE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_space_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_SPACE_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_space_return(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_SPACE_RETURN, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_partition_node(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_PARTITION_NODE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_partition_request(Serializer &rez, 
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_PARTITION_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_partition_return(Serializer &rez,
-                                                     bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_PARTITION_RETURN, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_space_node(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FIELD_SPACE_NODE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_space_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FIELD_SPACE_REQUEST, flush);
-    }
-    
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_space_return(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FIELD_SPACE_RETURN, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_logical_region_node(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_LOGICAL_REGION_NODE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_space_destruction(Serializer &rez, 
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_partition_destruction(Serializer &rez, 
-                                                          bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, INDEX_PARTITION_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_space_destruction(Serializer &rez, 
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, FIELD_SPACE_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_logical_region_destruction(Serializer &rez, 
-                                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, LOGICAL_REGION_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_logical_partition_destruction(Serializer &rez, 
-                                                            bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, LOGICAL_PARTITION_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_allocation(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, FIELD_ALLOCATION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_destruction(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, FIELD_DESTRUCTION_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_individual_remote_mapped(Serializer &rez, 
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, INDIVIDUAL_REMOTE_MAPPED, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_individual_remote_complete(Serializer &rez,
-                                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, INDIVIDUAL_REMOTE_COMPLETE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_individual_remote_commit(Serializer &rez,
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, INDIVIDUAL_REMOTE_COMMIT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_slice_remote_mapped(Serializer &rez, 
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SLICE_REMOTE_MAPPED, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_slice_remote_complete(Serializer &rez,
-                                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SLICE_REMOTE_COMPLETE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_slice_remote_commit(Serializer &rez,
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SLICE_REMOTE_COMMIT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_did_remote_registration(Serializer &rez, 
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, DISTRIBUTED_REMOTE_REGISTRATION, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_did_remote_valid_update(Serializer &rez,
-                                                      bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, DISTRIBUTED_VALID_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_did_remote_gc_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, DISTRIBUTED_GC_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_did_remote_resource_update(Serializer &rez,
-                                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, DISTRIBUTED_RESOURCE_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_view_remote_registration(Serializer &rez, 
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, VIEW_REMOTE_REGISTRATION, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_view_remote_valid_update(Serializer &rez,
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, VIEW_VALID_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_view_remote_gc_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, VIEW_GC_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_view_remote_resource_update(Serializer &rez,
-                                                          bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, VIEW_RESOURCE_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_back_atomic(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_BACK_ATOMIC, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_materialized_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_MATERIALIZED_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_materialized_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_MATERIALIZED_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_composite_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_COMPOSITE_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_composite_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_COMPOSITE_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_fill_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FILL_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_fill_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FILL_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_reduction_view(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_REDUCTION_VIEW, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_reduction_update(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_REDUCTION_UPDATE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_instance_manager(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INSTANCE_MANAGER, flush); 
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_reduction_manager(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_REDUCTION_MANAGER, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_remote_references(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_REMOTE_REFERENCES, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_future(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FUTURE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_future_result(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FUTURE_RESULT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_future_subscription(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FUTURE_SUBSCRIPTION, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_make_persistent(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_MAKE_PERSISTENT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_mapper_message(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_MAPPER_MESSAGE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_mapper_broadcast(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_MAPPER_BROADCAST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_space_semantic_info(Serializer &rez, 
-                                                        bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_index_partition_semantic_info(Serializer &rez, 
-                                                            bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_INDEX_PARTITION_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_space_semantic_info(Serializer &rez, 
-                                                        bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_field_semantic_info(Serializer &rez, 
-                                                  bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FIELD_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_logical_region_semantic_info(Serializer &rez, 
-                                                           bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_LOGICAL_REGION_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_logical_partition_semantic_info(Serializer &rez, 
-                                                              bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_LOGICAL_PARTITION_SEMANTIC_INFO, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_subscribe_remote_context(Serializer &rez, 
-                                                       bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_SUBSCRIBE_REMOTE_CONTEXT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_free_remote_context(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_FREE_REMOTE_CONTEXT, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_version_state_request(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_VERSION_STATE_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_version_state_broadcast_request(Serializer &rez,
-                                                              bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_VERSION_STATE_BROADCAST_REQUEST, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_version_state_response(Serializer &rez,bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_VERSION_STATE_RESPONSE, flush);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::send_version_state_broadcast_response(Serializer &rez,
-                                                               bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_VERSION_STATE_BROADCAST_RESPONSE, flush);
-    }
-
-    //--------------------------------------------------------------------------
     Event MessageManager::notify_pending_shutdown(void)
     //--------------------------------------------------------------------------
     {
@@ -4578,14 +4102,6 @@ namespace LegionRuntime {
         wait_events.insert(channels[idx].notify_pending_shutdown());
       }
       return Event::merge_events(wait_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::package_message(Serializer &rez, MessageKind kind,
-                                         bool flush)
-    //--------------------------------------------------------------------------
-    {
-      send_message(rez, kind, DEFAULT_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -11469,7 +10985,8 @@ namespace LegionRuntime {
           deactivate_task = task->pack_task(rez, target);
         }
         // Put it on the queue and send it
-        manager->send_task(rez, true/*flush*/);
+        manager->send_message(rez, TASK_MESSAGE, 
+                              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
         if (deactivate_task)
           task->deactivate();
       }
@@ -11511,7 +11028,8 @@ namespace LegionRuntime {
             deactivate_task = (*it)->pack_task(rez, target);
           }
           // Put it in the queue, flush the last task
-          manager->send_task(rez, (idx == tasks.size()));
+          manager->send_message(rez, TASK_MESSAGE,
+                                DEFAULT_VIRTUAL_CHANNEL, (idx == tasks.size()));
           // Deactivate the task if it is remote
           if (deactivate_task)
             (*it)->deactivate();
@@ -11544,7 +11062,8 @@ namespace LegionRuntime {
             for ( ; it != targets.upper_bound(target); it++)
               rez.serialize(it->second);
           }
-          manager->send_steal_request(rez, true/*flush*/);
+          manager->send_message(rez, STEAL_MESSAGE,
+                                MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
         }
         else
         {
@@ -11585,7 +11104,8 @@ namespace LegionRuntime {
             rez.serialize(source);
             rez.serialize(map_id);
           }
-          messenger->send_advertisement(rez, true/*flush*/);
+          messenger->send_message(rez, ADVERTISEMENT_MESSAGE, 
+                                  MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
           already_sent.insert(messenger);
         }
       }
@@ -11595,7 +11115,8 @@ namespace LegionRuntime {
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_space_node(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11603,7 +11124,8 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_space_request(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_REQUEST, 
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11611,7 +11133,8 @@ namespace LegionRuntime {
                                           Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_space_return(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11619,7 +11142,8 @@ namespace LegionRuntime {
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_partition_node(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11627,7 +11151,8 @@ namespace LegionRuntime {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_partition_request(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_REQUEST,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11635,14 +11160,16 @@ namespace LegionRuntime {
                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_partition_return(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_field_space_node(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_NODE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11650,7 +11177,8 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_field_space_request(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_REQUEST,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11658,7 +11186,8 @@ namespace LegionRuntime {
                                           Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_field_space_return(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_RETURN,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11666,7 +11195,8 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_logical_region_node(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_LOGICAL_REGION_NODE,
+                                  LOGICAL_TREE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11679,7 +11209,8 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
       }
-      find_messenger(target)->send_index_space_destruction(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11692,8 +11223,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
       }
-      find_messenger(target)->send_index_partition_destruction(rez, 
-                                                               false/*flush*/);
+      find_messenger(target)->send_message(rez, 
+        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
+                                                             false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11706,7 +11238,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
       }
-      find_messenger(target)->send_field_space_destruction(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, 
+          FIELD_SPACE_DESTRUCTION_MESSAGE, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
+                                                              false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11719,7 +11253,8 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
       }
-      find_messenger(target)->send_logical_region_destruction(rez, 
+      find_messenger(target)->send_message(rez, 
+          LOGICAL_REGION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
                                                               false/*flush*/);
     }
 
@@ -11733,7 +11268,8 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
       }
-      find_messenger(target)->send_logical_partition_destruction(rez, 
+      find_messenger(target)->send_message(rez, 
+          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
                                                                 false/*flush*/);
     }
 
@@ -11751,7 +11287,8 @@ namespace LegionRuntime {
         rez.serialize(size);
         rez.serialize(idx);
       }
-      find_messenger(target)->send_field_allocation(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, FIELD_ALLOCATION_MESSAGE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11765,7 +11302,8 @@ namespace LegionRuntime {
         rez.serialize(space);
         rez.serialize(fid);
       }
-      find_messenger(target)->send_field_destruction(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, FIELD_DESTRUCTION_MESSAGE,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11773,7 +11311,8 @@ namespace LegionRuntime {
                                         Serializer &rez, bool flush /*= true*/)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_individual_remote_mapped(rez, flush);
+      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
+                                           DEFAULT_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -11781,8 +11320,8 @@ namespace LegionRuntime {
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_individual_remote_complete(rez, 
-                                                              true/*flush*/);
+      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMPLETE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11790,28 +11329,32 @@ namespace LegionRuntime {
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_individual_remote_commit(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMMIT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_mapped(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_slice_remote_mapped(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SLICE_REMOTE_MAPPED,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_complete(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_slice_remote_complete(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SLICE_REMOTE_COMPLETE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_commit(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_slice_remote_commit(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SLICE_REMOTE_COMMIT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11819,7 +11362,8 @@ namespace LegionRuntime {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_registration(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, DISTRIBUTED_REMOTE_REGISTRATION,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11827,7 +11371,8 @@ namespace LegionRuntime {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_valid_update(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, DISTRIBUTED_VALID_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11835,7 +11380,8 @@ namespace LegionRuntime {
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_gc_update(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, DISTRIBUTED_GC_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11843,8 +11389,8 @@ namespace LegionRuntime {
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_did_remote_resource_update(rez, 
-                                                              true/*flush*/);
+      find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11852,7 +11398,8 @@ namespace LegionRuntime {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_registration(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, VIEW_REMOTE_REGISTRATION,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11860,8 +11407,8 @@ namespace LegionRuntime {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_valid_update(rez,
-                                                            true/*flush*/);
+      find_messenger(target)->send_message(rez, VIEW_VALID_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11869,7 +11416,8 @@ namespace LegionRuntime {
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_gc_update(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, VIEW_GC_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11877,22 +11425,24 @@ namespace LegionRuntime {
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_view_remote_resource_update(rez, 
-                                                               true/*flush*/);
+      find_messenger(target)->send_message(rez, VIEW_RESOURCE_UPDATE,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_back_atomic(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_back_atomic(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_BACK_ATOMIC,
+                                        DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_materialized_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_materialized_view(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
+                                PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11900,84 +11450,96 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_materialized_update(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_MATERIALIZED_UPDATE,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_composite_view(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_composite_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_composite_update(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_COMPOSITE_UPDATE,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_fill_view(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_fill_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_fill_update(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FILL_UPDATE,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_reduction_view(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_reduction_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_reduction_update(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REDUCTION_UPDATE,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_instance_manager(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_instance_manager(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_MANAGER,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_reduction_manager(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_reduction_manager(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_remote_references(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_remote_references(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REMOTE_REFERENCES,
+                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_future(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_future(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FUTURE,
+                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_future_result(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FUTURE_RESULT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11985,28 +11547,32 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_future_subscription(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FUTURE_SUBSCRIPTION,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_make_persistent(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_make_persistent(rez, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_MAKE_PERSISTENT,
+                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_mapper_message(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_MAPPER_MESSAGE,
+                                        MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_mapper_broadcast(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_mapper_broadcast(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_MAPPER_BROADCAST,
+                                         MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12014,7 +11580,8 @@ namespace LegionRuntime {
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_space_semantic_info(rez,true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO,
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12022,7 +11589,8 @@ namespace LegionRuntime {
                                                      Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_index_partition_semantic_info(rez,
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_PARTITION_SEMANTIC_INFO, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
     }
 
@@ -12031,7 +11599,8 @@ namespace LegionRuntime {
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_field_space_semantic_info(rez,true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12039,7 +11608,8 @@ namespace LegionRuntime {
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_field_semantic_info(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_INFO,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12047,7 +11617,8 @@ namespace LegionRuntime {
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_logical_region_semantic_info(rez,
+      find_messenger(target)->send_message(rez, 
+          SEND_LOGICAL_REGION_SEMANTIC_INFO, LOGICAL_TREE_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
     }
 
@@ -12056,7 +11627,8 @@ namespace LegionRuntime {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_logical_partition_semantic_info(rez,
+      find_messenger(target)->send_message(rez,
+          SEND_LOGICAL_PARTITION_SEMANTIC_INFO, LOGICAL_TREE_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
     }
 
@@ -12065,7 +11637,8 @@ namespace LegionRuntime {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_subscribe_remote_context(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_SUBSCRIBE_REMOTE_CONTEXT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12073,7 +11646,8 @@ namespace LegionRuntime {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_free_remote_context(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_FREE_REMOTE_CONTEXT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12081,7 +11655,8 @@ namespace LegionRuntime {
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_version_state_request(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_REQUEST,
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12089,7 +11664,8 @@ namespace LegionRuntime {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_version_state_broadcast_request(rez,
+      find_messenger(target)->send_message(rez, 
+          SEND_VERSION_STATE_BROADCAST_REQUEST, PHYSICAL_STATE_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
     }
 
@@ -12098,7 +11674,8 @@ namespace LegionRuntime {
                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_version_state_response(rez, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12106,8 +11683,9 @@ namespace LegionRuntime {
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_version_state_broadcast_response(rez,
-                                                                true/*flush*/);
+      find_messenger(target)->send_message(rez, 
+          SEND_VERSION_STATE_BROADCAST_RESPONSE, PHYSICAL_STATE_VIRTUAL_CHANNEL,
+                                                                 true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
