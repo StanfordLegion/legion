@@ -396,10 +396,11 @@ namespace LegionRuntime {
 	}
       }
       // Unpack any profiling requests 
-      const void *result = requests.deserialize(idata);
-      Realm::Operation::reconstruct_measurements();
+      // TODO: unbreak once the serialization stuff is repaired
+      //const void *result = requests.deserialize(idata);
+      //Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
-      assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
+      //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -463,7 +464,8 @@ namespace LegionRuntime {
         OASVec& oasvec = it2->second;
         result += (3 + oasvec.size() * 3) * sizeof(IDType);
       }
-      result += requests.compute_size();
+      // TODO: unbreak once the serialization stuff is repaired
+      //result += requests.compute_size();
       return result;
     }
 
@@ -489,7 +491,8 @@ namespace LegionRuntime {
 	  *msgptr++ = it3->size;
 	}
       }
-      requests.serialize(msgptr); 
+      // TODO: unbreak once the serialization stuff is repaired
+      //requests.serialize(msgptr); 
       // We sent this message remotely, so we need to clear the profiling
       // so it doesn't get sent accidentally
       clear_profiling();
@@ -3207,10 +3210,11 @@ namespace LegionRuntime {
       inst_lock_needed = *idata++;
 
       // Unpack any requests that we have
-      const void *result = requests.deserialize(idata);
-      Realm::Operation::reconstruct_measurements();
+      // TODO: unbreak once the serialization stuff is repaired
+      //const void *result = requests.deserialize(idata);
+      //Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
-      assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
+      //assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -3277,7 +3281,8 @@ namespace LegionRuntime {
       size_t result = domain.compute_size();
       result += (4 + 3 * srcs.size()) * sizeof(IDType);
       result += sizeof(IDType); // for inst_lock_needed
-      result += requests.compute_size();
+      // TODO: unbreak once the serialization stuff is repaired
+      //result += requests.compute_size();
       return result;
     }
 
@@ -3303,7 +3308,8 @@ namespace LegionRuntime {
 
       *msgptr++ = inst_lock_needed;
 
-      requests.serialize(msgptr);
+      // TODO: unbreak once the serialization stuff is repaired
+      //requests.serialize(msgptr);
       // We sent this request remotely so we need to clear it's profiling
       clear_profiling();
     }
@@ -3836,11 +3842,12 @@ namespace LegionRuntime {
 
       idata += elmts;
 
-      const void *result = requests.deserialize(idata);
-      Realm::Operation::reconstruct_measurements();
+      // TODO: unbreak once the serialization stuff is repaired
+      //const void *result = requests.deserialize(idata);
+      //Realm::Operation::reconstruct_measurements();
 
       // better have consumed exactly the right amount of data
-      assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
+      //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
     }
 
     FillRequest::FillRequest(const Domain &d, 
@@ -3874,7 +3881,8 @@ namespace LegionRuntime {
       size_t result = domain.compute_size();
       size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
       result += ((elmts+1) * sizeof(IDType)); // +1 for fill size in bytes
-      result += requests.compute_size();
+      // TODO: unbreak once the serialization stuff is repaired
+      //result += requests.compute_size();
       return result;
     }
 
@@ -3888,7 +3896,8 @@ namespace LegionRuntime {
       memcpy(msgptr, fill_buffer, fill_size);
       msgptr += elmts;
 
-      requests.serialize(msgptr);
+      // TODO: unbreak once the serialization stuff is repaired
+      //requests.serialize(msgptr);
       // We sent this message remotely, so we need to clear the profiling
       // so it doesn't get sent accidentally
       clear_profiling();
@@ -4172,8 +4181,8 @@ namespace LegionRuntime {
       for(int i = 0; i < count; i++) {
 	pthread_attr_t attr;
 	CHECK_PTHREAD( pthread_attr_init(&attr) );
-	if(proc_assignment)
-	  proc_assignment->bind_thread(-1, &attr, "DMA worker");
+	if(Realm::proc_assignment)
+	  Realm::proc_assignment->bind_thread(-1, &attr, "DMA worker");
 	CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, 
 				      dma_worker_thread_loop, dma_queue) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );

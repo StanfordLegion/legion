@@ -20,7 +20,6 @@
 #include "utilities.h"
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
-  typedef LegionRuntime::LowLevel::PreemptableThread PreemptableThread;
 
   inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
   {

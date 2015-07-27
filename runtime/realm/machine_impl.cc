@@ -21,8 +21,6 @@
 #include "utilities.h"
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
-  typedef LegionRuntime::LowLevel::PreemptableThread PreemptableThread;
-  typedef LegionRuntime::LowLevel::RemoteProcessor RemoteProcessor;
   typedef LegionRuntime::LowLevel::RemoteMemory RemoteMemory;
   typedef LegionRuntime::LowLevel::Node Node;
 

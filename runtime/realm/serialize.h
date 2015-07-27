@@ -215,8 +215,6 @@ namespace Realm {
       static bool serdez(FixedBufferDeserializer& s, const T& data) { return deserialize(s, *const_cast<T*>(&data)); }
   };
 
-    // Turning off the serializability checks for now because they aren't working properly
-#if 0
     template <typename S, typename T>
       bool operator<<(S& s, const T& data) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serialize(s, data); }
     template <typename S, typename T>
@@ -229,20 +227,6 @@ namespace Realm {
 
     template <typename S, typename T>
       bool operator>>(S& s, std::vector<T>& v) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::deserialize_vector(s, v); }
-#else
-    template <typename S, typename T>
-      bool operator<<(S& s, const T& data) { return SerializationHelper<T, true>::serialize(s, data); }
-    template <typename S, typename T>
-      bool operator>>(S& s, T& data) { return SerializationHelper<T, true>::deserialize(s, data); }
-    template <typename S, typename T>
-      bool operator&(S& s, const T& data) { return SerializationHelper<T, true>::serdez(s, data); }
-
-    template <typename S, typename T>
-      bool operator<<(S& s, const std::vector<T>& v) { return SerializationHelper<T, true>::serialize_vector(s, v); }
-
-    template <typename S, typename T>
-      bool operator>>(S& s, std::vector<T>& v) { return SerializationHelper<T, true>::deserialize_vector(s, v); }
-#endif
   }; // namespace Serialization
 
 }; // namespace Realm

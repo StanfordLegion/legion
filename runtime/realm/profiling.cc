@@ -81,6 +81,7 @@ namespace Realm {
     return *this;
   }
 
+#if 0
   size_t ProfilingRequest::compute_size(void) const
   {
     size_t result = sizeof(response_proc) + sizeof(response_task_id) + 
@@ -171,7 +172,8 @@ namespace Realm {
     }
     return buffer;
   }
-
+#endif
+  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -248,6 +250,7 @@ namespace Realm {
     requests.clear();
   }
 
+#if 0
   size_t ProfilingRequestSet::compute_size(void) const
   {
     size_t result = sizeof(size_t);
@@ -293,7 +296,8 @@ namespace Realm {
     }
     return buffer;
   }
-
+#endif
+  
 
   ////////////////////////////////////////////////////////////////////////
   //
