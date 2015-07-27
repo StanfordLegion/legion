@@ -2501,7 +2501,7 @@ namespace LegionRuntime {
 #endif
             exit(ERROR_INVALID_COPY_FIELDS_SIZE);
           }
-          if (!IS_WRITE(dst_requirements[idx]))
+          if (!HAS_WRITE(dst_requirements[idx]))
           {
             log_run.error("Copy destination requirement %d for copy "
                                 "operation (ID %lld) in parent task %s "
@@ -3047,7 +3047,17 @@ namespace LegionRuntime {
           {
             // In this case, there is no source instance so we need
             // to issue copies from the valid set
-            copy_complete_events.insert(runtime->forest->copy_across(this, 
+            if (!IS_REDUCE(dst_requirements[idx]))
+              copy_complete_events.insert(runtime->forest->copy_across(this, 
+                                          parent_ctx->get_executing_processor(),
+                                                   src_contexts[idx],
+                                                   dst_contexts[idx],
+                                                   src_requirements[idx],
+                                                   src_versions[idx],
+                                                   dst_requirements[idx],
+                                                   dst_ref, sync_precondition));
+            else
+              copy_complete_events.insert(runtime->forest->reduce_across(this,
                                           parent_ctx->get_executing_processor(),
                                                    src_contexts[idx],
                                                    dst_contexts[idx],
@@ -3086,8 +3096,16 @@ namespace LegionRuntime {
               src_requirements[idx].selected_memory = src_ref.get_memory();
             }
             // Now issue the copies from source to destination
-            copy_complete_events.insert(
-             runtime->forest->copy_across(this, src_contexts[idx],
+            if (!IS_REDUCE(dst_requirements[idx]))
+              copy_complete_events.insert(
+                  runtime->forest->copy_across(this, src_contexts[idx],
+                                          dst_contexts[idx],
+                                          src_requirements[idx],
+                                          dst_requirements[idx],
+                                          src_ref, dst_ref, sync_precondition));
+            else
+              copy_complete_events.insert(
+                  runtime->forest->reduce_across(this, dst_contexts[idx],
                                           dst_contexts[idx],
                                           src_requirements[idx],
                                           dst_requirements[idx],

@@ -5449,7 +5449,7 @@ namespace LegionRuntime {
                       const char *task_name,
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
-      static LowLevel::ReductionOpTable& get_reduction_table(void);
+      static ReductionOpTable& get_reduction_table(void);
     private:
       friend class Mapper;
       Runtime *runtime;
@@ -6737,8 +6737,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_RESERVED_REDOP_ID);
       }
-      LowLevel::ReductionOpTable &red_table = 
-          HighLevelRuntime::get_reduction_table(); 
+      ReductionOpTable &red_table = HighLevelRuntime::get_reduction_table(); 
       // Check to make sure we're not overwriting a prior reduction op 
       if (red_table.find(redop_id) != red_table.end())
       {

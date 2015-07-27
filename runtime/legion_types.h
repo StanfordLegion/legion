@@ -468,6 +468,7 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
     typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<LowLevel::ReductionOpID, const LowLevel::ReductionOpUntyped *> ReductionOpTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
     typedef ::legion_color_t Color;

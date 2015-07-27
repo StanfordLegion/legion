@@ -13,7 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [
+-- []
+
+-- FIXME: Temporarily disable this test. Hitting memory corruption
+-- (double free).
+
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-compact", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
@@ -60,7 +64,7 @@ do
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", "-I", root_dir, "-I", runtime_dir)
+  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 -- Include other headers

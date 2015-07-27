@@ -1943,17 +1943,9 @@ std.sov = terralib.memoize(function(struct_type, width)
   assert(not std.is_ref(struct_type))
   assert(not std.is_rawref(struct_type))
 
-  --for _, entry in pairs(struct_type.entries) do
-  --  local entry_type = entry[2] or entry.type
-  --  if not entry_type:isprimitive() then
-  --    error("sov expected a struct type of primitive types, got a field " ..
-  --      entry.field .. " of type " ..  tostring(entry.type))
-  --  end
-  --end
-
   local st = terralib.types.newstruct("sov")
   st.entries = terralib.newlist()
-  for _, entry in pairs(struct_type.entries) do
+  for _, entry in pairs(struct_type:getentries()) do
     local entry_field = entry[1] or entry.field
     local entry_type = entry[2] or entry.type
     if entry_type:isprimitive() then

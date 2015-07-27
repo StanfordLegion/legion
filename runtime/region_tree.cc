@@ -2463,6 +2463,98 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Event RegionTreeForest::reduce_across(Operation *op,
+                                          Processor local_proc,
+                                          RegionTreeContext src_ctx,
+                                          RegionTreeContext dst_ctx,
+                                          RegionRequirement &src_req,
+                                          VersionInfo &src_version_info,
+                                          const RegionRequirement &dst_req,
+                                          const InstanceRef &dst_ref,
+                                          Event pre)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeForest::reduce_across(Operation *op,
+                                          RegionTreeContext src_ctx, 
+                                          RegionTreeContext dst_ctx,
+                                          const RegionRequirement &src_req,
+                                          const RegionRequirement &dst_req,
+                                          const InstanceRef &src_ref,
+                                          const InstanceRef &dst_ref,
+                                          Event precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      begin_perf_trace(COPY_ACROSS_ANALYSIS);
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+      assert(src_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(src_ref.has_ref());
+      assert(dst_ref.has_ref());
+      assert(dst_req.privilege == REDUCE);
+#endif
+      // We already have the events for using the physical instances
+      // All we need to do is get the offsets for performing the copies
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      LogicalView *src_view = src_ref.get_handle().get_view();
+      LogicalView *dst_view = dst_ref.get_handle().get_view();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(src_view->is_instance_view());
+      assert(dst_view->is_instance_view());
+#endif
+      InstanceView *src_inst = src_view->as_instance_view();
+      InstanceView *dst_inst = dst_view->as_instance_view();
+      if (src_inst->is_reduction_view())
+      {
+        FieldMask src_mask = src_inst->logical_node->column_source->
+                                get_field_mask(src_req.privilege_fields);
+        src_inst->as_reduction_view()->reduce_from(dst_req.redop, 
+                                                   src_mask, src_fields);
+      }
+      else
+      {
+        MaterializedView *src_mat_view = src_inst->as_materialized_view();
+        src_mat_view->manager->compute_copy_offsets(src_req.instance_fields,
+                                                    src_fields);
+      }
+      FieldMask dst_mask = dst_view->logical_node->column_source->
+                            get_field_mask(dst_req.privilege_fields);
+      dst_inst->reduce_to(dst_req.redop, dst_mask, dst_fields); 
+      const bool fold = dst_inst->is_reduction_view();
+
+      std::set<Domain> dst_domains;
+      RegionNode *dst_node = get_node(dst_req.region);
+      Event dom_precondition = Event::NO_EVENT;
+      if (dst_node->has_component_domains())
+        dst_domains = dst_node->get_component_domains(dom_precondition);
+      else
+        dst_domains.insert(dst_node->get_domain(dom_precondition));
+
+      Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
+                                           dst_ref.get_ready_event(),
+                                           precondition, dom_precondition);
+      std::set<Event> result_events;
+      for (std::set<Domain>::const_iterator it = dst_domains.begin();
+            it != dst_domains.end(); it++)
+      {
+        Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, fold,
+                                            src_fields, dst_fields, copy_pre);
+        if (copy_result.exists())
+          result_events.insert(copy_result);
+      }
+      Event result = Event::merge_events(result_events);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
                                        const RegionRequirement &req,
                                        const void *value, size_t value_size,
@@ -11314,7 +11406,6 @@ namespace LegionRuntime {
           force_close_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
                         RegionUsage(close_op->get_region_requirement()),
                         it->closing_mask);
-
       }
     }
 
@@ -18507,7 +18598,7 @@ namespace LegionRuntime {
       InstanceView *inst_view = view->as_instance_view();
       // This mirrors the if-else statement in MappingTraverser::visit_region
       // for handling the different instance and reduction cases
-      if (!IS_REDUCE(info.req))
+      if (!inst_view->is_reduction_view())
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(inst_view->is_materialized_view());

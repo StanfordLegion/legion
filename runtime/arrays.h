@@ -31,10 +31,6 @@ static inline int imin(int a, int b) { return (a < b) ? a : b; }
 static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
-  namespace LowLevel {
-    class IndexSpace;
-  };
-
   namespace Arrays {
     template <unsigned DIM>
     class Point {
