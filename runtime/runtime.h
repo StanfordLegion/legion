@@ -1841,6 +1841,7 @@ namespace LegionRuntime {
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc);
       void unregister_distributed_collectable(DistributedID did);
+      bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
     public:
       void register_future(DistributedID did, Future::Impl *impl);

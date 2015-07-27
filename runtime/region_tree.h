@@ -1427,10 +1427,19 @@ namespace LegionRuntime {
                                            VersionManager *manager,
                                            bool initialize, bool capture);
     public:
-      void make_local(std::set<Event> &preconditions, 
+      void pack_version_info(Serializer &rez, AddressSpaceID local_space,
+                             ContextID ctx);
+      void unpack_version_info(Deserializer &derez);
+      void make_local(std::set<Event> &preconditions, RegionTreeForest *forest,
                       ContextID ctx, bool path_only = false);
     protected:
-      void unpack_buffer(std::set<Event> &preconditions, ContextID ctx);
+      void pack_buffer(Serializer &rez, 
+                       AddressSpaceID local_space, ContextID ctx);
+      void unpack_buffer(RegionTreeForest *forest, ContextID ctx);
+      void pack_node_info(Serializer &rez, NodeInfo &info,
+                          RegionTreeNode *node, ContextID ctx);
+      void unpack_node_info(RegionTreeNode *node, ContextID ctx,
+                            Deserializer &derez, AddressSpaceID source);
     protected:
       std::map<RegionTreeNode*,NodeInfo> node_infos;
       RegionTreeNode *upper_bound_node;
@@ -2175,7 +2184,13 @@ namespace LegionRuntime {
                                   PhysicalState *state, FieldMask &to_create,
                                   bool advance);
     protected:
-      VersionState* create_version_state(VersionID vid, bool initialize);
+      VersionState* create_new_version_state(VersionID vid, bool initialize);
+      VersionState* create_remote_version_state(VersionID vid, 
+              DistributedID did, AddressSpaceID owner_space, bool initialize);
+    public:
+      VersionState* find_remote_version_state(VersionID vid, DistributedID did,
+                                      AddressSpaceID source, bool initialize,
+                                      bool request_initial, bool request_final);
     public:
       RegionTreeForest *const context;
     protected:
@@ -2447,7 +2462,11 @@ namespace LegionRuntime {
     public:
       bool register_logical_view(LogicalView *view);
       void unregister_logical_view(LogicalView *view);
-      LogicalView *find_view(DistributedID did);
+      LogicalView* find_view(DistributedID did);
+      VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
+                                  DistributedID did, AddressSpaceID source, 
+                                  bool initialize, bool request_intial, 
+                                  bool request_final);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual const ColorPoint& get_color(void) const = 0;

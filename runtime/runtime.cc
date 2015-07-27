@@ -13741,6 +13741,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_distributed_collectable(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      return (dist_collectables.find(did) != dist_collectables.end());
+    }
+
+    //--------------------------------------------------------------------------
     DistributedCollectable* Runtime::find_distributed_collectable(
                                                               DistributedID did)
     //--------------------------------------------------------------------------

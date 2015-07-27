@@ -1863,7 +1863,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -2754,13 +2755,15 @@ namespace LegionRuntime {
       {
         RegionTreeContext physical_ctx =
           parent_ctx->find_enclosing_physical_context(src_parent_indexes[idx]);
-        src_versions[idx].make_local(preconditions, physical_ctx.get_id());
+        src_versions[idx].make_local(preconditions, runtime->forest,
+                                     physical_ctx.get_id());
       }
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
       {
         RegionTreeContext physical_ctx =
           parent_ctx->find_enclosing_physical_context(dst_parent_indexes[idx]);
-        dst_versions[idx].make_local(preconditions, physical_ctx.get_id());
+        dst_versions[idx].make_local(preconditions, runtime->forest,
+                                     physical_ctx.get_id());
       }
       if (preconditions.empty())
         ready_event.trigger();
@@ -4265,7 +4268,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(find_parent_index(0));
       std::set<Event> preconditions;
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -5002,7 +5006,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -5599,7 +5604,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -8289,7 +8295,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -8758,7 +8765,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -9220,7 +9228,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -9581,7 +9590,8 @@ namespace LegionRuntime {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_physical_context(parent_req_index);
       std::set<Event> preconditions;  
-      version_info.make_local(preconditions, physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest,
+                              physical_ctx.get_id());
       if (preconditions.empty())
         ready_event.trigger();
       else

@@ -9114,7 +9114,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : upper_bound_node(NULL), advance(false)
+      : upper_bound_node(NULL), advance(false), packed(false),
+        packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -9125,6 +9126,10 @@ namespace LegionRuntime {
         advance(rhs.advance)
     //--------------------------------------------------------------------------
     {
+      // This shouldn't be called when packed
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!rhs.packed);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9138,6 +9143,9 @@ namespace LegionRuntime {
         assert(it->second.physical_state == NULL);
       }
 #endif
+      // Free the packed buffer if we have one
+      if (packed && (packed_buffer != NULL))
+        free(packed_buffer);
     }
 
     //--------------------------------------------------------------------------
@@ -9150,6 +9158,8 @@ namespace LegionRuntime {
       {
         assert(it->second.physical_state == NULL);
       }
+      // shouldn't be called when packed
+      assert(!packed);
 #endif
       node_infos = rhs.node_infos;
       upper_bound_node = rhs.upper_bound_node;
@@ -9163,6 +9173,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(upper_bound_node == NULL);
+      assert(!packed);
 #endif
       upper_bound_node = node;
     }
@@ -9171,6 +9182,10 @@ namespace LegionRuntime {
     void VersionInfo::merge(const VersionInfo &rhs, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+      assert(!rhs.packed);
+#endif
       for (std::map<RegionTreeNode*,NodeInfo>::const_iterator vit = 
             rhs.node_infos.begin(); vit != 
             rhs.node_infos.end(); vit++)
@@ -9209,6 +9224,9 @@ namespace LegionRuntime {
     void VersionInfo::apply_premapping(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -9228,6 +9246,9 @@ namespace LegionRuntime {
     void VersionInfo::apply_mapping(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -9248,6 +9269,9 @@ namespace LegionRuntime {
     void VersionInfo::reset(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it =
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -9264,6 +9288,9 @@ namespace LegionRuntime {
     void VersionInfo::release(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       // Now it is safe to go through and delete all the physical states
       // which will free up all the references on all the version managers
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
@@ -9287,6 +9314,7 @@ namespace LegionRuntime {
       {
         assert(it->second.physical_state == NULL);
       }
+      assert(!packed);
 #endif
       node_infos.clear();
       upper_bound_node = NULL;
@@ -9297,6 +9325,7 @@ namespace LegionRuntime {
     void VersionInfo::sanity_check(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
+      assert(!packed);
       std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
         node_infos.find(node);
       if (finder == node_infos.end())
@@ -9315,6 +9344,9 @@ namespace LegionRuntime {
     PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
@@ -9337,6 +9369,9 @@ namespace LegionRuntime {
                          VersionManager *manager, bool initialize, bool capture)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
       std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
@@ -9356,38 +9391,290 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    void VersionInfo::pack_version_info(Serializer &rez, 
+                                        AddressSpaceID local, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (packed)
+      {
+        // If we are already packed this is easy
+        rez.serialize(packed_size);
+        rez.serialize(packed_buffer, packed_size);
+      }
+      else
+      {
+        // Otherwise, make our own local serializer so we
+        // can record how many bytes we need
+        Serializer local_rez;
+        pack_buffer(local_rez, local, ctx);
+        size_t total_size = local_rez.get_used_bytes();
+        rez.serialize(total_size);
+        rez.serialize(local_rez.get_buffer(), total_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::make_local(std::set<Event> &preconditions, 
+                                 RegionTreeForest *forest,
                                  ContextID ctx, bool path_only)
     //--------------------------------------------------------------------------
     {
-      // This will also have the effect of localizing everything
       if (packed)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!path_only); // shouldn't be doing this if we are unpacking
 #endif
-        unpack_buffer(preconditions, ctx);
+        unpack_buffer(forest, ctx);
+      }
+      // Iterate over all version state infos and build physical states
+      // without actually capturing any data
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        NodeInfo &info = it->second;
+        // Skip any unnecessary entries if we are doing path only
+        if (path_only && !info.path_only)
+          continue;
+        if (info.physical_state == NULL)
+        {
+          info.physical_state = it->first->get_physical_state(ctx, *this,
+                                                       false/*initialize*/,
+                                                       false/*capture*/);
+          info.needs_capture = true;                                                 
+        }
+        // Now get the preconditions for the state
+        info.physical_state->make_local(preconditions, info.advance);
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::pack_buffer(Serializer &rez, 
+                                  AddressSpaceID local_space, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+      assert(upper_bound_node != NULL);
+#endif
+      rez.serialize(advance);
+      if (upper_bound_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        rez.serialize(upper_bound_node->as_region_node()->handle);
       }
       else
       {
-        // Iterate over all version state infos and build physical states
-        // without actually capturing any data
-        for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
-              node_infos.begin(); it != node_infos.end(); it++)
+        rez.serialize<bool>(false);
+        rez.serialize(upper_bound_node->as_partition_node()->handle);
+      }
+      rez.serialize(local_space);
+      size_t total_regions = 0;
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (it->first->is_region())
+          total_regions++;
+      }
+      rez.serialize(total_regions);
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (it->first->is_region())
         {
-          NodeInfo &info = it->second;
-          // Skip any unnecessary entries if we are doing path only
-          if (path_only && !info.path_only)
-            continue;
-          if (info.physical_state == NULL)
+          rez.serialize(it->first->as_region_node()->handle);
+          pack_node_info(rez, it->second, it->first, ctx);
+        }
+      }
+      size_t total_partitions = node_infos.size() - total_regions;
+      rez.serialize(total_partitions);
+      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        if (!it->first->is_region())
+        {
+          rez.serialize(it->first->as_partition_node()->handle);
+          pack_node_info(rez, it->second, it->first, ctx);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::unpack_buffer(RegionTreeForest *forest, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(packed);
+      assert(packed_buffer != NULL);
+#endif
+      Deserializer derez(packed_buffer, packed_size);
+      // Unpack the advanced bit
+      derez.deserialize(advance); 
+      // Unpack the upper bound node
+      {
+        bool is_region;
+        derez.deserialize(is_region);
+        if (is_region)
+        {
+          LogicalRegion handle;
+          derez.deserialize(handle);
+          upper_bound_node = forest->get_node(handle);
+        }
+        else
+        {
+          LogicalPartition handle;
+          derez.deserialize(handle);
+          upper_bound_node = forest->get_node(handle);
+        }
+      }
+      // Unpack the source
+      AddressSpaceID source;
+      derez.deserialize(source);
+      // Unpack the node infos
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      for (unsigned idx = 0; idx < num_regions; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = forest->get_node(handle);
+        unpack_node_info(node, ctx, derez, source);
+      }
+      size_t num_partitions;
+      derez.deserialize(num_partitions);
+      for (unsigned idx = 0; idx < num_partitions; idx++)
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = forest->get_node(handle);
+        unpack_node_info(node, ctx, derez, source);
+      }
+      // Free up the buffer
+      free(packed_buffer);
+      packed_buffer = NULL;
+      packed_size = 0;
+      packed = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::pack_node_info(Serializer &rez, NodeInfo &info,
+                                     RegionTreeNode *node, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(info.path_only);
+      rez.serialize(info.advance);
+      if (info.physical_state == NULL)
+        info.physical_state = node->get_physical_state(ctx, *this,
+                                        false/*initialize*/, false/*capture*/);
+      PhysicalState *state = info.physical_state;
+#ifdef DEBUG_HIGH_LEVEL
+      if (!info.advance)
+        assert(state->advance_states.empty());
+#endif
+      size_t total_version_states = 0;
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 = 
+            state->version_states.begin(); it1 != 
+            state->version_states.end(); it1++)
+      {
+        const VersionStateInfo &state_info = it1->second;
+        total_version_states += state_info.states.size();
+      }
+      rez.serialize(total_version_states);
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 = 
+            state->version_states.begin(); it1 != 
+            state->version_states.end(); it1++)
+      {
+        const VersionStateInfo &state_info = it1->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              state_info.states.begin(); it != state_info.states.end(); it++)
+        {
+          rez.serialize(it1->first);
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+      }
+      if (info.advance)
+      {
+        size_t total_advance_states = 0;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              it1 = state->advance_states.begin(); it1 != 
+              state->advance_states.end(); it1++)
+        {
+          const VersionStateInfo &state_info = it1->second;
+          total_advance_states += state_info.states.size();
+        }
+        rez.serialize(total_advance_states);
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              it1 = state->advance_states.begin(); it1 != 
+              state->advance_states.end(); it1++)
+        {
+          const VersionStateInfo &state_info = it1->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                state_info.states.begin(); it != state_info.states.end(); it++)
           {
-            info.physical_state = it->first->get_physical_state(ctx, *this,
-                                                         false/*initialize*/,
-                                                         false/*capture*/);
-            info.needs_capture = true;                                                 
-            // Now get the preconditions for the state
-            info.physical_state->make_local(preconditions, info.advance);
+            rez.serialize(it1->first);
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
           }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::unpack_node_info(RegionTreeNode *node, ContextID ctx,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      NodeInfo &info = node_infos[node];
+#ifdef DEBUG_HIGH_LEVEL
+      info.physical_state = legion_new<PhysicalState>(node);
+#else
+      info.physical_state = legion_new<PhysicalState>();
+#endif
+      // Don't need premap
+      derez.deserialize(info.path_only);
+      derez.deserialize(info.advance);
+      info.needs_capture = true;
+      // Unpack the version states
+      unsigned num_states;
+      derez.deserialize(num_states);
+      FieldSpaceNode *field_node = node->column_source;
+      for (unsigned idx = 0; idx < num_states; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        DistributedID did;
+        derez.deserialize(did);
+        VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                      did, source, false/*initialize*/, 
+                                      !info.advance, info.advance);
+        FieldMask mask;
+        derez.deserialize(mask);
+        // Transform the field mask
+        field_node->transform_field_mask(mask, source);
+        // No point in adding this to the version state infos
+        // since we already know we just use that to build the PhysicalState
+        info.physical_state->add_version_state(state, mask);
+      }
+      if (info.advance)
+      {
+        // Unpack the advance states
+        derez.deserialize(num_states);
+        for (unsigned idx = 0; idx < num_states; idx++)
+        {
+          VersionID vid;
+          derez.deserialize(vid);
+          DistributedID did;
+          derez.deserialize(did);
+          VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                         did, source, true/*initialize*/, 
+                     false/*requestl initial*/, false/*requestl final*/);
+          FieldMask mask;
+          derez.deserialize(mask);
+          // Transform the field mask
+          field_node->transform_field_mask(mask, source);
+          // No point in adding this to the version state infos
+          // since we already know we just use that to build the PhysicalState
+          info.physical_state->add_advance_state(state, mask);
         }
       }
     }
@@ -13374,7 +13661,7 @@ namespace LegionRuntime {
               observed_mask |= to_create;
 #endif
               VersionState *new_state = 
-                create_version_state(it->first+1, initialize);
+                create_new_version_state(it->first+1, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
@@ -13407,7 +13694,7 @@ namespace LegionRuntime {
               observed_mask |= to_create;
 #endif
               VersionState *new_state = 
-                create_version_state(it->first, initialize);
+                create_new_version_state(it->first, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
@@ -13746,7 +14033,8 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = create_version_state(0, true/*initialize*/);
+        VersionState *init_state = 
+          create_new_version_state(0, true/*initialize*/);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, user);
         current_version_infos[0].valid_fields = user.field_mask;
@@ -13883,14 +14171,56 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionManager::create_version_state(VersionID vid, 
-                                                       bool initialize)
+    VersionState* VersionManager::create_new_version_state(VersionID vid, 
+                                                           bool initialize)
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = context->runtime->get_available_distributed_id();
       AddressSpace local_space = context->runtime->address_space;
       return legion_new<VersionState>(vid, context->runtime, new_did,
                                       local_space, local_space, initialize);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* VersionManager::create_remote_version_state(VersionID vid,
+                 DistributedID did, AddressSpaceID owner_space, bool initialize) 
+    //--------------------------------------------------------------------------
+    {
+      AddressSpace local_space = context->runtime->address_space;
+      return legion_new<VersionState>(vid, context->runtime, did,
+                                      local_space, local_space, initialize);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* VersionManager::find_remote_version_state(VersionID vid,
+                DistributedID did, AddressSpaceID source, bool initialize,
+                bool request_initial, bool request_final)
+    //--------------------------------------------------------------------------
+    {
+      // Use the lock on the version manager to ensure that we don't
+      // replicated version states on a node
+      AutoLock v_lock(version_lock);
+      if (context->runtime->has_distributed_collectable(did))
+      {
+        DistributedCollectable *result = 
+          context->runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+        VersionState *vs = dynamic_cast<VersionState*>(result);
+        assert(vs != NULL);
+#else
+        VersionState *vs = static_cast<VersionState*>(result);
+#endif
+        // If we found it, no need to do the requests
+        return vs;
+      }
+      // Otherwise make it, send any requests and then return the result
+      VersionState *result = 
+        create_remote_version_state(vid, did, source, initialize);
+      if (request_initial)
+        result->request_initial_version_state();
+      if (request_final)
+        result->request_final_version_state();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -17570,6 +17900,17 @@ namespace LegionRuntime {
       // Otherwise go up the tree
       LogicalView *parent_view = parent->find_view(did);
       return parent_view->get_subview(get_color());
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
+                  VersionID vid, DistributedID did, AddressSpaceID source,
+                  bool initialize, bool request_initial, bool request_final)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager *manager = version_managers.lookup_entry(ctx, context);
+      return manager->find_remote_version_state(vid, did, source, initialize,
+                                                request_initial, request_final);
     }
 
     //--------------------------------------------------------------------------
