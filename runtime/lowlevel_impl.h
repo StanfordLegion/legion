@@ -103,6 +103,7 @@ namespace Realm {
 
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
+#include "realm/machine_impl.h"
 
 // namespace importing for backwards compatibility
 namespace LegionRuntime {
@@ -113,6 +114,7 @@ namespace LegionRuntime {
     typedef Realm::GenEventImpl GenEventImpl;
     typedef Realm::BarrierImpl BarrierImpl;
     typedef Realm::ReservationImpl ReservationImpl;
+    typedef Realm::MachineImpl MachineImpl;
   };
 };
 
@@ -314,6 +316,33 @@ namespace LegionRuntime {
       Processor::Kind kind;
       Atomic<int> *run_counter;
     }; 
+
+    class RemoteProcessor : public ProcessorImpl {
+    public:
+      RemoteProcessor(Processor _me, Processor::Kind _kind);
+      virtual ~RemoteProcessor(void);
+
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+
+      virtual void enqueue_task(Task *task);
+
+      virtual void tasks_available(int priority);
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority);
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+    };
 
     class DeferredTaskSpawn : public EventWaiter {
     public:
@@ -946,6 +975,34 @@ namespace LegionRuntime {
     };
 #endif
 
+    class RemoteMemory : public MemoryImpl {
+    public:
+      RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+      virtual ~RemoteMemory(void);
+
+      virtual RegionInstance create_instance(IndexSpace r,
+					     const int *linearization_bits,
+					     size_t bytes_needed,
+					     size_t block_size,
+					     size_t element_size,
+					     const std::vector<size_t>& field_sizes,
+					     ReductionOpID redopid,
+					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
+					     RegionInstance parent_inst);
+      virtual void destroy_instance(RegionInstance i, 
+				    bool local_destroy);
+      virtual off_t alloc_bytes(size_t size);
+      virtual void free_bytes(off_t offset, size_t size);
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+      virtual int get_home_node(off_t offset, size_t size);
+
+    public:
+      void *regbase;
+    };
+
     class MetadataBase {
     public:
       MetadataBase(void);
@@ -1165,39 +1222,6 @@ namespace LegionRuntime {
     };
 
     struct NodeAnnounceData;
-
-    class MachineImpl {
-    public:
-      void get_all_memories(std::set<Memory>& mset) const;
-      void get_all_processors(std::set<Processor>& pset) const;
-
-      // Return the set of memories visible from a processor
-      void get_visible_memories(Processor p, std::set<Memory>& mset) const;
-
-      // Return the set of memories visible from a memory
-      void get_visible_memories(Memory m, std::set<Memory>& mset) const;
-
-      // Return the set of processors which can all see a given memory
-      void get_shared_processors(Memory m, std::set<Processor>& pset) const;
-
-      int get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
-				Processor restrict_proc /*= Processor::NO_PROC*/,
-				Memory restrict_memory /*= Memory::NO_MEMORY*/) const;
-
-      int get_mem_mem_affinity(std::vector<Machine::MemoryMemoryAffinity>& result,
-			       Memory restrict_mem1 /*= Memory::NO_MEMORY*/,
-			       Memory restrict_mem2 /*= Memory::NO_MEMORY*/) const;
-      
-      void parse_node_announce_data(const void *args, size_t arglen,
-				    const NodeAnnounceData& annc_data,
-				    bool remote);
-    protected:
-      std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
-      std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
-    };
-
-    extern MachineImpl *machine_singleton;
-    inline MachineImpl *get_machine(void) { return machine_singleton; }
 
     class RuntimeImpl {
     public:

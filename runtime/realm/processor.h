@@ -22,6 +22,9 @@
 
 #include "event.h"
 
+#include <vector>
+#include <map>
+
 namespace Realm {
 
     typedef unsigned int AddressSpace;
