@@ -276,7 +276,8 @@ endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
-		   $(LG_RT_DIR)/realm/event_impl.cc
+		   $(LG_RT_DIR)/realm/event_impl.cc \
+		   $(LG_RT_DIR)/realm/rsrv_impl.cc
 
 
 # If you want to go back to using the shared mapper, comment out the next line

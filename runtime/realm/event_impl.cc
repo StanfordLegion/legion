@@ -22,7 +22,7 @@ namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
   typedef LegionRuntime::LowLevel::PreemptableThread PreemptableThread;
 
-  LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
+  inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
   {
     return LegionRuntime::LowLevel::get_runtime();
   }

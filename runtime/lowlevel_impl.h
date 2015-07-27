@@ -102,6 +102,7 @@ namespace Realm {
 };
 
 #include "realm/event_impl.h"
+#include "realm/rsrv_impl.h"
 
 // namespace importing for backwards compatibility
 namespace LegionRuntime {
@@ -111,6 +112,7 @@ namespace LegionRuntime {
     typedef Realm::EventImpl EventImpl;
     typedef Realm::GenEventImpl GenEventImpl;
     typedef Realm::BarrierImpl BarrierImpl;
+    typedef Realm::ReservationImpl ReservationImpl;
   };
 };
 
@@ -217,123 +219,6 @@ namespace LegionRuntime {
 	return need;
       }
 	
-    };
-
-    class ReservationImpl {
-    public:
-      ReservationImpl(void);
-
-      static const ID::ID_Types ID_TYPE = ID::ID_LOCK;
-
-      void init(Reservation _me, unsigned _init_owner, size_t _data_size = 0);
-
-      template <class T>
-      void set_local_data(T *data)
-      {
-	local_data = data;
-	local_data_size = sizeof(T);
-        own_local = false;
-      }
-
-      //protected:
-      Reservation me;
-      unsigned owner; // which node owns the lock
-      unsigned count; // number of locks held by local threads
-      unsigned mode;  // lock mode
-      bool in_use;
-
-      enum { MODE_EXCL = 0, ZERO_COUNT = 0x11223344 };
-
-      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible lock)
-
-      // bitmasks of which remote nodes are waiting on a lock (or sharing it)
-      NodeSet remote_waiter_mask, remote_sharer_mask;
-      //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
-      std::map<unsigned, std::deque<GenEventImpl *> > local_waiters;
-      bool requested; // do we have a request for the lock in flight?
-
-      // local data protected by lock
-      void *local_data;
-      size_t local_data_size;
-      bool own_local;
-
-      static GASNetHSL freelist_mutex;
-      static ReservationImpl *first_free;
-      ReservationImpl *next_free;
-
-      // created a GenEventImpl if needed to describe when reservation is granted
-      Event acquire(unsigned new_mode, bool exclusive,
-		    GenEventImpl *after_lock = 0);
-
-      bool select_local_waiters(std::deque<GenEventImpl *>& to_wake);
-
-      void release(void);
-
-      bool is_locked(unsigned check_mode, bool excl_ok);
-
-      void release_reservation(void);
-
-      struct PackFunctor {
-      public:
-        PackFunctor(int *p) : pos(p) { }
-      public:
-        inline void apply(int target) { *pos++ = target; }
-      public:
-        int *pos;
-      };
-    };
-
-    template <typename T>
-    class StaticAccess {
-    public:
-      typedef typename T::StaticData StaticData;
-
-      StaticAccess(T* thing_with_data, bool already_valid = false);
-
-      ~StaticAccess(void) {}
-
-      const StaticData *operator->(void) { return data; }
-
-    protected:
-      StaticData *data;
-    };
-
-    template <typename T>
-    class SharedAccess {
-    public:
-      typedef typename T::CoherentData CoherentData;
-
-      SharedAccess(T* thing_with_data, bool already_held = false);
-
-      ~SharedAccess(void)
-      {
-	lock->release();
-      }
-
-      const CoherentData *operator->(void) { return data; }
-
-    protected:
-      CoherentData *data;
-      ReservationImpl *lock;
-    };
-
-    template <class T>
-    class ExclusiveAccess {
-    public:
-      typedef typename T::CoherentData CoherentData;
-
-      ExclusiveAccess(T* thing_with_data, bool already_held = false);
-
-      ~ExclusiveAccess(void)
-      {
-	lock->release();
-      }
-
-      CoherentData *operator->(void) { return data; }
-
-    protected:
-      CoherentData *data;
-      ReservationImpl *lock;
     };
 
     class ProcessorAssignment {
@@ -1381,54 +1266,6 @@ namespace LegionRuntime {
 
     extern RuntimeImpl *runtime_singleton;
     inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
-
-    template <typename T>
-    StaticAccess<T>::StaticAccess(T* thing_with_data, bool already_valid /*= false*/)
-      : data(&thing_with_data->locked_data)
-    {
-      // if already_valid, just check that data is already valid
-      if(already_valid) {
-	assert(data->valid);
-      } else {
-	if(!data->valid) {
-	  // get a valid copy of the static data by taking and then releasing
-	  //  a shared lock
-	  Event e = thing_with_data->lock.acquire(1, false);
-	  if(!e.has_triggered()) 
-            e.wait();
-	  thing_with_data->lock.release();
-	  assert(data->valid);
-	}
-      }
-    }
-
-    template <typename T>
-    SharedAccess<T>::SharedAccess(T* thing_with_data, bool already_held /*= false*/)
-      : data(&thing_with_data->locked_data), lock(&thing_with_data->lock)
-    {
-      // if already_held, just check that it's held (if in debug mode)
-      if(already_held) {
-	assert(lock->is_locked(1, true));
-      } else {
-	Event e = thing_with_data->lock.acquire(1, false);
-	if(!e.has_triggered())
-          e.wait();
-      }
-    }
-
-    template <typename T>
-    ExclusiveAccess<T>::ExclusiveAccess(T* thing_with_data, bool already_held /*= false*/)
-      : data(&thing_with_data->locked_data), lock(&thing_with_data->lock)
-    {
-      // if already_held, just check that it's held (if in debug mode)
-      if(already_held) {
-	assert(lock->is_locked(0, true));
-      } else {
-	Event e = thing_with_data->lock.acquire(0, true);
-	if(!e.has_triggered())
-          e.wait();
-      }
-    }
 
   }; // namespace LowLevel
 }; // namespace LegionRuntime
