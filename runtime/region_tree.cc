@@ -16940,11 +16940,31 @@ namespace LegionRuntime {
       // for those fields from the composite instances
       if (!deferred_instances.empty())
       {
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-              deferred_instances.begin(); it !=
-              deferred_instances.end(); it++)
+        // If the tracker is NULL we have to make our own so we can 
+        // properly register the destination copy user
+        if (tracker == NULL)
         {
-          it->first->issue_deferred_copies(info, dst, it->second, tracker);
+          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+                deferred_instances.begin(); it !=
+                deferred_instances.end(); it++)
+          {
+            CopyTracker deferred_tracker;
+            it->first->issue_deferred_copies(info, dst, 
+                                             it->second, &deferred_tracker);
+            Event term_event = deferred_tracker.get_termination_event();
+            if (term_event.exists())
+              dst->add_copy_user(0/*redop*/, term_event, info.version_info,
+                                 it->second, false/*reading*/);
+          }
+        }
+        else
+        {
+          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+                deferred_instances.begin(); it !=
+                deferred_instances.end(); it++)
+          {
+            it->first->issue_deferred_copies(info, dst, it->second, tracker);
+          }
         }
       }
     }
@@ -24240,8 +24260,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::update_reduction_epochs(const ReductionEpoch &epoch,
-                                               const FieldMask &epoch_mask)
+    void DeferredView::update_reduction_epochs(const ReductionEpoch &epoch)
     //--------------------------------------------------------------------------
     {
       // This should be the parent and have no children
@@ -24251,10 +24270,8 @@ namespace LegionRuntime {
       // No need to hold the lock since this is only called when 
       // the deferred view is being constructed
       reduction_epochs.push_back(epoch);
-      ReductionEpoch &last = reduction_epochs.back();
-      last.valid_fields = epoch_mask;
       // Don't forget to update the reduction mask
-      reduction_mask |= epoch_mask;
+      reduction_mask |= epoch.valid_fields;
     }
 
     //--------------------------------------------------------------------------
@@ -24896,13 +24913,48 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    CompositeView* CompositeView::flatten_composite_view(FieldMask &global_dirt,
-                         const FieldMask &flatten_mask, CompositeCloser &closer)
+    void CompositeView::flatten_composite_view(FieldMask &global_dirt,
+                                               const FieldMask &flatten_mask, 
+                                               CompositeCloser &closer, 
+                                               CompositeNode *target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!(valid_mask * flatten_mask)); // A little sanity check
 #endif
+      // Try to flatten this composite view, first make sure there are no
+      // reductions which cannot be flattened
+      LegionDeque<ReductionEpoch>::aligned flat_reductions;
+      {
+        // Hold the lock when 
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (LegionDeque<ReductionEpoch>::aligned::const_iterator it1 = 
+              reduction_epochs.begin(); it1 != reduction_epochs.end(); it1++)
+        {
+          FieldMask overlap = it1->valid_fields & flatten_mask; 
+          if (!overlap)
+            continue;
+          const ReductionEpoch &epoch = *it1; 
+          flat_reductions.push_back(ReductionEpoch());
+          ReductionEpoch &next = flat_reductions.back();
+          for (std::set<ReductionView*>::const_iterator it = 
+                epoch.views.begin(); it != epoch.views.end(); it++)
+          {
+            FieldMask temp = overlap;
+            closer.filter_capture_mask((*it)->logical_node, temp);
+            if (!!temp)
+              next.views.insert(*it);
+          }
+          if (!next.views.empty())
+          {
+            next.valid_fields = overlap;
+            next.redop = epoch.redop;
+          }
+          else // Actually empty so we can ignore it
+            flat_reductions.pop_back();
+        }
+      }
+      // Now see if we can flatten any roots
       LegionMap<CompositeNode*,FieldMask>::aligned new_roots;
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
             roots.begin(); it != roots.end(); it++)
@@ -24915,42 +24967,45 @@ namespace LegionRuntime {
         if (!overlap)
           continue;
         CompositeNode *new_root = it->first->flatten(overlap, closer, 
-                                               NULL/*parent*/, global_dirt);
+                                       NULL/*parent*/, global_dirt, target);
         if (new_root != NULL)
           new_roots[new_root] = overlap;
       }
-      if (new_roots.empty())
-        return NULL;
-      // Make a new composite view and then iterate over the roots
-      DistributedID flat_did = context->runtime->get_available_distributed_id();
-      CompositeView *result = legion_new<CompositeView>(context, flat_did,
-                                            context->runtime->address_space,
-                                            logical_node,
-                                            context->runtime->address_space,
-                                            flatten_mask, true/*reg now*/);
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            new_roots.begin(); it != new_roots.end(); it++)
+      // If we have no new roots and we have no reductions then 
+      // we successfully flattened into the target
+      if (!flat_reductions.empty() || !new_roots.empty())
       {
-        result->add_root(it->first, it->second, true/*top*/);
-      }
-      // See if we have any reduction views to update as well
-      if (!reduction_epochs.empty())
-      {
-        for (LegionDeque<ReductionEpoch>::aligned::const_iterator it = 
-              reduction_epochs.begin(); it != reduction_epochs.end(); it++)
-        {
-          FieldMask overlap = it->valid_fields & flatten_mask; 
-          if (!overlap)
-            continue;
-          result->update_reduction_epochs(*it, overlap);
-        }
-      }
-#ifdef UNIMPLEMENTED_VERSIONING
-      // TODO: As an optimization, send the new composite view to all the 
-      // known locations of this view so we can avoid duplicate sends of the 
-      // meta-data for all the constituent views
+#ifdef DEBUG_HIGH_LEVEL
+        // Sanity check that we always have something to apply reductions to
+        if (!flat_reductions.empty())
+          assert(!new_roots.empty()); 
 #endif
-      return result;
+        // Make a new composite view and then iterate over the roots
+        DistributedID flat_did = 
+          context->runtime->get_available_distributed_id();
+        CompositeView *result = legion_new<CompositeView>(context, flat_did,
+                                              context->runtime->address_space,
+                                              logical_node,
+                                              context->runtime->address_space,
+                                              flatten_mask, true/*reg now*/);
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+              new_roots.begin(); it != new_roots.end(); it++)
+        {
+          result->add_root(it->first, it->second, true/*top*/);
+        }
+        for (std::deque<ReductionEpoch>::const_iterator it = 
+              flat_reductions.begin(); it != flat_reductions.end(); it++)
+        {
+          result->update_reduction_epochs(*it);
+        }
+        // Add the new view to the target
+        target->update_instance_views(result, flatten_mask); 
+#ifdef UNIMPLEMENTED_VERSIONING
+        // TODO: As an optimization, send the new composite view to all the 
+        // known locations of this view so we can avoid duplicate sends of the 
+        // meta-data for all the constituent views
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -25311,15 +25366,10 @@ namespace LegionRuntime {
           FieldMask overlap = need_flatten & it->second;
           if (!overlap)
             continue;
-          CompositeView *flat_view = 
-            it->first->flatten_composite_view(global_dirt, overlap, closer);
-          if (flat_view != NULL)
-          {
-            update_instance_views(flat_view, overlap);
-            need_flatten -= overlap;
-            if (!need_flatten)
-              break;
-          }
+          it->first->flatten_composite_view(global_dirt, overlap, closer, this);
+          need_flatten -= overlap;
+          if (!need_flatten)
+            break;
         }
       }
     }
@@ -25375,11 +25425,14 @@ namespace LegionRuntime {
     CompositeNode* CompositeNode::flatten(const FieldMask &flatten_mask,
                                           CompositeCloser &closer,
                                           CompositeNode *parent,
-                                          FieldMask &global_dirt)
+                                          FieldMask &global_dirt,
+                                          CompositeNode *target)
     //--------------------------------------------------------------------------
     {
-      CompositeNode *result = legion_new<CompositeNode>(logical_node, 
-                                                        parent, version_info);
+      CompositeNode *result = NULL;
+      // If we don't have a target, go ahead and make the clone
+      if (target == NULL)
+        result = legion_new<CompositeNode>(logical_node, parent, version_info);
       // First capture down the tree  
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -25392,12 +25445,20 @@ namespace LegionRuntime {
         if (!overlap)
           continue;
         CompositeNode *flat_child = it->first->flatten(overlap, closer, 
-                                                       result, global_dirt);
+                                       result, global_dirt, NULL/*no target*/);
+        // Make the result if we haven't yet
+        if (result == NULL)
+          result = legion_new<CompositeNode>(logical_node,parent,version_info);
         result->update_child_info(flat_child, overlap);
       }
-      // Then capture ourself
-      result->capture_physical_state(logical_node, NULL/*state*/, flatten_mask,
-                                 closer, global_dirt, dirty_mask, valid_views); 
+      // Then capture ourself if we don't have anyone below, we can capture
+      // directly into the target, otherwise we have to capture to our result
+      if (result == NULL)
+        target->capture_physical_state(logical_node, NULL/*state*/, 
+            flatten_mask, closer, global_dirt, dirty_mask, valid_views);
+      else
+        result->capture_physical_state(logical_node, NULL/*state*/, 
+            flatten_mask, closer, global_dirt, dirty_mask, valid_views);
       // Finally update the closer with the capture fields
       closer.update_capture_mask(logical_node, flatten_mask);
       return result;

@@ -3965,8 +3965,7 @@ namespace LegionRuntime {
       void update_reduction_views(ReductionView *view, 
                                   const FieldMask &valid_mask,
                                   bool update_parent = true);
-      void update_reduction_epochs(const ReductionEpoch &epoch,
-                                   const FieldMask &epoch_mask);
+      void update_reduction_epochs(const ReductionEpoch &epoch);
     protected:
       void update_reduction_views_above(ReductionView *view,
                                         const FieldMask &valid_mask,
@@ -4075,8 +4074,9 @@ namespace LegionRuntime {
         { return const_cast<CompositeView*>(this); }
     public:
       void update_valid_mask(const FieldMask &mask);
-      CompositeView* flatten_composite_view(FieldMask &global_dirt,
-              const FieldMask &flatten_mask, CompositeCloser &closer);
+      void flatten_composite_view(FieldMask &global_dirt,
+              const FieldMask &flatten_mask, CompositeCloser &closer,
+              CompositeNode *target);
     public:
       virtual void find_field_descriptors(PhysicalUser &user,
                                           unsigned fid_idx,
@@ -4187,7 +4187,8 @@ namespace LegionRuntime {
       CompositeNode* flatten(const FieldMask &flatten_mask, 
                              CompositeCloser &closer,
                              CompositeNode *parent,
-                             FieldMask &global_dirt);
+                             FieldMask &global_dirt,
+                             CompositeNode *target);
       void update_parent_info(const FieldMask &mask);
       void update_child_info(CompositeNode *child, const FieldMask &mask);
       void update_instance_views(LogicalView *view,
