@@ -60,6 +60,7 @@ namespace Realm {
 #include "realm/operation.h"
 #include "realm/dynamic_table.h"
 #include "realm/id.h"
+#include "realm/metadata.h"
 
 #include <assert.h>
 
@@ -123,6 +124,7 @@ namespace LegionRuntime {
     typedef Realm::ProcessorGroup ProcessorGroup;
     typedef Realm::Task Task;
     typedef Realm::MemoryImpl MemoryImpl;
+    typedef Realm::MetadataBase MetadataBase;
   };
 };
 
@@ -228,39 +230,6 @@ namespace LegionRuntime {
 #endif
 
     class RegionInstanceImpl;
-
-    class MetadataBase {
-    public:
-      MetadataBase(void);
-      ~MetadataBase(void);
-
-      enum State { STATE_INVALID,
-		   STATE_VALID,
-		   STATE_REQUESTED,
-		   STATE_INVALIDATE,  // if invalidate passes normal request response
-		   STATE_CLEANUP };
-
-      bool is_valid(void) const { return state == STATE_VALID; }
-
-      void mark_valid(void); // used by owner
-      void handle_request(int requestor);
-
-      // returns an Event for when data will be valid
-      Event request_data(int owner, IDType id);
-      void await_data(bool block = true);  // request must have already been made
-      void handle_response(void);
-      void handle_invalidate(void);
-
-      // these return true once all remote copies have been invalidated
-      bool initiate_cleanup(IDType id);
-      bool handle_inval_ack(int sender);
-
-    protected:
-      GASNetHSL mutex;
-      State state;  // current state
-      GenEventImpl *valid_event_impl; // event to track receipt of in-flight request (if any)
-      NodeSet remote_copies;
-    };
 
     class RegionInstanceImpl {
     public:

@@ -611,7 +611,7 @@ namespace Realm {
     Message::request(target, args);
   }
 
-  /*static*/ void EventTriggerMessage::broadcast_request(NodeSet targets, Event event)
+  /*static*/ void EventTriggerMessage::broadcast_request(const NodeSet& targets, Event event)
   {
     RequestArgs args;
 

@@ -210,7 +210,7 @@ namespace Realm {
 				      handle_request> Message;
 
     static void send_request(gasnet_node_t target, Event event);
-    static void broadcast_request(NodeSet targets, Event event);
+    static void broadcast_request(const NodeSet& targets, Event event);
   };
 
     struct BarrierAdjustMessage {
