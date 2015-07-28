@@ -24966,8 +24966,11 @@ namespace LegionRuntime {
         closer.filter_capture_mask(it->first->logical_node, overlap);
         if (!overlap)
           continue;
+        // If we can't flatten the reductions, then we also 
+        // can't flatten the roots
         CompositeNode *new_root = it->first->flatten(overlap, closer, 
-                                       NULL/*parent*/, global_dirt, target);
+                                         NULL/*parent*/, global_dirt, 
+                                     (flat_reductions.empty() ? target : NULL));
         if (new_root != NULL)
           new_roots[new_root] = overlap;
       }
