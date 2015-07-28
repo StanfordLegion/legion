@@ -456,7 +456,113 @@ namespace Realm {
 			       const ProfilingRequestSet *prs);
     };
 
+    struct DestroyInstanceMessage {
+      struct RequestArgs {
+	Memory m;
+	RegionInstance i;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<DESTROY_INST_MSGID,
+ 	                                RequestArgs,
+	                                handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory memory,
+			       RegionInstance inst);
+    };
+
+    struct RemoteWriteMessage {
+      struct RequestArgs : public BaseMedium {
+	Memory mem;
+	off_t offset;
+	unsigned sender;
+	unsigned sequence_id;
+	Event event;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
+				         RequestArgs,
+				         handle_request> Message;
+
+      // no simple send_request method here - see below
+    };
+
+    struct RemoteReduceMessage {
+      struct RequestArgs : public BaseMedium {
+	Memory mem;
+	off_t offset;
+	int stride;
+	ReductionOpID redop_id;
+	//bool red_fold;
+	unsigned sender;
+	unsigned sequence_id;
+	Event event;
+      };
+      
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<REMOTE_REDUCE_MSGID,
+				         RequestArgs,
+				         handle_request> Message;
+
+      // no simple send_request method here - see below
+    };
+
+    struct RemoteWriteFenceMessage {
+      struct RequestArgs {
+	Memory mem;
+	unsigned sender;
+	unsigned sequence_id;
+	unsigned num_writes;
+	Event event;
+      };
+       
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_MSGID,
+				        RequestArgs,
+				        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory memory,
+			       unsigned sequence_id, unsigned num_writes,
+			       Event event);
+    };
     
+    // remote memory writes
+
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const void *data, size_t datalen,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
+
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const void *data, size_t datalen,
+				    off_t stride, size_t lines,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
+    
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const SpanList& spans, size_t datalen,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
+
+    extern unsigned do_remote_reduce(Memory mem, off_t offset,
+				     ReductionOpID redop_id, bool red_fold,
+				     const void *data, size_t count,
+				     off_t src_stride, off_t dst_stride,
+				     unsigned sequence_id,
+				     Event event, bool make_copy = false);				     
+
+    extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
+					     ReductionOpID redopid,
+					     const void *data, size_t datalen,
+					     unsigned sequence_id,
+					     Event event);
+
+    extern void do_remote_fence(Memory mem, unsigned sequence_id, unsigned count, Event event);    
     
 }; // namespace Realm
 

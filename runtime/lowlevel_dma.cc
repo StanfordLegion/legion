@@ -650,39 +650,6 @@ namespace LegionRuntime {
       return false;
     }
 
-    // defined in lowlevel.cc
-    extern unsigned do_remote_write(Memory mem, off_t offset,
-				    const void *data, size_t datalen,
-				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
-
-    extern unsigned do_remote_write(Memory mem, off_t offset,
-				    const void *data, size_t datalen,
-				    off_t stride, size_t lines,
-				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
-    
-    extern unsigned do_remote_write(Memory mem, off_t offset,
-				    const SpanList& spans, size_t datalen,
-				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
-
-    extern unsigned do_remote_reduce(Memory mem, off_t offset,
-				     ReductionOpID redop_id, bool red_fold,
-				     const void *data, size_t count,
-				     off_t src_stride, off_t dst_stride,
-				     unsigned sequence_id,
-				     Event event, bool make_copy = false);				     
-
-    extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
-					     ReductionOpID redopid,
-					     const void *data, size_t datalen,
-					     unsigned sequence_id,
-					     Event event);
-
-    extern void do_remote_fence(Memory mem, unsigned sequence_id, unsigned count, Event event);
-
-
     namespace RangeExecutors {
       class Memcpy {
       public:
