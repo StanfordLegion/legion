@@ -110,6 +110,7 @@ namespace Realm {
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/idx_impl.h"
 
 // namespace importing for backwards compatibility
 namespace LegionRuntime {
@@ -127,6 +128,7 @@ namespace LegionRuntime {
     typedef Realm::MemoryImpl MemoryImpl;
     typedef Realm::MetadataBase MetadataBase;
     typedef Realm::RegionInstanceImpl RegionInstanceImpl;
+    typedef Realm::IndexSpaceImpl IndexSpaceImpl;
   };
 };
 
@@ -198,20 +200,6 @@ namespace LegionRuntime {
       }
     };
      
-    struct ElementMaskImpl {
-      //int count, offset;
-      typedef unsigned long long uint64;
-      uint64_t dummy;
-      uint64_t bits[0];
-
-      static size_t bytes_needed(off_t offset, off_t count)
-      {
-	size_t need = sizeof(ElementMaskImpl) + (((count + 63) >> 6) << 3);
-	return need;
-      }
-	
-    };
-
 #ifdef USE_GASNET 
     class HandlerThread : public PreemptableThread {
     public:
@@ -230,58 +218,6 @@ namespace LegionRuntime {
       IncomingMessageManager *const manager;
     };
 #endif
-
-    class IndexSpaceImpl {
-    public:
-      IndexSpaceImpl(void);
-      ~IndexSpaceImpl(void);
-
-      void init(IndexSpace _me, unsigned _init_owner);
-
-      void init(IndexSpace _me, IndexSpace _parent,
-		size_t _num_elmts,
-		const ElementMask *_initial_valid_mask = 0, bool _frozen = false);
-
-      static const ID::ID_Types ID_TYPE = ID::ID_INDEXSPACE;
-
-      bool is_parent_of(IndexSpace other);
-
-      size_t instance_size(const ReductionOpUntyped *redop = 0,
-			   off_t list_size = -1);
-
-      off_t instance_adjust(const ReductionOpUntyped *redop = 0);
-
-      Event request_valid_mask(void);
-
-      IndexSpace me;
-      ReservationImpl lock;
-      IndexSpaceImpl *next_free;
-
-      struct StaticData {
-	IndexSpace parent;
-	bool frozen;
-	size_t num_elmts;
-        size_t first_elmt, last_elmt;
-        // This had better damn well be the last field
-        // in the struct in order to avoid race conditions!
-	bool valid;
-      };
-      struct CoherentData : public StaticData {
-	unsigned valid_mask_owners;
-	int avail_mask_owner;
-      };
-
-      CoherentData locked_data;
-      GASNetHSL valid_mask_mutex;
-      ElementMask *valid_mask;
-      int valid_mask_count;
-      bool valid_mask_complete;
-      Event valid_mask_event;
-      GenEventImpl *valid_mask_event_impl;
-      int valid_mask_first, valid_mask_last;
-      bool valid_mask_contig;
-      ElementMask *avail_mask;
-    };
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {

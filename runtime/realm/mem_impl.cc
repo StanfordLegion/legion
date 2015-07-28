@@ -31,7 +31,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_malloc("malloc");
-  Logger log_copy("copy");
+  extern Logger log_copy; // in idx_impl.cc
   extern Logger log_inst; // in inst_impl.cc
 
 

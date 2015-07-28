@@ -18,6 +18,10 @@
 #ifndef REALM_INDEXSPACE_H
 #define REALM_INDEXSPACE_H
 
+#include "event.h"
+#include "memory.h"
+#include "instance.h"
+
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
@@ -27,6 +31,8 @@
 
 namespace Realm {
 
+  class ProfilingRequestSet;
+  
     class ElementMask {
     public:
       ElementMask(void);
