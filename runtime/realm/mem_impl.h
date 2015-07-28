@@ -31,16 +31,10 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    class RegionInstanceImpl;
-  }
-}
-
 namespace Realm {
 
-  typedef LegionRuntime::LowLevel::RegionInstanceImpl RegionInstanceImpl;
-
+  class RegionInstanceImpl;
+  
     class MemoryImpl {
     public:
       enum MemoryKind {

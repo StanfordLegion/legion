@@ -31,8 +31,38 @@ namespace Realm {
 namespace Realm {
 
   Logger log_malloc("malloc");
-  Logger log_inst("inst");
   Logger log_copy("copy");
+  extern Logger log_inst; // in inst_impl.cc
+
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Memory
+  //
+
+    AddressSpace Memory::address_space(void) const
+    {
+      return ID(id).node();
+    }
+
+    ID::IDType Memory::local_id(void) const
+    {
+      return ID(id).index();
+    }
+
+    Memory::Kind Memory::kind(void) const
+    {
+      return get_runtime()->get_memory_impl(*this)->get_kind();
+    }
+
+    size_t Memory::capacity(void) const
+    {
+      return get_runtime()->get_memory_impl(*this)->size;
+    }
+
+    /*static*/ const Memory Memory::NO_MEMORY = { 0 };
+
 
   ////////////////////////////////////////////////////////////////////////
   //
