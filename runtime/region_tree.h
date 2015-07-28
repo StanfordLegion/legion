@@ -242,6 +242,9 @@ namespace LegionRuntime {
                                        VersionInfo &version_info,
                                        RestrictInfo &restrict_info,
                                        RegionTreePath &path);
+      void perform_reduction_close_analysis(Operation *op, unsigned idx,
+                                       RegionRequirement &req,
+                                       VersionInfo &version_info);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
       void analyze_destroy_index_space(RegionTreeContext ctx, 
@@ -545,11 +548,6 @@ namespace LegionRuntime {
       PhysicalInstance create_instance(const Domain &dom, Memory target,
                                        size_t field_size, ReductionOpID redop,
                                        Operation *op);
-    public:
-      void register_physical_manager(PhysicalManager *manager);
-      void unregister_physical_manager(DistributedID did);
-      bool has_manager(DistributedID did) const;
-      PhysicalManager* find_manager(DistributedID did);
     protected:
       void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
                            RegionTreePath &path);
@@ -600,7 +598,6 @@ namespace LegionRuntime {
       Runtime *const runtime;
     protected:
       Reservation lookup_lock;
-      Reservation distributed_lock;
     private:
       // The lookup lock must be held when accessing these
       // data structures
@@ -610,10 +607,6 @@ namespace LegionRuntime {
       std::map<LogicalRegion,RegionNode*>     region_nodes;
       std::map<LogicalPartition,PartitionNode*> part_nodes;
       std::map<RegionTreeID,RegionNode*>        tree_nodes;
-    private:
-      // References to objects stored in the region forest
-      LegionMap<DistributedID,PhysicalManager*,
-                     PHYSICAL_MANAGER_ALLOC>::tracked managers;
     public:
       static bool are_disjoint(const Domain &left,
                                const Domain &right);
@@ -2064,7 +2057,7 @@ namespace LegionRuntime {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   bool initialize);
+                   VersionManager *manager, bool initialize);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2109,6 +2102,7 @@ namespace LegionRuntime {
                                                      Deserializer &derez);
     public:
       const VersionID version_number;
+      VersionManager *const manager;
     protected:
       Reservation state_lock;
       // Fields which have been directly written to
@@ -2145,7 +2139,7 @@ namespace LegionRuntime {
      */
     class VersionManager { 
     public:
-      VersionManager(RegionTreeForest *context);
+      VersionManager(RegionTreeNode *owner);
       VersionManager(const VersionManager &rhs);
       ~VersionManager(void);
     public:
@@ -2184,7 +2178,7 @@ namespace LegionRuntime {
                                       AddressSpaceID source, bool initialize,
                                       bool request_initial, bool request_final);
     public:
-      RegionTreeForest *const context;
+      RegionTreeNode *const owner;
     protected:
       Reservation version_lock;
       LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
@@ -2221,7 +2215,7 @@ namespace LegionRuntime {
         if (result != NULL)
           return result;
         // If it didn't have it then we need to make it
-        VersionManager *manager = version_managers.lookup_entry(ctx, context);
+        VersionManager *manager = version_managers.lookup_entry(ctx, this);
 #ifdef DEBUG_HIGH_LEVEL
         assert(manager != NULL);
 #endif
@@ -2267,6 +2261,9 @@ namespace LegionRuntime {
                                  FatTreePath *fat_path,
                                  VersionInfo &version_info,
                                  RestrictInfo &restrict_info);
+      void close_reduction_analysis(ContextID ctx,
+                                    const LogicalUser &user,
+                                    VersionInfo &version_info);
       void close_logical_subtree(LogicalCloser &closer,
                                  const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
@@ -2364,6 +2361,11 @@ namespace LegionRuntime {
                                const ColorPoint &child_color,
                                const FieldMask &open_mask,
                                VersionInfo &version_info);
+      // A special version of siphon physical region for closing
+      // to a reduction instance at the end of a task
+      void siphon_physical_children(ReductionCloser &closer,
+                                    PhysicalState *state);
+      void close_physical_node(ReductionCloser &closer);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -2459,6 +2461,10 @@ namespace LegionRuntime {
                                   DistributedID did, AddressSpaceID source, 
                                   bool initialize, bool request_intial, 
                                   bool request_final);
+    public:
+      bool register_physical_manager(PhysicalManager *manager);
+      void unregister_physical_manager(PhysicalManager *manager);
+      PhysicalManager* find_manager(DistributedID did);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual const ColorPoint& get_color(void) const = 0;
@@ -2566,6 +2572,8 @@ namespace LegionRuntime {
       // should rarely need to be accessed for tracking views
       LegionMap<DistributedID,LogicalView*,
                 LOGICAL_VIEW_ALLOC>::tracked logical_views;
+      LegionMap<DistributedID,PhysicalManager*,
+                PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
@@ -3100,7 +3108,7 @@ namespace LegionRuntime {
      * \class ReductionCloser
      * A class for performing reduciton close operations
      */
-    class ReductionCloser : public NodeTraverser {
+    class ReductionCloser {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
@@ -3110,17 +3118,16 @@ namespace LegionRuntime {
       ~ReductionCloser(void);
     public:
       ReductionCloser& operator=(const ReductionCloser &rhs);
+      void issue_close_reductions(RegionTreeNode *node, PhysicalState *state);
     public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
       const ContextID ctx;
       ReductionView *const target;
       const FieldMask close_mask;
       VersionInfo &version_info;
       const Processor local_proc;
       Operation *const op;
+    protected:
+      std::set<ReductionView*> issued_reductions;
     };
 
     /**
@@ -3240,7 +3247,8 @@ namespace LegionRuntime {
     public:
       PhysicalManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
-                      Memory mem, PhysicalInstance inst);
+                      Memory mem, RegionNode *node,
+                      PhysicalInstance inst, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
@@ -3255,8 +3263,7 @@ namespace LegionRuntime {
       virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void);
       virtual void notify_invalid(void) = 0;
-      virtual DistributedID send_manager(AddressSpaceID target, 
-                               std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual DistributedID send_manager(AddressSpaceID target) = 0; 
     public:
       inline PhysicalInstance get_instance(void) const
       {
@@ -3268,6 +3275,7 @@ namespace LegionRuntime {
     public:
       RegionTreeForest *const context;
       const Memory memory;
+      RegionNode *const region_node;
     protected:
       PhysicalInstance instance;
     };
@@ -3302,7 +3310,8 @@ namespace LegionRuntime {
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       Memory mem, PhysicalInstance inst, RegionNode *node,
                       LayoutDescription *desc, Event use_event, 
-                      unsigned depth, InstanceFlag flag = NO_INSTANCE_FLAG);
+                      unsigned depth, bool register_now,
+                      InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -3333,18 +3342,10 @@ namespace LegionRuntime {
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target, 
-                                 std::set<PhysicalManager*> &needed_managers);
-      static void handle_send_manager(RegionTreeForest *context, 
+      virtual DistributedID send_manager(AddressSpaceID target); 
+      static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
-    public:
-      void pack_manager(Serializer &rez, AddressSpaceID target);
-      static InstanceManager* unpack_manager(Deserializer &derez,
-                                             RegionTreeForest *context, 
-                                             DistributedID did,
-                                             AddressSpaceID source,
-                                             bool make = true);
     public:
       void add_valid_view(MaterializedView *view);
       void remove_valid_view(MaterializedView *view);
@@ -3360,7 +3361,6 @@ namespace LegionRuntime {
     public:
       bool is_attached_file(void) const;
     public:
-      RegionNode *const region_node;
       LayoutDescription *const layout;
       // Event that needs to trigger before we can start using
       // this physical instance.
@@ -3390,7 +3390,7 @@ namespace LegionRuntime {
                        AddressSpaceID owner_space, AddressSpaceID local_space,
                        Memory mem, PhysicalInstance inst, 
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op);
+                       const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
     public:
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
@@ -3419,23 +3419,16 @@ namespace LegionRuntime {
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
       virtual Event get_use_event(void) const = 0;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target, 
-                        std::set<PhysicalManager*> &needed_managers);
+      virtual DistributedID send_manager(AddressSpaceID target); 
     public:
-      static void handle_send_manager(RegionTreeForest *context,
+      static void handle_send_manager(Runtime *runtime,
                                       AddressSpaceID source,
                                       Deserializer &derez);
-    public:
-      void pack_manager(Serializer &rez);
-      static ReductionManager* unpack_manager(Deserializer &derez,
-                            RegionTreeForest *context, 
-                            DistributedID did, bool make = true);
     public:
       ReductionView* create_view(void);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
-      RegionNode *const region_node;
     };
 
     /**
@@ -3451,7 +3444,7 @@ namespace LegionRuntime {
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Domain dom);
+                           const ReductionOp *op, Domain dom, bool reg_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -3494,7 +3487,8 @@ namespace LegionRuntime {
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event);
+                           const ReductionOp *op, Event use_event,
+                           bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
@@ -3575,6 +3569,12 @@ namespace LegionRuntime {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
+      DistributedID send_view(AddressSpaceID target, 
+                              const FieldMask &update_mask);
+      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask) = 0;
+    public:
       void defer_collect_user(Event term_event);
       virtual void collect_users(const std::set<Event> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
@@ -3635,6 +3635,10 @@ namespace LegionRuntime {
       virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
+    public:
+      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask) = 0;
     public:
       // Instance recycling
       virtual void collect_users(const std::set<Event> &term_events) = 0;
@@ -3721,6 +3725,10 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_users);
+    public:
+      virtual void send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
     protected:
       void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
       template<bool ABOVE>
@@ -3764,6 +3772,9 @@ namespace LegionRuntime {
       void process_atomic_reservations(Deserializer &derez);
       static void handle_send_back_atomic(RegionTreeForest *ctx,
                                           Deserializer &derez);
+    public:
+      static void handle_send_materialized_view(Runtime *runtime,
+                              Deserializer &derez, AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -3870,6 +3881,13 @@ namespace LegionRuntime {
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_events);
     public:
+      virtual void send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
+    public:
+      static void handle_send_reduction_view(Runtime *runtime,
+                              Deserializer &derez, AddressSpaceID source);
+    public:
       ReductionOpID get_redop(void) const;
     public:
       ReductionManager *const manager;
@@ -3924,6 +3942,10 @@ namespace LegionRuntime {
       virtual void notify_inactive(void) = 0;
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
+    public:
+      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask) = 0;
     public:
       // Should never be called
       virtual void collect_users(const std::set<Event> &term_events)
@@ -4041,6 +4063,10 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
+      virtual void send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
+    public:
       virtual bool is_composite_view(void) const { return true; }
       virtual bool is_fill_view(void) const { return false; }
       virtual FillView* as_fill_view(void) const
@@ -4100,8 +4126,6 @@ namespace LegionRuntime {
       LegionMap<CompositeNode*,FieldMask>::aligned roots;
       // Keep track of all the child views
       std::map<ColorPoint,CompositeView*> children;
-      // Keep track of which fields have been sent remotely
-      LegionMap<AddressSpaceID,FieldMask>::aligned remote_state;
     };
 
     /**
@@ -4232,10 +4256,25 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
+      class FillViewValue : public Collectable {
+      public:
+        FillViewValue(const void *v, size_t size)
+          : value(v), value_size(size) { }
+        FillViewValue(const FillViewValue &rhs)
+          : value(NULL), value_size(0) { assert(false); }
+        ~FillViewValue(void)
+        { free(const_cast<void*>(value)); }
+      public:
+        FillViewValue& operator=(const FillViewValue &rhs)
+        { assert(false); return *this; }
+      public:
+        const void *const value;
+        const size_t value_size;
+      };
+    public:
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
-               RegionTreeNode *node, bool reg_now, const void *value, 
-               size_t value_size, bool value_owner = true,
+               RegionTreeNode *node, bool reg_now, FillViewValue *value,
                FillView *parent = NULL);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
@@ -4250,6 +4289,10 @@ namespace LegionRuntime {
       virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
+    public:
+      virtual void send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
     public:
       virtual bool is_composite_view(void) const { return false; }
       virtual bool is_fill_view(void) const { return true; }
@@ -4294,11 +4337,11 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
+      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
+                                        AddressSpaceID source);
+    public:
       FillView *const parent;
-    protected:
-      const void *value;
-      size_t value_size;
-      bool  value_owner;
+      FillViewValue *const value;
     protected:
       // Keep track of the child views
       std::map<ColorPoint,FillView*> children;

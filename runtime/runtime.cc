@@ -12008,7 +12008,7 @@ namespace LegionRuntime {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //MaterializedView::handle_send_materialized_view(forest, derez, source); 
+      MaterializedView::handle_send_materialized_view(this, derez, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -12056,7 +12056,7 @@ namespace LegionRuntime {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //ReductionView::handle_send_reduction_view(forest, derez, source);
+      ReductionView::handle_send_reduction_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12072,7 +12072,7 @@ namespace LegionRuntime {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceManager::handle_send_manager(forest, source, derez);
+      InstanceManager::handle_send_manager(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -12080,7 +12080,7 @@ namespace LegionRuntime {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ReductionManager::handle_send_manager(forest, source, derez);
+      ReductionManager::handle_send_manager(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

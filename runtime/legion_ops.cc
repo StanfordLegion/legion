@@ -4702,11 +4702,17 @@ namespace LegionRuntime {
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
       begin_dependence_analysis();
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   version_info,
-                                                   restrict_info,
-                                                   privilege_path);
+      // Handle a special case that involves closing to a reduction instance
+      if (requirement.privilege == REDUCE)
+        runtime->forest->perform_reduction_close_analysis(this, 0/*idx*/,
+                                                          requirement,
+                                                          version_info);
+      else
+        runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     restrict_info,
+                                                     privilege_path);
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
