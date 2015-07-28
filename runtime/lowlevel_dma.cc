@@ -2774,7 +2774,7 @@ namespace LegionRuntime {
 #ifdef USE_HDF
           case MemoryImpl::MKIND_HDF:
           {
-            ID id(dst_inst.impl()->me);
+            ID id = dst_inst.id; 
             unsigned index = id.index_l();
             HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
             log_dma.info("create mem->hdf xferdes\n");
@@ -2970,7 +2970,7 @@ namespace LegionRuntime {
         {
           ID src_id(src_impl->me);
           unsigned src_index = src_id.index_l();
-          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*)src_mem.impl())->hdf_metadata[src_index];
+          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata[src_index];
           switch (dst_kind) {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
@@ -2980,7 +2980,7 @@ namespace LegionRuntime {
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_read_channel(), false,
                                               src_buf, dst_buf, dst_mem_base, src_hdf_metadata,
                                               domain, oasvec,
-                                              100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_HDF_READ);
+                                              100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
             path.push_back(xd);
             break;
           }
