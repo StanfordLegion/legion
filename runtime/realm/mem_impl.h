@@ -505,6 +505,24 @@ namespace Realm {
       // no simple send_request method here - see below
     };
 
+    struct RemoteReduceListMessage {
+      struct RequestArgs : public BaseMedium {
+	Memory mem;
+	off_t offset;
+	ReductionOpID redopid;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+      
+      typedef ActiveMessageMediumNoReply<REMOTE_REDLIST_MSGID,
+				         RequestArgs,
+				         handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory mem, off_t offset,
+			       ReductionOpID redopid,
+			       const void *data, size_t datalen, int payload_mode);
+    };
+    
     struct RemoteWriteFenceMessage {
       struct RequestArgs {
 	Memory mem;

@@ -1268,6 +1268,58 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
+  // class RemoteReduceListMessage
+  //
+
+  /*static*/ void RemoteReduceListMessage::handle_request(RequestArgs args,
+							  const void *data,
+							  size_t datalen)
+  {
+    MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
+    
+    log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
+		   args.mem.id, args.offset, datalen, args.redopid);
+
+    switch(impl->kind) {
+    case MemoryImpl::MKIND_SYSMEM:
+    case MemoryImpl::MKIND_ZEROCOPY:
+#ifdef USE_CUDA
+    case MemoryImpl::MKIND_GPUFB:
+#endif
+    default:
+      assert(0);
+
+    case MemoryImpl::MKIND_GLOBAL:
+      {
+	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[args.redopid];
+	assert((datalen % redop->sizeof_list_entry) == 0);
+	impl->apply_reduction_list(args.offset,
+				   redop,
+				   datalen / redop->sizeof_list_entry,
+				   data);
+      }
+    }
+  }
+
+  /*static*/ void RemoteReduceListMessage::send_request(gasnet_node_t target,
+							Memory mem,
+							off_t offset,
+							ReductionOpID redopid,
+							const void *data,
+							size_t datalen,
+							int payload_mode)
+  {
+    RequestArgs args;
+
+    args.mem = mem;
+    args.offset = offset;
+    args.redopid = redopid;
+    Message::request(target, args, data, datalen, payload_mode);
+  }
+  
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RemoteWriteFenceMessage
   //
 
@@ -1687,6 +1739,14 @@ namespace Realm {
 
 	return 1;
       }
+    }
+
+    void do_remote_apply_red_list(int node, Memory mem, off_t offset,
+				  ReductionOpID redopid,
+				  const void *data, size_t datalen)
+    {
+      RemoteReduceListMessage::send_request(node, mem, offset, redopid,
+					    data, datalen, PAYLOAD_COPY);
     }
 
     void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes, Event event)

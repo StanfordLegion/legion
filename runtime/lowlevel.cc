@@ -67,7 +67,6 @@ namespace LegionRuntime {
 #ifdef EVENT_GRAPH_TRACE
     Logger::Category log_event_graph("graph");
 #endif
-    Logger::Category log_meta("meta");
 
 #ifdef EVENT_GRAPH_TRACE
     Event find_enclosing_termination_event(void)
@@ -675,7 +674,6 @@ namespace Realm {
 namespace LegionRuntime {
   namespace LowLevel {
 
-    static Logger::Category log_copy("copy");
 
 
 
@@ -1013,56 +1011,7 @@ namespace LegionRuntime {
     };
 #endif
 
-    struct RemoteRedListArgs : public BaseMedium {
-      Memory mem;
-      off_t offset;
-      ReductionOpID redopid;
-    };
 
-    void handle_remote_redlist(RemoteRedListArgs args,
-			       const void *data, size_t datalen)
-    {
-      MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
-
-      log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
-		     args.mem.id, args.offset, datalen, args.redopid);
-
-      switch(impl->kind) {
-      case MemoryImpl::MKIND_SYSMEM:
-      case MemoryImpl::MKIND_ZEROCOPY:
-#ifdef USE_CUDA
-      case MemoryImpl::MKIND_GPUFB:
-#endif
-      default:
-	assert(0);
-
-      case MemoryImpl::MKIND_GLOBAL:
-	{
-	  const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[args.redopid];
-	  assert((datalen % redop->sizeof_list_entry) == 0);
-	  impl->apply_reduction_list(args.offset,
-				     redop,
-				     datalen / redop->sizeof_list_entry,
-				     data);
-	}
-      }
-    }
-
-    typedef ActiveMessageMediumNoReply<REMOTE_REDLIST_MSGID,
-				       RemoteRedListArgs,
-				       handle_remote_redlist> RemoteRedListMessage;
-
-    void do_remote_apply_red_list(int node, Memory mem, off_t offset,
-				  ReductionOpID redopid,
-				  const void *data, size_t datalen)
-    {
-      RemoteRedListArgs args;
-      args.mem = mem;
-      args.offset = offset;
-      args.redopid = redopid;
-      RemoteRedListMessage::request(node, args,
-				    data, datalen, PAYLOAD_COPY);
-    }
 
 #ifdef OLD_RANGE_EXECUTORS
     namespace RangeExecutors {
@@ -2178,7 +2127,7 @@ namespace LegionRuntime {
       hcount += Realm::RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
       hcount += Realm::RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
       hcount += Realm::DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
-      hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
+      hcount += Realm::RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
       hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
       hcount += Realm::BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
       hcount += Realm::BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
