@@ -21,8 +21,8 @@
 #include <unistd.h>
 #include <errno.h>
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
+
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
@@ -295,5 +295,5 @@ namespace LegionRuntime {
       return gasnet_mynode();
     }
 #endif
-  }
+
 }

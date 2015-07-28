@@ -21,7 +21,6 @@
 #include "utilities.h"
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
-  typedef LegionRuntime::LowLevel::RemoteMemory RemoteMemory;
   typedef LegionRuntime::LowLevel::Node Node;
 
   inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)

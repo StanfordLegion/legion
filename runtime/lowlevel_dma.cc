@@ -48,6 +48,9 @@ using namespace LegionRuntime::HighLevel::LegionProf;
 namespace LegionRuntime {
   namespace LowLevel {
 
+    typedef Realm::GASNetMemory GASNetMemory;
+    typedef Realm::DiskMemory DiskMemory;
+
     Logger::Category log_dma("dma");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;

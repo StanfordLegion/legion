@@ -267,6 +267,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 		   $(LG_RT_DIR)/realm/event_impl.cc \
 		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
 		   $(LG_RT_DIR)/realm/proc_impl.cc \
+		   $(LG_RT_DIR)/realm/mem_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
 		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
