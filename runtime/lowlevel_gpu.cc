@@ -551,7 +551,7 @@ namespace LegionRuntime {
         // Otherwise see if we need to wake up a thread
         LocalThread *to_wake = 0;
         LocalThread *to_start = 0;
-        gasnet_hsl_lock(&mutex);
+	mutex.lock();
         // Add this to the list of complete jobs
         complete_jobs.push_back(job);
         // Make sure there is a running thread
@@ -565,7 +565,7 @@ namespace LegionRuntime {
             running_thread = to_start;
           }
         }
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         if (to_wake)
           to_wake->awake();
         if (to_start)
@@ -586,7 +586,7 @@ namespace LegionRuntime {
 
     bool GPUProcessor::execute_gpu(GPUThread *thread)
     {
-      gasnet_hsl_lock(&mutex);
+      mutex.lock();
       // Sanity check, we should be the running thread if we are in here
       assert(thread == running_thread);
       // First check to see if there are any resumable threads
@@ -603,7 +603,7 @@ namespace LegionRuntime {
         // Make this the running thread
         running_thread = to_resume;
         // Release the lock
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         // Wake up the resumable thread
         to_resume->resume();
         // Put ourselves to sleep
@@ -616,7 +616,7 @@ namespace LegionRuntime {
         thread->prepare_to_sleep();
         available_threads.push_back(thread);
         running_thread = NULL;
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         thread->sleep();
       }
       else
@@ -644,8 +644,8 @@ namespace LegionRuntime {
             finished();
             // Mark that we received the shutdown trigger
             shutdown_trigger = true;
-            gasnett_cond_signal(&condvar);
-            gasnet_hsl_unlock(&mutex);
+	    condvar.signal();
+	    mutex.unlock();
             // Trigger the completion task
             if (__sync_fetch_and_add(&(task->run_count),1) == 0)
               get_runtime()->get_genevent_impl(task->finish_event)->
@@ -654,7 +654,7 @@ namespace LegionRuntime {
             if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
               delete task;
           } else {
-            gasnet_hsl_unlock(&mutex);
+	    mutex.unlock();
             // Figure out if we are going to execute this task, if so we
             // need to add it to our list of pending tasks on the current stream
             // before we release the lock and run the task
@@ -669,7 +669,7 @@ namespace LegionRuntime {
           }
         } else {
           // Still have to release the lock
-          gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
         }
         // Launch any ready copies
         if (!ready_copies.empty())
@@ -797,7 +797,7 @@ namespace LegionRuntime {
       } else {
         LocalThread *to_wake = 0;
         LocalThread *to_start = 0;
-        gasnet_hsl_lock(&mutex);
+	mutex.lock();
         copies.push_back(copy);
         // If there is no worker, we need to make sure a thread
         // is awake and running to handle the copies
@@ -811,7 +811,7 @@ namespace LegionRuntime {
             running_thread = to_start;
           }
         }
-        gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
         if (to_wake)
           to_wake->awake();
         if (to_start)
@@ -854,10 +854,9 @@ namespace LegionRuntime {
 
 
     GPUWorker::GPUWorker(void)
-      : copies_empty(true), jobs_empty(true), worker_shutdown_requested(false)
+      : copies_empty(true), jobs_empty(true),
+	worker_cond(worker_lock), worker_shutdown_requested(false)
     {
-      gasnet_hsl_init(&worker_lock);
-      gasnett_cond_init(&worker_cond);
     }
 
     GPUWorker::~GPUWorker(void)
@@ -868,7 +867,7 @@ namespace LegionRuntime {
     {
       AutoHSLLock a(worker_lock);
       worker_shutdown_requested = true;
-      gasnett_cond_signal(&worker_cond);
+      worker_cond.signal();
     }
 
     void GPUWorker::enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy)
@@ -877,7 +876,7 @@ namespace LegionRuntime {
       std::deque<GPUMemcpy*> &proc_copies = copies[proc];
       proc_copies.push_back(copy);
       copies_empty = false;
-      gasnett_cond_signal(&worker_cond);
+      worker_cond.signal();
     }
 
     void GPUWorker::handle_complete_job(GPUProcessor *proc, GPUJob *job)
@@ -886,7 +885,7 @@ namespace LegionRuntime {
       std::deque<GPUJob*> &proc_jobs = complete_jobs[proc];
       proc_jobs.push_back(job);
       jobs_empty = false;
-      gasnett_cond_signal(&worker_cond);
+      worker_cond.signal();
     }
 
     Processor GPUWorker::get_processor(void) const
@@ -909,7 +908,7 @@ namespace LegionRuntime {
             if (worker_shutdown_requested)
               break;
             else
-              gasnett_cond_wait(&worker_cond, &worker_lock.lock);
+	      worker_cond.wait();
           } else {
             for (std::map<GPUProcessor*,std::deque<GPUMemcpy*> >::iterator
                   it = copies.begin(); it != copies.end(); it++)

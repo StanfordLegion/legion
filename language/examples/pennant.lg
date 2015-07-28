@@ -29,11 +29,7 @@
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
-import "legion"
-
-local c = legionlib.c
-
-(terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+-- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- Compile and link pennant.cc
 local cpennant
@@ -62,6 +58,10 @@ do
   terralib.linklibrary(pennant_so)
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
+
+import "legion"
+
+local c = legionlib.c
 
 -- Include other headers
 local cmath = terralib.includec("math.h")
