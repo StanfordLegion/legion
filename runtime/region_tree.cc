@@ -24248,9 +24248,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(get_parent() == NULL);
 #endif
+      // No need to hold the lock since this is only called when 
+      // the deferred view is being constructed
       reduction_epochs.push_back(epoch);
       ReductionEpoch &last = reduction_epochs.back();
       last.valid_fields = epoch_mask;
+      // Don't forget to update the reduction mask
+      reduction_mask |= epoch_mask;
     }
 
     //--------------------------------------------------------------------------
