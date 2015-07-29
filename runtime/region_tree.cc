@@ -24368,12 +24368,15 @@ namespace LegionRuntime {
         {
           std::set<Domain> component_domains;
           Event dom_pre = find_component_domains(*it, dst, component_domains);
-          Event result = (*it)->perform_deferred_reduction(dst,
-                                  epoch.valid_fields, info.version_info, 
-                                  preconditions, component_domains, 
-                                  dom_pre, info.op);
-          if (result.exists())
-            postconditions.insert(result);
+          if (!component_domains.empty())
+          {
+            Event result = (*it)->perform_deferred_reduction(dst,
+                                    epoch.valid_fields, info.version_info, 
+                                    preconditions, component_domains, 
+                                    dom_pre, info.op);
+            if (result.exists())
+              postconditions.insert(result);
+          }
         }
         // Merge the post-conditions together and add them to results
         Event result = Event::merge_events(postconditions);
@@ -24419,13 +24422,16 @@ namespace LegionRuntime {
             // Get the domains for this reduction view
             std::set<Domain> component_domains;
             Event dom_pre = find_component_domains(*it, dst, component_domains);
-            Event result = (*it)->perform_deferred_across_reduction(dst,
-                                            dst_field, src_field, src_index,
-                                            info.version_info,
-                                            preconditions, component_domains,
-                                            dom_pre, info.op);
-            if (result.exists())
-              postconditions.insert(result);
+            if (!component_domains.empty())
+            {
+              Event result = (*it)->perform_deferred_across_reduction(dst,
+                                              dst_field, src_field, src_index,
+                                              info.version_info,
+                                              preconditions, component_domains,
+                                              dom_pre, info.op);
+              if (result.exists())
+                postconditions.insert(result);
+            }
           }
           // Merge the postconditions
           Event result = Event::merge_events(postconditions);
