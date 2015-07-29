@@ -16940,31 +16940,11 @@ namespace LegionRuntime {
       // for those fields from the composite instances
       if (!deferred_instances.empty())
       {
-        // If the tracker is NULL we have to make our own so we can 
-        // properly register the destination copy user
-        if (tracker == NULL)
+        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+              deferred_instances.begin(); it !=
+              deferred_instances.end(); it++)
         {
-          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
-                deferred_instances.begin(); it !=
-                deferred_instances.end(); it++)
-          {
-            CopyTracker deferred_tracker;
-            it->first->issue_deferred_copies(info, dst, 
-                                             it->second, &deferred_tracker);
-            Event term_event = deferred_tracker.get_termination_event();
-            if (term_event.exists())
-              dst->add_copy_user(0/*redop*/, term_event, info.version_info,
-                                 it->second, false/*reading*/);
-          }
-        }
-        else
-        {
-          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
-                deferred_instances.begin(); it !=
-                deferred_instances.end(); it++)
-          {
-            it->first->issue_deferred_copies(info, dst, it->second, tracker);
-          }
+          it->first->issue_deferred_copies(info, dst, it->second, tracker);
         }
       }
     }
@@ -24387,7 +24367,7 @@ namespace LegionRuntime {
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
           std::set<Domain> component_domains;
-          Event dom_pre = find_component_domains(*it, component_domains);
+          Event dom_pre = find_component_domains(*it, dst, component_domains);
           Event result = (*it)->perform_deferred_reduction(dst,
                                   epoch.valid_fields, info.version_info, 
                                   preconditions, component_domains, 
@@ -24438,7 +24418,7 @@ namespace LegionRuntime {
           {
             // Get the domains for this reduction view
             std::set<Domain> component_domains;
-            Event dom_pre = find_component_domains(*it, component_domains);
+            Event dom_pre = find_component_domains(*it, dst, component_domains);
             Event result = (*it)->perform_deferred_across_reduction(dst,
                                             dst_field, src_field, src_index,
                                             info.version_info,
@@ -24460,20 +24440,22 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event DeferredView::find_component_domains(ReductionView *reduction_view,
+                                               MaterializedView *dst_view,
                                             std::set<Domain> &component_domains)
     //--------------------------------------------------------------------------
     {
       Event result = Event::NO_EVENT;
-      if (logical_node == reduction_view->logical_node)
+      if (dst_view->logical_node == reduction_view->logical_node)
       {
-        if (logical_node->has_component_domains())
-          component_domains = logical_node->get_component_domains(result);
+        if (dst_view->logical_node->has_component_domains())
+          component_domains = 
+            dst_view->logical_node->get_component_domains(result);
         else
-          component_domains.insert(logical_node->get_domain(result));
+          component_domains.insert(dst_view->logical_node->get_domain(result));
       }
       else
-        component_domains = 
-          logical_node->get_intersection_domains(reduction_view->logical_node);
+        component_domains = dst_view->logical_node->get_intersection_domains(
+                                                reduction_view->logical_node);
       return result;
     }
 
@@ -25339,10 +25321,8 @@ namespace LegionRuntime {
       dirty_mask |= local_dirty;
       LegionMap<CompositeView*,FieldMask>::aligned to_flatten;
       FieldMask need_flatten = capture_mask;
-      if ((parent == NULL) && (state != NULL))
+      if (state != NULL)
       {
-        // If we are the top, we need to capture valid views for everyone
-        // above us in the tree, otherwise we can just get the local ones
         LegionMap<LogicalView*,FieldMask>::aligned instances;
         tree_node->find_valid_instance_views(closer.ctx, state, capture_mask,
             capture_mask, closer.version_info, false/*needs space*/, instances);

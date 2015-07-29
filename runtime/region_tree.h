@@ -3985,6 +3985,7 @@ namespace LegionRuntime {
                                    Event dst_precondition,
                                    std::set<Event> &conditions);
       Event find_component_domains(ReductionView *reduction_view,
+                                   MaterializedView *dst_view,
                                    std::set<Domain> &component_domains);
     protected:
       void activate_deferred(void);
