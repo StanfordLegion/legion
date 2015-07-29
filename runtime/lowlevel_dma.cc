@@ -82,8 +82,8 @@ namespace LegionRuntime {
       void shutdown_queue(void);
 
     protected:
-      gasnet_hsl_t queue_mutex;
-      gasnett_cond_t queue_condvar;
+      GASNetHSL queue_mutex;
+      GASNetCondVar queue_condvar;
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
@@ -268,32 +268,30 @@ namespace LegionRuntime {
     };
 
     DmaRequestQueue::DmaRequestQueue(void)
+      : queue_condvar(queue_mutex)
     {
-      gasnet_hsl_init(&queue_mutex);
-      gasnett_cond_init(&queue_condvar);
       queue_sleepers = 0;
       shutdown_flag = false;
     }
 
     void DmaRequestQueue::shutdown_queue(void)
     {
-      gasnet_hsl_lock(&queue_mutex);
+      queue_mutex.lock();
 
       assert(queues.empty());
 
       // set the shutdown flag and wake up any sleepers
       shutdown_flag = true;
 
-      gasnett_cond_broadcast(&queue_condvar);
-
-      gasnet_hsl_unlock(&queue_mutex);
+      queue_condvar.broadcast();
+      queue_mutex.unlock();
     }
 
     void DmaRequestQueue::enqueue_request(DmaRequest *r)
     {
       // Record that it is ready
       r->mark_ready();
-      gasnet_hsl_lock(&queue_mutex);
+      queue_mutex.lock();
 
       // there's a queue per priority level
       // priorities are negated so that the highest logical priority comes first
@@ -312,26 +310,26 @@ namespace LegionRuntime {
       // if anybody was sleeping, wake them up
       if(queue_sleepers > 0) {
 	queue_sleepers = 0;
-	gasnett_cond_broadcast(&queue_condvar);
+	queue_condvar.broadcast();
       }
 
-      gasnet_hsl_unlock(&queue_mutex);
+      queue_mutex.unlock();
     }
 
     DmaRequest *DmaRequestQueue::dequeue_request(bool sleep /*= true*/)
     {
-      gasnet_hsl_lock(&queue_mutex);
+      queue_mutex.lock();
 
       // quick check - are there any requests at all?
       while(queues.empty()) {
 	if(!sleep || shutdown_flag) {
-	  gasnet_hsl_unlock(&queue_mutex);
+	  queue_mutex.unlock();
 	  return 0;
 	}
 
 	// sleep until there are, or until shutdown
 	queue_sleepers++;
-	gasnett_cond_wait(&queue_condvar, &queue_mutex.lock);
+	queue_condvar.wait();
       }
 
       // grab the first request from the highest-priority queue there is
@@ -346,7 +344,7 @@ namespace LegionRuntime {
 	queues.erase(it);
       }
 
-      gasnet_hsl_unlock(&queue_mutex);
+      queue_mutex.unlock();
       
       return r;
     } 
@@ -2776,7 +2774,7 @@ namespace LegionRuntime {
 #ifdef USE_HDF
           case MemoryImpl::MKIND_HDF:
           {
-            ID id(dst_inst.impl()->me);
+            ID id = dst_inst.id; 
             unsigned index = id.index_l();
             HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
             log_dma.info("create mem->hdf xferdes\n");
@@ -2972,7 +2970,7 @@ namespace LegionRuntime {
         {
           ID src_id(src_impl->me);
           unsigned src_index = src_id.index_l();
-          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*)src_mem.impl())->hdf_metadata[src_index];
+          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata[src_index];
           switch (dst_kind) {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
@@ -2982,7 +2980,7 @@ namespace LegionRuntime {
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_read_channel(), false,
                                               src_buf, dst_buf, dst_mem_base, src_hdf_metadata,
                                               domain, oasvec,
-                                              100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_HDF_READ);
+                                              100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
             path.push_back(xd);
             break;
           }

@@ -75,6 +75,61 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
   } \
 } while(0)
 
+// gasnet_hsl_t in object form for templating goodness
+class GASNetHSL {
+public:
+  GASNetHSL(void) { gasnet_hsl_init(&mutex); }
+  ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
+
+private:
+  // Should never be copied
+  GASNetHSL(const GASNetHSL &rhs) { assert(false); }
+  GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
+
+public:
+  void lock(void) { gasnet_hsl_lock(&mutex); }
+  void unlock(void) { gasnet_hsl_unlock(&mutex); }
+
+protected:
+  friend class GASNetCondVar;
+  gasnet_hsl_t mutex;
+};
+
+class GASNetCondVar {
+public:
+  GASNetCondVar(GASNetHSL &_mutex) 
+    : mutex(_mutex)
+  {
+    gasnett_cond_init(&cond);
+  }
+
+  ~GASNetCondVar(void)
+  {
+    gasnett_cond_destroy(&cond);
+  }
+
+  // these require that you hold the lock when you call
+  void signal(void)
+  {
+    gasnett_cond_signal(&cond);
+  }
+
+  void broadcast(void)
+  {
+    gasnett_cond_broadcast(&cond);
+  }
+
+  void wait(void)
+  {
+    gasnett_cond_wait(&cond, &mutex.mutex.lock);
+  }
+
+  GASNetHSL &mutex;
+
+protected:
+  gasnett_cond_t cond;
+};
+
 extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
@@ -561,6 +616,7 @@ typedef unsigned gasnet_node_t;
 
 #include <pthread.h>
 
+#if 0
 // gasnet_hsl_t is a struct containing a pthread_mutex_t
 typedef struct {
   //struct { pthread_mutex_t lock; } mutex;
@@ -576,18 +632,65 @@ inline void gasnet_hsl_lock(gasnet_hsl_t *mutex)
 { pthread_mutex_lock(&(mutex->lock)); }
 inline void gasnet_hsl_unlock(gasnet_hsl_t *mutex) 
 { pthread_mutex_unlock(&(mutex->lock)); }
+#endif
 
 #define GASNET_WAIT_BLOCK 0
 inline void gasnet_set_waitmode(int) {}
 
-// gasnett_cond_t is just a pthread_cond_t
-typedef pthread_cond_t gasnett_cond_t;
+// gasnet_hsl_t in object form for templating goodness
+class GASNetHSL {
+public:
+  GASNetHSL(void) { pthread_mutex_init(&mutex, 0); }
+  ~GASNetHSL(void) { pthread_mutex_destroy(&mutex); }
 
-inline void gasnett_cond_init(gasnett_cond_t *cond) { pthread_cond_init(cond, 0); }
-inline void gasnett_cond_destroy(gasnett_cond_t *cond) { pthread_cond_destroy(cond); }
-inline void gasnett_cond_signal(gasnett_cond_t *cond) { pthread_cond_signal(cond); }
-inline void gasnett_cond_broadcast(gasnett_cond_t *cond) { pthread_cond_broadcast(cond); }
- inline void gasnett_cond_wait(gasnett_cond_t *cond, pthread_mutex_t *mutex) { pthread_cond_wait(cond, mutex); }
+private:
+  // Should never be copied
+  GASNetHSL(const GASNetHSL &rhs) { assert(false); }
+  GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
+
+public:
+  void lock(void) { pthread_mutex_lock(&mutex); }
+  void unlock(void) { pthread_mutex_unlock(&mutex); }
+
+protected:
+  friend class GASNetCondVar;
+  pthread_mutex_t mutex;
+};
+
+class GASNetCondVar {
+public:
+  GASNetCondVar(GASNetHSL &_mutex) 
+    : mutex(_mutex)
+  {
+    pthread_cond_init(&cond, 0);
+  }
+
+  ~GASNetCondVar(void)
+  {
+    pthread_cond_destroy(&cond);
+  }
+
+  // these require that you hold the lock when you call
+  void signal(void)
+  {
+    pthread_cond_signal(&cond);
+  }
+
+  void broadcast(void)
+  {
+    pthread_cond_broadcast(&cond);
+  }
+
+  void wait(void)
+  {
+    pthread_cond_wait(&cond, &mutex.mutex);
+  }
+
+  GASNetHSL &mutex;
+
+protected:
+  pthread_cond_t cond;
+};
 
  // barriers
 #define GASNET_BARRIERFLAG_ANONYMOUS 0

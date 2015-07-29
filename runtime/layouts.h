@@ -72,9 +72,9 @@ namespace LegionRuntime {
               local_p.x[1] /= dim_size[i];
               break;
             case DIM_Z:
-              index += (local_p.x[2] % dim_size[i]) * subtotal;
+              index += (local_p.x[DIM-1] % dim_size[i]) * subtotal;
               subtotal *= dim_size[i];
-              local_p.x[2] /= dim_size[i];
+              local_p.x[DIM-1] /= dim_size[i];
               break;
             default:
               assert(0);
@@ -124,8 +124,8 @@ namespace LegionRuntime {
               index /= dim_size[i];
               break;
             case DIM_Z:
-              ret.x[2] += dim_base[2] * (index % dim_size[i]);
-              dim_base.x[2] *= dim_size[i];
+              ret.x[DIM-1] += dim_base[DIM-1] * (index % dim_size[i]);
+              dim_base.x[DIM-1] *= dim_size[i];
               index /= dim_size[i];
               break;
             default:
