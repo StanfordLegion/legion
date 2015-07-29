@@ -318,10 +318,10 @@ namespace Realm {
       virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
-      void get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size);
+      void get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
-      void put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size);
+      void put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size);
 
       virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
                                        size_t count, const void *entry_buffer);

@@ -79,6 +79,9 @@ namespace LegionRuntime {
     typedef Realm::ProcessorGroup ProcessorGroup;
     typedef Realm::Task Task;
     typedef Realm::MemoryImpl MemoryImpl;
+#ifdef USE_HDF
+    typedef Realm::HDFMemory HDFMemory;
+#endif
     typedef Realm::MetadataBase MetadataBase;
     typedef Realm::RegionInstanceImpl RegionInstanceImpl;
     typedef Realm::IndexSpaceImpl IndexSpaceImpl;
