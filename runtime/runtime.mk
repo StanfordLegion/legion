@@ -345,6 +345,7 @@ endif
 
 ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
 
+ifndef NO_BUILD_RULES
 .PHONY: all
 all: $(OUTFILE)
 
@@ -376,4 +377,5 @@ $(GPU_RUNTIME_OBJS): %.o : %.cu
 
 clean:
 	@$(RM) -rf $(ALL_OBJS) $(OUTFILE)
+endif
 
