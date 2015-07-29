@@ -13,10 +13,13 @@
  * limitations under the License.
  */
 
+#include "mem_impl.h"
+
 #include "proc_impl.h"
-#include "lowlevel_impl.h"
 #include "logging.h"
 #include "serialize.h"
+#include "inst_impl.h"
+#include "runtime_impl.h"
 
 namespace Realm {
 

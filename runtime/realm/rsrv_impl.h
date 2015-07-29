@@ -21,13 +21,27 @@
 #include "reservation.h"
 
 #include "id.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
 #include "activemsg.h"
+#include "nodeset.h"
 
 namespace Realm {
 
-  typedef LegionRuntime::HighLevel::NodeSet NodeSet;
+#ifdef LOCK_TRACING
+    // For lock tracing
+    struct LockTraceItem {
+    public:
+      enum Action {
+        ACT_LOCAL_REQUEST = 0, // request for a lock where the owner is local
+        ACT_REMOTE_REQUEST = 1, // request for a lock where the owner is not local
+        ACT_FORWARD_REQUEST = 2, // for forwarding of requests
+        ACT_LOCAL_GRANT = 3, // local grant of the lock
+        ACT_REMOTE_GRANT = 4, // remote grant of the lock (change owners)
+        ACT_REMOTE_RELEASE = 5, // remote release of a shared lock
+      };
+    public:
+      unsigned time_units, lock_id, owner, action;
+    };
+#endif
 
   // defined in event_impl.h
   class GenEventImpl;

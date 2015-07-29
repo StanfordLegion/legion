@@ -20,10 +20,8 @@
 
 #include "event.h"
 #include "id.h"
+#include "nodeset.h"
 
-//include "lowlevel_impl.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
 #include "activemsg.h"
 
 #include <vector>
@@ -31,7 +29,20 @@
 
 namespace Realm {
 
-  typedef LegionRuntime::HighLevel::NodeSet NodeSet;
+#ifdef EVENT_TRACING
+    // For event tracing
+    struct EventTraceItem {
+    public:
+      enum Action {
+        ACT_CREATE = 0,
+        ACT_QUERY = 1,
+        ACT_TRIGGER = 2,
+        ACT_WAIT = 3,
+      };
+    public:
+      unsigned time_units, event_id, event_gen, action;
+    };
+#endif
 
     class EventWaiter {
     public:

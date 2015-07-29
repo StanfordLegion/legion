@@ -17,7 +17,7 @@
 
 #include "logging.h"
 #include "event_impl.h"
-#include "lowlevel_impl.h"
+#include "runtime_impl.h"
 
 namespace Realm {
 

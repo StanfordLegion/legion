@@ -34,6 +34,8 @@ enum {
   TIME_AM,
 };
 
+extern pthread_key_t thread_timer_key;
+
 namespace Realm {
 
   // Clock provides (static) methods for getting the current time, which can be either:

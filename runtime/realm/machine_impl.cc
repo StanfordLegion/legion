@@ -16,9 +16,9 @@
 #include "machine_impl.h"
 
 #include "logging.h"
+#include "proc_impl.h"
+#include "mem_impl.h"
 #include "runtime_impl.h"
-
-#include "lowlevel_impl.h"
 
 namespace Realm {
 

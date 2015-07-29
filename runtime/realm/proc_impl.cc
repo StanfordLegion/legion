@@ -14,11 +14,21 @@
  */
 
 #include "proc_impl.h"
-#include "lowlevel_impl.h"
+
+#include "timers.h"
+#include "runtime_impl.h"
 #include "logging.h"
 #include "serialize.h"
 
 GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
+
+#define CHECK_PTHREAD(cmd) do { \
+  int ret = (cmd); \
+  if(ret != 0) { \
+    fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
+    exit(1); \
+  } \
+} while(0)
 
 namespace Realm {
 

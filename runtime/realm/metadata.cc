@@ -18,14 +18,8 @@
 #include "metadata.h"
 
 #include "event_impl.h"
+#include "inst_impl.h"
 #include "runtime_impl.h"
-#include "lowlevel_impl.h"
-
-namespace Realm {
-
-  typedef LegionRuntime::LowLevel::RegionInstanceImpl RegionInstanceImpl;
-  
-};
 
 namespace Realm {
 

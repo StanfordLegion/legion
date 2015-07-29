@@ -18,7 +18,9 @@
 #include "idx_impl.h"
 
 #include "logging.h"
-#include "lowlevel_impl.h"
+#include "inst_impl.h"
+#include "mem_impl.h"
+#include "runtime_impl.h"
 
 namespace Realm {
 

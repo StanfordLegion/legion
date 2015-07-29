@@ -16,7 +16,6 @@
 #ifndef REALM_OPERATION_H
 #define REALM_OPERATION_H
 
-#include "lowlevel.h"
 #include "realm/profiling.h"
 
 namespace Realm {

@@ -21,9 +21,6 @@
 #include "memory.h"
 #include "id.h"
 
-//include "lowlevel_impl.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
 #include "activemsg.h"
 #include "operation.h"
 #include "profiling.h"

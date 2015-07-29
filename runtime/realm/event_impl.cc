@@ -14,7 +14,9 @@
  */
 
 #include "event_impl.h"
-#include "lowlevel_impl.h"
+
+#include "proc_impl.h"
+#include "runtime_impl.h"
 #include "logging.h"
 
 #ifdef USE_CUDA
