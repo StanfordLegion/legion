@@ -95,7 +95,7 @@ private:
 #if USE_TLS
       global_cache[space] = spans;
 #else
-      AutoLock guard(global_lock);
+      LegionRuntime::HighLevel::AutoLock guard(global_lock);
       if (!global_cache.count(space)) {
         global_cache[space] = spans;
       }
