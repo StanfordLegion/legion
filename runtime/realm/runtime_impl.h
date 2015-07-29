@@ -72,9 +72,9 @@ namespace Realm {
 
       typedef GASNetHSL LT;
       typedef int IT;
-      typedef Realm::DynamicTableNode<Realm::DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
-      typedef Realm::DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
-      typedef Realm::DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
+      typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
+      typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
+      typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -117,11 +117,11 @@ namespace Realm {
       std::vector<MemoryImpl *> memories;
       std::vector<ProcessorImpl *> processors;
 
-      Realm::DynamicTable<EventTableAllocator> events;
-      Realm::DynamicTable<BarrierTableAllocator> barriers;
-      Realm::DynamicTable<ReservationTableAllocator> reservations;
-      Realm::DynamicTable<IndexSpaceTableAllocator> index_spaces;
-      Realm::DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      DynamicTable<EventTableAllocator> events;
+      DynamicTable<BarrierTableAllocator> barriers;
+      DynamicTable<ReservationTableAllocator> reservations;
+      DynamicTable<IndexSpaceTableAllocator> index_spaces;
+      DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
     class RuntimeImpl {
@@ -171,7 +171,7 @@ namespace Realm {
       static const char *prefix;
 #endif
 
-      std::vector<Realm::Module *> modules;
+      std::vector<Module *> modules;
       Node *nodes;
       MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;

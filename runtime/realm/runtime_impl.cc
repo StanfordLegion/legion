@@ -91,6 +91,7 @@ namespace Realm {
     /*static*/ Runtime Runtime::get_runtime(void)
     {
       Runtime r;
+      // explicit namespace qualifier here due to name collision
       r.impl = Realm::get_runtime();
       return r;
     }
@@ -326,10 +327,10 @@ namespace Realm {
 
       if(bind_localproc_threads) {
 	// this has to preceed all spawning of threads, including the ones done by things like gasnet_init()
-	Realm::proc_assignment = new Realm::ProcessorAssignment(num_local_cpus);
+	proc_assignment = new ProcessorAssignment(num_local_cpus);
 
 	// now move ourselves off the reserved cores
-	Realm::proc_assignment->bind_thread(-1, 0, "machine thread");
+	proc_assignment->bind_thread(-1, 0, "machine thread");
       }
 
       if (disable_greenlets)
@@ -355,7 +356,7 @@ namespace Realm {
         char s[80];
         gethostname(s, 79);
         strcat(s, " enter gasnet_init");
-        LegionRuntime::TimeStamp ts(s, false);
+        TimeStamp ts(s, false);
         fflush(stdout);
       }
 #endif
@@ -365,7 +366,7 @@ namespace Realm {
         char s[80];
         gethostname(s, 79);
         strcat(s, " exit gasnet_init");
-        LegionRuntime::TimeStamp ts(s, false);
+        TimeStamp ts(s, false);
         fflush(stdout);
       }
 #endif
@@ -397,44 +398,44 @@ namespace Realm {
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
-      Realm::Logger::configure_from_cmdline(*argc, (const char **)*argv);
+      Logger::configure_from_cmdline(*argc, (const char **)*argv);
 
       gasnet_handlerentry_t handlers[128];
       int hcount = 0;
-      hcount += Realm::NodeAnnounceMessage::Message::add_handler_entries(&handlers[hcount], "Node Announce AM");
-      hcount += Realm::SpawnTaskMessage::Message::add_handler_entries(&handlers[hcount], "Spawn Task AM");
-      hcount += Realm::LockRequestMessage::Message::add_handler_entries(&handlers[hcount], "Lock Request AM");
-      hcount += Realm::LockReleaseMessage::Message::add_handler_entries(&handlers[hcount], "Lock Release AM");
-      hcount += Realm::LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
-      hcount += Realm::EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
-      hcount += Realm::EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
-      hcount += Realm::RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
-      hcount += Realm::RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
-      hcount += Realm::CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
-      hcount += Realm::CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
+      hcount += NodeAnnounceMessage::Message::add_handler_entries(&handlers[hcount], "Node Announce AM");
+      hcount += SpawnTaskMessage::Message::add_handler_entries(&handlers[hcount], "Spawn Task AM");
+      hcount += LockRequestMessage::Message::add_handler_entries(&handlers[hcount], "Lock Request AM");
+      hcount += LockReleaseMessage::Message::add_handler_entries(&handlers[hcount], "Lock Release AM");
+      hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
+      hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
+      hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
+      hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
+      hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
+      hcount += CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
       hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
-      hcount += Realm::ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
-      hcount += Realm::ValidMaskDataMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
+      hcount += ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
+      hcount += ValidMaskDataMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
 #ifdef DETAILED_TIMING
-      hcount += Realm::TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
-      hcount += Realm::TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
-      hcount += Realm::ClearTimersMessage::Message::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
+      hcount += TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
+      hcount += TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
+      hcount += ClearTimersMessage::Message::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
 #endif
-      hcount += Realm::DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
-      hcount += Realm::RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
-      hcount += Realm::RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
-      hcount += Realm::RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
-      hcount += Realm::DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
-      hcount += Realm::RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
+      hcount += DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
+      hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
+      hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
+      hcount += RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
+      hcount += DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
+      hcount += RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
       hcount += RuntimeShutdownMessage::Message::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
-      hcount += Realm::BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
-      hcount += Realm::BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
-      hcount += Realm::BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
-      hcount += Realm::MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
-      hcount += Realm::MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
-      hcount += Realm::MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
-      hcount += Realm::MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
+      hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
+      hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
+      hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
+      hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
+      hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
+      hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
+      hcount += MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 
@@ -507,7 +508,7 @@ namespace Realm {
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
       if(gasnet_mem_size_in_mb > 0)
-	global_memory = new Realm::GASNetMemory(ID(ID::ID_MEMORY, 0, ID::ID_GLOBAL_MEM, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+	global_memory = new GASNetMemory(ID(ID::ID_MEMORY, 0, ID::ID_GLOBAL_MEM, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
       else
 	global_memory = 0;
 
@@ -519,12 +520,12 @@ namespace Realm {
         for(unsigned i = 0; i < num_util_procs; i++) {
           ProcessorImpl *up;
           if (use_greenlet_procs)
-            up = new Realm::GreenletProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
+            up = new GreenletProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
                                     n->processors.size()).convert<Processor>(),
                                     Processor::UTIL_PROC, stack_size_in_mb << 20, 
                                     init_stack_count, "utility worker");
           else
-            up = new Realm::LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
+            up = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
                                     n->processors.size()).convert<Processor>(),
                                     Processor::UTIL_PROC, 
                                     stack_size_in_mb << 20, "utility worker");
@@ -536,7 +537,7 @@ namespace Realm {
       if (num_io_procs > 0)
       {
         for (unsigned i = 0; i < num_io_procs; i++) {
-          Realm::LocalProcessor *io = new Realm::LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
+          LocalProcessor *io = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
                                             n->processors.size()).convert<Processor>(),
                                             Processor::IO_PROC,
                                             stack_size_in_mb << 20, "io worker");
@@ -550,7 +551,7 @@ namespace Realm {
       CHECK_CU( cuInit(0) );
       // Keep track of the local system memories so we can pin them
       // after we've initialized the GPU
-      std::vector<Realm::LocalCPUMemory*> local_mems;
+      std::vector<LocalCPUMemory*> local_mems;
       // Figure out which GPUs support peer access (if any)
       // and prioritize them so they are used first
       std::vector<int> peer_gpus;
@@ -592,11 +593,11 @@ namespace Realm {
 			 n->processors.size()).convert<Processor>();
         ProcessorImpl *lp;
         if (use_greenlet_procs)
-          lp = new Realm::GreenletProcessor(p, Processor::LOC_PROC,
+          lp = new GreenletProcessor(p, Processor::LOC_PROC,
                                      stack_size_in_mb << 20, init_stack_count,
                                      "local worker", i);
         else
-	  lp = new Realm::LocalProcessor(p, Processor::LOC_PROC,
+	  lp = new LocalProcessor(p, Processor::LOC_PROC,
                                   stack_size_in_mb << 20,
                                   "local worker", i);
 	n->processors.push_back(lp);
@@ -604,9 +605,9 @@ namespace Realm {
       }
 
       // create local memory
-      Realm::LocalCPUMemory *cpumem;
+      LocalCPUMemory *cpumem;
       if(cpu_mem_size_in_mb > 0) {
-	cpumem = new Realm::LocalCPUMemory(ID(ID::ID_MEMORY, 
+	cpumem = new LocalCPUMemory(ID(ID::ID_MEMORY, 
 				       gasnet_mynode(),
 				       n->memories.size(), 0).convert<Memory>(),
 				    cpu_mem_size_in_mb << 20);
@@ -617,13 +618,13 @@ namespace Realm {
       } else
 	cpumem = 0;
 
-      Realm::LocalCPUMemory *regmem;
+      LocalCPUMemory *regmem;
       if(reg_mem_size_in_mb > 0) {
 	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
 	char *regmem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
-	regmem = new Realm::LocalCPUMemory(ID(ID::ID_MEMORY,
+	regmem = new LocalCPUMemory(ID(ID::ID_MEMORY,
 				       gasnet_mynode(),
 				       n->memories.size(), 0).convert<Memory>(),
 				    reg_mem_size_in_mb << 20,
@@ -637,9 +638,9 @@ namespace Realm {
 	regmem = 0;
 
       // create local disk memory
-      Realm::DiskMemory *diskmem;
+      DiskMemory *diskmem;
       if(disk_mem_size_in_mb > 0) {
-        diskmem = new Realm::DiskMemory(ID(ID::ID_MEMORY,
+        diskmem = new DiskMemory(ID(ID::ID_MEMORY,
                                     gasnet_mynode(),
                                     n->memories.size(), 0).convert<Memory>(),
                                  disk_mem_size_in_mb << 20,
@@ -650,8 +651,8 @@ namespace Realm {
 
 #ifdef USE_HDF
       // create HDF memory
-      Realm::HDFMemory *hdfmem;
-      hdfmem = new Realm::HDFMemory(ID(ID::ID_MEMORY,
+      HDFMemory *hdfmem;
+      hdfmem = new HDFMemory(ID(ID::ID_MEMORY,
                                 gasnet_mynode(),
                                 n->memories.size(), 0).convert<Memory>());
       n->memories.push_back(hdfmem);
@@ -745,7 +746,7 @@ namespace Realm {
 	    it != local_util_procs.end();
 	    it++) {
 	  num_procs++;
-          adata[apos++] = Realm::NODE_ANNOUNCE_PROC;
+          adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = (*it)->me.id;
           adata[apos++] = Processor::UTIL_PROC;
 	}
@@ -754,7 +755,7 @@ namespace Realm {
 	    it != local_io_procs.end();
 	    it++) {
 	  num_procs++;
-          adata[apos++] = Realm::NODE_ANNOUNCE_PROC;
+          adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = (*it)->me.id;
           adata[apos++] = Processor::IO_PROC;
 	}
@@ -763,7 +764,7 @@ namespace Realm {
 	    it != local_cpus.end();
 	    it++) {
 	  num_procs++;
-          adata[apos++] = Realm::NODE_ANNOUNCE_PROC;
+          adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = (*it)->me.id;
           adata[apos++] = Processor::LOC_PROC;
 	}
@@ -771,7 +772,7 @@ namespace Realm {
 	// memories
 	if(cpumem) {
 	  num_memories++;
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	  adata[apos++] = NODE_ANNOUNCE_MEM;
 	  adata[apos++] = cpumem->me.id;
 	  adata[apos++] = Memory::SYSTEM_MEM;
 	  adata[apos++] = cpumem->size;
@@ -780,7 +781,7 @@ namespace Realm {
 
 	if(regmem) {
 	  num_memories++;
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	  adata[apos++] = NODE_ANNOUNCE_MEM;
 	  adata[apos++] = regmem->me.id;
 	  adata[apos++] = Memory::REGDMA_MEM;
 	  adata[apos++] = regmem->size;
@@ -789,7 +790,7 @@ namespace Realm {
 
 	if(diskmem) {
 	  num_memories++;
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	  adata[apos++] = NODE_ANNOUNCE_MEM;
 	  adata[apos++] = diskmem->me.id;
 	  adata[apos++] = Memory::DISK_MEM;
 	  adata[apos++] = diskmem->size;
@@ -799,7 +800,7 @@ namespace Realm {
 #ifdef USE_HDF
 	if(hdfmem) {
 	  num_memories++;
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	  adata[apos++] = NODE_ANNOUNCE_MEM;
 	  adata[apos++] = hdfmem->me.id;
 	  adata[apos++] = Memory::HDF_MEM;
 	  adata[apos++] = hdfmem->size;
@@ -819,7 +820,7 @@ namespace Realm {
 	    it != all_local_procs.end();
 	    it++) {
 	  if(cpumem) {
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = cpumem->me.id;
 	    adata[apos++] = 100;  // "large" bandwidth
@@ -827,7 +828,7 @@ namespace Realm {
 	  }
 
 	  if(regmem) {
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = regmem->me.id;
 	    adata[apos++] = 80;  // "large" bandwidth
@@ -835,7 +836,7 @@ namespace Realm {
 	  }
 
 	  if(diskmem) {
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = diskmem->me.id;
 	    adata[apos++] = 5;  // "low" bandwidth
@@ -844,7 +845,7 @@ namespace Realm {
 
 #ifdef USE_HDF
 	  if(hdfmem) {
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = hdfmem->me.id;
 	    adata[apos++] = 5; // "low" bandwidth
@@ -853,7 +854,7 @@ namespace Realm {
 #endif
 
 	  if(global_memory) {
-  	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+  	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = global_memory->me.id;
 	    adata[apos++] = 10;  // "lower" bandwidth
@@ -862,7 +863,7 @@ namespace Realm {
 	}
 
 	if(cpumem && global_memory) {
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MMA;
+	  adata[apos++] = NODE_ANNOUNCE_MMA;
 	  adata[apos++] = cpumem->me.id;
 	  adata[apos++] = global_memory->me.id;
 	  adata[apos++] = 30;  // "lower" bandwidth
@@ -870,7 +871,7 @@ namespace Realm {
 	}
 
 	if(cpumem && diskmem) {
-	  adata[apos++] = Realm::NODE_ANNOUNCE_MMA;
+	  adata[apos++] = NODE_ANNOUNCE_MMA;
 	  adata[apos++] = cpumem->me.id;
 	  adata[apos++] = diskmem->me.id;
 	  adata[apos++] = 15;    // "low" bandwidth
@@ -883,7 +884,7 @@ namespace Realm {
 	    it++)
 	{
 	  num_procs++;
-	  adata[apos++] = Realm::NODE_ANNOUNCE_PROC;
+	  adata[apos++] = NODE_ANNOUNCE_PROC;
 	  adata[apos++] = (*it)->me.id;
 	  adata[apos++] = Processor::TOC_PROC;
 
@@ -891,14 +892,14 @@ namespace Realm {
 	  if(fbm) {
 	    num_memories++;
 
-	    adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	    adata[apos++] = NODE_ANNOUNCE_MEM;
 	    adata[apos++] = fbm->me.id;
 	    adata[apos++] = Memory::GPU_FB_MEM;
 	    adata[apos++] = fbm->size;
 	    adata[apos++] = 0; // not registered
 
 	    // FB has very good bandwidth and ok latency to GPU
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = fbm->me.id;
 	    adata[apos++] = 200; // "big" bandwidth
@@ -909,14 +910,14 @@ namespace Realm {
 	  if(zcm) {
 	    num_memories++;
 
-	    adata[apos++] = Realm::NODE_ANNOUNCE_MEM;
+	    adata[apos++] = NODE_ANNOUNCE_MEM;
 	    adata[apos++] = zcm->me.id;
 	    adata[apos++] = Memory::Z_COPY_MEM;
 	    adata[apos++] = zcm->size;
 	    adata[apos++] = 0; // not registered
 
 	    // ZC has medium bandwidth and bad latency to GPU
-	    adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
 	    adata[apos++] = (*it)->me.id;
 	    adata[apos++] = zcm->me.id;
 	    adata[apos++] = 20;
@@ -926,7 +927,7 @@ namespace Realm {
 	    for(std::vector<ProcessorImpl*>::iterator it2 = local_cpus.begin();
 		it2 != local_cpus.end();
 		it2++) {
-	      adata[apos++] = Realm::NODE_ANNOUNCE_PMA;
+	      adata[apos++] = NODE_ANNOUNCE_PMA;
 	      adata[apos++] = (*it2)->me.id;
 	      adata[apos++] = zcm->me.id;
 	      adata[apos++] = 40;
@@ -936,7 +937,7 @@ namespace Realm {
 	}
 #endif
 
-	adata[apos++] = Realm::NODE_ANNOUNCE_DONE;
+	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
 
 	// parse our own data (but don't create remote proc/mem objects)
@@ -948,7 +949,7 @@ namespace Realm {
 
 #ifdef DEBUG_REALM_STARTUP
 	if(gasnet_mynode() == 0) {
-	  LegionRuntime::TimeStamp ts("sending announcements", false);
+	  TimeStamp ts("sending announcements", false);
 	  fflush(stdout);
 	}
 #endif
@@ -956,17 +957,17 @@ namespace Realm {
 	// now announce ourselves to everyone else
 	for(unsigned i = 0; i < gasnet_nodes(); i++)
 	  if(i != gasnet_mynode())
-	    Realm::NodeAnnounceMessage::send_request(i,
+	    NodeAnnounceMessage::send_request(i,
 						     num_procs,
 						     num_memories,
 						     adata, apos*sizeof(adata[0]),
 						     PAYLOAD_COPY);
 
-	Realm::NodeAnnounceMessage::await_all_announcements();
+	NodeAnnounceMessage::await_all_announcements();
 
 #ifdef DEBUG_REALM_STARTUP
 	if(gasnet_mynode() == 0) {
-	  LegionRuntime::TimeStamp ts("received all announcements", false);
+	  TimeStamp ts("received all announcements", false);
 	  fflush(stdout);
 	}
 #endif
@@ -1024,7 +1025,7 @@ namespace Realm {
 
       // Initialize the shutdown counter
       const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-      Realm::Atomic<int> running_proc_count(local_procs.size());
+      Atomic<int> running_proc_count(local_procs.size());
 
       for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	  it != local_procs.end();
@@ -1093,7 +1094,7 @@ namespace Realm {
       log_runtime.info("running proc count is now zero - terminating\n");
 #ifdef REPORT_REALM_RESOURCE_USAGE
       {
-        RuntimeImpl *rt = LegionRuntime::LowLevel::get_runtime();
+        RuntimeImpl *rt = get_runtime();
         printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
                gasnet_mynode(),
                rt->local_event_free_list->next_alloc,

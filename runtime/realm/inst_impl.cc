@@ -112,7 +112,7 @@ namespace Realm {
 					   off_t _offset, size_t _size, ReductionOpID _redopid,
 					   const DomainLinearization& _linear, size_t _block_size,
 					   size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-					   const Realm::ProfilingRequestSet &reqs,
+					   const ProfilingRequestSet &reqs,
 					   off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/,
 					   RegionInstance _parent_inst /*= NO_INST*/)
       : me(_me), memory(_memory)
@@ -129,7 +129,7 @@ namespace Realm {
       //metadata.access_offset = _offset + _adjust;
       metadata.size = _size;
       
-      //Realm::StaticAccess<IndexSpaceImpl> rdata(_is.impl());
+      //StaticAccess<IndexSpaceImpl> rdata(_is.impl());
       //locked_data.first_elmt = rdata->first_elmt;
       //locked_data.last_elmt = rdata->last_elmt;
 
@@ -147,7 +147,7 @@ namespace Realm {
         requests = reqs;
         measurements.import_requests(requests);
         if (measurements.wants_measurement<
-                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+                          ProfilingMeasurements::InstanceTimeline>()) {
           timeline.instance = me;
           timeline.record_create_time();
         }
@@ -245,13 +245,13 @@ namespace Realm {
     {
       if (!requests.empty()) {
         if (measurements.wants_measurement<
-                          Realm::ProfilingMeasurements::InstanceTimeline>()) {
+                          ProfilingMeasurements::InstanceTimeline>()) {
           timeline.record_delete_time();
           measurements.add_measurement(timeline);
         }
         if (measurements.wants_measurement<
-                          Realm::ProfilingMeasurements::InstanceMemoryUsage>()) {
-          Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
+                          ProfilingMeasurements::InstanceMemoryUsage>()) {
+          ProfilingMeasurements::InstanceMemoryUsage usage;
           usage.instance = me;
           usage.memory = memory;
           // Safe to read from meta-data here because we know we are
@@ -322,7 +322,7 @@ namespace Realm {
 #ifdef POINTER_CHECKS
     void RegionInstanceImpl::verify_access(unsigned ptr)
     {
-      Realm::StaticAccess<RegionInstanceImpl> data(this);
+      StaticAccess<RegionInstanceImpl> data(this);
       const ElementMask &mask = data->is.get_valid_mask();
       if (!mask.is_set(ptr))
       {

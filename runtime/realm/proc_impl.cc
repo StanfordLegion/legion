@@ -512,7 +512,7 @@ namespace Realm {
 
     void RemoteProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
-				     const Realm::ProfilingRequestSet &reqs,
+				     const ProfilingRequestSet &reqs,
 				     Event start_event, Event finish_event,
 				     int priority)
     {
@@ -930,7 +930,7 @@ namespace Realm {
 
     void LocalProcessor::spawn_task(Processor::TaskFuncID func_id,
                                     const void *args, size_t arglen,
-                                    const Realm::ProfilingRequestSet &reqs,
+                                    const ProfilingRequestSet &reqs,
                                     Event start_event, Event finish_event,
                                     int priority)
     {
@@ -1251,7 +1251,7 @@ namespace Realm {
 
     void GreenletProcessor::spawn_task(Processor::TaskFuncID func_id,
                                        const void *args, size_t arglen,
-                                       const Realm::ProfilingRequestSet &reqs,
+                                       const ProfilingRequestSet &reqs,
                                        Event start_event, Event finish_event,
                                        int priority)
     {

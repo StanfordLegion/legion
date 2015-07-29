@@ -34,7 +34,7 @@ namespace Realm {
 			 ReductionOpID _redopid,
 			 const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
 			 const std::vector<size_t>& _field_sizes,
-			 const Realm::ProfilingRequestSet &reqs,
+			 const ProfilingRequestSet &reqs,
 			 off_t _count_offset = -1, off_t _red_list_size = -1, 
 			 RegionInstance _parent_inst = RegionInstance::NO_INST);
 
@@ -67,14 +67,14 @@ namespace Realm {
       void finalize_instance(void);
 
     public: //protected:
-      friend class Realm::RegionInstance;
+      friend class RegionInstance;
 
       RegionInstance me;
       Memory memory; // not part of metadata because it's determined from ID alone
       // Profiling info only needed on creation node
-      Realm::ProfilingRequestSet requests;
-      Realm::ProfilingMeasurementCollection measurements;
-      Realm::ProfilingMeasurements::InstanceTimeline timeline;
+      ProfilingRequestSet requests;
+      ProfilingMeasurementCollection measurements;
+      ProfilingMeasurements::InstanceTimeline timeline;
 
       class Metadata : public MetadataBase {
       public:

@@ -71,7 +71,7 @@ namespace Realm {
       assert(impl);
       assert(ID(impl->me).type() == ID::ID_INDEXSPACE);
 
-      Realm::StaticAccess<IndexSpaceImpl> p_data(get_runtime()->get_index_space_impl(parent));
+      StaticAccess<IndexSpaceImpl> p_data(get_runtime()->get_index_space_impl(parent));
 
       impl->init(impl->me, parent,
 		 p_data->num_elmts, 
@@ -114,7 +114,7 @@ namespace Realm {
 #ifdef COHERENT_BUT_BROKEN_WAY
       // for now, just hand out the valid mask for the master allocator
       //  and hope it's accessible to the caller
-      Realm::SharedAccess<IndexSpaceImpl> data(r_impl);
+      SharedAccess<IndexSpaceImpl> data(r_impl);
       assert((data->valid_mask_owners >> gasnet_mynode()) & 1);
 #else
       if(!r_impl->valid_mask_complete) {
@@ -142,7 +142,7 @@ namespace Realm {
 
     Event IndexSpace::create_equal_subspaces(size_t count, size_t granularity,
                                              std::vector<IndexSpace>& subspaces,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
                                              bool mutable_results,
                                              Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -165,7 +165,7 @@ namespace Realm {
     Event IndexSpace::create_weighted_subspaces(size_t count, size_t granularity,
                                                 const std::vector<int>& weights,
                                                 std::vector<IndexSpace>& subspaces,
-                                                const Realm::ProfilingRequestSet &reqs,
+                                                const ProfilingRequestSet &reqs,
                                                 bool mutable_results,
                                                 Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -186,7 +186,7 @@ namespace Realm {
 
     /*static*/
     Event IndexSpace::compute_index_spaces(std::vector<BinaryOpDescriptor>& pairs,
-                                           const Realm::ProfilingRequestSet &reqs,
+                                           const ProfilingRequestSet &reqs,
                                            bool mutable_results,
 					   Event wait_on /*= Event::NO_EVENT*/)
     {
@@ -211,7 +211,7 @@ namespace Realm {
     /*static*/
     Event IndexSpace::reduce_index_spaces(IndexSpaceOperation op,
                                           const std::vector<IndexSpace>& spaces,
-                                          const Realm::ProfilingRequestSet &reqs,
+                                          const ProfilingRequestSet &reqs,
                                           IndexSpace& result,
                                           bool mutable_results,
                                           IndexSpace parent /*= IndexSpace::NO_SPACE*/,
@@ -236,7 +236,7 @@ namespace Realm {
     Event IndexSpace::create_subspaces_by_field(
                                 const std::vector<FieldDataDescriptor>& field_data,
                                 std::map<DomainPoint, IndexSpace>& subspaces,
-                                const Realm::ProfilingRequestSet &reqs,
+                                const ProfilingRequestSet &reqs,
                                 bool mutable_results,
                                 Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -259,7 +259,7 @@ namespace Realm {
     Event IndexSpace::create_subspaces_by_image(
                                 const std::vector<FieldDataDescriptor>& field_data,
                                 std::map<IndexSpace, IndexSpace>& subspaces,
-                                const Realm::ProfilingRequestSet &reqs,
+                                const ProfilingRequestSet &reqs,
                                 bool mutable_results,
                                 Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -282,7 +282,7 @@ namespace Realm {
     Event IndexSpace::create_subspaces_by_preimage(
                                  const std::vector<FieldDataDescriptor>& field_data,
                                  std::map<IndexSpace, IndexSpace>& subspaces,
-                                 const Realm::ProfilingRequestSet &reqs,
+                                 const ProfilingRequestSet &reqs,
                                  bool mutable_results,
                                  Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -310,7 +310,7 @@ namespace Realm {
 
     RegionInstance Domain::create_instance(Memory memory,
 					   size_t elem_size,
-                                           const Realm::ProfilingRequestSet &reqs,
+                                           const ProfilingRequestSet &reqs,
 					   ReductionOpID redop_id) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
@@ -325,14 +325,14 @@ namespace Realm {
 					   size_t block_size,
 					   ReductionOpID redop_id) const
     {
-      Realm::ProfilingRequestSet requests;
+      ProfilingRequestSet requests;
       return create_instance(memory, field_sizes, block_size, requests, redop_id);
     }
 
     RegionInstance Domain::create_instance(Memory memory,
 					   const std::vector<size_t> &field_sizes,
 					   size_t block_size,
-                                           const Realm::ProfilingRequestSet &reqs,
+                                           const ProfilingRequestSet &reqs,
 					   ReductionOpID redop_id) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);      
@@ -387,7 +387,7 @@ namespace Realm {
       } else {
 	IndexSpaceImpl *r = get_runtime()->get_index_space_impl(get_index_space());
 
-	Realm::StaticAccess<IndexSpaceImpl> data(r);
+	StaticAccess<IndexSpaceImpl> data(r);
 	assert(data->num_elmts > 0);
 
 #ifdef FULL_SIZE_INSTANCES
@@ -458,7 +458,7 @@ namespace Realm {
       assert(false);
       return RegionInstance::NO_INST;
 #else
-      Realm::ProfilingRequestSet requests;
+      ProfilingRequestSet requests;
 
       assert(field_sizes.size() == field_files.size());
       Memory memory = Memory::NO_MEMORY;
@@ -1194,7 +1194,7 @@ namespace Realm {
 	  locked_data.first_elmt = 0;
 	  locked_data.last_elmt = _num_elmts - 1;
 	} else {
-	  Realm::StaticAccess<IndexSpaceImpl> pdata(get_runtime()->get_index_space_impl(_parent));
+	  StaticAccess<IndexSpaceImpl> pdata(get_runtime()->get_index_space_impl(_parent));
 	  locked_data.first_elmt = pdata->first_elmt;
 	  locked_data.last_elmt = pdata->last_elmt;
 	}
@@ -1214,14 +1214,14 @@ namespace Realm {
       while(other != IndexSpace::NO_SPACE) {
 	if(other == me) return true;
 	IndexSpaceImpl *other_impl = get_runtime()->get_index_space_impl(other);
-	other = Realm::StaticAccess<IndexSpaceImpl>(other_impl)->parent;
+	other = StaticAccess<IndexSpaceImpl>(other_impl)->parent;
       }
       return false;
     }
 
     Event IndexSpaceImpl::request_valid_mask(void)
     {
-      size_t num_elmts = Realm::StaticAccess<IndexSpaceImpl>(this)->num_elmts;
+      size_t num_elmts = StaticAccess<IndexSpaceImpl>(this)->num_elmts;
       int valid_mask_owner = -1;
       
       Event e;
@@ -1264,7 +1264,7 @@ namespace Realm {
 
     unsigned IndexSpaceAllocatorImpl::alloc_elements(unsigned count /*= 1 */)
     {
-      Realm::SharedAccess<IndexSpaceImpl> is_data(is_impl);
+      SharedAccess<IndexSpaceImpl> is_data(is_impl);
       assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
       int start = is_impl->valid_mask->find_disabled(count);
       assert(start >= 0);
@@ -1279,7 +1279,7 @@ namespace Realm {
       // for now, do updates of valid masks immediately
       IndexSpaceImpl *impl = is_impl;
       while(1) {
-	Realm::SharedAccess<IndexSpaceImpl> is_data(impl);
+	SharedAccess<IndexSpaceImpl> is_data(impl);
 	assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
 	is_impl->valid_mask->enable(ptr, count);
 	IndexSpace is = is_data->parent;
@@ -1293,7 +1293,7 @@ namespace Realm {
       // for now, do updates of valid masks immediately
       IndexSpaceImpl *impl = is_impl;
       while(1) {
-	Realm::SharedAccess<IndexSpaceImpl> is_data(impl);
+	SharedAccess<IndexSpaceImpl> is_data(impl);
 	assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
 	is_impl->valid_mask->disable(ptr, count);
 	IndexSpace is = is_data->parent;

@@ -76,7 +76,7 @@ namespace Realm {
 					   const std::vector<size_t>& field_sizes,
 					   ReductionOpID redopid,
 					   off_t list_size,
-                                           const Realm::ProfilingRequestSet &reqs,
+                                           const ProfilingRequestSet &reqs,
 					   RegionInstance parent_inst);
 
       RegionInstance create_instance_remote(IndexSpace is,
@@ -87,7 +87,7 @@ namespace Realm {
 					    const std::vector<size_t>& field_sizes,
 					    ReductionOpID redopid,
 					    off_t list_size,
-                                            const Realm::ProfilingRequestSet &reqs,
+                                            const ProfilingRequestSet &reqs,
 					    RegionInstance parent_inst);
 
       virtual RegionInstance create_instance(IndexSpace is,
@@ -98,7 +98,7 @@ namespace Realm {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst) = 0;
 
       void destroy_instance_local(RegionInstance i, bool local_destroy);
@@ -167,7 +167,7 @@ namespace Realm {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
@@ -199,7 +199,7 @@ namespace Realm {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
@@ -250,7 +250,7 @@ namespace Realm {
                                             const std::vector<size_t>& field_sizes,
                                             ReductionOpID redopid,
                                             off_t list_size,
-                                            const Realm::ProfilingRequestSet &reqs,
+                                            const ProfilingRequestSet &reqs,
                                             RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i,
@@ -292,7 +292,7 @@ namespace Realm {
                                              const std::vector<size_t>& field_sizes,
                                              ReductionOpID redopid,
                                              off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
                                              RegionInstance parent_inst);
 
       RegionInstance create_instance(IndexSpace is,
@@ -303,7 +303,7 @@ namespace Realm {
                                      const std::vector<size_t>& field_sizes,
                                      ReductionOpID redopid,
                                      off_t list_size,
-                                     const Realm::ProfilingRequestSet &reqs,
+                                     const ProfilingRequestSet &reqs,
                                      RegionInstance parent_inst,
                                      const char* file,
                                      const std::vector<const char*>& path_names,
@@ -356,7 +356,7 @@ namespace Realm {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
+                                             const ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);

@@ -181,7 +181,7 @@ namespace Realm {
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
-                              const Realm::ProfilingRequestSet &reqs,
+                              const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
 
@@ -444,7 +444,7 @@ namespace Realm {
                               int priority);
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
-                              const Realm::ProfilingRequestSet &reqs,
+                              const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
     protected:
@@ -531,7 +531,7 @@ namespace Realm {
                               int priority);
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
-                              const Realm::ProfilingRequestSet &reqs,
+                              const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
     public:

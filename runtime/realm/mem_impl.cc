@@ -255,7 +255,7 @@ namespace Realm {
 						       const std::vector<size_t>& field_sizes,
 						       ReductionOpID redopid,
 						       off_t list_size,
-                                                       const Realm::ProfilingRequestSet &reqs,
+                                                       const ProfilingRequestSet &reqs,
 						       RegionInstance parent_inst)
     {
       off_t inst_offset = alloc_bytes(bytes_needed);
@@ -329,7 +329,7 @@ namespace Realm {
 							const std::vector<size_t>& field_sizes,
 							ReductionOpID redopid,
 							off_t list_size,
-                                                        const Realm::ProfilingRequestSet &reqs,
+                                                        const ProfilingRequestSet &reqs,
 							RegionInstance parent_inst)
     {
       CreateInstanceRequest::Result resp;
@@ -495,7 +495,7 @@ namespace Realm {
 						 const std::vector<size_t>& field_sizes,
 						 ReductionOpID redopid,
 						 off_t list_size,
-						 const Realm::ProfilingRequestSet &reqs,
+						 const ProfilingRequestSet &reqs,
 						 RegionInstance parent_inst)
   {
     return create_instance_local(r, linearization_bits, bytes_needed,
@@ -562,7 +562,7 @@ namespace Realm {
 						 const std::vector<size_t>& field_sizes,
 						 ReductionOpID redopid,
 						 off_t list_size,
-						 const Realm::ProfilingRequestSet &reqs,
+						 const ProfilingRequestSet &reqs,
 						 RegionInstance parent_inst)
     {
       return create_instance_remote(r, linearization_bits, bytes_needed,
@@ -655,7 +655,7 @@ namespace Realm {
 						 const std::vector<size_t>& field_sizes,
 						 ReductionOpID redopid,
 						 off_t list_size,
-                                                 const Realm::ProfilingRequestSet &reqs,
+                                                 const ProfilingRequestSet &reqs,
 						 RegionInstance parent_inst)
     {
       if(gasnet_mynode() == 0) {
@@ -1097,7 +1097,7 @@ namespace Realm {
     switch(impl->kind) {
     case MemoryImpl::MKIND_SYSMEM:
       {
-	Realm::LocalCPUMemory *cpumem = (Realm::LocalCPUMemory *)impl;
+	LocalCPUMemory *cpumem = (LocalCPUMemory *)impl;
 	if(cpumem->registered) {
 	  if(data == (cpumem->base + args.offset)) {
 	    // copy is in right spot - yay!
@@ -1406,7 +1406,7 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
       if(m_impl->kind == MemoryImpl::MKIND_RDMA) {
-	dstptr = ((char *)(((Realm::RemoteMemory *)m_impl)->regbase)) + offset;
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
@@ -1480,7 +1480,7 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
       if(m_impl->kind == MemoryImpl::MKIND_RDMA) {
-	dstptr = ((char *)(((Realm::RemoteMemory *)m_impl)->regbase)) + offset;
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
@@ -1557,7 +1557,7 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
       if(m_impl->kind == MemoryImpl::MKIND_RDMA) {
-	dstptr = ((char *)(((Realm::RemoteMemory *)m_impl)->regbase)) + offset;
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
