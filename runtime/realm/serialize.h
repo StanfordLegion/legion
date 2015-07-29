@@ -20,6 +20,8 @@
 
 #include <cstddef>
 #include <vector>
+#include <list>
+#include <map>
 
 // helper template tells us which types can be directly copied into serialized streams
 // (this is similar to C++11's is_trivially_copyable, but does not include pointers since
@@ -157,18 +159,18 @@ namespace Realm {
 	return true;
       }
 
-      /* template <typename S, typename YOURTYPE> */
-      /* static bool serdez(S&, const YOURTYPE&) { */
-      /* 	return Your_Type_Needs_A_Custom_Serializer_Implementation<YOURTYPE>::foo; */
-      /* 	return false; */
-      /* } */
+      template <typename S, typename YOURTYPE>
+      static bool serdez(S&, const YOURTYPE&) {
+      	return Your_Type_Needs_A_Custom_Serializer_Implementation<YOURTYPE>::foo;
+      	return false;
+      }
 
       // this isn't right either - it does the right thing when a custom serdez needs to
       //  call another one that's split, but results in infinite recursion when one doesn't exist
-      static bool serdez(FixedBufferSerializer& s, const T& data) { return s << data; }
-      static bool serdez(DynamicBufferSerializer& s, const T& data) { return s << data; }
-      static bool serdez(ByteCountSerializer& s, const T& data) { return s << data; }
-      static bool serdez(FixedBufferDeserializer& s, const T& data) { return s >> const_cast<T&>(data); }
+      //static bool serdez(FixedBufferSerializer& s, const T& data) { return s << data; }
+      //static bool serdez(DynamicBufferSerializer& s, const T& data) { return s << data; }
+      //static bool serdez(ByteCountSerializer& s, const T& data) { return s << data; }
+      //static bool serdez(FixedBufferDeserializer& s, const T& data) { return s >> const_cast<T&>(data); }
     };
 
     template <typename T>
@@ -222,11 +224,24 @@ namespace Realm {
     template <typename S, typename T>
       bool operator&(S& s, const T& data) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serdez(s, data); }
 
+    // support for some STL containers (vector is special because it can still be trivially_copyable)
     template <typename S, typename T>
       bool operator<<(S& s, const std::vector<T>& v) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serialize_vector(s, v); }
 
     template <typename S, typename T>
       bool operator>>(S& s, std::vector<T>& v) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::deserialize_vector(s, v); }
+
+    template <typename S, typename T>
+      bool operator<<(S& s, const std::list<T>& l);
+
+    template <typename S, typename T>
+      bool operator>>(S& s, std::list<T>& l);
+
+    template <typename S, typename T1, typename T2>
+      bool operator<<(S& s, const std::map<T1, T2>& m);
+
+    template <typename S, typename T1, typename T2>
+      bool operator>>(S& s, std::map<T1, T2>& m);
   }; // namespace Serialization
 
 }; // namespace Realm

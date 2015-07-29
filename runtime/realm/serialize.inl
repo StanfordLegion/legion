@@ -105,6 +105,9 @@ namespace Realm {
 
     DynamicBufferSerializer::DynamicBufferSerializer(size_t initial_size)
     {
+      // always allocate at least a little space
+      if(initial_size < 16)
+	initial_size = 16;
       base = (char *)malloc(initial_size);
       assert(base != 0);
       pos = base;
@@ -292,6 +295,66 @@ namespace Realm {
 	data = *(const T *)pos;
       pos = pos2;
       return ok_to_read;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // STL container helpers (except std::vector)
+    //
+
+    template <typename S, typename T>
+    inline bool operator<<(S& s, const std::list<T>& l)
+    {
+      size_t len = l.size();
+      if(!(s << len)) return false;
+      for(typename std::list<T>::const_iterator it = l.begin();
+	  it != l.end();
+	  it++)
+	if(!(s << *it)) return false;
+      return true;
+    }
+
+    template <typename S, typename T>
+    inline bool operator>>(S& s, std::list<T>& l)
+    {
+      size_t len;
+      if(!(s >> len)) return false;
+      l.clear(); // start from an empty list
+      for(size_t i = 0; i < len; i++) {
+	l.push_back(T()); // won't work if no default constructor for T
+	if(!(s >> l.back())) return false;
+      }
+      return true;
+    }
+
+    template <typename S, typename T1, typename T2>
+    inline bool operator<<(S& s, const std::map<T1,T2>& m)
+    {
+      size_t len = m.size();
+      if(!(s << len)) return false;
+      for(typename std::map<T1,T2>::const_iterator it = m.begin();
+	  it != m.end();
+	  it++) {
+	if(!(s << it->first)) return false;
+	if(!(s << it->second)) return false;
+      }
+      return true;
+    }
+
+    template <typename S, typename T1, typename T2>
+    inline bool operator>>(S& s, std::map<T1,T2>& m)
+    {
+      size_t len;
+      if(!(s >> len)) return false;
+      m.clear(); // start from an empty map
+      for(size_t i = 0; i < len; i++) {
+	T1 k;
+	T2 v;
+	if(!(s >> k)) return false;
+	if(!(s >> v)) return false;
+	m[k] = v;
+      }
+      return true;
     }
 
   }; // namespace Serialization
