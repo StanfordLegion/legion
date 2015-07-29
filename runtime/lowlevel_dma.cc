@@ -19,6 +19,7 @@
 #endif
 #include "accessor.h"
 #include <errno.h>
+#include <aio.h>
 
 #include <queue>
 
