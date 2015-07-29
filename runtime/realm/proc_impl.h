@@ -453,6 +453,7 @@ namespace Realm {
       const char *const processor_name;
       GASNetHSL mutex;
       GASNetCondVar condvar;
+      bool done_initialization;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
@@ -548,6 +549,7 @@ namespace Realm {
     protected:
       GASNetHSL mutex;
       GASNetCondVar condvar;
+      bool done_initialization;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
