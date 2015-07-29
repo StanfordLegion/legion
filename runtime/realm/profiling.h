@@ -130,12 +130,6 @@ namespace Realm {
     };
   };
 
-  // A helper class for the runtime to use in creating an initial time on a node
-  class InitialTime {
-  public:
-    static inline unsigned long long get_initial_time(void);
-  };
-
   class ProfilingRequest {
   public:
     ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id);

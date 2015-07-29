@@ -19,12 +19,6 @@
 #include "lowlevel_impl.h"
 #include "logging.h"
 
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::DetailedTimer DetailedTimer;
-
-};
-
 namespace Realm {
 
   Logger log_inst("inst");

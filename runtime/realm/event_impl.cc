@@ -17,11 +17,6 @@
 #include "lowlevel_impl.h"
 #include "logging.h"
 
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::DetailedTimer DetailedTimer;
-};
-
 #ifdef USE_CUDA
 GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
 #endif

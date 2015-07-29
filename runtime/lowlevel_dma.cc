@@ -45,11 +45,14 @@ using namespace LegionRuntime::HighLevel::LegionProf;
 
 #include "atomics.h"
 
+#include "realm/timers.h"
+
 namespace LegionRuntime {
   namespace LowLevel {
 
     typedef Realm::GASNetMemory GASNetMemory;
     typedef Realm::DiskMemory DiskMemory;
+    typedef Realm::DetailedTimer DetailedTimer;
 
     inline Realm::RuntimeImpl *get_runtime(void)
     {

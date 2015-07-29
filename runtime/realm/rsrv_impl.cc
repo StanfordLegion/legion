@@ -19,12 +19,6 @@
 #include "event_impl.h"
 #include "lowlevel_impl.h"
 
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::DetailedTimer DetailedTimer;
-
-};
-
 namespace Realm {
 
   Logger log_reservation("reservation");

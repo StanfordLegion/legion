@@ -34,12 +34,6 @@ namespace Realm {
 #include "lowlevel_gpu.h"
 #endif
 
-// need Clock from utilities.h
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::LowLevel::Clock Clock;
-};
-
 #include <unistd.h>
 
 namespace Realm {
@@ -408,9 +402,9 @@ namespace Realm {
       hcount += Realm::ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
       hcount += Realm::ValidMaskDataMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
 #ifdef DETAILED_TIMING
-      hcount += RollUpRequestMessage::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
-      hcount += RollUpDataMessage::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
-      hcount += ClearTimerRequestMessage::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
+      hcount += Realm::TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
+      hcount += Realm::TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
+      hcount += Realm::ClearTimersMessage::Message::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
 #endif
       hcount += Realm::DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
       hcount += Realm::RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
@@ -480,9 +474,6 @@ namespace Realm {
 
       if (active_msg_sender_threads)
         start_sending_threads();
-
-      Clock::synchronize();
-      Realm::InitialTime::get_initial_time();
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen

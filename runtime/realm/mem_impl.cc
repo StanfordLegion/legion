@@ -18,12 +18,6 @@
 #include "logging.h"
 #include "serialize.h"
 
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::DetailedTimer DetailedTimer;
-
-};
-
 namespace Realm {
 
   Logger log_malloc("malloc");

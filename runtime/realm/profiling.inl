@@ -22,14 +22,9 @@
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
 
-namespace Realm {
+#include "timers.h"
 
-  /*static*/ inline unsigned long long InitialTime::get_initial_time(void)
-  {
-    static const unsigned long long initial_time = 
-      LegionRuntime::TimeStamp::get_current_time_in_nanos();
-    return initial_time;
-  }
+namespace Realm {
 
   namespace ProfilingMeasurements {
 
@@ -45,26 +40,22 @@ namespace Realm {
 
     inline void OperationTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
-                     InitialTime::get_initial_time();
+      create_time = Clock::current_time();
     }
 
     inline void OperationTimeline::record_ready_time(void)
     {
-      ready_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
-                    InitialTime::get_initial_time();
+      ready_time = Clock::current_time();
     }
 
     inline void OperationTimeline::record_start_time(void)
     {
-      start_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                    InitialTime::get_initial_time();
+      start_time = Clock::current_time();
     }
 
     inline void OperationTimeline::record_end_time(void)
     {
-      end_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                  InitialTime::get_initial_time();
+      end_time = Clock::current_time();
     }
 
     inline bool OperationTimeline::is_valid(void)
@@ -77,14 +68,12 @@ namespace Realm {
 
     inline void InstanceTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                     InitialTime::get_initial_time();
+      create_time = Clock::current_time();
     }
 
     inline void InstanceTimeline::record_delete_time(void)
     {
-      delete_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                      InitialTime::get_initial_time();
+      delete_time = Clock::current_time();
     }
 
   }; // namespace ProfilingMeasurements

@@ -2021,6 +2021,15 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   }
 #endif
 
+  // once we've attached, attempt to synchronize all node's clocks
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  Realm::Clock::set_zero_time();
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  
   segment_info = new gasnet_seginfo_t[gasnet_nodes()];
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 

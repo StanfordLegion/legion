@@ -284,7 +284,8 @@ LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
-		   $(LG_RT_DIR)/realm/operation.cc
+		   $(LG_RT_DIR)/realm/operation.cc \
+		   $(LG_RT_DIR)/realm/timers.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that

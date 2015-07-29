@@ -18,12 +18,6 @@
 #include "logging.h"
 #include "serialize.h"
 
-#include "utilities.h"
-namespace Realm {
-  typedef LegionRuntime::DetailedTimer DetailedTimer;
-
-};
-
 GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
 
 namespace Realm {

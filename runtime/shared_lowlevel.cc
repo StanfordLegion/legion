@@ -21,6 +21,7 @@
 #include "legion_utilities.h"
 #endif
 #include "realm/profiling.h"
+#include "realm/timers.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -125,6 +126,9 @@ pthread_key_t local_thread_key;
 namespace LegionRuntime {
   namespace LowLevel {
 
+    // bring Realm's DetailedTimer into this namespace
+    typedef Realm::DetailedTimer DetailedTimer;
+    
 // MAC OSX doesn't support pthread barrier type
 #ifdef __MACH__
     typedef UtilityBarrier pthread_barrier_t;
@@ -6807,7 +6811,9 @@ namespace LegionRuntime {
 
     bool RuntimeImpl::init(int *argc, char ***argv)
     {
-        Realm::InitialTime::get_initial_time();
+        // make all timestamps use relative time from now
+        Realm::Clock::set_zero_time();
+
         unsigned num_cpus = NUM_PROCS;
         unsigned num_utility_cpus = NUM_UTIL_PROCS;
         unsigned num_dma_threads = NUM_DMA_THREADS;
