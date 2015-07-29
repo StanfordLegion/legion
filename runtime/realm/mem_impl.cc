@@ -21,6 +21,10 @@
 #include "inst_impl.h"
 #include "runtime_impl.h"
 
+#ifdef USE_CUDA
+#include "lowlevel_gpu.h"
+#endif
+
 namespace Realm {
 
   Logger log_malloc("malloc");

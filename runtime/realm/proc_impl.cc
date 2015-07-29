@@ -20,6 +20,13 @@
 #include "logging.h"
 #include "serialize.h"
 
+#ifdef USE_CUDA
+#include "lowlevel_gpu.h"
+#endif
+
+#include <sys/types.h>
+#include <dirent.h>
+
 GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
 
 #define CHECK_PTHREAD(cmd) do { \
@@ -53,7 +60,7 @@ namespace Realm {
       }
       // Otherwise this better be a GPU processor 
 #ifdef USE_CUDA
-      return GPUProcessor::get_processor();
+      return LegionRuntime::LowLevel::GPUProcessor::get_processor();
 #else
       assert(0);
 #endif

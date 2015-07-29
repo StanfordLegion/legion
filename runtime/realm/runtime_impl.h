@@ -26,6 +26,7 @@
 #include "profiling.h"
 
 #include "dynamic_table.h"
+#include "proc_impl.h"
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)

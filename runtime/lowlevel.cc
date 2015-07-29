@@ -69,13 +69,6 @@ pthread_key_t thread_timer_key;
 namespace LegionRuntime {
   namespace LowLevel {
 
-    inline Realm::RuntimeImpl *get_runtime(void)
-    {
-      return Realm::get_runtime();
-    }
-
-    typedef Realm::DetailedTimer DetailedTimer;
-    
 #ifdef USE_CUDA
     Logger::Category log_gpu("gpu");
 #endif

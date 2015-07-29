@@ -20,6 +20,7 @@
 
 #include "activemsg.h"
 
+#include <stdio.h>
 #include <map>
 
 // outside of namespace because 50-letter-long enums are annoying

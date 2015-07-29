@@ -2104,8 +2104,8 @@ void start_polling_threads(int count)
   for(int i = 0; i < count; i++) {
     pthread_attr_t attr;
     CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(LegionRuntime::LowLevel::proc_assignment)
-      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
+    if(Realm::proc_assignment)
+      Realm::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
     CHECK_PTHREAD( pthread_create(&polling_threads[i], 0, 
 				  gasnet_poll_thread_loop, 0) );
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
@@ -2133,8 +2133,8 @@ void start_sending_threads(void)
     if (i == gasnet_mynode()) continue;
     pthread_attr_t attr;
     CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(LegionRuntime::LowLevel::proc_assignment)
-      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
+    if(Realm::proc_assignment)
+      Realm::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
     CHECK_PTHREAD( pthread_create(&sending_threads[i], 0,
                                   sender_thread_loop, (void*)long(i)));
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );

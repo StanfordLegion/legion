@@ -42,7 +42,7 @@ namespace Realm {
     clock_get_time(cclock, &ts);
     mach_port_deallocate(mach_task_self(), cclock);
 #else
-    struct timestep ts;
+    struct timespec ts;
     clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
 #endif
     double t = ts.tv_sec + (1e-9 * ts.tv_nsec);
@@ -60,7 +60,7 @@ namespace Realm {
     clock_get_time(cclock, &ts);
     mach_port_deallocate(mach_task_self(), cclock);
 #else
-    struct timestep ts;
+    struct timespec ts;
     clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
 #endif
     long long t = (1000000LL * ts.tv_sec) + (ts.tv_nsec / 1000);
@@ -78,7 +78,7 @@ namespace Realm {
     clock_get_time(cclock, &ts);
     mach_port_deallocate(mach_task_self(), cclock);
 #else
-    struct timestep ts;
+    struct timespec ts;
     clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
 #endif
     long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;

@@ -92,8 +92,6 @@ GASNETT_THREADKEY_DECLARE(in_handler);
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 
-#include "utilities.h"
-
 #include <vector>
 
 #define CHECK_PTHREAD(cmd) do { \

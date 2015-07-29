@@ -32,9 +32,16 @@ namespace Realm {
 
 #ifdef USE_CUDA
 #include "lowlevel_gpu.h"
+namespace Realm {
+  typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
+  typedef LegionRuntime::LowLevel::GPUFBMemory GPUFBMemory;
+  typedef LegionRuntime::LowLevel::GPUZCMemory GPUZCMemory;
+  typedef LegionRuntime::LowLevel::GPUWorker GPUWorker;
+};
 #endif
 
 #include <unistd.h>
+#include <signal.h>
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
