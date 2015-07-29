@@ -22,10 +22,6 @@
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
 
-  inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
-  {
-    return LegionRuntime::LowLevel::get_runtime();
-  }
 };
 
 namespace Realm {

@@ -20,11 +20,6 @@
 #include "utilities.h"
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
-
-  inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
-  {
-    return LegionRuntime::LowLevel::get_runtime();
-  }
 };
 
 #ifdef USE_CUDA

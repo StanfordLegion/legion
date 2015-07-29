@@ -18,14 +18,10 @@
 #include "metadata.h"
 
 #include "event_impl.h"
+#include "runtime_impl.h"
 #include "lowlevel_impl.h"
 
 namespace Realm {
-
-  inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
-  {
-    return LegionRuntime::LowLevel::get_runtime();
-  }
 
   typedef LegionRuntime::LowLevel::RegionInstanceImpl RegionInstanceImpl;
   

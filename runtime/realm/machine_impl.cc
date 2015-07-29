@@ -16,17 +16,13 @@
 #include "machine_impl.h"
 
 #include "logging.h"
+#include "runtime_impl.h"
+
 #include "lowlevel_impl.h"
 
 #include "utilities.h"
 namespace Realm {
   typedef LegionRuntime::DetailedTimer DetailedTimer;
-  typedef LegionRuntime::LowLevel::Node Node;
-
-  inline LegionRuntime::LowLevel::RuntimeImpl *get_runtime(void)
-  {
-    return LegionRuntime::LowLevel::get_runtime();
-  }
 };
 
 namespace Realm {

@@ -51,6 +51,11 @@ namespace LegionRuntime {
     typedef Realm::GASNetMemory GASNetMemory;
     typedef Realm::DiskMemory DiskMemory;
 
+    inline Realm::RuntimeImpl *get_runtime(void)
+    {
+      return Realm::get_runtime();
+    }
+
     Logger::Category log_dma("dma");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
