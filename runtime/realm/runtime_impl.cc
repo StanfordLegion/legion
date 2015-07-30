@@ -197,9 +197,8 @@ namespace Realm {
       LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<3> >();
       LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::Translation<1> >();
 
-      // Create the key for the thread local data
-      //CHECK_PTHREAD( pthread_key_create(&thread_timer_key,thread_timer_free) );
-
+      DetailedTimer::init_timers();
+      
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;

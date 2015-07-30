@@ -119,15 +119,21 @@ namespace Realm {
 
     GASNetHSL timer_data_mutex;
     std::vector<PerThreadTimerData *> timer_data;
-#if 0
+
     static void thread_timer_free(void *arg)
     {
       assert(arg != NULL);
       PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
       delete ptr;
     }
-#endif
 
+  /*static*/ void DetailedTimer::init_timers(void)
+  {
+    // Create the key for the thread local data
+    int ret = pthread_key_create(&thread_timer_key,thread_timer_free);
+    assert(ret == 0);
+  }
+  
 #ifdef DETAILED_TIMING
     /*static*/ void DetailedTimer::clear_timers(bool all_nodes /*= true*/)
     {

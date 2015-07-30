@@ -84,6 +84,7 @@ namespace Realm {
   // DetailedTimer allows for precise timing of what a given thread was doing when (or how long)
   class DetailedTimer {
   public:
+    static void init_timers(void);
 #ifdef DETAILED_TIMING
     static void clear_timers(bool all_nodes = true);
     static void push_timer(int timer_kind);
