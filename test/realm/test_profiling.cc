@@ -149,7 +149,8 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 #endif
   
   // launch a child task and perform some measurements on it
-  Processor first_cpu = all_cpus[0];
+  // choose the last cpu, which is likely to be on a different node
+  Processor first_cpu = all_cpus.back();
   ProfilingRequestSet prs;
   prs.add_request(first_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
