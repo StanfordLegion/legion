@@ -1373,6 +1373,24 @@ protected:
       }
       break;
 
+    case 14:
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium14(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+				 hdr->args[0], hdr->args[1], hdr->args[2],
+				 hdr->args[3], hdr->args[4], hdr->args[5],
+				 hdr->args[6], hdr->args[7], hdr->args[8],
+				 hdr->args[9], hdr->args[10], hdr->args[11],
+				 hdr->args[12], hdr->args[13]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort14(peer, hdr->msgid,
+				hdr->args[0], hdr->args[1], hdr->args[2],
+				hdr->args[3], hdr->args[4], hdr->args[5],
+				hdr->args[6], hdr->args[7], hdr->args[8],
+				hdr->args[9], hdr->args[10], hdr->args[11],
+				hdr->args[12], hdr->args[13]) );
+      }
+      break;
+
     case 16:
       if(hdr->payload_mode != PAYLOAD_NONE) {
 	CHECK_GASNET( gasnet_AMRequestMedium16(peer, hdr->msgid, hdr->payload, hdr->payload_size,
