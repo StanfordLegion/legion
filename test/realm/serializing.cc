@@ -75,7 +75,7 @@ std::ostream& operator<<(std::ostream& os, const std::map<T1, T2>& m)
 }
 
 template <typename T>
-void test_dynamic(const char *name, const T& input, size_t exp_size = 0)
+size_t test_dynamic(const char *name, const T& input, size_t exp_size = 0)
 {
   // first serialize and check size
   Realm::Serialization::DynamicBufferSerializer dbs(0);
@@ -133,12 +133,95 @@ void test_dynamic(const char *name, const T& input, size_t exp_size = 0)
   }
 
   free(buffer);
+
+  return act_size;
+}
+
+template <typename T>
+void test_size(const char *name, const T& input, size_t exp_size)
+{
+  Realm::Serialization::ByteCountSerializer bcs;
+
+  bool ok = bcs << input;
+  if(!ok) {
+    std::cout << "ERROR: " << name << "byetcount serialization failed!" << std::endl;
+    error_count++;
+  }
+
+  size_t act_size = bcs.bytes_used();
+  if(act_size != exp_size) {
+    std::cout << "ERROR: " << name << "bytecount size = " << act_size << " (should be " << exp_size << ")" << std::endl;
+    error_count++;
+  } else {
+    if(verbose)
+      printf("OK: %s bytecount size = %zd\n", name, act_size);
+  }
+}
+
+template <typename T>
+void test_fixed(const char *name, const T& input, size_t exp_size)
+{
+  // first serialize and check size
+  void *buffer = malloc(exp_size);
+  Realm::Serialization::FixedBufferSerializer fbs(buffer, exp_size);
+
+  bool ok1 = fbs << input;
+  if(!ok1) {
+    std::cout << "ERROR: " << name << "fixed serialization failed!" << std::endl;
+    error_count++;
+  }
+
+  ptrdiff_t leftover = fbs.bytes_left();
+
+  if(leftover != 0) {
+    std::cout << "ERROR: " << name << "fixed leftover = " << leftover << std::endl;
+    error_count++;
+  } else {
+    if(verbose)
+      printf("OK: %s fixed leftover = %zd\n", name, leftover);
+  }
+
+  // now deserialize into a new object and test for equality
+  Realm::Serialization::FixedBufferDeserializer fbd(buffer, exp_size);
+  T output;
+
+  bool ok2 = fbd >> output;
+  if(!ok2) {
+    printf("ERROR: %s fixed deserialization failed!\n", name);
+    error_count++;
+  }
+
+  leftover = fbd.bytes_left();
+  if(leftover != 0) {
+    printf("ERROR: %s fixed leftover = %zd\n", name, leftover);
+    error_count++;
+  }
+
+  bool ok3 = (input == output);
+  if(ok3) {
+    if(verbose)
+      printf("OK: %s fixed output matches\n", name);
+  } else {
+    printf("ERROR: %s fixed output mismatch:\n", name);
+    std::cout << "Input:  " << input << std::endl;
+    std::cout << "Buffer: [" << exp_size << "]";
+    std::cout << std::hex;
+    for(size_t i = 0; i < exp_size; i++)
+      std::cout << ' ' << std::setfill('0') << std::setw(2) << (int)((unsigned char *)buffer)[i];
+    std::cout << std::dec << std::endl;
+    std::cout << "Output: " << output << std::endl;
+    error_count++;
+  }
+
+  free(buffer);
 }
 
 template <typename T>
 void do_test(const char *name, const T& input, size_t exp_size = 0)
 {
-  test_dynamic(name, input, exp_size);
+  exp_size = test_dynamic(name, input, exp_size);
+  test_size(name, input, exp_size);
+  test_fixed(name, input, exp_size);
 }
 
 template <typename T1, typename T2>
@@ -179,7 +262,11 @@ bool operator>>(S& s, PODPacked& p) { return (s >> p.x) && (s >> p.y); }
 
 typedef Pair<double, char> PODPacked2;
 template <typename S>
-bool operator&(S& s, const PODPacked& p) { return (s & p.x) && (s & p.y); }
+bool operator&(S& s, const PODPacked2& p) { return (s & p.x) && (s & p.y); }
+
+typedef Pair<PODPacked, int> PP2;
+template <typename S>
+bool operator&(S& s, const PP2& p) { return (s & p.x) && (s & p.y); }
 
 int main(int argc, const char *argv[])
 {
@@ -210,13 +297,27 @@ int main(int argc, const char *argv[])
 
   do_test("pod packed", PODPacked(8.5, 9.1), 12 /* not sizeof(PODPacked)*/);
 
-  //do_test("pod packed2", PODPacked2(10.5, 'z'), 9 /* not sizeof(PODPacked2)*/);
+  do_test("pod packed2", PODPacked2(10.5, 'z'), 9 /* not sizeof(PODPacked2)*/);
+
+  do_test("pp2", PP2(PODPacked(44.3, 1), 9), 16 /* not sizeof(PP2) */);
 
   std::vector<int> a(3);
   a[0] = 1;
   a[1] = 2;
   a[2] = 3;
   do_test("vector<int>", a, sizeof(size_t) + a.size() * sizeof(int));
+
+  std::vector<PODStruct> a2(1);
+  a2[0] = PODStruct(3, 4);
+  do_test("vector<PODStruct>", a2, sizeof(size_t) + a2.size() * sizeof(PODStruct));
+
+  std::vector<PODPacked> a3(1);
+  a3[0] = PODPacked(3, 4);
+  do_test("vector<PODPacked>", a3, sizeof(size_t) + 12 /* not sizeof(PODPacked)*/);
+
+  std::vector<PODPacked2> a4(1);
+  a4[0] = PODPacked2(3, 4);
+  do_test("vector<PODPacked2>", a4, sizeof(size_t) + 9 /* not sizeof(PODPacked2)*/);
 
   std::list<int> b;
   b.push_back(4);
@@ -230,4 +331,17 @@ int main(int argc, const char *argv[])
   c[9] = 2.2;
   c[10] = 3.3;
   do_test("map<int,double>", c, sizeof(size_t) + c.size() * 16 /*alignment*/);
+
+  std::vector<std::string> ss;
+  ss.push_back("Hello");
+  ss.push_back("World");
+  do_test("vector<string>", ss, sizeof(size_t) + 12 + 9);
+  
+  if(error_count > 0) {
+    std::cout << "ERRORS FOUND" << std::endl;
+    exit(1);
+  } else {
+    std::cout << "all tests passed" << std::endl;
+    exit(0);
+  }
 }
