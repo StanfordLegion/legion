@@ -175,6 +175,9 @@ namespace Realm {
   protected:
     friend class ProfilingMeasurementCollection;
 
+    template <typename S> friend bool operator<<(S &s, const ProfilingRequestSet &prs);
+    template <typename S> friend bool operator>>(S &s, ProfilingRequestSet &prs);
+
     std::vector<ProfilingRequest *> requests;
   };
 

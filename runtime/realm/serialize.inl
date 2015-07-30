@@ -279,10 +279,21 @@ namespace Realm {
       const char *pos2 = pos + datalen;
       // only copy if we have enough data
       bool ok_to_read = (pos2 <= limit);
-      if(ok_to_read)
+      if(ok_to_read && data)
 	memcpy(data, pos, datalen);
       pos = pos2;
       return ok_to_read;
+    }
+
+    const void *FixedBufferDeserializer::peek_bytes(size_t datalen)
+    {
+      const char *pos2 = pos + datalen;
+      // only copy if we have enough data
+      bool ok_to_read = (pos2 <= limit);
+      if(ok_to_read)
+	return pos;
+      else
+	return 0;
     }
 
     template <typename T>
@@ -357,5 +368,27 @@ namespace Realm {
       return true;
     }
 
+    template <typename S>
+    inline bool operator<<(S& s, const std::string& str)
+    {
+      // strings are common, so use a shorter length - 32 bits is plenty
+      unsigned len = str.length();
+      if(!(s << len)) return false;
+      // no alignment needed for character data
+      return s.append_bytes(str.data(), len);
+    }
+
+    template <typename S>
+    inline bool operator>>(S& s, std::string& str)
+    {
+      // strings are common, so use a shorter length - 32 bits is plenty
+      unsigned len;
+      if(!(s >> len)) return false;
+      const void *p = s.peek_bytes(len);
+      if(!p) return false;
+      str.assign((const char *)p, len);
+      return s.extract_bytes(0, len);
+    }      
+    
   }; // namespace Serialization
 }; // namespace Realm

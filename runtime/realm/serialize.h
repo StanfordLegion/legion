@@ -22,6 +22,34 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <string>
+
+// To add serializability for a new data type, do one of the following:
+//
+// 1) If your type can be copied bit for bit (i.e. C++11's is_trivially_copyable), just do:
+//  TYPE_IS_SERIALIZABLE(my_type)
+//
+// 2) If your type is just a struct with a bunch of members, do:
+//  template<typename S>
+//  bool operator&(S& s, const my_type& t)
+//  {
+//    return (s & t.field1) && (s & t.field2) ... ;
+//  }
+//
+// 3) If your type needs to serialize and deserialize in a complicated way, define them separately:
+//
+//  template<typename S>
+//  bool operator<<(S& s, const my_type& t)
+//  {
+//    // serialization code here...
+//  }
+//
+//  template<typename S>
+//  bool operator>>(S& s, my_type& t)
+//  {
+//    // deserialization code here...
+//  }
+
 
 // helper template tells us which types can be directly copied into serialized streams
 // (this is similar to C++11's is_trivially_copyable, but does not include pointers since
@@ -118,6 +146,7 @@ namespace Realm {
 
       inline bool enforce_alignment(size_t granularity);
       inline bool extract_bytes(void *data, size_t datalen);
+      inline const void *peek_bytes(size_t datalen);
       template <typename T> bool extract_serializable(T& data);
 
     protected:
@@ -128,19 +157,29 @@ namespace Realm {
     template <typename YOURTYPE>
       struct Your_Type_Needs_A_Custom_Serializer_Implementation {};
 
-    template <typename T, bool IS_SERIALIZEABLE>
+    template <typename T, bool CUSTOM_SERDEZ, bool IS_SERIALIZABLE>
     struct SerializationHelper {
-      template <typename S>
-      static bool serialize(S& s, const T& data) { return s & data; }
-      template <typename S>
-      static bool deserialize(S& s, T& data) { return s & data; }
+      // the base case is when we can't copy bits and don't have an operator &
+      // since we only got here because we didn't have << or >> either, we're toast
 
+      template <typename S>
+      static bool serialize(S& s, const T& data) 
+      {
+	return Your_Type_Needs_A_Custom_Serializer_Implementation<T>::FATAL_ERROR;
+      }
+
+      template <typename S>
+      static bool deserialize(S& s, T& data) 
+      {
+	return Your_Type_Needs_A_Custom_Serializer_Implementation<T>::FATAL_ERROR;
+      }
+
+      // vectors might actually be ok - see if the inner type can be serialized somehow
       template <typename S>
       static bool serialize_vector(S& s, const std::vector<T>& v)
       {
 	size_t c = v.size();
 	if(!(s << c)) return false;
-	// have to serialize elements individually
 	for(size_t i = 0; i < c; i++)
 	  if(!(s << v[i])) return false;
 	return true;
@@ -153,28 +192,15 @@ namespace Realm {
 	if(!(s >> c)) return false;
 	// TODO: sanity-check size?
 	v.resize(c);
-	// have to deserialize elements individually
 	for(size_t i = 0; i < c; i++)
 	  if(!(s >> v[i])) return false;
 	return true;
       }
-
-      template <typename S, typename YOURTYPE>
-      static bool serdez(S&, const YOURTYPE&) {
-      	return Your_Type_Needs_A_Custom_Serializer_Implementation<YOURTYPE>::foo;
-      	return false;
-      }
-
-      // this isn't right either - it does the right thing when a custom serdez needs to
-      //  call another one that's split, but results in infinite recursion when one doesn't exist
-      //static bool serdez(FixedBufferSerializer& s, const T& data) { return s << data; }
-      //static bool serdez(DynamicBufferSerializer& s, const T& data) { return s << data; }
-      //static bool serdez(ByteCountSerializer& s, const T& data) { return s << data; }
-      //static bool serdez(FixedBufferDeserializer& s, const T& data) { return s >> const_cast<T&>(data); }
     };
 
-    template <typename T>
-    struct SerializationHelper<T, true> {
+    template <typename T, bool CUSTOM_SERDEZ>
+    struct SerializationHelper<T, CUSTOM_SERDEZ, true> {
+      // this is the special case where we can copy bits directly, even for vectors
       template <typename S>
       static bool serialize(S& s, const T& data) 
       {
@@ -210,26 +236,100 @@ namespace Realm {
 		s.enforce_alignment(__alignof__(T)) &&
 		s.extract_bytes(&v[0], sizeof(T) * c));
       }
+    };
 
-      static bool serdez(FixedBufferSerializer& s, const T& data) { return serialize(s, data); }
-      static bool serdez(DynamicBufferSerializer& s, const T& data) { return serialize(s, data); }
-      static bool serdez(ByteCountSerializer& s, const T& data) { return serialize(s, data); }
-      static bool serdez(FixedBufferDeserializer& s, const T& data) { return deserialize(s, *const_cast<T*>(&data)); }
-  };
+    template <typename T>
+    struct SerializationHelper<T, true, false> {
+      // this is the case where T has a custom operator &, so we can map both serialize
+      //  and deserialize onto that
+      template <typename S>
+      static bool serialize(S& s, const T& data) 
+      {
+	return s & data;
+      }
+      template <typename S>
+      static bool deserialize(S& s, T& data)
+      {
+	return s & data;
+      }
+
+      template <typename S>
+      static bool serialize_vector(S& s, const std::vector<T>& v)
+      {
+	size_t c = v.size();
+	if(!(s << c)) return false;
+	for(size_t i = 0; i < c; i++)
+	  if(!(s << v[i])) return false;
+	return true;
+      }
+
+      template <typename S>
+      static bool deserialize_vector(S& s, std::vector<T>& v)
+      {
+	size_t c;
+	if(!(s >> c)) return false;
+	// TODO: sanity-check size?
+	v.resize(c);
+	for(size_t i = 0; i < c; i++)
+	  if(!(s >> v[i])) return false;
+	return true;
+      }
+    };
+
+
+    template <typename T>
+    struct SerDezSplitter {
+      static bool serdez(FixedBufferSerializer& s, const T& data) { return s << data; }
+      static bool serdez(DynamicBufferSerializer& s, const T& data) { return s << data; }
+      static bool serdez(ByteCountSerializer& s, const T& data) { return s << data; }
+      static bool serdez(FixedBufferDeserializer& s, const T& data) { return s >> const_cast<T&>(data); }
+    };
+
+    // we use the & operator to allow a type to "distribute" both serialization and deserialization
+    //  over its fields/etc. with a single method, but it has to serve two purposes:
+    // a) a type-based split to << or >> for anything for which << and >> are defined, and
+    // b) a fallback from << and >> when a custom & is defined
+    //
+    // to detect whether a custom & is defined, the default returns a funny bool2 type (so we can
+    //  use template-fu that uses sizeof(returntype) that coerces back into a normal bool
+    class bool2 {
+    public:
+      explicit bool2(bool b) : x(b), y(false) {}
+      operator bool(void) const { return x; };
+    protected:
+      bool x, y;
+    };
 
     template <typename S, typename T>
-      bool operator<<(S& s, const T& data) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serialize(s, data); }
+      bool2 operator&(S& s, const T& data) { return bool2(SerDezSplitter<T>::serdez(s,data)); }
+    
     template <typename S, typename T>
-      bool operator>>(S& s, T& data) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::deserialize(s, data); }
+      struct has_custom_serdez {
+	static const bool value = (sizeof((*(S*)0) & (*(T*)0)) == sizeof(bool));
+      };
+
     template <typename S, typename T>
-      bool operator&(S& s, const T& data) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serdez(s, data); }
+      bool operator<<(S& s, const T& data)
+    {
+      return SerializationHelper<T,
+	                         has_custom_serdez<S,T>::value,
+	                         is_directly_serializable::test<T>::value>::serialize(s, data);
+    }
+    
+    template <typename S, typename T>
+      bool operator>>(S& s, T& data)
+    {
+      return SerializationHelper<T,
+	                         has_custom_serdez<S,T>::value,
+	                         is_directly_serializable::test<T>::value>::deserialize(s, data);
+    }
 
     // support for some STL containers (vector is special because it can still be trivially_copyable)
     template <typename S, typename T>
-      bool operator<<(S& s, const std::vector<T>& v) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::serialize_vector(s, v); }
+      bool operator<<(S& s, const std::vector<T>& v) { return SerializationHelper<T, has_custom_serdez<S,T>::value,is_directly_serializable::test<T>::value>::serialize_vector(s, v); }
 
     template <typename S, typename T>
-      bool operator>>(S& s, std::vector<T>& v) { return SerializationHelper<T, is_directly_serializable::test<T>::value>::deserialize_vector(s, v); }
+      bool operator>>(S& s, std::vector<T>& v) { return SerializationHelper<T, has_custom_serdez<S,T>::value,is_directly_serializable::test<T>::value>::deserialize_vector(s, v); }
 
     template <typename S, typename T>
       bool operator<<(S& s, const std::list<T>& l);
@@ -242,6 +342,12 @@ namespace Realm {
 
     template <typename S, typename T1, typename T2>
       bool operator>>(S& s, std::map<T1, T2>& m);
+
+    template <typename S>
+      bool operator<<(S& s, const std::string& str);
+
+    template <typename S>
+      bool operator>>(S& s, std::string& str);
   }; // namespace Serialization
 
 }; // namespace Realm

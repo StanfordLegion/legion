@@ -21,6 +21,10 @@
 #include "serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
 
 #include "timers.h"
 
@@ -125,6 +129,28 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ProfilingRequestSet
+  //
+
+  template <typename S>
+  bool operator<<(S &s, const ProfilingRequestSet &prs)
+  {
+    // TODO: actual data :)
+    int dummy = 5;
+    return s << dummy;
+  }
+  
+  template <typename S>
+  bool operator>>(S &s, ProfilingRequestSet &prs)
+  {
+    // TODO: actual data :)
+    int dummy;
+    return s >> dummy;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ProfilingResponse
   //
 
@@ -148,5 +174,6 @@ namespace Realm {
     } else
       return 0;
   }
+
 
 }; // namespace Realm
