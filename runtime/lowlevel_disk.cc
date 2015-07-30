@@ -182,6 +182,7 @@ namespace LegionRuntime {
                  list_size, reqs, parent_inst);
 
       HDFMetadata* new_hdf = new HDFMetadata;
+      new_hdf->hdf_memory = this;
       new_hdf->ndims = domain.get_dim();
       for (int i = 0; i < domain.get_dim(); i++) {
         new_hdf->lo[i] = domain.rect_data[i];
@@ -192,6 +193,7 @@ namespace LegionRuntime {
         flags = H5F_ACC_RDONLY;
       else
         flags = H5F_ACC_RDWR;
+      this->mutex.lock();
       new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
       for (IDType idx = 0; idx < path_names.size(); idx ++) {
         new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx], H5P_DEFAULT));
@@ -202,7 +204,7 @@ namespace LegionRuntime {
         hdf_metadata[inst.id] = new_hdf;
       else
         hdf_metadata.push_back(new_hdf);
-
+      this->mutex.unlock();
       return inst;
     }
 
@@ -211,6 +213,7 @@ namespace LegionRuntime {
     {
       HDFMetadata* new_hdf = hdf_metadata[ID(i).index_l()];
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
+      this->mutex.lock();
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
         H5Tclose(new_hdf->datatype_ids[idx]);
@@ -220,6 +223,7 @@ namespace LegionRuntime {
       new_hdf->datatype_ids.clear();
       delete new_hdf;
       destroy_instance_local(i, local_destroy);
+      this->mutex.unlock();
     }
 
     off_t HDFMemory::alloc_bytes(size_t size)
@@ -242,6 +246,7 @@ namespace LegionRuntime {
 
     void HDFMemory::get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
+      this->mutex.lock();
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
       assert(size == H5Tget_size(metadata->datatype_ids[fid]));
@@ -256,6 +261,7 @@ namespace LegionRuntime {
       H5Dread(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, dst);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
+      this->mutex.unlock();
     }
 
     void HDFMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -265,6 +271,7 @@ namespace LegionRuntime {
 
     void HDFMemory::put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
+      this->mutex.lock();
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
       assert(size == H5Tget_size(hdf_metadata[inst_id]->datatype_ids[fid]));
@@ -279,6 +286,7 @@ namespace LegionRuntime {
       H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, src);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
+      this->mutex.unlock();
     }
 
     void HDFMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,

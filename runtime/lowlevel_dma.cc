@@ -2776,7 +2776,10 @@ namespace LegionRuntime {
           {
             ID id = dst_inst.id; 
             unsigned index = id.index_l();
+            get_runtime()->get_memory_impl(src_mem)->mutex.lock();
             HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
+            get_runtime()->get_memory_impl(src_mem)->mutex.unlock();
+
             log_dma.info("create mem->hdf xferdes\n");
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
                                               src_buf, dst_buf, src_mem_base, hdf_metadata,
