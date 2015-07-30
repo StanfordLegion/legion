@@ -54,13 +54,15 @@ vpath %.cc .:$(RUNTIME_VPATH)
 
 REALM_LIB := librealm.a
 
-foo :
-	echo $(REALM_OBJS)
+run_all : $(TESTS:%=run_%)
+
+run_% : %
+	./$*
 
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
 
 $(TESTS) : % : %.cc librealm.a
 	$(GCC) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS)
