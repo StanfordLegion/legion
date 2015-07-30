@@ -1,3 +1,4 @@
 *.dSYM
 librealm.a
 serializing
+test_profiling

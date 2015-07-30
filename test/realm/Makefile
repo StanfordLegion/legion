@@ -43,13 +43,15 @@ LD_FLAGS	:=
 NO_BUILD_RULES=1
 include $(LG_RT_DIR)/runtime.mk
 
-TESTS := serializing
+TESTS := serializing test_profiling
 
-REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC)))
+REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
+              $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
 RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(LOW_RUNTIME_SRC))))
 vpath %.cc .:$(RUNTIME_VPATH)
+vpath %.S .:$(RUNTIME_VPATH)
 #VPATH = .:$(RUNTIME_VPATH)
 
 REALM_LIB := librealm.a
@@ -72,4 +74,7 @@ $(REALM_LIB) : $(REALM_OBJS)
 	ar rcv $(REALM_LIB) $(REALM_OBJS)
 
 %.o : %.cc
+	$(GCC) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+%.o : %.S
 	$(GCC) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
