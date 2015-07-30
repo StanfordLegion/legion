@@ -441,6 +441,11 @@ namespace Realm {
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
 		     *argc, (const char **)*argv);
+#ifndef USE_GASNET
+      // network initialization is also responsible for setting the "zero_time"
+      //  for relative timing - no synchronization necessary in non-gasnet case
+      Realm::Clock::set_zero_time();
+#endif
 
       // Put this here so that it complies with the GASNet specification and
       // doesn't make any calls between gasnet_init and gasnet_attach

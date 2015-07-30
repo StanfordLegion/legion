@@ -94,7 +94,11 @@ namespace Realm {
 
   inline /*static*/ void Clock::set_zero_time(void)
   {
-    zero_time = current_time_in_nanoseconds(true);
+    // this looks weird, but we can't use the absolute time because it uses
+    //  a different system clock in POSIX-land, so we ask for the current
+    //  relative time (based on whatever zero_time currently is) and add
+    //  that in
+    zero_time += current_time_in_nanoseconds(false);
   }
 
   
