@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <vector>
 #include <list>
+#include <set>
 #include <map>
 #include <string>
 
@@ -336,6 +337,12 @@ namespace Realm {
 
     template <typename S, typename T>
       bool operator>>(S& s, std::list<T>& l);
+
+    template <typename S, typename T>
+      bool operator<<(S& s, const std::set<T>& ss);
+
+    template <typename S, typename T>
+      bool operator>>(S& s, std::set<T>& ss);
 
     template <typename S, typename T1, typename T2>
       bool operator<<(S& s, const std::map<T1, T2>& m);

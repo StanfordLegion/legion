@@ -338,6 +338,32 @@ namespace Realm {
       return true;
     }
 
+    template <typename S, typename T>
+    inline bool operator<<(S& s, const std::set<T>& ss)
+    {
+      size_t len = ss.size();
+      if(!(s << len)) return false;
+      for(typename std::set<T>::const_iterator it = ss.begin();
+	  it != ss.end();
+	  it++)
+	if(!(s << *it)) return false;
+      return true;
+    }
+
+    template <typename S, typename T>
+    inline bool operator>>(S& s, std::set<T>& ss)
+    {
+      size_t len;
+      if(!(s >> len)) return false;
+      ss.clear(); // start from an empty set
+      for(size_t i = 0; i < len; i++) {
+	T v;  // won't work if no default constructor for T
+	if(!(s >> v)) return false;
+	ss.insert(v);
+      }
+      return true;
+    }
+
     template <typename S, typename T1, typename T2>
     inline bool operator<<(S& s, const std::map<T1,T2>& m)
     {
