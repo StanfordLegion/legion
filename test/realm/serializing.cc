@@ -106,7 +106,7 @@ size_t test_dynamic(const char *name, const T& input, size_t exp_size = 0)
       error_count++;
     } else {
       if(verbose)
-	printf("OK: %s dynamic size = %zd\n", name, act_size);
+	std::cout << "OK: " << name << " dynamic size = " << act_size << std::endl;
     }
   }
 
@@ -118,22 +118,22 @@ size_t test_dynamic(const char *name, const T& input, size_t exp_size = 0)
 
   bool ok2 = fbd >> output;
   if(!ok2) {
-    printf("ERROR: %s dynamic deserialization failed!\n", name);
+    std::cout << "ERROR: " << name << " dynamic deserialization failed!" << std::endl;
     error_count++;
   }
 
   ptrdiff_t leftover = fbd.bytes_left();
   if(leftover != 0) {
-    printf("ERROR: %s dynamic leftover = %zd\n", name, leftover);
+    std::cout << "ERROR: " << name << " dynamic leftover = " << leftover << std::endl;
     error_count++;
   }
 
   bool ok3 = (input == output);
   if(ok3) {
     if(verbose)
-      printf("OK: %s dynamic output matches\n", name);
+      std::cout << "OK: " << name << " dynamic output matches" << std::endl;
   } else {
-    printf("ERROR: %s dynamic output mismatch:\n", name);
+    std::cout << "ERROR: " << name << " dynamic output mismatch:" << std::endl;
     std::cout << "Input:  " << input << std::endl;
     std::cout << "Buffer: [" << act_size << "]";
     std::cout << std::hex;
@@ -166,7 +166,7 @@ void test_size(const char *name, const T& input, size_t exp_size)
     error_count++;
   } else {
     if(verbose)
-      printf("OK: %s bytecount size = %zd\n", name, act_size);
+      std::cout << "OK: " << name << " bytecount size = " << act_size << std::endl;
   }
 }
 
@@ -190,7 +190,7 @@ void test_fixed(const char *name, const T& input, size_t exp_size)
     error_count++;
   } else {
     if(verbose)
-      printf("OK: %s fixed leftover = %zd\n", name, leftover);
+      std::cout << "OK: " << name << " fixed leftover = " << leftover << std::endl;
   }
 
   // now deserialize into a new object and test for equality
@@ -199,22 +199,22 @@ void test_fixed(const char *name, const T& input, size_t exp_size)
 
   bool ok2 = fbd >> output;
   if(!ok2) {
-    printf("ERROR: %s fixed deserialization failed!\n", name);
+    std::cout << "ERROR: " << name << " fixed deserialization failed!" << std::endl;
     error_count++;
   }
 
   leftover = fbd.bytes_left();
   if(leftover != 0) {
-    printf("ERROR: %s fixed leftover = %zd\n", name, leftover);
+    std::cout << "ERROR: " << name << " fixed leftover = " << leftover << std::endl;
     error_count++;
   }
 
   bool ok3 = (input == output);
   if(ok3) {
     if(verbose)
-      printf("OK: %s fixed output matches\n", name);
+      std::cout << "OK: " << name << " fixed output matches" << std::endl;
   } else {
-    printf("ERROR: %s fixed output mismatch:\n", name);
+    std::cout << "ERROR: " << name << " fixed output mismatch:" << std::endl;
     std::cout << "Input:  " << input << std::endl;
     std::cout << "Buffer: [" << exp_size << "]";
     std::cout << std::hex;
