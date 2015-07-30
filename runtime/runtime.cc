@@ -12024,7 +12024,7 @@ namespace LegionRuntime {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //CompositeView::handle_send_composite_view(forest, derez, source);
+      CompositeView::handle_send_composite_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12040,7 +12040,7 @@ namespace LegionRuntime {
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //FillView::handle_send_fill_view(forest, derez, source);
+      FillView::handle_send_fill_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

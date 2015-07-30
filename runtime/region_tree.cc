@@ -9034,8 +9034,8 @@ namespace LegionRuntime {
         assert(it->second.physical_state == NULL);
       }
 #endif
-      // Free the packed buffer if we have one
-      if (packed && (packed_buffer != NULL))
+      // If we still have a buffer, then free it now
+      if (packed_buffer != NULL)
         free(packed_buffer);
     }
 
@@ -9286,7 +9286,7 @@ namespace LegionRuntime {
                                         AddressSpaceID local, ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      if (packed)
+      if (packed_buffer != NULL)
       {
         // If we are already packed this is easy
         rez.serialize(packed_size);
@@ -9453,10 +9453,8 @@ namespace LegionRuntime {
         RegionTreeNode *node = forest->get_node(handle);
         unpack_node_info(node, ctx, derez, source);
       }
-      // Free up the buffer
-      free(packed_buffer);
-      packed_buffer = NULL;
-      packed_size = 0;
+      // Keep the buffer around for now in case we need
+      // to pack it again later (e.g. for composite views)
       packed = false;
     }
 
@@ -13189,11 +13187,14 @@ namespace LegionRuntime {
                                       UserEvent to_trigger, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock when touching the data structures because we might
-      // be getting multiple updates from different locations
+      // Keep track of any composite veiws we need to check 
+      // for having recursive version states at here
+      std::vector<CompositeView*> composite_views;
       {
         RegionTreeNode *owner_node = manager->owner;
         FieldSpaceNode *field_node = owner_node->column_source;
+        // Hold the lock when touching the data structures because we might
+        // be getting multiple updates from different locations
         AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
         assert(meta_state != INVALID_VERSION_STATE);
@@ -13225,6 +13226,13 @@ namespace LegionRuntime {
             DistributedID did;
             derez.deserialize(did);
             LogicalView *view = owner_node->find_view(did);
+            // Check for composite view
+            if (view->is_deferred_view())
+            {
+              DeferredView *def_view = view->as_deferred_view();
+              if (def_view->is_composite_view())
+                composite_views.push_back(def_view->as_composite_view());
+            }
             FieldMask &mask = valid_views[view];
             derez.deserialize(mask);
             field_node->transform_field_mask(mask, source);
@@ -13292,6 +13300,13 @@ namespace LegionRuntime {
             DistributedID did;
             derez.deserialize(did);
             LogicalView *view = owner_node->find_view(did);
+            // Check for composite view
+            if (view->is_deferred_view())
+            {
+              DeferredView *def_view = view->as_deferred_view();
+              if (def_view->is_composite_view())
+                composite_views.push_back(def_view->as_composite_view());
+            }
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
               valid_views.find(view);
             if (finder != valid_views.end())
@@ -13339,8 +13354,26 @@ namespace LegionRuntime {
           }
         }
       }
-      // Finally trigger the event saying we have the data
-      to_trigger.trigger();
+      // If we have composite views, then we need to make sure
+      // that their version states are local as well
+      if (!composite_views.empty())
+      {
+        std::set<Event> preconditions;
+        for (std::vector<CompositeView*>::const_iterator it = 
+              composite_views.begin(); it != composite_views.end(); it++)
+        {
+          (*it)->make_local(preconditions); 
+        }
+        if (!preconditions.empty())
+          to_trigger.trigger(Event::merge_events(preconditions));
+        else
+          to_trigger.trigger();
+      }
+      else
+      {
+        // Finally trigger the event saying we have the data
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22492,9 +22525,9 @@ namespace LegionRuntime {
                                          const FieldMask &update_mask)
     //--------------------------------------------------------------------------
     {
-      send_view_base(target);
+      DistributedID result = send_view_base(target);
       send_view_updates(target, update_mask);
-      return did;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -23100,7 +23133,7 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    void MaterializedView::send_view_base(AddressSpaceID target)
+    DistributedID MaterializedView::send_view_base(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // See if we already have it
@@ -23131,6 +23164,7 @@ namespace LegionRuntime {
         // We've now done the send so record it 
         update_remote_instances(target);
       }
+      return did;
     }
 
     //--------------------------------------------------------------------------
@@ -24715,7 +24749,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::send_view_base(AddressSpaceID target)
+    DistributedID CompositeView::send_view_base(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!has_remote_instance(target))
@@ -24727,19 +24761,30 @@ namespace LegionRuntime {
           {
             RezCheck z(rez);
             rez.serialize(did);
+            rez.serialize(owner_space);
+            rez.serialize(valid_mask);
             bool is_region = logical_node->is_region();
             rez.serialize(is_region);
             if (is_region)
               rez.serialize(logical_node->as_region_node()->handle);
             else
               rez.serialize(logical_node->as_partition_node()->handle);
-            rez.serialize(owner_space);
-            rez.serialize(valid_mask);
             rez.serialize<size_t>(roots.size());
             for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
                   it = roots.begin(); it != roots.end(); it++)
             {
-              // TODO: here
+#ifdef DEBUG_HIGH_LEVEL
+              assert(it->first->logical_node == this->logical_node);
+#endif
+              // Pack the version info and then pack the composite tree
+              // We know that the physical states have already been 
+              // created for this version info in order to do the capture
+              // of the tree, so we can pass in dummy context and 
+              // local space parameters.
+              VersionInfo &info = it->first->version_info->get_version_info();
+              info.pack_version_info(rez, 0, 0);
+              it->first->pack_composite_tree(rez, target);
+              rez.serialize(it->second);
             }
           }
           runtime->send_composite_view(target, rez);
@@ -24749,6 +24794,91 @@ namespace LegionRuntime {
         // We've done the send so record it
         update_remote_instances(target);
       }
+      return did;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::unpack_composite_view(Deserializer &derez, 
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_roots;
+      derez.deserialize(num_roots);
+      for (unsigned idx = 0; idx < num_roots; idx++)
+      {
+        CompositeVersionInfo *version_info = new CompositeVersionInfo();
+        VersionInfo &info = version_info->get_version_info();
+        info.unpack_version_info(derez);
+        CompositeNode *new_node = legion_new<CompositeNode>(logical_node,
+                            (CompositeNode*)NULL/*parent*/, version_info);
+        new_node->unpack_composite_tree(derez, source);
+        FieldMask &mask = roots[new_node];
+        derez.deserialize(mask);
+        logical_node->column_source->transform_field_mask(mask, source);
+        new_node->set_owner_did(did);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::make_local(std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // This might not be the top of the view tree, but that is alright
+      // because all the composite nodes share the same VersionInfo
+      // data structure so we'll end up waiting for the right set of
+      // version states to be local. It might be a little bit of an 
+      // over approximation for sub-views, but that is ok for now.
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            roots.begin(); it != roots.end(); it++)
+      {
+        VersionInfo &info = it->first->version_info->get_version_info();
+        // If we are getting this call, we know we are on a remote node
+        // so we know the physical states are already unpacked and therefore
+        // we can pass in a dummy context ID
+        info.make_local(preconditions, context, 0/*dummy ctx*/);
+        // Now check the sub-tree for recursive composite views
+        std::set<DistributedID> checked_views;
+        it->first->make_local(preconditions, checked_views);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      FieldMask valid_mask;
+      derez.deserialize(valid_mask);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      // Transform the fields mask 
+      target_node->column_source->transform_field_mask(valid_mask, source);
+      CompositeView *new_view = legion_new<CompositeView>(runtime->forest,
+                            did, owner, target_node, runtime->address_space,
+                            valid_mask, false/*register now*/);
+      new_view->unpack_composite_view(derez, source);
+      if (!target_node->register_logical_view(new_view))
+        legion_delete(new_view);
+      else
+        new_view->update_remote_instances(source);
     }
 
     //--------------------------------------------------------------------------
@@ -25202,6 +25332,12 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
     // CompositeNode 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeVersionInfo::CompositeVersionInfo(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     CompositeVersionInfo::CompositeVersionInfo(const VersionInfo &ver_info)
@@ -26109,6 +26245,100 @@ namespace LegionRuntime {
         it->first->remove_valid_references();
       }
     }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::pack_composite_tree(Serializer &rez, 
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(dirty_mask);
+      rez.serialize<size_t>(valid_views.size());
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        // Only need to send the structure for now, we'll check for
+        // updates when we unpack and request anything we need later
+        DistributedID did = it->first->send_view_base(target);
+        rez.serialize(did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(open_children.size());
+      for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        rez.serialize(it->first->logical_node->get_color());
+        rez.serialize<bool>(it->second.complete);
+        rez.serialize(it->second.open_fields);
+        it->first->pack_composite_tree(rez, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::unpack_composite_tree(Deserializer &derez,
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *field_node = logical_node->column_source;
+      derez.deserialize(dirty_mask); 
+      field_node->transform_field_mask(dirty_mask, source);
+      size_t num_valid_views;
+      derez.deserialize(num_valid_views);
+      for (unsigned idx = 0; idx < num_valid_views; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        LogicalView *view = logical_node->find_view(did);
+        FieldMask &mask = valid_views[view];
+        derez.deserialize(mask);
+        field_node->transform_field_mask(mask, source);
+      }
+      size_t num_open_children;
+      derez.deserialize(num_open_children);
+      for (unsigned idx = 0; idx < num_open_children; idx++)
+      {
+        ColorPoint child_color;
+        derez.deserialize(child_color);
+        RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
+        CompositeNode *new_node = legion_new<CompositeNode>(child_node, this,
+                                                            version_info);
+        ChildInfo &info = open_children[new_node];
+        derez.deserialize<bool>(info.complete);
+        derez.deserialize(info.open_fields);
+        field_node->transform_field_mask(info.open_fields, source);
+        new_node->unpack_composite_tree(derez, source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::make_local(std::set<Event> &preconditions,
+                                   std::set<DistributedID> &checked_views)
+    //--------------------------------------------------------------------------
+    {
+      // Check all our views for composite instances so we do any
+      // recursive checking for up-to-date views
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        // If we already checked this view, we are good
+        if (checked_views.find(it->first->did) != checked_views.end())
+          continue;
+        checked_views.insert(it->first->did);
+        if (it->first->is_deferred_view())
+        {
+          DeferredView *def_view = it->first->as_deferred_view();
+          if (def_view->is_composite_view())
+          {
+            def_view->as_composite_view()->make_local(preconditions);
+          }
+        }
+      }
+      // Then traverse any children
+      for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        it->first->make_local(preconditions, checked_views);
+      }
+    }
     
     //--------------------------------------------------------------------------
     bool CompositeNode::dominates(RegionTreeNode *dst)
@@ -26231,7 +26461,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::send_view_base(AddressSpaceID target)
+    DistributedID FillView::send_view_base(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!has_remote_instance(target))
@@ -26258,6 +26488,7 @@ namespace LegionRuntime {
         // We've now done the send so record it
         update_remote_instances(target);
       }
+      return did;
     }
 
     //--------------------------------------------------------------------------
@@ -27388,7 +27619,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::send_view_base(AddressSpaceID target)
+    DistributedID ReductionView::send_view_base(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!has_remote_instance(target))
@@ -27411,6 +27642,7 @@ namespace LegionRuntime {
         runtime->send_reduction_view(target, rez);
         update_remote_instances(target);
       }
+      return did;
     }
 
     //--------------------------------------------------------------------------

@@ -3571,7 +3571,7 @@ namespace LegionRuntime {
     public:
       DistributedID send_view(AddressSpaceID target, 
                               const FieldMask &update_mask);
-      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
     public:
@@ -3636,7 +3636,7 @@ namespace LegionRuntime {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
     public:
@@ -3726,7 +3726,7 @@ namespace LegionRuntime {
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_users);
     public:
-      virtual void send_view_base(AddressSpaceID target);
+      virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
     protected:
@@ -3881,7 +3881,7 @@ namespace LegionRuntime {
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_events);
     public:
-      virtual void send_view_base(AddressSpaceID target);
+      virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
     public:
@@ -3943,7 +3943,7 @@ namespace LegionRuntime {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      virtual void send_view_base(AddressSpaceID target) = 0;
+      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
     public:
@@ -4063,9 +4063,11 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      virtual void send_view_base(AddressSpaceID target);
+      virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
+      void unpack_composite_view(Deserializer &derez, AddressSpaceID source);
+      void make_local(std::set<Event> &preconditions);
     public:
       virtual bool is_composite_view(void) const { return true; }
       virtual bool is_fill_view(void) const { return false; }
@@ -4118,6 +4120,9 @@ namespace LegionRuntime {
                                                 Event precondition,
                                          std::set<Event> &postconditions);
     public:
+      static void handle_send_composite_view(Runtime *runtime, 
+                              Deserializer &derez, AddressSpaceID source);
+    public:
       CompositeView *const parent;
     protected:
       // The set of fields represented by this composite view
@@ -4136,13 +4141,14 @@ namespace LegionRuntime {
      */
     class CompositeVersionInfo : public Collectable {
     public:
+      CompositeVersionInfo(void);
       CompositeVersionInfo(const VersionInfo &info);
       CompositeVersionInfo(const CompositeVersionInfo &rhs);
       ~CompositeVersionInfo(void);
     public:
       CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
     public:
-      inline const VersionInfo& get_version_info(void) const 
+      inline VersionInfo& get_version_info(void)
         { return version_info; }
     protected:
       VersionInfo version_info;
@@ -4229,6 +4235,11 @@ namespace LegionRuntime {
       void remove_gc_references(void);
       void add_valid_references(void);
       void remove_valid_references(void);
+    public:
+      void pack_composite_tree(Serializer &rez, AddressSpaceID target);
+      void unpack_composite_tree(Deserializer &derez, AddressSpaceID source);
+      void make_local(std::set<Event> &preconditions,
+                      std::set<DistributedID> &checked_views);
     protected:
       bool dominates(RegionTreeNode *dst);
       template<typename MAP_TYPE>
@@ -4292,7 +4303,7 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      virtual void send_view_base(AddressSpaceID target);
+      virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
     public:
