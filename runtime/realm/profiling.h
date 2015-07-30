@@ -144,8 +144,12 @@ namespace Realm {
     template <typename T>
     ProfilingRequest &add_measurement(void);
 
+    template <typename S> static ProfilingRequest *deserialize_new(S &s);
+
   protected:
     friend class ProfilingMeasurementCollection;
+
+    template <typename S> friend bool operator<<(S &s, const ProfilingRequest &pr);
 
     Processor response_proc;
     Processor::TaskFuncID response_task_id;

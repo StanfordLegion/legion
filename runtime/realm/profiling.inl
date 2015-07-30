@@ -20,6 +20,7 @@
 #include "utilities.h"
 #include "serialize.h"
 
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
@@ -95,6 +96,37 @@ namespace Realm {
     return *this;
   }
 
+  template <typename S>
+  bool operator<<(S &s, const ProfilingRequest &pr)
+  {
+    return((s << pr.response_proc) &&
+	   (s << pr.response_task_id) &&
+	   (s << ByteArray(pr.user_data, pr.user_data_size)) &&
+	   (s << pr.requested_measurements));
+  }
+
+  template <typename S>
+  /*static*/ ProfilingRequest *ProfilingRequest::deserialize_new(S &s)
+  {
+    // have to get fields of the reqeuest in order to build it
+    Processor p;
+    Processor::TaskFuncID fid;
+    if(!(s >> p)) return 0;
+    if(!(s >> fid)) return 0;
+    ProfilingRequest *pr = new ProfilingRequest(p, fid);
+    size_t user_data_size;
+    if(!(s >> user_data_size)) return 0;
+    if(user_data_size) {
+      pr->add_user_data(s.peek_bytes(user_data_size), user_data_size);
+      s.extract_bytes(0, user_data_size);
+    }
+    if(!(s >> pr->requested_measurements)) {
+      delete pr;
+      return 0;
+    }
+    return pr;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -135,17 +167,26 @@ namespace Realm {
   template <typename S>
   bool operator<<(S &s, const ProfilingRequestSet &prs)
   {
-    // TODO: actual data :)
-    int dummy = 5;
-    return s << dummy;
+    size_t len = prs.requests.size();
+    if(!(s << len)) return false;
+    for(size_t i = 0; i < len; i++)
+      if(!(s << *prs.requests[i])) return false;
+    return true;
   }
   
   template <typename S>
   bool operator>>(S &s, ProfilingRequestSet &prs)
   {
-    // TODO: actual data :)
-    int dummy;
-    return s >> dummy;
+    size_t len;
+    if(!(s >> len)) return false;
+    prs.clear(); // erase any existing data cleanly
+    prs.requests.reserve(len);
+    for(size_t i = 0; i < len; i++) {
+      ProfilingRequest *pr = ProfilingRequest::deserialize_new(s);
+      if(!pr) return false;
+      prs.requests.push_back(pr);
+    }
+    return true;
   }
 
 
