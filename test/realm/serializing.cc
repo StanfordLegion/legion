@@ -26,6 +26,7 @@
 #include <string>
 #include <map>
 #include <list>
+#include <set>
 
 static bool verbose = false;
 static int error_count = 0;
@@ -58,6 +59,17 @@ std::ostream& operator<<(std::ostream& os, const std::list<T>& l)
   os << '[' << l.size() << ']';
   for(typename std::list<T>::const_iterator it = l.begin();
       it != l.end();
+      it++)
+    os << ' ' << *it;
+  return os;
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::set<T>& s)
+{
+  os << '[' << s.size() << ']';
+  for(typename std::set<T>::const_iterator it = s.begin();
+      it != s.end();
       it++)
     os << ' ' << *it;
   return os;
@@ -336,6 +348,12 @@ int main(int argc, const char *argv[])
   ss.push_back("Hello");
   ss.push_back("World");
   do_test("vector<string>", ss, sizeof(size_t) + 12 + 9);
+
+  std::set<int> s;
+  s.insert(4);
+  s.insert(2);
+  s.insert(11);
+  do_test("set<int>", s, sizeof(size_t) + s.size() * sizeof(int));
   
   if(error_count > 0) {
     std::cout << "ERRORS FOUND" << std::endl;
