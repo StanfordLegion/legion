@@ -44,22 +44,22 @@ namespace Realm {
 
     inline void OperationTimeline::record_create_time(void)
     {
-      create_time = Clock::current_time();
+      create_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_ready_time(void)
     {
-      ready_time = Clock::current_time();
+      ready_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_start_time(void)
     {
-      start_time = Clock::current_time();
+      start_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_end_time(void)
     {
-      end_time = Clock::current_time();
+      end_time = Clock::current_time_in_nanoseconds();
     }
 
     inline bool OperationTimeline::is_valid(void)
@@ -72,12 +72,12 @@ namespace Realm {
 
     inline void InstanceTimeline::record_create_time(void)
     {
-      create_time = Clock::current_time();
+      create_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void InstanceTimeline::record_delete_time(void)
     {
-      delete_time = Clock::current_time();
+      delete_time = Clock::current_time_in_nanoseconds();
     }
 
   }; // namespace ProfilingMeasurements

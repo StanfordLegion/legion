@@ -18,6 +18,7 @@
 #ifndef REALM_PROFILING_H
 #define REALM_PROFILING_H
 
+#include <climits>
 #include <vector>
 #include <set>
 #include <map>
@@ -66,8 +67,8 @@ namespace Realm {
       // on some node. This is necessary because clients can't know where the
       // measurement times were recorded and therefore have no reference. There
       // may be skews between the start times of different nodes.
-      typedef unsigned long long timestamp_t;
-      static const timestamp_t INVALID_TIMESTAMP = 0;
+      typedef long long timestamp_t;
+      static const timestamp_t INVALID_TIMESTAMP = LLONG_MIN;
 
       OperationTimeline() :
         create_time(INVALID_TIMESTAMP),
