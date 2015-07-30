@@ -1417,6 +1417,8 @@ namespace LegionRuntime {
       void unpack_version_info(Deserializer &derez);
       void make_local(std::set<Event> &preconditions, RegionTreeForest *forest,
                       ContextID ctx, bool path_only = false);
+      void clone_from(const VersionInfo &rhs);
+      void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     protected:
       void pack_buffer(Serializer &rez, 
                        AddressSpaceID local_space, ContextID ctx);
@@ -1798,7 +1800,7 @@ namespace LegionRuntime {
                                   FieldMask &dirty_mask);
       void update_capture_mask(RegionTreeNode *node,
                                const FieldMask &capture_mask);
-      void filter_capture_mask(RegionTreeNode *node,
+      bool filter_capture_mask(RegionTreeNode *node,
                                FieldMask &capture_mask);
     public:
       const ContextID ctx;
@@ -1974,6 +1976,7 @@ namespace LegionRuntime {
       void reset(void);
     public:
       PhysicalState* clone(bool clone_state) const;
+      PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
       void make_local(std::set<Event> &preconditions, bool advance);
     public:
       void print_physical_state(const FieldMask &capture_mask,
@@ -4142,7 +4145,6 @@ namespace LegionRuntime {
     class CompositeVersionInfo : public Collectable {
     public:
       CompositeVersionInfo(void);
-      CompositeVersionInfo(const VersionInfo &info);
       CompositeVersionInfo(const CompositeVersionInfo &rhs);
       ~CompositeVersionInfo(void);
     public:
@@ -4196,6 +4198,8 @@ namespace LegionRuntime {
                              CompositeNode *parent,
                              FieldMask &global_dirt,
                              CompositeNode *target);
+      CompositeNode* create_clone_node(CompositeNode *parent,
+                                       CompositeCloser &closer);
       void update_parent_info(const FieldMask &mask);
       void update_child_info(CompositeNode *child, const FieldMask &mask);
       void update_instance_views(LogicalView *view,

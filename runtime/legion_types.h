@@ -415,6 +415,7 @@ namespace LegionRuntime {
     struct TraceInfo;
     struct LogicalCloser;
     struct PhysicalCloser;
+    struct CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;

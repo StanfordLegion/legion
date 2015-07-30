@@ -9017,9 +9017,13 @@ namespace LegionRuntime {
         advance(rhs.advance), packed(false), packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
-      // This shouldn't be called when packed
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!rhs.packed);
+      assert(!rhs.packed); // This shouldn't be called when packed
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        assert(it->second.physical_state == NULL);
+      }
 #endif
     }
 
@@ -9353,6 +9357,90 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    void VersionInfo::clone_from(const VersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+      assert(!rhs.packed);
+#endif
+      advance = rhs.advance;
+      upper_bound_node = rhs.upper_bound_node;
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator nit = 
+            rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
+      {
+        const NodeInfo &current = nit->second;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(current.physical_state != NULL);
+#endif
+        NodeInfo &next = node_infos[nit->first];
+        next.physical_state = current.physical_state->clone(
+                                                  false/*capture state*/);
+        next.version_numbers = current.version_numbers;
+        next.premap_only = current.premap_only;
+        next.path_only = current.path_only;
+        next.advance = current.advance;
+        // Needs capture is already set
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::clone_from(const VersionInfo &rhs,CompositeCloser &closer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+      assert(!rhs.packed);
+#endif
+      advance = rhs.advance;
+      upper_bound_node = rhs.upper_bound_node;
+      // Capture all region tree nodes that have not already been
+      // captured by the closer
+      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator nit = 
+            rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
+      {
+        const NodeInfo &current = nit->second;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(current.physical_state != NULL);
+#endif
+        FieldMask clone_mask;         
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              current.version_numbers.begin(); it != 
+              current.version_numbers.end(); it++) 
+        {
+          clone_mask |= it->second;
+        }
+        // Filter this node from the closer
+        bool changed = closer.filter_capture_mask(nit->first, clone_mask);
+        if (!clone_mask)
+          continue;
+        NodeInfo &next = node_infos[nit->first];
+        if (changed)
+          next.physical_state = current.physical_state->clone(clone_mask, 
+                                                  false/*capture_state*/);
+        else
+          next.physical_state = current.physical_state->clone(
+                                                  false/*capture state*/);
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              current.version_numbers.begin(); it !=
+              current.version_numbers.end(); it++)
+        {
+          FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          next.version_numbers[it->first] = overlap;
+        }
+        next.premap_only = current.premap_only;
+        next.path_only = current.path_only;
+        next.advance = current.advance;
+        // Needs capture is already set
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(node_infos.find(upper_bound_node) != node_infos.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::pack_buffer(Serializer &rez, 
                                   AddressSpaceID local_space, ContextID ctx)
     //--------------------------------------------------------------------------
@@ -9554,9 +9642,15 @@ namespace LegionRuntime {
         derez.deserialize(mask);
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
-        // No point in adding this to the version state infos
-        // since we already know we just use that to build the PhysicalState
         info.physical_state->add_version_state(state, mask);
+        // Also add this to the version numbers
+        // Only need to do this for the non-advance states
+        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          info.version_numbers.find(vid);
+        if (finder == info.version_numbers.end())
+          info.version_numbers[vid] = mask;
+        else
+          finder->second |= mask;
       }
       if (info.advance)
       {
@@ -11665,7 +11759,7 @@ namespace LegionRuntime {
       : ctx(c), permit_leave_open(open), version_info(info)
     //--------------------------------------------------------------------------
     {
-      composite_version_info = new CompositeVersionInfo(info);
+      composite_version_info = new CompositeVersionInfo();
     }
 
     //--------------------------------------------------------------------------
@@ -11725,6 +11819,10 @@ namespace LegionRuntime {
                                    closed_mask, true/*register now*/);
       // Set the root value
       composite_view->add_root(root, closed_mask, true/*top*/);
+      // Fill in the version infos
+      VersionInfo &target_version_info = 
+                                composite_version_info->get_version_info();
+      target_version_info.clone_from(version_info);
       if (!reduction_views.empty())
       {
         for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
@@ -11787,14 +11885,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeCloser::filter_capture_mask(RegionTreeNode *node,
+    bool CompositeCloser::filter_capture_mask(RegionTreeNode *node,
                                               FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
       LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
         capture_fields.find(node);
-      if (finder != capture_fields.end())
+      if (finder != capture_fields.end() && !(capture_mask * finder->second))
+      {
         capture_mask -= finder->second;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -12347,6 +12449,87 @@ namespace LegionRuntime {
         result->children = children;
         result->valid_views = valid_views;
         result->reduction_views = reduction_views;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState* PhysicalState::clone(const FieldMask &clone_mask, 
+                                        bool capture_state) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalState *result = legion_new<PhysicalState>(node);
+#else
+      PhysicalState *result = legion_new<PhysicalState>();
+#endif
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
+            version_states.begin(); it1 != version_states.end(); it1++)
+      {
+        const VersionStateInfo &info = it1->second;
+        if (it1->second.valid_fields * clone_mask)
+          continue;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          result->add_version_state(it->first, it->second);
+        }
+      }
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
+            advance_states.begin(); it1 != advance_states.end(); it1++)
+      {
+        const VersionStateInfo &info = it1->second;
+        if (it1->second.valid_fields * clone_mask)
+          continue;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          result->add_advance_state(it->first, it->second);
+        }
+      }
+      if (capture_state)
+      {
+        // No need to copy over the close mask
+        result->dirty_mask = dirty_mask & clone_mask;
+        result->reduction_mask = reduction_mask & clone_mask;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          result->valid_views[it->first] = overlap;
+        }
+        if (!!result->reduction_mask)
+        {
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+                reduction_views.begin(); it != reduction_views.end(); it++)
+          {
+            FieldMask overlap = it->second & clone_mask;
+            if (!overlap)
+              continue;
+            result->reduction_views[it->first] = overlap;
+          }
+        }
+        if (!(children.valid_fields * clone_mask))
+        {
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                children.open_children.begin(); it !=
+                children.open_children.end(); it++)
+          {
+            FieldMask overlap = it->second & clone_mask;
+            if (!overlap)
+              continue;
+            result->children.open_children[it->first] = overlap;
+            result->children.valid_fields |= overlap;
+          }
+        }
       }
       return result;
     }
@@ -25340,13 +25523,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    CompositeVersionInfo::CompositeVersionInfo(const VersionInfo &ver_info)
-      : version_info(ver_info)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     CompositeVersionInfo::CompositeVersionInfo(const CompositeVersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
@@ -25557,7 +25733,7 @@ namespace LegionRuntime {
       CompositeNode *result = NULL;
       // If we don't have a target, go ahead and make the clone
       if (target == NULL)
-        result = legion_new<CompositeNode>(logical_node, parent, version_info);
+        result = create_clone_node(parent, closer); 
       // First capture down the tree  
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -25573,7 +25749,7 @@ namespace LegionRuntime {
                                        result, global_dirt, NULL/*no target*/);
         // Make the result if we haven't yet
         if (result == NULL)
-          result = legion_new<CompositeNode>(logical_node,parent,version_info);
+          result = create_clone_node(parent, closer);
         result->update_child_info(flat_child, overlap);
       }
       // Then capture ourself if we don't have anyone below, we can capture
@@ -25586,6 +25762,30 @@ namespace LegionRuntime {
             flatten_mask, closer, global_dirt, dirty_mask, valid_views);
       // Finally update the closer with the capture fields
       closer.update_capture_mask(logical_node, flatten_mask);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeNode* CompositeNode::create_clone_node(CompositeNode *parent,
+                                                    CompositeCloser &closer)
+    //--------------------------------------------------------------------------
+    {
+      // If we're making a copy and we don't have a parent, make a new
+      // version info and then capture the needed version infos
+      CompositeNode *result;
+      if (parent == NULL)
+      {
+        CompositeVersionInfo *new_info = new CompositeVersionInfo();
+        result = legion_new<CompositeNode>(logical_node, parent, new_info);
+        // We need to capture the version info for all the nodes 
+        // except the ones we know we've already captured
+        VersionInfo &new_version_info = new_info->get_version_info();
+        const VersionInfo &old_info = version_info->get_version_info();
+        new_version_info.clone_from(old_info, closer);
+      }
+      else
+        result = legion_new<CompositeNode>(logical_node, parent,
+                                           parent->version_info);
       return result;
     }
 
