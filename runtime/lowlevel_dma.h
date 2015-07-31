@@ -28,15 +28,29 @@ namespace LegionRuntime {
       int priority;
     };
 
+    struct RemoteFillArgs : public BaseMedium {
+      RegionInstance inst;
+      unsigned offset, size;
+      Event before_fill, after_fill;
+      int priority;
+    };
+
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
+
+    extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
 
     enum DMAActiveMessageIDs {
       REMOTE_COPY_MSGID = 200,
+      REMOTE_FILL_MSGID = 201,
     };
 
     typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
 				       RemoteCopyArgs,
 				       handle_remote_copy> RemoteCopyMessage;
+
+    typedef ActiveMessageMediumNoReply<REMOTE_FILL_MSGID,
+                                       RemoteFillArgs,
+                                       handle_remote_fill> RemoteFillMessage;
 
     extern void init_dma_handler(void);
 
@@ -52,6 +66,17 @@ namespace LegionRuntime {
 			     Event before_copy,
 			     Event after_copy = Event::NO_EVENT);
     */
+
+    // An important helper method used in other places
+    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
+				     int block_size, int index)
+    {
+      return (alloc_offset +                                      // start address
+	      ((index / block_size) * block_size * elmt_size) +   // full blocks
+	      (field_start * block_size) +                        // skip other fields
+	      ((index % block_size) * field_size));               // some some of our fields within our block
+    }
+
   };
 };
 

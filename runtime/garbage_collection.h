@@ -22,6 +22,55 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    enum ReferenceSource {
+      FUTURE_HANDLE_REF,
+      INDIVIDUAL_TASK_REF,
+      INDEX_TASK_REF,
+      REDUCTION_CLOSER_REF,
+      PHYSICAL_CLOSER_REF,
+      COMPOSITE_CLOSER_REF,
+      COMPOSITE_NODE_REF,
+      TEMP_VALID_REF,
+      PHYSICAL_STATE_REF,
+      FIELD_DESCRIPTORS_REF,
+      VIEW_HANDLE_REF,
+      MAPPING_REF,
+      INSTANCE_REF,
+      PENDING_GC_REF,
+      PENDING_COLLECTIVE_REF,
+      MEMORY_MANAGER_REF,
+      LAST_SOURCE_REF,
+    };
+
+    enum ReferenceKind {
+      GC_REF_KIND,
+      VALID_REF_KIND,
+      REMOTE_REF_KIND,
+      RESOURCE_REF_KIND,
+    };
+
+#define REFERENCE_NAMES_ARRAY(names)                \
+    const char *const names[LAST_SOURCE_REF] = {    \
+      "Future Handle Reference",                    \
+      "Individual Task Reference",                  \
+      "Index Task Reference",                       \
+      "Reduction Closer Reference",                 \
+      "Physical Closer Reference",                  \
+      "Composite Closer Reference",                 \
+      "Composite Node Reference",                   \
+      "Temporary Valid Reference",                  \
+      "Physical State Reference",                   \
+      "Field Descriptors Reference",                \
+      "View Handle Reference",                      \
+      "Mapping Reference",                          \
+      "Instance Reference",                         \
+      "Pending GC Reference",                       \
+      "Pending Collective Reference",               \
+      "Memory Manager Reference"                    \
+    }
+
+    extern Logger::Category log_garbage;
+
     /**
      * \class Collectable
      * We'll use this class for reference
@@ -122,18 +171,54 @@ namespace LegionRuntime {
                              AddressSpaceID local_space);
       virtual ~DistributedCollectable(void);
     public:
-      void add_gc_reference(unsigned cnt = 1);
-      bool remove_gc_reference(unsigned cnt = 1);
+      inline void add_base_gc_ref(ReferenceSource source, unsigned cnt = 1);
+      inline void add_nested_gc_ref(DistributedID source, unsigned cnt = 1);
+      inline bool remove_base_gc_ref(ReferenceSource source, unsigned cnt = 1);
+      inline bool remove_nested_gc_ref(DistributedID source, unsigned cnt = 1);
     public:
-      void add_valid_reference(unsigned cnt = 1);
-      bool remove_valid_reference(unsigned cnt = 1);
+      inline void add_base_valid_ref(ReferenceSource source, unsigned cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, unsigned cnt = 1);
+      inline bool remove_base_valid_ref(ReferenceSource source, 
+                                        unsigned cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, 
+                                          unsigned cnt = 1);
     public:
-      void add_resource_reference(unsigned cnt = 1);
-      bool remove_resource_reference(unsigned cnt = 1);
+      inline void add_base_resource_ref(ReferenceSource source, 
+                                        unsigned cnt = 1);
+      inline void add_nested_resource_ref(DistributedID source, 
+                                          unsigned cnt = 1);
+      inline bool remove_base_resource_ref(ReferenceSource source, 
+                                           unsigned cnt = 1);
+      inline bool remove_nested_resource_ref(DistributedID source, 
+                                             unsigned cnt = 1);
     public:
-      bool add_remote_reference(AddressSpaceID sid, unsigned cnt = 1);
+      inline bool add_base_remote_ref(AddressSpaceID sid,
+                                      ReferenceSource source, 
+                                      unsigned cnt = 1);
+      inline bool add_nested_remote_ref(AddressSpaceID sid,
+                                        DistributedID source, 
+                                        unsigned cnt = 1);
+      inline bool remove_base_remote_ref(AddressSpaceID sid,
+                                         Event dest_event,
+                                         ReferenceSource source, 
+                                         unsigned cnt = 1);
+      inline bool remove_nested_remote_ref(AddressSpaceID sid,
+                                           Event dest_event,
+                                           DistributedID source, 
+                                           unsigned cnt = 1);
+    private:
+      void add_gc_reference(unsigned cnt);
+      bool remove_gc_reference(unsigned cnt);
+    private:
+      void add_valid_reference(unsigned cnt);
+      bool remove_valid_reference(unsigned cnt);
+    private:
+      void add_resource_reference(unsigned cnt);
+      bool remove_resource_reference(unsigned cnt);
+    private:
+      bool add_remote_reference(AddressSpaceID sid, unsigned cnt);
       bool remove_remote_reference(AddressSpaceID sid, Event dest_event,
-                                   unsigned cnt = 1);
+                                   unsigned cnt);
     public:
       void add_held_remote_reference(unsigned cnt = 1);
       // Notify the owner of a remote reference sent somewhere else
@@ -218,17 +303,47 @@ namespace LegionRuntime {
                               DistributedID owner_did);
       virtual ~HierarchicalCollectable(void);
     public:
-      void add_gc_reference(unsigned cnt = 1);
-      bool remove_gc_reference(unsigned cnt = 1);
+      inline void add_base_gc_ref(ReferenceSource source, unsigned cnt = 1);
+      inline void add_nested_gc_ref(DistributedID source, unsigned cnt = 1);
+      inline bool remove_base_gc_ref(ReferenceSource source, unsigned cnt = 1);
+      inline bool remove_nested_gc_ref(DistributedID source, unsigned cnt = 1);
     public:
-      void add_valid_reference(unsigned cnt = 1);
-      bool remove_valid_reference(unsigned cnt = 1);
+      inline void add_base_valid_ref(ReferenceSource source, unsigned cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, unsigned cnt = 1);
+      inline bool remove_base_valid_ref(ReferenceSource source, 
+                                        unsigned cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, 
+                                          unsigned cnt = 1);
     public:
-      void add_resource_reference(unsigned cnt = 1);
-      bool remove_resource_reference(unsigned cnt = 1);
+      inline void add_base_resource_ref(ReferenceSource source, 
+                                        unsigned cnt = 1);
+      inline void add_nested_resource_ref(DistributedID source, 
+                                          unsigned cnt = 1);
+      inline bool remove_base_resource_ref(ReferenceSource source, 
+                                           unsigned cnt = 1);
+      inline bool remove_nested_resource_ref(DistributedID source, 
+                                             unsigned cnt = 1);
     public:
-      void add_remote_reference(unsigned cnt = 1);
-      bool remove_remote_reference(unsigned cnt = 1);
+      inline void add_base_remote_ref(ReferenceSource source, 
+                                      unsigned cnt = 1);
+      inline void add_nested_remote_ref(DistributedID source, 
+                                          unsigned cnt = 1);
+      inline bool remove_base_remote_ref(ReferenceSource source, 
+                                           unsigned cnt = 1);
+      inline bool remove_nested_remote_ref(DistributedID source, 
+                                             unsigned cnt = 1);
+    private:
+      void add_gc_reference(unsigned cnt);
+      bool remove_gc_reference(unsigned cnt);
+    private:
+      void add_valid_reference(unsigned cnt);
+      bool remove_valid_reference(unsigned cnt);
+    private:
+      void add_resource_reference(unsigned cnt);
+      bool remove_resource_reference(unsigned cnt);
+    private:
+      void add_remote_reference(unsigned cnt);
+      bool remove_remote_reference(unsigned cnt);
     public:
       void add_subscriber(AddressSpaceID target, 
                           DistributedID subscriber_did);
@@ -272,10 +387,37 @@ namespace LegionRuntime {
       bool free_distributed_id;
     };
 
-
     //--------------------------------------------------------------------------
     // Give some implementations here so things get inlined
     //--------------------------------------------------------------------------
+
+    //--------------------------------------------------------------------------
+    template<bool ADD>
+    static inline void log_base_ref(ReferenceKind kind, DistributedID did,
+                                    ReferenceSource src, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD)
+        log_garbage.info("GC Add Base Ref %d %ld %d %d",
+                          kind, did, src, cnt);
+      else
+        log_garbage.info("GC Remove Base Ref %d %ld %d %d",
+                          kind, did, src, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ADD>
+    static inline void log_nested_ref(ReferenceKind kind, DistributedID did, 
+                                      DistributedID src, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD)
+        log_garbage.info("GC Add Nested Ref %d %ld %ld %d",
+                          kind, did, src, cnt);
+      else
+        log_garbage.info("GC Remove Nested Ref %d %ld %ld %d",
+                          kind, did, src, cnt);
+    }
 
     //--------------------------------------------------------------------------
     inline void Collectable::add_reference(unsigned cnt /*= 1*/)
@@ -295,6 +437,360 @@ namespace LegionRuntime {
       // If previous is equal to count, the value is now
       // zero so it is safe to reclaim this object
       return (prev == cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_base_gc_ref(ReferenceSource source,
+                                                        unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
+      add_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_nested_gc_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
+      add_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_base_gc_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
+      return remove_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_nested_gc_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
+      return remove_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_base_valid_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
+      add_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_nested_valid_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
+      add_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_base_valid_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
+      return remove_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_nested_valid_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
+      return remove_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_base_resource_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      add_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_nested_resource_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      add_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_base_resource_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      return remove_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_nested_resource_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      return remove_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::add_base_remote_ref(
+                AddressSpaceID sid, ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return add_remote_reference(sid, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::add_nested_remote_ref(
+                  AddressSpaceID sid, DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return add_remote_reference(sid, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_base_remote_ref(
+                                    AddressSpaceID sid, Event dest_event, 
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return remove_remote_reference(sid, dest_event, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_nested_remote_ref(
+                                      AddressSpaceID sid, Event dest_event,
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return remove_remote_reference(sid, dest_event, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_base_gc_ref(ReferenceSource source,
+                                                        unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
+      add_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_nested_gc_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
+#endif
+      add_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_base_gc_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
+      return remove_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_nested_gc_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
+#endif
+      return remove_gc_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_base_valid_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
+      add_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_nested_valid_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
+#endif
+      add_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_base_valid_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
+      return remove_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_nested_valid_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
+#endif
+      return remove_valid_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_base_resource_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      add_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_nested_resource_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      add_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_base_resource_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      return remove_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_nested_resource_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+#endif
+      return remove_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_base_remote_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      add_remote_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void HierarchicalCollectable::add_nested_remote_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<true>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      add_remote_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_base_remote_ref(
+                                    ReferenceSource source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_base_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return remove_remote_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool HierarchicalCollectable::remove_nested_remote_ref(
+                                      DistributedID source, unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_nested_ref<false>(REMOTE_REF_KIND, did, source, cnt);
+#endif
+      return remove_remote_reference(cnt);
     }
 
   }; // namespace HighLevel 

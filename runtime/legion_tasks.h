@@ -81,6 +81,8 @@ namespace LegionRuntime {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+      virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
@@ -264,6 +266,10 @@ namespace LegionRuntime {
       public:
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
+      };
+      struct DecrementArgs {
+        HLRTaskID hlr_id;
+        SingleTask *parent_ctx;
       };
     public:
       SingleTask(Runtime *rt);
@@ -623,7 +629,6 @@ namespace LegionRuntime {
                                  bool owner, bool exclusive); 
     protected:
       bool sliced;
-      Barrier must_barrier; // for must parallelism
       ArgumentMap argument_map;
       std::list<SliceTask*> slices;
       std::vector<RestrictInfo> restrict_infos;

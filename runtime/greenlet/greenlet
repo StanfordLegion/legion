@@ -1,0 +1,64 @@
+/* vi: ft=cpp
+ *
+ * This file is part of cgreenlet. CGreenlet is free software available
+ * under the terms of the MIT license. Consult the file LICENSE that was
+ * shipped together with this source file for the exact licensing terms.
+ *
+ * Copyright (c) 2012 by the cgreenlet authors. See the file AUTHORS for a
+ * full list.
+ */
+
+#ifndef GREENLET_INCLUDED
+#define GREENLET_INCLUDED
+
+#include <greenlet.h>
+#include <exception>
+
+
+struct _greenlet_data;
+
+class greenlet_exit: public std::exception {};
+
+class greenlet
+{
+public:
+    greenlet(greenlet_start_func_t start_func=0L,
+             void *stack=0L, long *stacksize=0L, 
+             greenlet *parent=0L);
+    greenlet(greenlet_t *greenlet_t);
+    greenlet(const greenlet &rhs);
+    virtual ~greenlet();
+    greenlet& operator=(const greenlet &rhs);
+
+    static greenlet *root();
+    static greenlet *current();
+    greenlet *parent();
+
+    void *switch_to(void *arg=0L);
+    void inject(greenlet_inject_func_t inject_func);
+    void reset();
+
+    bool isstarted();
+    bool isdead();
+
+    void* release_stack(long *stacksize);
+
+public:
+    static void init_greenlet_library(void);
+    static void init_greenlet_thread(void);
+    static void *alloc_greenlet_stack(long *stacksize);
+    static void dealloc_greenlet_stack(void *stack, long stacksize);
+
+protected:
+    virtual void *run(void *arg);
+
+private:
+    static void *_run(void *arg);
+    static void _inject_exception(void *arg);
+
+    greenlet_t *_greenlet;
+    greenlet_start_func_t _start_func;
+    _greenlet_data *_data;
+};
+
+#endif /* GREENLET_INCLUDED */

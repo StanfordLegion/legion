@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -122,6 +122,9 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.ExprRawRuntime) then
+    return nil
+
+  elseif node:is(ast.typed.ExprRawValue) then
     return nil
 
   elseif node:is(ast.typed.ExprIsnull) then
@@ -473,6 +476,11 @@ function optimize_futures.expr_raw_physical(cx, node)
   return node { region = region }
 end
 
+function optimize_futures.expr_raw_value(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
 function optimize_futures.expr_isnull(cx, node)
   local pointer = concretize(optimize_futures.expr(cx, node.pointer))
   return node { pointer = pointer }
@@ -522,11 +530,10 @@ function optimize_futures.expr_partition(cx, node)
 end
 
 function optimize_futures.expr_cross_product(cx, node)
-  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
-  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  local args = node.args:map(
+    function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
   return node {
-    lhs = lhs,
-    rhs = rhs,
+    args = args,
   }
 end
 
@@ -607,6 +614,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return node
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return optimize_futures.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return optimize_futures.expr_isnull(cx, node)

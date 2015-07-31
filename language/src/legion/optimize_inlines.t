@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -205,6 +205,10 @@ function analyze_usage.expr_raw_fields(cx, node)
   return analyze_usage.expr(cx, node.region)
 end
 
+function analyze_usage.expr_raw_value(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
 function analyze_usage.expr_isnull(cx, node)
   return analyze_usage.expr(cx, node.pointer)
 end
@@ -232,8 +236,9 @@ function analyze_usage.expr_partition(cx, node)
 end
 
 function analyze_usage.expr_cross_product(cx, node)
-  return usage_meet(analyze_usage.expr(cx, node.lhs),
-                    analyze_usage.expr(cx, node.rhs))
+  return std.reduce(
+    usage_meet,
+    node.args:map(function(arg) return analyze_usage.expr(cx, arg) end))
 end
 
 function analyze_usage.expr_unary(cx, node)
@@ -301,6 +306,9 @@ function analyze_usage.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return nil
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return analyze_usage.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return analyze_usage.expr_isnull(cx, node)

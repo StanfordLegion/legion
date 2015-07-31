@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -113,20 +113,24 @@ function type_check.expr_field_access(cx, node)
 
   if std.is_region(std.as_read(value_type)) then
     local region_type = std.check_read(cx, value)
-    if node.field_name == "partition" and
-      region_type:has_default_partition()
+    local field_type
+    if node.field_name == "partition" and region_type:has_default_partition()
     then
-      local field_type = region_type:default_partition()
-      return ast.typed.ExprFieldAccess {
-        value = value,
-        field_name = node.field_name,
-        expr_type = field_type,
-        span = node.span,
-      }
+      field_type = region_type:default_partition()
+    elseif node.field_name == "product" and region_type:has_default_product()
+    then
+      field_type = region_type:default_product()
     else
       log.error(node, "no field '" .. node.field_name .. "' in type " ..
                   tostring(std.as_read(value_type)))
     end
+
+    return ast.typed.ExprFieldAccess {
+      value = value,
+      field_name = node.field_name,
+      expr_type = field_type,
+      span = node.span,
+    }
   else
     -- If the value is an fspace instance, or a index or bounded type,
     -- unpack before allowing access.
@@ -611,6 +615,30 @@ function type_check.expr_raw_runtime(cx, node)
   }
 end
 
+function type_check.expr_raw_value(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+
+  local expr_type
+  if std.is_ispace(value_type) then
+    expr_type = std.c.legion_index_space_t
+  elseif std.is_region(value_type) then
+    expr_type = std.c.legion_logical_region_t
+  elseif std.is_partition(value_type) then
+    expr_type = std.c.legion_logical_partition_t
+  elseif std.is_cross_product(value_type) then
+    expr_type = std.c.legion_terra_index_cross_product_t
+  else
+    log.error(node, "raw expected an ispace, region, partition, or cross product, got " .. tostring(value_type))
+  end
+
+  return ast.typed.ExprRawValue {
+    value = value,
+    expr_type = expr_type,
+    span = node.span,
+  }
+end
+
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
@@ -805,25 +833,18 @@ function type_check.expr_partition(cx, node)
 end
 
 function type_check.expr_cross_product(cx, node)
-  local lhs = type_check.expr(cx, node.lhs)
-  local lhs_type = std.check_read(cx, lhs)
+  local args = node.args:map(function(arg) return type_check.expr(cx, arg) end)
+  local arg_types = args:map(function(arg) return std.check_read(cx, arg) end)
 
-  local rhs = type_check.expr(cx, node.rhs)
-  local rhs_type = std.check_read(cx, rhs)
-
-  if not std.is_partition(lhs_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
-                tostring(lhs_type))
-  end
-
-  if not std.is_partition(rhs_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
-                tostring(rhs_type))
+  for i, arg_type in ipairs(arg_types) do
+    if not std.is_partition(arg_type) then
+      log.error(node, "type mismatch in argument " .. tostring(i) ..
+                  ": expected partition but got " .. tostring(arg_type))
+    end
   end
 
   return ast.typed.ExprCrossProduct {
-    lhs = lhs,
-    rhs = rhs,
+    args = args,
     expr_type = node.expr_type,
     span = node.span,
   }
@@ -994,6 +1015,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprRawRuntime) then
     return type_check.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawValue) then
+    return type_check.expr_raw_value(cx, node)
 
   elseif node:is(ast.specialized.ExprIsnull) then
     return type_check.expr_isnull(cx, node)

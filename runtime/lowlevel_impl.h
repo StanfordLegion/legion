@@ -35,6 +35,10 @@
 #include "realm/dynamic_set.h"
 #endif
 
+#include "realm/operation.h"
+#include "realm/dynamic_table.h"
+#include "realm/id.h"
+
 #include <assert.h>
 
 #include "activemsg.h"
@@ -54,6 +58,7 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <list>
 #include <map>
 #include <aio.h>
+#include <greenlet>
 
 #if __cplusplus >= 201103L
 #define typeof decltype
@@ -70,10 +75,15 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 
 namespace Realm {
   class Module;
+  class Operation;
+  class ProfilingRequestSet;
 };
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+    typedef Realm::ID ID;
+
     extern Logger::Category log_mutex;
 
 #ifdef EVENT_TRACING
@@ -108,106 +118,42 @@ namespace LegionRuntime {
     };
 #endif
 
-    // gasnet_hsl_t in object form for templating goodness
-    class GASNetHSL {
+    template <typename LT>
+    class AutoLock {
     public:
-      GASNetHSL(void) { gasnet_hsl_init(&mutex); }
-      // Should never be copied
-      GASNetHSL(const GASNetHSL &rhs) { assert(false); }
-      ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
-
-      // Should never be copied
-      GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
-
-      void lock(void) { gasnet_hsl_lock(&mutex); }
-      void unlock(void) { gasnet_hsl_unlock(&mutex); }
-
-    protected:
-      friend class AutoHSLLock;
-      friend class GASNetCondVar;
-      gasnet_hsl_t mutex;
-    };
-
-    class AutoHSLLock {
-    public:
-      AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
+      AutoLock(LT &mutex) : mutex(mutex), held(true)
       { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", &mutex);
+	mutex.lock();
+	log_mutex.spew("MUTEX LOCK HELD %p", &mutex);
       }
-      AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      AutoHSLLock(GASNetHSL &mutex) : mutexp(&mutex.mutex), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      ~AutoHSLLock(void) 
+
+      ~AutoLock(void) 
       {
 	if(held)
-	  gasnet_hsl_unlock(mutexp);
-	log_mutex.spew("MUTEX LOCK OUT %p", mutexp);
-	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
+	  mutex.unlock();
+	log_mutex.spew("MUTEX LOCK OUT %p", &mutex);
       }
+
       void release(void)
       {
 	assert(held);
-	gasnet_hsl_unlock(mutexp);
+	mutex.unlock();
 	held = false;
       }
+
       void reacquire(void)
       {
 	assert(!held);
-	gasnet_hsl_lock(mutexp);
+	mutex.lock();
 	held = true;
       }
     protected:
-      gasnet_hsl_t *mutexp;
+      LT &mutex;
       bool held;
     };
 
-    class GASNetCondVar {
-    public:
-      GASNetCondVar(GASNetHSL &_mutex) 
-	: mutex(_mutex)
-      {
-	gasnett_cond_init(&cond);
-      }
-
-      ~GASNetCondVar(void)
-      {
-	gasnett_cond_destroy(&cond);
-      }
-
-      // these require that you hold the lock when you call
-      void signal(void)
-      {
-	gasnett_cond_signal(&cond);
-      }
-
-      void wait(void)
-      {
-	gasnett_cond_wait(&cond, &mutex.mutex.lock);
-      }
-
-    public:
-      GASNetHSL &mutex;
-
-    protected:
-      gasnett_cond_t cond;
-    };
+    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
     typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
                                               NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
@@ -223,285 +169,11 @@ namespace LegionRuntime {
     typedef LegionRuntime::HighLevel::NodeSet NodeSet;
 #endif
 
-    // we have a base type that's element-type agnostic
-    template <typename LT, typename IT>
-    struct DynamicTableNodeBase {
-    public:
-      DynamicTableNodeBase(int _level, IT _first_index, IT _last_index)
-        : level(_level), first_index(_first_index), last_index(_last_index) {}
-
-      int level;
-      IT first_index, last_index;
-      LT lock;
-    };
-
-    template <typename ET, size_t _SIZE, typename LT, typename IT>
-      struct DynamicTableNode : public DynamicTableNodeBase<LT, IT> {
-    public:
-      static const size_t SIZE = _SIZE;
-
-      DynamicTableNode(int _level, IT _first_index, IT _last_index)
-        : DynamicTableNodeBase<LT, IT>(_level, _first_index, _last_index) {}
-
-      ET elems[SIZE];
-    };
-
-    template <typename ALLOCATOR> class DynamicTableFreeList;
-
-    template <typename ALLOCATOR>
-    class DynamicTable {
-    public:
-      typedef typename ALLOCATOR::IT IT;
-      typedef typename ALLOCATOR::ET ET;
-      typedef typename ALLOCATOR::LT LT;
-      typedef DynamicTableNodeBase<LT, IT> NodeBase;
-
-      DynamicTable(void);
-      ~DynamicTable(void);
-
-      size_t max_entries(void) const;
-      bool has_entry(IT index) const;
-      ET *lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list = 0);
-
-    protected:
-      NodeBase *new_tree_node(int level, IT first_index, IT last_index,
-			      int owner, typename ALLOCATOR::FreeList *free_list);
-
-      // lock protects _changes_ to 'root', but not access to it
-      GASNetHSL lock;
-      NodeBase * volatile root;
-    };
-
-    template <typename ALLOCATOR>
-    class DynamicTableFreeList {
-    public:
-      typedef typename ALLOCATOR::IT IT;
-      typedef typename ALLOCATOR::ET ET;
-      typedef typename ALLOCATOR::LT LT;
-
-      DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner);
-
-      ET *alloc_entry(void);
-      void free_entry(ET *entry);
-
-      DynamicTable<ALLOCATOR>& table;
-      int owner;
-      GASNetHSL lock;
-      ET * volatile first_free;
-      IT volatile next_alloc;
-    };
-
-    template <typename ALLOCATOR>
-    DynamicTable<ALLOCATOR>::DynamicTable(void)
-      : root(0)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    DynamicTable<ALLOCATOR>::~DynamicTable(void)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
-    {
-      if(level > 0) {
-	// an inner node - we can create that ourselves
-	typename ALLOCATOR::INNER_TYPE *inner = new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
-	for(size_t i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
-	  inner->elems[i] = 0;
-	return inner;
-      } else {
-	return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list);
-      }
-    }
-
-    template<typename ALLOCATOR>
-    size_t DynamicTable<ALLOCATOR>::max_entries(void) const
-    {
-      if (!root)
-        return 0;
-      size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      for (int i = 0; i < root->level; i++)
-        elems_addressable <<= ALLOCATOR::INNER_BITS;
-      return elems_addressable;
-    }
-
-    template<typename ALLOCATOR>
-    bool DynamicTable<ALLOCATOR>::has_entry(IT index) const
-    {
-      // first, figure out how many levels the tree must have to find our index
-      int level_needed = 0;
-      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      while(index >= elems_addressable) {
-	level_needed++;
-	elems_addressable <<= ALLOCATOR::INNER_BITS;
-      }
-
-      NodeBase *n = root;
-      if (!n || (n->level < level_needed))
-        return false;
-
-      // when we get here, root is high enough
-      assert((level_needed <= n->level) &&
-	     (index >= n->first_index) &&
-	     (index <= n->last_index));
-
-      // now walk tree, populating the path we need
-      while(n->level > 0) {
-	// intermediate nodes
-	typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
-
-	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
-		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
-
-	NodeBase *child = inner->elems[i];
-	if(child == 0) {
-          return false;	
-        }
-        assert((child != 0) &&
-	       (child->level == (n->level - 1)) &&
-	       (index >= child->first_index) &&
-	       (index <= child->last_index));
-	n = child;
-      }
-      return true;
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTable<ALLOCATOR>::ET *DynamicTable<ALLOCATOR>::lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
-    {
-      // first, figure out how many levels the tree must have to find our index
-      int level_needed = 0;
-      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      while(index >= elems_addressable) {
-	level_needed++;
-	elems_addressable <<= ALLOCATOR::INNER_BITS;
-      }
-
-      // in the common case, we won't need to add levels to the tree - grab the root (no lock)
-      // and see if it covers the range that includes our index
-      NodeBase *n = root;
-      if(!n || (n->level < level_needed)) {
-	// root doesn't appear to be high enough - take lock and fix it if it's really
-	//  not high enough
-	lock.lock();
-
-	if(!root) {
-	  // simple case - just create a root node at the level we want
-	  root = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
-	} else {
-	  // some of the tree already exists - add new layers on top
-	  while(root->level < level_needed) {
-	    int parent_level = root->level + 1;
-	    IT parent_first = 0;
-	    IT parent_last = (((root->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
-	    NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list);
-	    typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
-	    inner->elems[0] = root;
-	    root = parent;
-	  }
-	}
-	n = root;
-
-	lock.unlock();
-      }
-      // when we get here, root is high enough
-      assert((level_needed <= n->level) &&
-	     (index >= n->first_index) &&
-	     (index <= n->last_index));
-
-      // now walk tree, populating the path we need
-      while(n->level > 0) {
-	// intermediate nodes
-	typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
-
-	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
-		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
-
-	NodeBase *child = inner->elems[i];
-	if(child == 0) {
-	  // need to populate subtree
-
-	  // take lock on inner node
-	  inner->lock.lock();
-
-	  // now that lock is held, see if we really need to make new node
-	  if(inner->elems[i] == 0) {
-	    int child_level = inner->level - 1;
-	    int child_shift = (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
-	    IT child_first = inner->first_index + (i << child_shift);
-	    IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
-
-	    inner->elems[i] = new_tree_node(child_level, child_first, child_last, owner, free_list);
-	  }
-	  child = inner->elems[i];
-
-	  inner->lock.unlock();
-	}
-	assert((child != 0) &&
-	       (child->level == (n->level - 1)) &&
-	       (index >= child->first_index) &&
-	       (index <= child->last_index));
-	n = child;
-      }
-
-      // leaf node - just return pointer to the target element
-      typename ALLOCATOR::LEAF_TYPE *leaf = static_cast<typename ALLOCATOR::LEAF_TYPE *>(n);
-      int ofs = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
-      return &(leaf->elems[ofs]);
-    }
-
-    template <typename ALLOCATOR>
-    DynamicTableFreeList<ALLOCATOR>::DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner)
-      : table(_table), owner(_owner), first_free(0), next_alloc(0)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTableFreeList<ALLOCATOR>::ET *DynamicTableFreeList<ALLOCATOR>::alloc_entry(void)
-    {
-      // take the lock first, since we're messing with the free list
-      lock.lock();
-
-      // if the free list is empty, we can fill it up by referencing the next entry to be allocated -
-      // this uses the existing dynamic-filling code to avoid race conditions
-      while(!first_free) {
-	IT to_lookup = next_alloc;
-	next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
-	lock.unlock();
-	typename DynamicTable<ALLOCATOR>::ET *dummy = table.lookup_entry(to_lookup, owner, this);
-	assert(dummy != 0);
-	// can't actually use dummy because we let go of lock - retake lock and hopefully find non-empty
-	//  list next time
-	lock.lock();
-      }
-
-      typename DynamicTable<ALLOCATOR>::ET *entry = first_free;
-      first_free = entry->next_free;
-      lock.unlock();
-
-      return entry;
-    }
-
-    template <typename ALLOCATOR>
-    void DynamicTableFreeList<ALLOCATOR>::free_entry(ET *entry)
-    {
-      // just stick ourselves on front of free list
-      lock.lock();
-      entry->next_free = first_free;
-      first_free = entry;
-      lock.unlock();
-    }
-
     template <class T>
     class Atomic {
     public:
       Atomic(T _value) : value(_value)
       {
-	gasnet_hsl_init(&mutex);
 	//printf("%d: atomic %p = %d\n", gasnet_mynode(), this, value);
       }
 
@@ -517,7 +189,7 @@ namespace LegionRuntime {
 
     protected:
       T value;
-      gasnet_hsl_t mutex;
+      GASNetHSL mutex;
     };
 
     // prioritized list that maintains FIFO order within a priority level
@@ -551,94 +223,6 @@ namespace LegionRuntime {
       }
     };
      
-    class ID {
-    public:
-#ifdef LEGION_IDS_ARE_64BIT
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 12,
-	INDEX_L_BITS = 32,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
-      };
-#else
-      // two forms of bit pack for IDs:
-      //
-      //  3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
-      //  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-      // +-----+---------------------------------------------------------+
-      // |  TYP  |   NODE  |         INDEX                               |
-      // |  TYP  |   NODE  |  INDEX_H    |           INDEX_L             |
-      // +-----+---------------------------------------------------------+
-
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 7,
-	INDEX_L_BITS = 16,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 32 - TYPE_BITS - INDEX_BITS /* 5 = 32 nodes */
-      };
-#endif
-
-      enum ID_Types {
-	ID_SPECIAL,
-	ID_UNUSED_1,
-	ID_EVENT,
-	ID_BARRIER,
-	ID_LOCK,
-	ID_UNUSED_5,
-	ID_MEMORY,
-	ID_UNUSED_7,
-	ID_PROCESSOR,
-	ID_PROCGROUP,
-	ID_INDEXSPACE,
-	ID_UNUSED_11,
-	ID_ALLOCATOR,
-	ID_UNUSED_13,
-	ID_INSTANCE,
-	ID_UNUSED_15,
-      };
-
-      enum ID_Specials {
-	ID_INVALID = 0,
-	ID_GLOBAL_MEM = (1U << INDEX_H_BITS) - 1,
-      };
-
-      ID(IDType _value) : value(_value) {}
-
-      template <class T>
-      ID(T thing_to_get_id_from) : value(thing_to_get_id_from.id) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		_index) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index_h, IDType _index_l)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		(_index_h << INDEX_L_BITS) |
-		_index_l) {}
-
-      bool operator==(const ID& rhs) const { return value == rhs.value; }
-
-      IDType id(void) const { return value; }
-      ID_Types type(void) const { return (ID_Types)(value >> (NODE_BITS + INDEX_BITS)); }
-      unsigned node(void) const { return ((value >> INDEX_BITS) & ((1U << NODE_BITS)-1)); }
-      IDType index(void) const { return (value & ((((IDType)1) << INDEX_BITS) - 1)); }
-      IDType index_h(void) const { return ((value >> INDEX_L_BITS) & ((((IDType)1) << INDEX_H_BITS)-1)); }
-      IDType index_l(void) const { return (value & ((((IDType)1) << INDEX_L_BITS) - 1)); }
-
-      template <class T>
-      T convert(void) const { T thing_to_return; thing_to_return.id = value; return thing_to_return; }
-
-    protected:
-      IDType value;
-    };
-    
-    template <>
-    inline ID ID::convert<ID>(void) const { return *this; }
-      
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
@@ -647,7 +231,7 @@ namespace LegionRuntime {
     };
 
     // parent class of GenEventImpl and BarrierImpl
-    class Event::Impl {
+    class EventImpl {
     public:
       // test whether an event has triggered without waiting
       virtual bool has_triggered(Event::gen_t needed_gen) = 0;
@@ -658,9 +242,11 @@ namespace LegionRuntime {
       virtual void external_wait(Event::gen_t needed_gen) = 0;
 
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
+
+      static bool add_waiter(Event needed, EventWaiter *waiter);
     };
 
-    class GenEventImpl : public Event::Impl {
+    class GenEventImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
@@ -707,7 +293,7 @@ namespace LegionRuntime {
       std::vector<EventWaiter *> local_waiters; // set of local threads that are waiting on event
     };
 
-    class BarrierImpl : public Event::Impl {
+    class BarrierImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
 
@@ -776,9 +362,9 @@ namespace LegionRuntime {
 	
     };
 
-    class Reservation::Impl {
+    class ReservationImpl {
     public:
-      Impl(void);
+      ReservationImpl(void);
 
       static const ID::ID_Types ID_TYPE = ID::ID_LOCK;
 
@@ -801,7 +387,7 @@ namespace LegionRuntime {
 
       enum { MODE_EXCL = 0, ZERO_COUNT = 0x11223344 };
 
-      gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible lock)
+      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible lock)
 
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
       NodeSet remote_waiter_mask, remote_sharer_mask;
@@ -814,9 +400,9 @@ namespace LegionRuntime {
       size_t local_data_size;
       bool own_local;
 
-      static gasnet_hsl_t freelist_mutex;
-      static Reservation::Impl *first_free;
-      Reservation::Impl *next_free;
+      static GASNetHSL freelist_mutex;
+      static ReservationImpl *first_free;
+      ReservationImpl *next_free;
 
       // created a GenEventImpl if needed to describe when reservation is granted
       Event acquire(unsigned new_mode, bool exclusive,
@@ -871,7 +457,7 @@ namespace LegionRuntime {
 
     protected:
       CoherentData *data;
-      Reservation::Impl *lock;
+      ReservationImpl *lock;
     };
 
     template <class T>
@@ -890,7 +476,7 @@ namespace LegionRuntime {
 
     protected:
       CoherentData *data;
-      Reservation::Impl *lock;
+      ReservationImpl *lock;
     };
 
     class ProcessorAssignment {
@@ -919,11 +505,17 @@ namespace LegionRuntime {
     class ProcessorGroup;
 
     // information for a task launch
-    class Task {
+    class Task : public Realm::Operation {
     public:
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
 	   const void *_args, size_t _arglen,
+	   Event _finish_event, int _priority,
+           int expected_count);
+      Task(Processor _proc,
+	   Processor::TaskFuncID _func_id,
+	   const void *_args, size_t _arglen,
+           const Realm::ProfilingRequestSet &reqs,
 	   Event _finish_event, int _priority,
            int expected_count);
 
@@ -936,24 +528,36 @@ namespace LegionRuntime {
       Event finish_event;
       int priority;
       int run_count, finish_count;
+      bool capture_proc;
     };
 
-    class Processor::Impl {
+    class ProcessorImpl {
     public:
-      Impl(Processor _me, Processor::Kind _kind);
+      ProcessorImpl(Processor _me, Processor::Kind _kind);
 
-      virtual ~Impl(void);
+      virtual ~ProcessorImpl(void);
 
       void run(Atomic<int> *_run_counter)
       {
 	run_counter = _run_counter;
       }
 
+      virtual void start_processor(void) = 0;
+      virtual void shutdown_processor(void) = 0;
+      virtual void initialize_processor(void) = 0;
+      virtual void finalize_processor(void) = 0;
+
       virtual void enqueue_task(Task *task) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority) = 0;
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority) = 0;
 
@@ -971,7 +575,7 @@ namespace LegionRuntime {
 
     class DeferredTaskSpawn : public EventWaiter {
     public:
-      DeferredTaskSpawn(Processor::Impl *_proc, Task *_task) 
+      DeferredTaskSpawn(ProcessorImpl *_proc, Task *_task) 
         : proc(_proc), task(_task) {}
 
       virtual ~DeferredTaskSpawn(void)
@@ -983,7 +587,7 @@ namespace LegionRuntime {
       virtual void print_info(FILE *f);
 
     protected:
-      Processor::Impl *proc;
+      ProcessorImpl *proc;
       Task *task;
     };
 
@@ -1051,7 +655,7 @@ namespace LegionRuntime {
       return job;
     }
 
-    class ProcessorGroup : public Processor::Impl {
+    class ProcessorGroup : public ProcessorImpl {
     public:
       ProcessorGroup(void);
 
@@ -1065,6 +669,11 @@ namespace LegionRuntime {
 
       void get_group_members(std::vector<Processor>& member_list);
 
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+
       virtual void enqueue_task(Task *task);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
@@ -1073,11 +682,18 @@ namespace LegionRuntime {
 			      Event start_event, Event finish_event,
                               int priority);
 
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+
+
     public: //protected:
       bool members_valid;
       bool members_requested;
-      std::vector<Processor::Impl *> members;
-      Reservation::Impl lock;
+      std::vector<ProcessorImpl *> members;
+      ReservationImpl lock;
       ProcessorGroup *next_free;
 
       void request_group_members(void);
@@ -1150,7 +766,6 @@ namespace LegionRuntime {
     public:
       enum ThreadState {
         RUNNING_STATE,
-        PAUSING_STATE, // about to pause
         PAUSED_STATE,
         RESUMABLE_STATE,
         SLEEPING_STATE, // about to sleep
@@ -1179,13 +794,13 @@ namespace LegionRuntime {
       LocalProcessor *const proc;
     protected:
       ThreadState state;
-      gasnet_hsl_t thread_mutex;
-      gasnett_cond_t thread_cond;
+      GASNetHSL thread_mutex;
+      GASNetCondVar thread_cond;
       bool initialize;
       bool finalize;
     };
 
-    class LocalProcessor : public Processor::Impl {
+    class LocalProcessor : public ProcessorImpl {
     public:
       LocalProcessor(Processor _me, Processor::Kind _kind, 
                      size_t stack_size, const char *name,
@@ -1209,13 +824,19 @@ namespace LegionRuntime {
 			      //std::set<RegionInstance> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
     protected:
       const int core_id;
       const size_t stack_size;
       const char *const processor_name;
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       JobQueue<Task> task_queue;
+      bool done_initialization;
       bool shutdown, shutdown_trigger;
     protected:
       LocalThread               *running_thread;
@@ -1224,7 +845,107 @@ namespace LegionRuntime {
       std::vector<LocalThread*> available_threads;
     };
 
-    class Memory::Impl {
+    // Forward declarations
+    class GreenletThread;
+    class GreenletProcessor;
+
+    class GreenletTask : public greenlet, public EventWaiter {
+    public:
+      GreenletTask(Task *task, GreenletProcessor *proc,
+                   void *stack, long *stack_size);
+      virtual ~GreenletTask(void);
+    public:
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+    public:
+      virtual void* run(void *arg);
+    protected:
+      Task *const task;
+      GreenletProcessor *const proc;
+    };
+
+    class GreenletThread : public PreemptableThread {
+    public:
+      GreenletThread(GreenletProcessor *proc);
+      virtual ~GreenletThread(void);
+    public:
+      virtual Processor get_processor(void) const;
+    public:
+      virtual void thread_main(void);
+      virtual void sleep_on_event(Event wait_for);
+    public:
+      void start_task(GreenletTask *task);
+      void resume_task(GreenletTask *task);
+      void return_to_root(void);
+      void wait_for_shutdown(void);
+    public:
+      GreenletProcessor *const proc;
+    protected:
+      GreenletTask *current_task;
+    };
+
+    class GreenletProcessor : public ProcessorImpl {
+    public:
+      enum GreenletState {
+        GREENLET_IDLE,
+        GREENLET_RUNNING,
+      };
+      struct GreenletStack {
+      public:
+        void *stack;
+        long stack_size;
+      };
+    public:
+      GreenletProcessor(Processor _me, Processor::Kind _kind,
+                        size_t stack_size, int init_stack_count,
+                        const char *name, int core_id = -1);
+      virtual ~GreenletProcessor(void);
+    public:
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+    public:
+      virtual void enqueue_task(Task *task);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+			      Event start_event, Event finish_event,
+                              int priority);
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+                              const Realm::ProfilingRequestSet &reqs,
+			      Event start_event, Event finish_event,
+                              int priority);
+    public:
+      bool execute_task(void);
+      void pause_task(GreenletTask *paused_task);
+      void unpause_task(GreenletTask *paused_task);
+    public:
+      bool allocate_stack(GreenletStack &stack);
+      void create_stack(GreenletStack &stack);
+      void complete_greenlet(GreenletTask *greenlet); 
+    public:
+      const int core_id;
+      const size_t proc_stack_size;
+      const char *const processor_name;
+    protected:
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
+      JobQueue<Task> task_queue;
+      bool done_initialization;
+      bool shutdown, shutdown_trigger;
+    protected:
+      GreenletThread             *greenlet_thread;
+      GreenletState              thread_state;
+      std::set<GreenletTask*>    paused_tasks; 
+      std::list<GreenletTask*>   resumable_tasks;
+      std::vector<GreenletStack> greenlet_stacks;
+      std::vector<GreenletTask*> complete_greenlets;
+    };
+
+    class RegionInstanceImpl;
+
+    class MemoryImpl {
     public:
       enum MemoryKind {
 	MKIND_SYSMEM,  // directly accessible from CPU
@@ -1241,13 +962,13 @@ namespace LegionRuntime {
 #endif
       };
 
-      Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind);
+      MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind);
 
-      virtual ~Impl(void);
+      virtual ~MemoryImpl(void);
 
-      unsigned add_instance(RegionInstance::Impl *i);
+      unsigned add_instance(RegionInstanceImpl *i);
 
-      RegionInstance::Impl *get_instance(RegionInstance i);
+      RegionInstanceImpl *get_instance(RegionInstance i);
 
       RegionInstance create_instance_local(IndexSpace is,
 					   const int *linearization_bits,
@@ -1257,6 +978,7 @@ namespace LegionRuntime {
 					   const std::vector<size_t>& field_sizes,
 					   ReductionOpID redopid,
 					   off_t list_size,
+                                           const Realm::ProfilingRequestSet &reqs,
 					   RegionInstance parent_inst);
 
       RegionInstance create_instance_remote(IndexSpace is,
@@ -1267,6 +989,7 @@ namespace LegionRuntime {
 					    const std::vector<size_t>& field_sizes,
 					    ReductionOpID redopid,
 					    off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
 					    RegionInstance parent_inst);
 
       virtual RegionInstance create_instance(IndexSpace is,
@@ -1277,6 +1000,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst) = 0;
 
       void destroy_instance_local(RegionInstance i, bool local_destroy);
@@ -1313,16 +1037,16 @@ namespace LegionRuntime {
       size_t size;
       MemoryKind kind;
       size_t alignment;
-      Kind lowlevel_kind;
-      gasnet_hsl_t mutex; // protection for resizing vectors
-      std::vector<RegionInstance::Impl *> instances;
+      Memory::Kind lowlevel_kind;
+      GASNetHSL mutex; // protection for resizing vectors
+      std::vector<RegionInstanceImpl *> instances;
       std::map<off_t, off_t> free_blocks;
 #ifdef REALM_PROFILE_MEMORY_USAGE
       size_t usage, peak_usage, peak_footprint;
 #endif
     };
 
-    class GASNetMemory : public Memory::Impl {
+    class GASNetMemory : public MemoryImpl {
     public:
       static const size_t MEMORY_STRIDE = 1024;
 
@@ -1338,6 +1062,7 @@ namespace LegionRuntime {
 					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
 					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
@@ -1372,7 +1097,7 @@ namespace LegionRuntime {
       //std::map<off_t, off_t> free_blocks;
     };
 
-    class DiskMemory : public Memory::Impl {
+    class DiskMemory : public MemoryImpl {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -1388,6 +1113,7 @@ namespace LegionRuntime {
                                             const std::vector<size_t>& field_sizes,
                                             ReductionOpID redopid,
                                             off_t list_size,
+                                            const Realm::ProfilingRequestSet &reqs,
                                             RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i,
@@ -1413,7 +1139,7 @@ namespace LegionRuntime {
     };
 
 #ifdef USE_HDF
-    class HDFMemory : public Memory::Impl {
+    class HDFMemory : public MemoryImpl {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -1429,6 +1155,7 @@ namespace LegionRuntime {
                                              const std::vector<size_t>& field_sizes,
                                              ReductionOpID redopid,
                                              off_t list_size,
+                                             const Realm::ProfilingRequestSet &reqs,
                                              RegionInstance parent_inst);
 
       RegionInstance create_instance(IndexSpace is,
@@ -1439,6 +1166,7 @@ namespace LegionRuntime {
                                      const std::vector<size_t>& field_sizes,
                                      ReductionOpID redopid,
                                      off_t list_size,
+                                     const Realm::ProfilingRequestSet &reqs,
                                      RegionInstance parent_inst,
                                      const char* file,
                                      const std::vector<const char*>& path_names,
@@ -1511,16 +1239,20 @@ namespace LegionRuntime {
       NodeSet remote_copies;
     };
 
-    class RegionInstance::Impl {
+    class RegionInstanceImpl {
     public:
-      Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
-	   const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-	   off_t _count_offset = -1, off_t _red_list_size = -1, RegionInstance _parent_inst = NO_INST);
+      RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
+			 ReductionOpID _redopid,
+			 const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
+			 const std::vector<size_t>& _field_sizes,
+			 const Realm::ProfilingRequestSet &reqs,
+			 off_t _count_offset = -1, off_t _red_list_size = -1, 
+			 RegionInstance _parent_inst = RegionInstance::NO_INST);
 
       // when we auto-create a remote instance, we don't know region/offset/linearization
-      Impl(RegionInstance _me, Memory _memory);
+      RegionInstanceImpl(RegionInstance _me, Memory _memory);
 
-      ~Impl(void);
+      ~RegionInstanceImpl(void);
 
 #ifdef POINTER_CHECKS
       void verify_access(unsigned ptr);
@@ -1543,11 +1275,17 @@ namespace LegionRuntime {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).node(), me.id); }
 
+      void finalize_instance(void);
+
     public: //protected:
-      friend class RegionInstance;
+      friend class Realm::RegionInstance;
 
       RegionInstance me;
       Memory memory; // not part of metadata because it's determined from ID alone
+      // Profiling info only needed on creation node
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingMeasurementCollection measurements;
+      Realm::ProfilingMeasurements::InstanceTimeline timeline;
 
       class Metadata : public MetadataBase {
       public:
@@ -1570,13 +1308,13 @@ namespace LegionRuntime {
 
       static const unsigned MAX_LINEARIZATION_LEN = 16;
 
-      Reservation::Impl lock;
+      ReservationImpl lock;
     };
 
-    class IndexSpace::Impl {
+    class IndexSpaceImpl {
     public:
-      Impl(void);
-      ~Impl(void);
+      IndexSpaceImpl(void);
+      ~IndexSpaceImpl(void);
 
       void init(IndexSpace _me, unsigned _init_owner);
 
@@ -1596,8 +1334,8 @@ namespace LegionRuntime {
       Event request_valid_mask(void);
 
       IndexSpace me;
-      Reservation::Impl lock;
-      IndexSpace::Impl *next_free;
+      ReservationImpl lock;
+      IndexSpaceImpl *next_free;
 
       struct StaticData {
 	IndexSpace parent;
@@ -1614,7 +1352,7 @@ namespace LegionRuntime {
       };
 
       CoherentData locked_data;
-      gasnet_hsl_t valid_mask_mutex;
+      GASNetHSL valid_mask_mutex;
       ElementMask *valid_mask;
       int valid_mask_count;
       bool valid_mask_complete;
@@ -1634,9 +1372,9 @@ namespace LegionRuntime {
 
       typedef GASNetHSL LT;
       typedef int IT;
-      typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
-      typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
-      typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
+      typedef Realm::DynamicTableNode<Realm::DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
+      typedef Realm::DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
+      typedef Realm::DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -1666,8 +1404,8 @@ namespace LegionRuntime {
 
     typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
-    typedef DynamicTableAllocator<Reservation::Impl, 10, 8> ReservationTableAllocator;
-    typedef DynamicTableAllocator<IndexSpace::Impl, 10, 4> IndexSpaceTableAllocator;
+    typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
+    typedef DynamicTableAllocator<IndexSpaceImpl, 10, 4> IndexSpaceTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
@@ -1676,19 +1414,19 @@ namespace LegionRuntime {
       Node(void);
 
       // not currently resizable
-      std::vector<Memory::Impl *> memories;
-      std::vector<Processor::Impl *> processors;
+      std::vector<MemoryImpl *> memories;
+      std::vector<ProcessorImpl *> processors;
 
-      DynamicTable<EventTableAllocator> events;
-      DynamicTable<BarrierTableAllocator> barriers;
-      DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<IndexSpaceTableAllocator> index_spaces;
-      DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      Realm::DynamicTable<EventTableAllocator> events;
+      Realm::DynamicTable<BarrierTableAllocator> barriers;
+      Realm::DynamicTable<ReservationTableAllocator> reservations;
+      Realm::DynamicTable<IndexSpaceTableAllocator> index_spaces;
+      Realm::DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
     struct NodeAnnounceData;
 
-    class Machine::Impl {
+    class MachineImpl {
     public:
       void get_all_memories(std::set<Memory>& mset) const;
       void get_all_processors(std::set<Processor>& pset) const;
@@ -1718,20 +1456,21 @@ namespace LegionRuntime {
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
     };
 
-    extern Machine::Impl *machine_singleton;
-    inline Machine::Impl *get_machine(void) { return machine_singleton; }
+    extern MachineImpl *machine_singleton;
+    inline MachineImpl *get_machine(void) { return machine_singleton; }
 
-    class Runtime::Impl {
+    class RuntimeImpl {
     public:
-      Impl(void);
-      ~Impl(void);
+      RuntimeImpl(void);
+      ~RuntimeImpl(void);
 
       bool init(int *argc, char ***argv);
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
 
-      void run(Processor::TaskFuncID task_id = 0, RunStyle style = Runtime::ONE_TASK_ONLY,
+      void run(Processor::TaskFuncID task_id = 0, 
+	       Runtime::RunStyle style = Runtime::ONE_TASK_ONLY,
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of the runtime
@@ -1742,26 +1481,26 @@ namespace LegionRuntime {
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
       //  (e.g. trigger a GenEventImpl or adjust a BarrierImpl)
-      Event::Impl *get_event_impl(Event e);
+      EventImpl *get_event_impl(Event e);
       GenEventImpl *get_genevent_impl(Event e);
       BarrierImpl *get_barrier_impl(Event e);
 
-      Reservation::Impl *get_lock_impl(ID id);
-      Memory::Impl *get_memory_impl(ID id);
-      Processor::Impl *get_processor_impl(ID id);
+      ReservationImpl *get_lock_impl(ID id);
+      MemoryImpl *get_memory_impl(ID id);
+      ProcessorImpl *get_processor_impl(ID id);
       ProcessorGroup *get_procgroup_impl(ID id);
-      IndexSpace::Impl *get_index_space_impl(ID id);
-      RegionInstance::Impl *get_instance_impl(ID id);
+      IndexSpaceImpl *get_index_space_impl(ID id);
+      RegionInstanceImpl *get_instance_impl(ID id);
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
 
     protected:
     public:
-      Machine::Impl *machine;
+      MachineImpl *machine;
 
       Processor::TaskIDTable task_table;
-      ReductionOpTable reduce_op_table;
+      std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
 
 #ifdef NODE_LOGGING
       static const char *prefix;
@@ -1769,7 +1508,7 @@ namespace LegionRuntime {
 
       std::vector<Realm::Module *> modules;
       Node *nodes;
-      Memory::Impl *global_memory;
+      MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
@@ -1785,8 +1524,8 @@ namespace LegionRuntime {
 #endif
     };
 
-    extern Runtime::Impl *runtime_singleton;
-    inline Runtime::Impl *get_runtime(void) { return runtime_singleton; }
+    extern RuntimeImpl *runtime_singleton;
+    inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
 
     template <typename T>
     StaticAccess<T>::StaticAccess(T* thing_with_data, bool already_valid /*= false*/)

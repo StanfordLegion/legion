@@ -599,7 +599,6 @@ namespace LegionRuntime {
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      const Processor utility_proc;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
       // Is stealing disabled 
@@ -956,7 +955,7 @@ namespace LegionRuntime {
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
       void add_collection(LogicalView *view, Event term_event);
-      void launch(Processor utility, int priority);
+      void launch(int priority);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;
@@ -1197,9 +1196,18 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
+      IndexPartition get_index_partition(Context ctx, IndexSpace parent,
+                                         const DomainPoint &color);
+      bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
       IndexSpace get_index_subspace(IndexPartition p, Color c);
+      IndexSpace get_index_subspace(Context ctx, IndexPartition p,
+                                    const DomainPoint &color);
+      IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
+      bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       bool has_multiple_domains(IndexSpace handle);
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
@@ -1214,12 +1222,17 @@ namespace LegionRuntime {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace handle,
                                             std::set<Color> &colors);
+      void get_index_space_partition_colors(Context ctx, IndexSpace handle,
+                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_space_color(IndexSpace handle);
+      DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
+      DomainPoint get_index_partition_color_point(Context ctx, 
+                                                  IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
@@ -1256,8 +1269,13 @@ namespace LegionRuntime {
       LogicalPartition get_logical_partition_by_color(Context ctx, 
                                                       LogicalRegion parent, 
                                                       Color c);
+      LogicalPartition get_logical_partition_by_color(Context ctx,
+                                                      LogicalRegion parent,
+                                                      const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
+      bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
+                                          const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
                                                      FieldSpace fspace, 
@@ -1272,8 +1290,13 @@ namespace LegionRuntime {
       LogicalRegion get_logical_subregion_by_color(Context ctx, 
                                                    LogicalPartition parent, 
                                                    Color c);
+      LogicalRegion get_logical_subregion_by_color(Context ctx,
+                                                   LogicalPartition parent,
+                                                   const DomainPoint &c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
+      bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
+                                          const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
                                                   FieldSpace fspace, 
@@ -1351,11 +1374,18 @@ namespace LegionRuntime {
                       LogicalRegion parent, FieldID fid,
                       const void *value, size_t value_size,
                       const Predicate &pred);
+      void fill_field(Context ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid,
+                      Future f, const Predicate &pred);
       void fill_fields(Context ctx, LogicalRegion handle,
                        LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        const void *value, size_t value_size,
                        const Predicate &pred);
+      void fill_fields(Context ctx, LogicalRegion handle,
+                       LogicalRegion parent,
+                       const std::set<FieldID> &fields,
+                       Future f, const Predicate &pred);
     public:
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
@@ -1775,8 +1805,13 @@ namespace LegionRuntime {
                                const TaskArgument &arg);
       void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
-      inline Processor find_utility_group(void) { return utility_group; }
+      //inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);
+      Event issue_runtime_meta_task(const void *args, size_t arglen,
+                                    HLRTaskID tid, Operation *op = NULL,
+                                    Event precondition = Event::NO_EVENT, 
+                                    int priority = 0,
+                                    Processor proc = Processor::NO_PROC);
     public:
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
@@ -1905,10 +1940,13 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void high_level_runtime_task(
                           const void *args, size_t arglen, Processor p);
+      static void profiling_runtime_task(
+                          const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
       void process_schedule_request(Processor p);
+      void process_profiling_task(Processor p, const void *args, size_t arglen);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The HighLevelRuntime wrapper for this class
@@ -1917,8 +1955,10 @@ namespace LegionRuntime {
       const Machine machine;
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
+      LegionProfiler *profiler;
       RegionTreeForest *const forest;
       Processor utility_group;
+      const bool has_explicit_utility_procs;
     protected:
       unsigned outstanding_top_level_tasks;
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -2123,7 +2163,7 @@ namespace LegionRuntime {
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Runtime* get_runtime(Processor p);
-      static LowLevel::ReductionOpTable& get_reduction_table(void);
+      static ReductionOpTable& get_reduction_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
@@ -2221,10 +2261,8 @@ namespace LegionRuntime {
     public:
       static unsigned long long perf_trace_tolerance;
 #endif
-#ifdef LEGION_PROF
     public:
-      static int num_profiling_nodes;
-#endif
+      static unsigned num_profiling_nodes;
     public:
       // The baseline time for profiling
       static const long long init_time;

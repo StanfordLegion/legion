@@ -26,6 +26,8 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    using namespace MappingUtilities;
+
     Logger::Category log_shim("shim_mapper");
 
     //--------------------------------------------------------------------------
@@ -832,8 +834,12 @@ namespace LegionRuntime {
                           "on processor " IDFMT "", task->variants->name, 
                           task->get_unique_task_id(), target.id);
       memoizer.commit_mapping(target, task);
-      profiler.update_profiling_info(task, target, 
-				     target.kind(), profiling);
+      MappingProfiler::Profile sample;
+      sample.execution_time = task->stop_time - task->start_time;
+      sample.target_processor = task->target_proc;
+      sample.index_point = task->index_point;
+
+      profiler.add_profiling_sample(task->task_id, sample);
     }
 
     //--------------------------------------------------------------------------

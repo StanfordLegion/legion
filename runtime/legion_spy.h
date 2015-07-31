@@ -232,6 +232,30 @@ namespace LegionRuntime {
             context, deletion);
       }
 
+      static inline void log_dependent_partition_operation(UniqueID context,
+                                                           UniqueID unique_id,
+                                                           IDType pid,
+                                                           int kind)
+      {
+        log_spy.info("Dependent Partition Operation %llu %llu " IDFMT " %d",
+            context, unique_id, pid, kind);
+      }
+
+      static inline void log_pending_partition_operation(UniqueID context,
+                                                         UniqueID unique_id)
+      {
+        log_spy.info("Pending Partition Operation %llu %llu",
+            context, unique_id);
+      }
+
+      static inline void log_target_pending_partition(UniqueID unique_id,
+                                                      IDType pid,
+                                                      int kind)
+      {
+        log_spy.info("Pending Partition Target %llu " IDFMT " %d", unique_id,
+            pid, kind);
+      }
+
       static inline void log_index_slice(UniqueID index_id, UniqueID slice_id)
       {
         log_spy.info("Index Slice %llu %llu", index_id, slice_id);
@@ -370,6 +394,12 @@ namespace LegionRuntime {
                              inst_id, mem_id, index_handle, field_handle, 
                              tree_id, fold, indirect_id);
       }
+
+      static inline void log_instance_field(IDType inst_id, FieldID field_id)
+      {
+        log_spy.info("Instance Field " IDFMT " %u", inst_id, field_id);
+      }
+
 
       static inline void log_op_user(UniqueID user,
                                      unsigned idx, 

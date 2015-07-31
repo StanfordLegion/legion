@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2015 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -134,6 +134,8 @@ function parser.expr_primary(p)
       local field_names = terralib.newlist()
       if p:nextif("partition") then
         field_names:insert("partition")
+      elseif p:nextif("product") then
+        field_names:insert("product")
       elseif p:nextif("{") then
         repeat
           if p:matches("}") then break end
@@ -275,6 +277,15 @@ function parser.expr_simple(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__raw") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprRawValue {
+      value = value,
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("isnull") then
     p:expect("(")
     local pointer = p:expr()
@@ -373,13 +384,13 @@ function parser.expr_simple(p)
 
   elseif p:nextif("cross_product") then
     p:expect("(")
-    local lhs_type_expr = p:luaexpr()
-    p:expect(",")
-    local rhs_type_expr = p:luaexpr()
+    local arg_type_exprs = terralib.newlist()
+    repeat
+      arg_type_exprs:insert(p:luaexpr())
+    until not p:nextif(",")
     p:expect(")")
     return ast.unspecialized.ExprCrossProduct {
-      lhs_type_expr = lhs_type_expr,
-      rhs_type_expr = rhs_type_expr,
+      arg_type_exprs = arg_type_exprs,
       span = ast.span(start, p),
     }
 
@@ -564,21 +575,26 @@ function parser.stat_for_list(p, start, name, type_expr, vectorize)
 end
 
 function parser.stat_for(p)
-  local parallel = false
-  local vectorize = false
+  local parallel = "allow"
+  local vectorize = "allow"
+
+  local pragma = false
   if p:nextif("__demand") then
+    pragma = "demand"
+  elseif p:nextif("__forbid") then
+    pragma = "forbid"
+  end
+
+  if pragma then
     p:expect("(")
-    if p:matches("__parallel") then
-      p:expect("__parallel")
-      p:expect(")")
-      parallel = "demand"
-    elseif p:matches("__vectorize") then
-      p:expect("__vectorize")
-      p:expect(")")
-      vectorize = "demand"
+    if p:nextif("__parallel") then
+      parallel = pragma
+    elseif p:nextif("__vectorize") then
+      vectorize = pragma
     else
       p:error("expected __parallel or __vectorize")
     end
+    p:expect(")")
   end
 
   local start = ast.save(p)
@@ -779,7 +795,7 @@ function parser.stat(p)
 
   -- Technically this could be written anywhere but for now it only
   -- applies to for loops.
-  elseif p:matches("__demand") then
+  elseif p:matches("__demand") or p:matches("__forbid") then
     return p:stat_for()
 
   elseif p:matches("for") then

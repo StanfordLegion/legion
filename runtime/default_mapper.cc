@@ -36,7 +36,33 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    using namespace MappingUtilities;
+
     Logger::Category log_mapper("default_mapper");
+
+    enum MapperMeesageType
+    {
+      INVALID_MESSAGE = 0,
+      PROFILING_SAMPLE = 1,
+    };
+
+    struct MapperMsgHdr
+    {
+      MapperMsgHdr(void) : magic(0xABCD), type(INVALID_MESSAGE) { }
+      bool is_valid_mapper_msg() const
+      {
+        return magic == 0xABCD && type != INVALID_MESSAGE;
+      }
+      uint32_t magic;
+      MapperMeesageType type;
+    };
+
+    struct ProfilingSampleMsg : public MapperMsgHdr
+    {
+      ProfilingSampleMsg(void) : MapperMsgHdr(), task_id(0) { }
+      Processor::TaskFuncID task_id;
+      MappingProfiler::Profile sample;
+    };
 
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(Machine m, HighLevelRuntime *rt, 
@@ -94,7 +120,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(const DefaultMapper &rhs)
       : Mapper(NULL), local_proc(Processor::NO_PROC),
-        local_kind(Processor::LOC_PROC), machine(NULL),
+        local_kind(Processor::LOC_PROC), machine(rhs.machine),
         machine_interface(MappingUtilities::MachineQueryInterface(Machine::get_machine()))
     //--------------------------------------------------------------------------
     {
@@ -764,11 +790,21 @@ namespace LegionRuntime {
                             task->variants->name, 
                             task->get_unique_task_id(), task->target_proc.id);
       memoizer.commit_mapping(task->target_proc, task);
-      Mapper::ExecutionProfile profiling;
-      profiling.start_time = task->start_time;
-      profiling.stop_time = task->stop_time;
-      profiler.update_profiling_info(task, task->target_proc,
-				     task->target_proc.kind(), profiling);
+      MappingProfiler::Profile sample;
+      sample.execution_time = task->stop_time - task->start_time;
+      sample.target_processor = task->target_proc;
+      sample.index_point = task->index_point;
+
+      profiler.add_profiling_sample(task->task_id, sample);
+      if (profiler.get_profiling_option(task->task_id).gather_in_orig_proc &&
+          task->target_proc != task->orig_proc)
+      {
+        ProfilingSampleMsg msg;
+        msg.type = PROFILING_SAMPLE;
+        msg.task_id = task->task_id;
+        msg.sample = sample;
+        send_message(task->orig_proc, &msg, sizeof(msg));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -821,8 +857,26 @@ namespace LegionRuntime {
     {
       log_mapper.spew("Handle message in default mapper for processor " 
                             IDFMT "", local_proc.id);
-      // We don't send any messages so we should never receive one
-      assert(false);
+      const MapperMsgHdr* header = reinterpret_cast<const MapperMsgHdr*>(message);
+      if (header->is_valid_mapper_msg())
+      {
+        switch (header->type)
+        {
+          case PROFILING_SAMPLE:
+            {
+              const ProfilingSampleMsg* msg =
+                reinterpret_cast<const ProfilingSampleMsg*>(message);
+              profiler.add_profiling_sample(msg->task_id, msg->sample);
+              break;
+            }
+          default:
+            {
+              // this should not happen
+              assert(false);
+              break;
+            }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

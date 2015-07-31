@@ -24,7 +24,7 @@
 namespace LegionRuntime {
   namespace LowLevel {
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-      : Memory::Impl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
+      : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
       printf("file = %s\n", _file.c_str());
       // do not overwrite an existing file
@@ -52,11 +52,12 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst)
     {
       return create_instance_local(is, linearization_bits, bytes_needed,
                      block_size, element_size, field_sizes, redopid,
-                     list_size, parent_inst);
+                     list_size, reqs, parent_inst);
     }
 
     void DiskMemory::destroy_instance(RegionInstance i,
@@ -130,7 +131,7 @@ namespace LegionRuntime {
 
 #ifdef USE_HDF
     HDFMemory::HDFMemory(Memory _me)
-      : Memory::Impl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
+      : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
     {
     }
 
@@ -148,6 +149,7 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst)
     {
       // we use a new create_instance, which could provide
@@ -165,6 +167,7 @@ namespace LegionRuntime {
                      const std::vector<size_t>& field_sizes,
                      ReductionOpID redopid,
                      off_t list_size,
+                     const Realm::ProfilingRequestSet &reqs,
                      RegionInstance parent_inst,
                      const char* file,
                      const std::vector<const char*>& path_names,
@@ -175,7 +178,7 @@ namespace LegionRuntime {
       RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
-                 list_size, parent_inst);
+                 list_size, reqs, parent_inst);
 
       HDFMetadata* new_hdf = new HDFMetadata;
       new_hdf->ndims = domain.get_dim();

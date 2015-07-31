@@ -90,6 +90,10 @@ function analyze_region_divergence.expr_raw_fields(cx, node)
   analyze_region_divergence.expr(cx, node.region)
 end
 
+function analyze_region_divergence.expr_raw_value(cx, node)
+  analyze_region_divergence.expr(cx, node.value)
+end
+
 function analyze_region_divergence.expr_isnull(cx, node)
   analyze_region_divergence.expr(cx, node.pointer)
 end
@@ -166,6 +170,9 @@ function analyze_region_divergence.expr(cx, node)
 
   elseif node:is(ast.typed.ExprRawRuntime) then
     return
+
+  elseif node:is(ast.typed.ExprRawValue) then
+    return analyze_region_divergence.expr_raw_value(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return analyze_region_divergence.expr_isnull(cx, node)

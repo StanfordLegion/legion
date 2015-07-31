@@ -29,10 +29,6 @@
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
-import "legion"
-
-local c = legionlib.c
-
 -- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- Compile and link pennant.cc
@@ -60,8 +56,12 @@ do
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", "-I", root_dir, "-I", runtime_dir)
+  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
+
+import "legion"
+
+local c = legionlib.c
 
 -- Include other headers
 local cmath = terralib.includec("math.h")
@@ -1282,6 +1282,12 @@ terra wait_for(x : double)
   return x
 end
 
+task continue_simulation(warmup : bool,
+                         cycle : int64, cstop : int64,
+                         time : double, tstop : double)
+  return warmup or (cycle < cstop and time < tstop)
+end
+
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rz_spans_p : partition(disjoint, rz_all),
               rz_spans : cross_product(rz_all_p, rz_spans_p),
@@ -1311,7 +1317,7 @@ do
   var dtfac = conf.dtfac
   var dtinit = conf.dtinit
   var dtmax = conf.dtmax
-  var gamma = conf.qgamma
+  var gamma = conf.gamma
   var q1 = conf.q1
   var q2 = conf.q2
   var qgamma = conf.qgamma
@@ -1332,9 +1338,9 @@ do
   var cycle : int64 = 0
   var dt = dtmax
   var dthydro = dtmax
-  while warmup or (cycle < cstop and time < tstop) do
+  while continue_simulation(warmup, cycle, cstop, time, tstop) do
     if warmup and cycle > 0 then
-      wait_for(dt)
+      wait_for(dthydro)
       enable = true
       warmup = false
       time = 0.0
@@ -1434,7 +1440,7 @@ do
   end
 
   if enable then
-    wait_for(dt)
+    wait_for(dthydro)
     var end_time = c.legion_get_current_time_in_micros()/1.e6
     c.printf("Elapsed time = %.6e\n", end_time - start_time)
   end
