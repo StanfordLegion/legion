@@ -36,6 +36,8 @@
 #endif
 
 #include "realm/operation.h"
+#include "realm/dynamic_table.h"
+#include "realm/id.h"
 
 #include <assert.h>
 
@@ -79,6 +81,9 @@ namespace Realm {
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+    typedef Realm::ID ID;
+
     extern Logger::Category log_mutex;
 
 #ifdef EVENT_TRACING
@@ -113,106 +118,42 @@ namespace LegionRuntime {
     };
 #endif
 
-    // gasnet_hsl_t in object form for templating goodness
-    class GASNetHSL {
+    template <typename LT>
+    class AutoLock {
     public:
-      GASNetHSL(void) { gasnet_hsl_init(&mutex); }
-      // Should never be copied
-      GASNetHSL(const GASNetHSL &rhs) { assert(false); }
-      ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
-
-      // Should never be copied
-      GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
-
-      void lock(void) { gasnet_hsl_lock(&mutex); }
-      void unlock(void) { gasnet_hsl_unlock(&mutex); }
-
-    protected:
-      friend class AutoHSLLock;
-      friend class GASNetCondVar;
-      gasnet_hsl_t mutex;
-    };
-
-    class AutoHSLLock {
-    public:
-      AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
+      AutoLock(LT &mutex) : mutex(mutex), held(true)
       { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", &mutex);
+	mutex.lock();
+	log_mutex.spew("MUTEX LOCK HELD %p", &mutex);
       }
-      AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      AutoHSLLock(GASNetHSL &mutex) : mutexp(&mutex.mutex), held(true)
-      { 
-	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
-	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	gasnet_hsl_lock(mutexp); 
-	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
-	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
-      }
-      ~AutoHSLLock(void) 
+
+      ~AutoLock(void) 
       {
 	if(held)
-	  gasnet_hsl_unlock(mutexp);
-	log_mutex.spew("MUTEX LOCK OUT %p", mutexp);
-	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
+	  mutex.unlock();
+	log_mutex.spew("MUTEX LOCK OUT %p", &mutex);
       }
+
       void release(void)
       {
 	assert(held);
-	gasnet_hsl_unlock(mutexp);
+	mutex.unlock();
 	held = false;
       }
+
       void reacquire(void)
       {
 	assert(!held);
-	gasnet_hsl_lock(mutexp);
+	mutex.lock();
 	held = true;
       }
     protected:
-      gasnet_hsl_t *mutexp;
+      LT &mutex;
       bool held;
     };
 
-    class GASNetCondVar {
-    public:
-      GASNetCondVar(GASNetHSL &_mutex) 
-	: mutex(_mutex)
-      {
-	gasnett_cond_init(&cond);
-      }
-
-      ~GASNetCondVar(void)
-      {
-	gasnett_cond_destroy(&cond);
-      }
-
-      // these require that you hold the lock when you call
-      void signal(void)
-      {
-	gasnett_cond_signal(&cond);
-      }
-
-      void wait(void)
-      {
-	gasnett_cond_wait(&cond, &mutex.mutex.lock);
-      }
-
-    public:
-      GASNetHSL &mutex;
-
-    protected:
-      gasnett_cond_t cond;
-    };
+    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
     typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
                                               NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
@@ -228,285 +169,11 @@ namespace LegionRuntime {
     typedef LegionRuntime::HighLevel::NodeSet NodeSet;
 #endif
 
-    // we have a base type that's element-type agnostic
-    template <typename LT, typename IT>
-    struct DynamicTableNodeBase {
-    public:
-      DynamicTableNodeBase(int _level, IT _first_index, IT _last_index)
-        : level(_level), first_index(_first_index), last_index(_last_index) {}
-
-      int level;
-      IT first_index, last_index;
-      LT lock;
-    };
-
-    template <typename ET, size_t _SIZE, typename LT, typename IT>
-      struct DynamicTableNode : public DynamicTableNodeBase<LT, IT> {
-    public:
-      static const size_t SIZE = _SIZE;
-
-      DynamicTableNode(int _level, IT _first_index, IT _last_index)
-        : DynamicTableNodeBase<LT, IT>(_level, _first_index, _last_index) {}
-
-      ET elems[SIZE];
-    };
-
-    template <typename ALLOCATOR> class DynamicTableFreeList;
-
-    template <typename ALLOCATOR>
-    class DynamicTable {
-    public:
-      typedef typename ALLOCATOR::IT IT;
-      typedef typename ALLOCATOR::ET ET;
-      typedef typename ALLOCATOR::LT LT;
-      typedef DynamicTableNodeBase<LT, IT> NodeBase;
-
-      DynamicTable(void);
-      ~DynamicTable(void);
-
-      size_t max_entries(void) const;
-      bool has_entry(IT index) const;
-      ET *lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list = 0);
-
-    protected:
-      NodeBase *new_tree_node(int level, IT first_index, IT last_index,
-			      int owner, typename ALLOCATOR::FreeList *free_list);
-
-      // lock protects _changes_ to 'root', but not access to it
-      GASNetHSL lock;
-      NodeBase * volatile root;
-    };
-
-    template <typename ALLOCATOR>
-    class DynamicTableFreeList {
-    public:
-      typedef typename ALLOCATOR::IT IT;
-      typedef typename ALLOCATOR::ET ET;
-      typedef typename ALLOCATOR::LT LT;
-
-      DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner);
-
-      ET *alloc_entry(void);
-      void free_entry(ET *entry);
-
-      DynamicTable<ALLOCATOR>& table;
-      int owner;
-      GASNetHSL lock;
-      ET * volatile first_free;
-      IT volatile next_alloc;
-    };
-
-    template <typename ALLOCATOR>
-    DynamicTable<ALLOCATOR>::DynamicTable(void)
-      : root(0)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    DynamicTable<ALLOCATOR>::~DynamicTable(void)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
-    {
-      if(level > 0) {
-	// an inner node - we can create that ourselves
-	typename ALLOCATOR::INNER_TYPE *inner = new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
-	for(size_t i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
-	  inner->elems[i] = 0;
-	return inner;
-      } else {
-	return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list);
-      }
-    }
-
-    template<typename ALLOCATOR>
-    size_t DynamicTable<ALLOCATOR>::max_entries(void) const
-    {
-      if (!root)
-        return 0;
-      size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      for (int i = 0; i < root->level; i++)
-        elems_addressable <<= ALLOCATOR::INNER_BITS;
-      return elems_addressable;
-    }
-
-    template<typename ALLOCATOR>
-    bool DynamicTable<ALLOCATOR>::has_entry(IT index) const
-    {
-      // first, figure out how many levels the tree must have to find our index
-      int level_needed = 0;
-      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      while(index >= elems_addressable) {
-	level_needed++;
-	elems_addressable <<= ALLOCATOR::INNER_BITS;
-      }
-
-      NodeBase *n = root;
-      if (!n || (n->level < level_needed))
-        return false;
-
-      // when we get here, root is high enough
-      assert((level_needed <= n->level) &&
-	     (index >= n->first_index) &&
-	     (index <= n->last_index));
-
-      // now walk tree, populating the path we need
-      while(n->level > 0) {
-	// intermediate nodes
-	typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
-
-	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
-		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
-
-	NodeBase *child = inner->elems[i];
-	if(child == 0) {
-          return false;	
-        }
-        assert((child != 0) &&
-	       (child->level == (n->level - 1)) &&
-	       (index >= child->first_index) &&
-	       (index <= child->last_index));
-	n = child;
-      }
-      return true;
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTable<ALLOCATOR>::ET *DynamicTable<ALLOCATOR>::lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
-    {
-      // first, figure out how many levels the tree must have to find our index
-      int level_needed = 0;
-      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      while(index >= elems_addressable) {
-	level_needed++;
-	elems_addressable <<= ALLOCATOR::INNER_BITS;
-      }
-
-      // in the common case, we won't need to add levels to the tree - grab the root (no lock)
-      // and see if it covers the range that includes our index
-      NodeBase *n = root;
-      if(!n || (n->level < level_needed)) {
-	// root doesn't appear to be high enough - take lock and fix it if it's really
-	//  not high enough
-	lock.lock();
-
-	if(!root) {
-	  // simple case - just create a root node at the level we want
-	  root = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
-	} else {
-	  // some of the tree already exists - add new layers on top
-	  while(root->level < level_needed) {
-	    int parent_level = root->level + 1;
-	    IT parent_first = 0;
-	    IT parent_last = (((root->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
-	    NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list);
-	    typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
-	    inner->elems[0] = root;
-	    root = parent;
-	  }
-	}
-	n = root;
-
-	lock.unlock();
-      }
-      // when we get here, root is high enough
-      assert((level_needed <= n->level) &&
-	     (index >= n->first_index) &&
-	     (index <= n->last_index));
-
-      // now walk tree, populating the path we need
-      while(n->level > 0) {
-	// intermediate nodes
-	typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
-
-	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
-		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
-
-	NodeBase *child = inner->elems[i];
-	if(child == 0) {
-	  // need to populate subtree
-
-	  // take lock on inner node
-	  inner->lock.lock();
-
-	  // now that lock is held, see if we really need to make new node
-	  if(inner->elems[i] == 0) {
-	    int child_level = inner->level - 1;
-	    int child_shift = (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
-	    IT child_first = inner->first_index + (i << child_shift);
-	    IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
-
-	    inner->elems[i] = new_tree_node(child_level, child_first, child_last, owner, free_list);
-	  }
-	  child = inner->elems[i];
-
-	  inner->lock.unlock();
-	}
-	assert((child != 0) &&
-	       (child->level == (n->level - 1)) &&
-	       (index >= child->first_index) &&
-	       (index <= child->last_index));
-	n = child;
-      }
-
-      // leaf node - just return pointer to the target element
-      typename ALLOCATOR::LEAF_TYPE *leaf = static_cast<typename ALLOCATOR::LEAF_TYPE *>(n);
-      int ofs = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
-      return &(leaf->elems[ofs]);
-    }
-
-    template <typename ALLOCATOR>
-    DynamicTableFreeList<ALLOCATOR>::DynamicTableFreeList(DynamicTable<ALLOCATOR>& _table, int _owner)
-      : table(_table), owner(_owner), first_free(0), next_alloc(0)
-    {
-    }
-
-    template <typename ALLOCATOR>
-    typename DynamicTableFreeList<ALLOCATOR>::ET *DynamicTableFreeList<ALLOCATOR>::alloc_entry(void)
-    {
-      // take the lock first, since we're messing with the free list
-      lock.lock();
-
-      // if the free list is empty, we can fill it up by referencing the next entry to be allocated -
-      // this uses the existing dynamic-filling code to avoid race conditions
-      while(!first_free) {
-	IT to_lookup = next_alloc;
-	next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
-	lock.unlock();
-	typename DynamicTable<ALLOCATOR>::ET *dummy = table.lookup_entry(to_lookup, owner, this);
-	assert(dummy != 0);
-	// can't actually use dummy because we let go of lock - retake lock and hopefully find non-empty
-	//  list next time
-	lock.lock();
-      }
-
-      typename DynamicTable<ALLOCATOR>::ET *entry = first_free;
-      first_free = entry->next_free;
-      lock.unlock();
-
-      return entry;
-    }
-
-    template <typename ALLOCATOR>
-    void DynamicTableFreeList<ALLOCATOR>::free_entry(ET *entry)
-    {
-      // just stick ourselves on front of free list
-      lock.lock();
-      entry->next_free = first_free;
-      first_free = entry;
-      lock.unlock();
-    }
-
     template <class T>
     class Atomic {
     public:
       Atomic(T _value) : value(_value)
       {
-	gasnet_hsl_init(&mutex);
 	//printf("%d: atomic %p = %d\n", gasnet_mynode(), this, value);
       }
 
@@ -522,7 +189,7 @@ namespace LegionRuntime {
 
     protected:
       T value;
-      gasnet_hsl_t mutex;
+      GASNetHSL mutex;
     };
 
     // prioritized list that maintains FIFO order within a priority level
@@ -556,94 +223,6 @@ namespace LegionRuntime {
       }
     };
      
-    class ID {
-    public:
-#ifdef LEGION_IDS_ARE_64BIT
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 12,
-	INDEX_L_BITS = 32,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
-      };
-#else
-      // two forms of bit pack for IDs:
-      //
-      //  3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
-      //  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-      // +-----+---------------------------------------------------------+
-      // |  TYP  |   NODE  |         INDEX                               |
-      // |  TYP  |   NODE  |  INDEX_H    |           INDEX_L             |
-      // +-----+---------------------------------------------------------+
-
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 7,
-	INDEX_L_BITS = 16,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 32 - TYPE_BITS - INDEX_BITS /* 5 = 32 nodes */
-      };
-#endif
-
-      enum ID_Types {
-	ID_SPECIAL,
-	ID_UNUSED_1,
-	ID_EVENT,
-	ID_BARRIER,
-	ID_LOCK,
-	ID_UNUSED_5,
-	ID_MEMORY,
-	ID_UNUSED_7,
-	ID_PROCESSOR,
-	ID_PROCGROUP,
-	ID_INDEXSPACE,
-	ID_UNUSED_11,
-	ID_ALLOCATOR,
-	ID_UNUSED_13,
-	ID_INSTANCE,
-	ID_UNUSED_15,
-      };
-
-      enum ID_Specials {
-	ID_INVALID = 0,
-	ID_GLOBAL_MEM = (1U << INDEX_H_BITS) - 1,
-      };
-
-      ID(IDType _value) : value(_value) {}
-
-      template <class T>
-      ID(T thing_to_get_id_from) : value(thing_to_get_id_from.id) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		_index) {}
-
-      ID(ID_Types _type, unsigned _node, IDType _index_h, IDType _index_l)
-	: value((((IDType)_type) << (NODE_BITS + INDEX_BITS)) |
-		(((IDType)_node) << INDEX_BITS) |
-		(_index_h << INDEX_L_BITS) |
-		_index_l) {}
-
-      bool operator==(const ID& rhs) const { return value == rhs.value; }
-
-      IDType id(void) const { return value; }
-      ID_Types type(void) const { return (ID_Types)(value >> (NODE_BITS + INDEX_BITS)); }
-      unsigned node(void) const { return ((value >> INDEX_BITS) & ((1U << NODE_BITS)-1)); }
-      IDType index(void) const { return (value & ((((IDType)1) << INDEX_BITS) - 1)); }
-      IDType index_h(void) const { return ((value >> INDEX_L_BITS) & ((((IDType)1) << INDEX_H_BITS)-1)); }
-      IDType index_l(void) const { return (value & ((((IDType)1) << INDEX_L_BITS) - 1)); }
-
-      template <class T>
-      T convert(void) const { T thing_to_return; thing_to_return.id = value; return thing_to_return; }
-
-    protected:
-      IDType value;
-    };
-    
-    template <>
-    inline ID ID::convert<ID>(void) const { return *this; }
-      
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
@@ -808,7 +387,7 @@ namespace LegionRuntime {
 
       enum { MODE_EXCL = 0, ZERO_COUNT = 0x11223344 };
 
-      gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible lock)
+      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible lock)
 
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
       NodeSet remote_waiter_mask, remote_sharer_mask;
@@ -821,7 +400,7 @@ namespace LegionRuntime {
       size_t local_data_size;
       bool own_local;
 
-      static gasnet_hsl_t freelist_mutex;
+      static GASNetHSL freelist_mutex;
       static ReservationImpl *first_free;
       ReservationImpl *next_free;
 
@@ -1215,8 +794,8 @@ namespace LegionRuntime {
       LocalProcessor *const proc;
     protected:
       ThreadState state;
-      gasnet_hsl_t thread_mutex;
-      gasnett_cond_t thread_cond;
+      GASNetHSL thread_mutex;
+      GASNetCondVar thread_cond;
       bool initialize;
       bool finalize;
     };
@@ -1254,8 +833,8 @@ namespace LegionRuntime {
       const int core_id;
       const size_t stack_size;
       const char *const processor_name;
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
@@ -1349,8 +928,8 @@ namespace LegionRuntime {
       const size_t proc_stack_size;
       const char *const processor_name;
     protected:
-      gasnet_hsl_t mutex;
-      gasnett_cond_t condvar;
+      GASNetHSL mutex;
+      GASNetCondVar condvar;
       JobQueue<Task> task_queue;
       bool shutdown, shutdown_trigger;
     protected:
@@ -1457,7 +1036,7 @@ namespace LegionRuntime {
       MemoryKind kind;
       size_t alignment;
       Memory::Kind lowlevel_kind;
-      gasnet_hsl_t mutex; // protection for resizing vectors
+      GASNetHSL mutex; // protection for resizing vectors
       std::vector<RegionInstanceImpl *> instances;
       std::map<off_t, off_t> free_blocks;
 #ifdef REALM_PROFILE_MEMORY_USAGE
@@ -1771,7 +1350,7 @@ namespace LegionRuntime {
       };
 
       CoherentData locked_data;
-      gasnet_hsl_t valid_mask_mutex;
+      GASNetHSL valid_mask_mutex;
       ElementMask *valid_mask;
       int valid_mask_count;
       bool valid_mask_complete;
@@ -1791,9 +1370,9 @@ namespace LegionRuntime {
 
       typedef GASNetHSL LT;
       typedef int IT;
-      typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
-      typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
-      typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
+      typedef Realm::DynamicTableNode<Realm::DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
+      typedef Realm::DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
+      typedef Realm::DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -1836,11 +1415,11 @@ namespace LegionRuntime {
       std::vector<MemoryImpl *> memories;
       std::vector<ProcessorImpl *> processors;
 
-      DynamicTable<EventTableAllocator> events;
-      DynamicTable<BarrierTableAllocator> barriers;
-      DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<IndexSpaceTableAllocator> index_spaces;
-      DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      Realm::DynamicTable<EventTableAllocator> events;
+      Realm::DynamicTable<BarrierTableAllocator> barriers;
+      Realm::DynamicTable<ReservationTableAllocator> reservations;
+      Realm::DynamicTable<IndexSpaceTableAllocator> index_spaces;
+      Realm::DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
     struct NodeAnnounceData;
