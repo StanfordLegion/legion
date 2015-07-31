@@ -6014,7 +6014,7 @@ namespace LegionRuntime {
                                    size_t stacksize, const char *name, int _core)
       : ProcessorImpl(_me, _kind), core_id(_core), 
         stack_size(stacksize), processor_name(name),
-	condvar(mutex),
+	condvar(mutex), done_initialization(false),
         shutdown(false), shutdown_trigger(false), running_thread(0)
     {
     }
@@ -6029,6 +6029,10 @@ namespace LegionRuntime {
       running_thread = create_new_thread();
       running_thread->do_initialize();
       running_thread->start_thread(stack_size, core_id, processor_name);
+      mutex.lock();
+      if (!done_initialization)
+        condvar.wait();
+      mutex.unlock();
     }
 
     void LocalProcessor::shutdown_processor(void)
@@ -6065,6 +6069,10 @@ namespace LegionRuntime {
 
     void LocalProcessor::initialize_processor(void)
     {
+      mutex.lock();
+      done_initialization = true;
+      condvar.signal();
+      mutex.unlock();
       Processor::TaskIDTable::iterator it = 
         get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
       if(it != get_runtime()->task_table.end()) {
@@ -6512,7 +6520,7 @@ namespace LegionRuntime {
                                          const char *name, int _core_id)
       : ProcessorImpl(_me, _kind), core_id(_core_id), proc_stack_size(_stack_size), 
         processor_name(name),
-	condvar(mutex),
+	condvar(mutex), done_initialization(false),
 	shutdown(false), shutdown_trigger(false), 
         greenlet_thread(0), thread_state(GREENLET_RUNNING)
     {
@@ -6527,6 +6535,10 @@ namespace LegionRuntime {
       assert(greenlet_thread == 0);
       greenlet_thread = new GreenletThread(this);
       greenlet_thread->start_thread(proc_stack_size, core_id, processor_name);
+      mutex.lock();
+      if (!done_initialization)
+        condvar.wait();
+      mutex.unlock();
     }
 
     void GreenletProcessor::shutdown_processor(void)
@@ -6544,6 +6556,10 @@ namespace LegionRuntime {
 
     void GreenletProcessor::initialize_processor(void)
     {
+      mutex.lock();
+      done_initialization = true;
+      condvar.signal();
+      mutex.unlock();
       Processor::TaskIDTable::iterator it = 
         get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
       if(it != get_runtime()->task_table.end()) {

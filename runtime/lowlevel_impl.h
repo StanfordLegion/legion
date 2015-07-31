@@ -836,6 +836,7 @@ namespace LegionRuntime {
       GASNetHSL mutex;
       GASNetCondVar condvar;
       JobQueue<Task> task_queue;
+      bool done_initialization;
       bool shutdown, shutdown_trigger;
     protected:
       LocalThread               *running_thread;
@@ -931,6 +932,7 @@ namespace LegionRuntime {
       GASNetHSL mutex;
       GASNetCondVar condvar;
       JobQueue<Task> task_queue;
+      bool done_initialization;
       bool shutdown, shutdown_trigger;
     protected:
       GreenletThread             *greenlet_thread;
