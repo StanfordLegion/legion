@@ -550,6 +550,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const BitMask &rhs) const;
@@ -627,6 +628,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const TLBitMask &rhs) const;
@@ -697,6 +699,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -766,6 +769,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -839,6 +843,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
@@ -911,6 +916,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
@@ -1075,6 +1081,7 @@ namespace LegionRuntime {
       inline void add(IT index);
       inline void remove(IT index);
       inline IT find_first_set(void) const;
+      inline IT find_index_set(int index) const;
       // The functor class must have an 'apply' method that
       // take one argument of type IT. This method will map
       // the functor over all the entries in the set.
@@ -1860,6 +1867,33 @@ namespace LegionRuntime {
     }
 
     //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
     template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
     inline void BitMask<T,MAX,SHIFT,MASK>::clear(void)
     //-------------------------------------------------------------------------
@@ -2472,6 +2506,33 @@ namespace LegionRuntime {
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -3114,14 +3175,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -3692,14 +3780,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -4336,14 +4451,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -5003,14 +5145,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE+ j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -6082,6 +6251,31 @@ namespace LegionRuntime {
 #endif
         return set_ptr.dense->set.find_first_set();
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IT IntegerSet<IT,DT,BIDIR>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index >= 0);
+      assert(index < int(size()));
+#endif
+      if (index == 0)
+        return find_first_set();
+      if (sparse)
+      {
+        typename std::set<IT>::const_iterator it = set_ptr.sparse->begin();
+        while (index > 0)
+        {
+          it++;
+          index--;
+        }
+        return *it;
+      }
+      else
+        return set_ptr.dense->set.find_index_set(index);
     }
 
     //-------------------------------------------------------------------------

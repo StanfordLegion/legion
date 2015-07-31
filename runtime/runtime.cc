@@ -3948,15 +3948,15 @@ namespace LegionRuntime {
               runtime->handle_free_remote_context(derez);
               break;
             }
+          case SEND_VERSION_STATE_INIT:
+            {
+              runtime->handle_version_state_initialization(derez, 
+                                                          remote_address_space);
+              break;
+            }
           case SEND_VERSION_STATE_REQUEST:
             {
               runtime->handle_version_state_request(derez);
-              break;
-            }
-          case SEND_VERSION_STATE_BROADCAST_REQUEST:
-            {
-              runtime->handle_version_state_broadcast_request(derez,
-                                                          remote_address_space);
               break;
             }
           case SEND_VERSION_STATE_RESPONSE:
@@ -11311,8 +11311,10 @@ namespace LegionRuntime {
                                         Serializer &rez, bool flush /*= true*/)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
-                                           DEFAULT_VIRTUAL_CHANNEL, flush);
+                                         PHYSICAL_STATE_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -11320,8 +11322,10 @@ namespace LegionRuntime {
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMPLETE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11329,32 +11333,40 @@ namespace LegionRuntime {
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMMIT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_mapped(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_MAPPED,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_complete(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMPLETE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_commit(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Very important that this goes on the physical state channel
+      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMMIT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11651,22 +11663,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_state_initialization(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_INIT,
+                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_state_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VERSION_STATE_REQUEST,
                                  PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_broadcast_request(AddressSpaceID target,
-                                                       Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_VERSION_STATE_BROADCAST_REQUEST, PHYSICAL_STATE_VIRTUAL_CHANNEL,
-                                                                true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12243,19 +12254,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_initialization(Deserializer &derez,
+                                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_initialization(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_version_state_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_request(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_broadcast_request(Deserializer &derez,
-                                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_broadcast_request(this, derez,
-                                                            source);
     }
 
     //--------------------------------------------------------------------------

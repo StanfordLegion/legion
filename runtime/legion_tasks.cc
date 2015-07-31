@@ -6474,9 +6474,11 @@ namespace LegionRuntime {
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote())
+      if (!is_remote() && !is_locally_mapped())
       {
-        // Notify our enclosing parent task that we are being sent remotely
+        // Notify our enclosing parent task that we are being sent 
+        // remotely if we are not locally mapped because now there
+        // will be remote state
         parent_ctx->record_remote_state();
       }
       // Check to see if we are stealable, if not and we have not
@@ -9410,9 +9412,11 @@ namespace LegionRuntime {
     bool SliceTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote())
+      if (!is_remote() && !is_locally_mapped())
       {
-        // Tell our parent task that we are being sent remotely
+        // Notify our enclosing parent task that we are being sent 
+        // remotely if we are not locally mapped because now there
+        // will be remote state
         parent_ctx->record_remote_state();
       }
       // Check to see if we are stealable or not yet fully sliced,

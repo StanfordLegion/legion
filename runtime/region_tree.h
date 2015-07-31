@@ -2022,32 +2022,19 @@ namespace LegionRuntime {
         FINAL_VERSION_STATE,
       };
     public:
-      class RequestBroadcast {
+      class BroadcastFunctor {
       public:
-        RequestBroadcast(std::set<Event> &events, Runtime *rt, 
-                         AddressSpaceID src, DistributedID d)
-          : ready_events(events), runtime(rt), source(src), did(d) { }
-      public:
-        void apply(AddressSpaceID target);
-      protected:
-        std::set<Event> &ready_events;
-        Runtime *const runtime;
-        const AddressSpaceID source;
-        const DistributedID did;
-      };
-      class RequestResponse {
-      public:
-        RequestResponse(Serializer &r, AddressSpaceID src)
-          : rez(r), source(src) { }
+        BroadcastFunctor(AddressSpaceID loc, std::deque<AddressSpaceID> &t)
+          : local(loc), targets(t) { }
       public:
         inline void apply(AddressSpaceID target)
         {
-          if (target != source)
-            rez.serialize(target);
+          if (target != local)
+            targets.push_back(target);
         }
       protected:
-        Serializer &rez;
-        const AddressSpaceID source;
+        AddressSpaceID local;
+        std::deque<AddressSpaceID> &targets;
       };
     public:
       struct SendVersionStateArgs {
@@ -2074,7 +2061,7 @@ namespace LegionRuntime {
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask, 
                                  bool path_only) const;
-      void merge_physical_state(const PhysicalState *state, 
+      bool merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
     public:
       virtual void notify_active(void);
@@ -2085,20 +2072,25 @@ namespace LegionRuntime {
       Event request_initial_version_state(void);
       Event request_final_version_state(void);
       void send_version_state(AddressSpaceID target, UserEvent to_trigger);
+      void send_initialization_notice(void);
+      void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
+                            UserEvent to_trigger, bool final_req, bool upgrade);
+      void launch_send_version_state(AddressSpaceID target, 
+                                 UserEvent to_trigger, Event precondition);
+      AddressSpaceID select_next_target(bool initial, AddressSpaceID source);
     public:
+      void handle_version_state_initialization(AddressSpaceID source);
       void handle_version_state_request(AddressSpaceID source, 
-                                        UserEvent to_trigger);
-      void handle_version_state_broadcast_request(AddressSpaceID source, 
-                                                  UserEvent to_trigger);
+                       UserEvent to_trigger, bool final_req, bool upgrade);
       void handle_version_state_response(AddressSpaceID source,
                              UserEvent to_trigger, Deserializer &derez);
       void handle_version_state_broadcast_response(UserEvent to_trigger,
                                                    Deserializer &derez);
     public:
+      static void process_version_state_initialization(Runtime *rt,
+                              Deserializer &derez, AddressSpaceID source);
       static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
-      static void process_version_state_broadcast_request(Runtime *rt,
-                              Deserializer &derez, AddressSpaceID source);
       static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
       static void process_version_state_broadcast_response(Runtime *rt,
@@ -2128,6 +2120,9 @@ namespace LegionRuntime {
     protected:
       VersionMetaState meta_state;
       Event initial_ready, final_ready;
+      // These are valid on the owner node only
+      NodeSet initial_nodes, final_nodes;
+      unsigned init_index, final_index;
     };
 
     /**

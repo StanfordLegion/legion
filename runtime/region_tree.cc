@@ -12334,7 +12334,15 @@ namespace LegionRuntime {
               FieldMask non_closed = it->second - closed_mask;
               if (!non_closed)
                 continue;
-              it->first->merge_physical_state(this, non_closed); 
+#ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
+              bool check = 
+#endif
+#endif
+               it->first->merge_physical_state(this, non_closed); 
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!check);
+#endif
             }
           }
         }
@@ -12357,7 +12365,8 @@ namespace LegionRuntime {
               FieldMask non_closed = it->second - closed_mask;
               if (!non_closed)
                 continue;
-              it->first->merge_physical_state(this, non_closed); 
+              if (it->first->merge_physical_state(this, non_closed)) 
+                it->first->send_initialization_notice();
             }
           }
         }
@@ -12374,7 +12383,15 @@ namespace LegionRuntime {
             for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                   info.states.begin(); it != info.states.end(); it++)
             {
-              it->first->merge_physical_state(this, it->second); 
+#ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
+              bool check = 
+#endif
+#endif
+                it->first->merge_physical_state(this, it->second); 
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!check);
+#endif
             }
           }
         }
@@ -12391,7 +12408,8 @@ namespace LegionRuntime {
             for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                   info.states.begin(); it != info.states.end(); it++)
             {
-              it->first->merge_physical_state(this, it->second); 
+              if (it->first->merge_physical_state(this, it->second)) 
+                it->first->send_initialization_notice();
             }
           }
         }
@@ -12715,7 +12733,8 @@ namespace LegionRuntime {
         currently_active(true), currently_valid(true),
 #endif
         meta_state(initialize ? INITIAL_VERSION_STATE : INVALID_VERSION_STATE),
-        initial_ready(Event::NO_EVENT), final_ready(Event::NO_EVENT)
+        initial_ready(Event::NO_EVENT), final_ready(Event::NO_EVENT),
+        init_index(0), final_index(0)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, add a valid and resource reference
@@ -12945,7 +12964,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::merge_physical_state(const PhysicalState *state,
+    bool VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask)
     //--------------------------------------------------------------------------
     {
@@ -13019,6 +13038,17 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
+      // Finally update our state
+      if (meta_state == INVALID_VERSION_STATE)
+      {
+        meta_state = INITIAL_VERSION_STATE;
+        if (!is_owner())
+          return true;
+        else
+          initial_nodes.add(local_space);
+      }
+      // No need to send an update
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -13095,6 +13125,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       UserEvent result;
+      AddressSpaceID target = owner_space;
       {
         AutoLock s_lock(state_lock);
         if (meta_state == FINAL_VERSION_STATE)
@@ -13104,46 +13135,16 @@ namespace LegionRuntime {
         result = UserEvent::create_user_event();
         initial_ready = result;
         meta_state = INITIAL_VERSION_STATE;
+        // If we make it here we have to send a request to get the data 
+        // Send a request to the owner for the state which will either
+        // be handled there or sent to someone who can, unless we are
+        // the owner in which case we pick someone to send a request to
+        if (is_owner())
+          target = select_next_target(true/*initial*/, local_space);
       }
-      // If we make it here we have to send a request to get the data 
-      // Send a request to the owner for the state which will either
-      // be handled there or sent to someone who can, unless we are
-      // the owner in which case we pick someone to send a request to
-      AddressSpaceID target = owner_space;
-      if (is_owner())
-      {
-        // If we are the owner, look up someone who has the state
-        // and send a request, for right now just pick the first one
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!remote_instances.empty());
-#endif
-        target = remote_instances.find_first_set();
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(local_space);
-        rez.serialize(result);
-      }
-      runtime->send_version_state_request(target, rez);
+      send_version_state_request(target, local_space, result,
+                                 false/*final req*/, false/*upgrade*/);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::RequestBroadcast::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      UserEvent to_trigger = UserEvent::create_user_event();
-      Serializer rez;
-      {
-        rez.serialize(did);
-        rez.serialize(source);
-        rez.serialize(to_trigger);
-      }
-      runtime->send_version_state_request(target, rez);
-      ready_events.insert(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -13151,37 +13152,72 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       UserEvent result;
+      AddressSpaceID target = owner_space;
+      std::deque<AddressSpaceID> broadcast_targets;
       {
         AutoLock s_lock(state_lock);
         if (meta_state == FINAL_VERSION_STATE)
           return final_ready;
+        // Case 1: we are the owner and there is only one initial 
+        // version and we're it
+        if (is_owner() && (meta_state == INITIAL_VERSION_STATE) && 
+            (initial_nodes.size() ==1) && (initial_nodes.contains(local_space)))
+        {
+          // Upgrade ourselves and we're done
+          final_ready = initial_ready;
+          meta_state = FINAL_VERSION_STATE;
+          final_nodes.add(local_space);
+          return final_ready;
+        }
         result = UserEvent::create_user_event();
         final_ready = result;
         meta_state = FINAL_VERSION_STATE;
+        if (is_owner())
+        {
+          if (initial_nodes.size() == 1)
+          {
+            // Case 2: there is only one initial version and it's someone else
+            target = initial_nodes.find_first_set(); 
+            // Mark that this target is upgraded
+            final_nodes.add(target);
+          }
+          else
+          {
+            // Case 3: there are multiple initial versions 
+            // so we need to broadcast
+            BroadcastFunctor functor(local_space, broadcast_targets);
+            initial_nodes.map(functor);
+          }
+          // Record that we are now valid for final
+          final_nodes.add(local_space);
+        }
       }
-      // If we made it here, we actually have to send the requests
-      if (is_owner())
+      if (!broadcast_targets.empty())
       {
-        // If we are the owner, send requests to all the users
-        std::set<Event> ready_events;
-        RequestBroadcast broadcaster(ready_events, runtime, local_space, did);
-        map_over_remote_instances(broadcaster);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!ready_events.empty());
-#endif
-        result.trigger(Event::merge_events(ready_events));
+        // Send all the upgrades to the targets
+        std::set<Event> done_events;
+        for (std::deque<AddressSpaceID>::const_iterator it = 
+              broadcast_targets.begin(); it != broadcast_targets.end(); it++)
+        {
+          UserEvent next_event = UserEvent::create_user_event();
+          send_version_state_request(*it, local_space, next_event, 
+                                     false/*final*/, false/*upgrade*/);
+          done_events.insert(next_event);
+        }
+        result.trigger(Event::merge_events(done_events));
+      }
+      else if (target != owner_space)
+      {
+        // Send the update to the target and tell it that it can upgrade
+        send_version_state_request(target, local_space, result,
+                                   false/*final*/, true/*upgrade*/);
       }
       else
       {
         // Otherwise send a request to the owner for remote instances
         // so we can do the broadcast ourselves
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(result);
-        }
-        runtime->send_version_state_broadcast_request(owner_space, rez);
+        send_version_state_request(target, local_space, result,
+                                   true/*final*/, false/*upgrade*/);
       }
       return result;
     }
@@ -13234,65 +13270,47 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_request(AddressSpaceID source,
-                                                    UserEvent to_trigger)
+    void VersionState::send_initialization_notice(void)
     //--------------------------------------------------------------------------
     {
-      bool can_handle = true;
-      if (is_owner())
-      {
-        // If we're the owner see if can handle it, if so fall through
-        // otherwise forward on the request to someone who can
-        AutoLock s_lock(state_lock);
-        if (meta_state == INVALID_VERSION_STATE)
-          can_handle = false;
-      }
-      if (!can_handle)
-      {
-        AddressSpaceID target;
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          target = remote_instances.find_first_set();
-          if (target == source)
-          {
-            NodeSet copy = remote_instances;
-            copy.remove(source);
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!copy.empty());
+      assert(!is_owner());
 #endif
-            target = copy.find_first_set();
-          }
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(target != source);
-#endif
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(source);
-          rez.serialize(to_trigger);
-        }
-        runtime->send_version_state_request(target, rez);
-        return;
-      }
-      // Get the precondition for doing the send and launch a task
-      // to actually do the send to avoid blocking the message handling
-      Event precondition;
+      Serializer rez;
       {
-        AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(meta_state != INVALID_VERSION_STATE);
-#endif
-        if (meta_state == INITIAL_VERSION_STATE)
-          precondition = initial_ready;
-        else
-          precondition = final_ready;
+        RezCheck z(rez);
+        rez.serialize(did);
       }
+      runtime->send_version_state_initialization(owner_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::send_version_state_request(AddressSpaceID target,
+                                    AddressSpaceID source, UserEvent to_trigger, 
+                                    bool final_request, bool upgrade)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(source);
+        rez.serialize(to_trigger);
+        rez.serialize(final_request);
+        rez.serialize(upgrade);
+      }
+      runtime->send_version_state_request(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::launch_send_version_state(AddressSpaceID target,
+                                       UserEvent to_trigger, Event precondition)
+    //--------------------------------------------------------------------------
+    {
       SendVersionStateArgs args;
       args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
       args.proxy_this = this;
-      args.target = source;
+      args.target = target;
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
@@ -13300,69 +13318,260 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_broadcast_request(
-                                    AddressSpaceID source, UserEvent to_trigger)
+    AddressSpaceID VersionState::select_next_target(bool initial,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      AddressSpaceID result = source;
+      // use a basic round-robin scheme for now, in the future
+      // we might choose to do some more intelligent node selection
+      if (initial)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!initial_nodes.empty());
+        assert(!initial_nodes.contains(local_space));
+        if (initial_nodes.size() == 1)
+          assert(!initial_nodes.contains(source));
+#endif
+        while (result == source)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(init_index < initial_nodes.size());
+#endif
+          result = initial_nodes.find_index_set(init_index++); 
+          if (init_index == initial_nodes.size())
+            init_index = 0;
+        }
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!final_nodes.empty());
+        assert(!final_nodes.contains(local_space));
+        if (final_nodes.size() == 1)
+          assert(!final_nodes.contains(source));
+#endif
+        while (result == source);
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(final_index < final_nodes.size());
+#endif
+          result = final_nodes.find_index_set(final_index++);
+          if (final_index == final_nodes.size())
+            final_index = 0;
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_initialization(
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(is_owner()); // should only get this request on the owner node
+      assert(is_owner());
 #endif
-      Event precondition = Event::NO_EVENT;
-      bool locally_valid = false;
-      // See if we are the only valid ones in which case we can handle
-      // everything locally, otherwise, just send everything
+      AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(meta_state != FINAL_VERSION_STATE);
+#endif
+      initial_nodes.add(source);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_request(AddressSpaceID source,
+                         UserEvent to_trigger, bool final_request, bool upgrade)
+    //--------------------------------------------------------------------------
+    {
+      // If we are not the owner, we should definitely be able to handle this
+      if (!is_owner())
       {
-        AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        if (meta_state == INITIAL_VERSION_STATE)
+        Event precondition;
+        if (final_request)
         {
-          precondition = initial_ready;
-          locally_valid = true;
-        }
-        else if (meta_state == FINAL_VERSION_STATE)
-        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!upgrade);
+#endif
+          AutoLock s_lock(state_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(meta_state == FINAL_VERSION_STATE);
+#endif
           precondition = final_ready;
-          locally_valid = true;
         }
-      }
-      bool handle_locally = false;
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(to_trigger);
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
-        bool contains_source = remote_instances.contains(source);
-        if ((remote_instances.size() == 1) && contains_source)
-          handle_locally = true;
         else
         {
-          // Count how many to send
-          size_t count = remote_instances.size();
-          if (locally_valid)
-            count++;
-          if (contains_source)
-            count--;
+          AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(count > 0); // should be more than zero
+          assert(meta_state != INVALID_VERSION_STATE);
 #endif
-          rez.serialize(count);
-          RequestResponse response(rez, source);
-          remote_instances.map(response);
+          if (meta_state == INITIAL_VERSION_STATE)
+          {
+            precondition = initial_ready;
+            if (upgrade)
+            {
+              final_ready = initial_ready;
+              meta_state = FINAL_VERSION_STATE;
+            }
+          }
+          else
+            precondition = final_ready;
+        }
+        launch_send_version_state(source, to_trigger, precondition);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!upgrade);
+#endif
+        // We are the owner, see if we can handle it locally, if not
+        // then send out the right messages to handle the request
+        // and record who we know has certain versions of the state
+        Event precondition = Event::NO_EVENT;
+        bool forward = false;
+        bool trigger_now = false;
+        // Initialize target with a dumb value because compilers are dumb
+        AddressSpaceID target = source;
+        std::deque<AddressSpaceID> broadcast_targets;
+        if (final_request)
+        {
+          // Handle the final requests
+          AutoLock s_lock(state_lock);
+          // Check to see if we are valid and can handle the request
+          if (meta_state == FINAL_VERSION_STATE)
+          {
+            precondition = final_ready;
+          }
+          else
+          {
+            // Check to see if we've made a final instance yet
+            if (final_nodes.empty())
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!initial_nodes.empty());
+#endif
+              size_t count = initial_nodes.size();
+              if (initial_nodes.contains(source))
+                count--;
+              // Optimize for the cases where there is only one 
+              // or zero targets
+              if (count == 0)
+              {
+                // There is only one valid initial state and it
+                // is the requester and it is ready so trigger
+                // it now (not while holding the lock of course)
+                trigger_now = true;
+              }
+              else if (count == 1)
+              {
+                // If there is only one initial, then we can forward
+                target = select_next_target(true/*initial*/, source);
+                // See if it is the owner, if it is, then we
+                // can just handle it now, otherwise we forward
+                // it onto the node that can handle it
+                if (target == local_space)
+                {
+#ifdef DEBUG_HIGH_LEVEL
+                  assert(meta_state == INITIAL_VERSION_STATE);
+#endif
+                  precondition = initial_ready;
+                  // Upgrade ourselves
+                  meta_state = FINAL_VERSION_STATE;
+                  final_ready = initial_ready;
+                  final_nodes.add(local_space);
+                }
+                else
+                {
+                  forward = true;
+                  // Switch the request type to initial since
+                  // this is the only node needed to upgrade
+                  final_request = false;
+                  final_nodes.add(target);
+                  // tell the target that it can upgrade
+                  upgrade = true;
+                }
+              }
+              else
+              {
+                BroadcastFunctor functor(source, broadcast_targets);
+                initial_nodes.map(functor);
+              }
+            }
+            else
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!final_nodes.contains(source));
+#endif
+              forward = true;
+              target = select_next_target(false/*initial*/, source);
+            }
+          }
+          // Record that this node is now a final node
+          final_nodes.add(source);
+        }
+        else
+        {
+          // Handle the initial request
+          AutoLock s_lock(state_lock); 
+          // Check to see if we are valid and can handle the request
+          if (meta_state != INVALID_VERSION_STATE)
+          {
+            if (meta_state == INITIAL_VERSION_STATE)
+              precondition = initial_ready;
+            else
+              precondition = final_ready;
+          }
+          else
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!initial_nodes.empty());
+            assert(!initial_nodes.contains(source));
+#endif
+            forward = true;
+            target = select_next_target(true/*initial*/, source); 
+          }
+          // Record that this node is now an initial node
+          initial_nodes.add(source);
+        }
+        // If we can handle it locally, we are done
+        if (precondition.exists())
+          launch_send_version_state(source, to_trigger, precondition);
+        else if (forward)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(target != source);
+#endif
+          send_version_state_request(target, source, to_trigger,
+                                     final_request, upgrade); 
+        }
+        else if (trigger_now)
+          to_trigger.trigger();
+        else 
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!broadcast_targets.empty());
+#endif
+          // Respond to the requester with the broadcast information
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(to_trigger);
+            rez.serialize<size_t>(broadcast_targets.size());
+            for (std::deque<AddressSpaceID>::const_iterator it = 
+                  broadcast_targets.begin(); it != 
+                  broadcast_targets.end(); it++)
+            {
+              rez.serialize(*it);
+            }
+          }
+          runtime->send_version_state_broadcast_response(source, rez);
         }
       }
-      if (handle_locally)
-      {
-        SendVersionStateArgs args;
-        args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
-        args.proxy_this = this;
-        args.target = source;
-        args.to_trigger = to_trigger;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_SEND_VERSION_STATE_TASK_ID,
-                                         NULL/*op*/, precondition);
-      }
-      else // Then send the response
-        runtime->send_version_state_broadcast_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -13574,18 +13783,37 @@ namespace LegionRuntime {
       {
         AddressSpaceID target;
         derez.deserialize(target);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(target != runtime->address_space); // shouldn't be ourself
+#endif
         UserEvent precondition = UserEvent::create_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(local_space);
-          rez.serialize(precondition);
-        }
-        runtime->send_version_state_request(target, rez);
+        // Note that even though we are asking for a final state, if we
+        // are doing this broadcast, we are really asking for are all the
+        // initial states, so we tell the remote nodes that we are asking
+        // for their initial states and not their final states.
+        send_version_state_request(target, local_space, precondition,
+                                   false/*final req*/, false/*upgrade*/);
         preconditions.insert(precondition);
       }
       to_trigger.trigger(Event::merge_events(preconditions)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_initialization(
+                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_initialization(source);
     }
 
     //--------------------------------------------------------------------------
@@ -13600,6 +13828,10 @@ namespace LegionRuntime {
       derez.deserialize(source);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
+      bool final_request;
+      derez.deserialize(final_request);
+      bool upgrade;
+      derez.deserialize(upgrade);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
       VersionState *vs = dynamic_cast<VersionState*>(target);
@@ -13607,27 +13839,8 @@ namespace LegionRuntime {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_request(source, to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_broadcast_request(
-                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      UserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
-      VersionState *vs = dynamic_cast<VersionState*>(target);
-      assert(vs != NULL);
-#else
-      VersionState *vs = static_cast<VersionState*>(target);
-#endif
-      vs->handle_version_state_broadcast_request(source, to_trigger);
+      vs->handle_version_state_request(source, to_trigger, 
+                                       final_request, upgrade);
     }
 
     //--------------------------------------------------------------------------
@@ -14295,23 +14508,25 @@ namespace LegionRuntime {
     {
       // Use the lock on the version manager to ensure that we don't
       // replicated version states on a node
-      AutoLock v_lock(version_lock);
-      if (owner->context->runtime->has_distributed_collectable(did))
+      VersionState *result = NULL;
       {
-        DistributedCollectable *result = 
-          owner->context->runtime->find_distributed_collectable(did);
+        AutoLock v_lock(version_lock);
+        if (owner->context->runtime->has_distributed_collectable(did))
+        {
+          DistributedCollectable *result = 
+            owner->context->runtime->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
-        VersionState *vs = dynamic_cast<VersionState*>(result);
-        assert(vs != NULL);
+          result = dynamic_cast<VersionState*>(result);
+          assert(result != NULL);
 #else
-        VersionState *vs = static_cast<VersionState*>(result);
+          result = static_cast<VersionState*>(result);
 #endif
-        // If we found it, no need to do the requests
-        return vs;
+        }
+        else // Otherwise make it
+          result = create_remote_version_state(vid, did, source, initialize);
       }
-      // Otherwise make it, send any requests and then return the result
-      VersionState *result = 
-        create_remote_version_state(vid, did, source, initialize);
+      // Make sure we get our requests outstanding, they will
+      // automatically deduplicate if necessary
       if (request_initial)
         result->request_initial_version_state();
       if (request_final)

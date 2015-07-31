@@ -1481,9 +1481,9 @@ namespace LegionRuntime {
                                                 Serializer &rez);
       void send_subscribe_remote_context(AddressSpaceID target,Serializer &rez);
       void send_free_remote_context(AddressSpaceID target, Serializer &rez);
+      void send_version_state_initialization(AddressSpaceID target, 
+                                             Serializer &rez);
       void send_version_state_request(AddressSpaceID target, Serializer &rez);
-      void send_version_state_broadcast_request(AddressSpaceID target,
-                                                Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_broadcast_response(AddressSpaceID target,
                                                  Serializer &rez);
@@ -1571,9 +1571,9 @@ namespace LegionRuntime {
       void handle_subscribe_remote_context(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_free_remote_context(Deserializer &derez);
+      void handle_version_state_initialization(Deserializer &derez,
+                                               AddressSpaceID source);
       void handle_version_state_request(Deserializer &derez);
-      void handle_version_state_broadcast_request(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_version_state_broadcast_response(Deserializer &derez);
