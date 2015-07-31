@@ -18,6 +18,8 @@
 #ifndef REALM_SERIALIZE_H
 #define REALM_SERIALIZE_H
 
+#include "bytearray.h"
+
 #include <cstddef>
 #include <vector>
 #include <list>
@@ -91,6 +93,7 @@ namespace Realm {
     class FixedBufferSerializer {
     public:
       inline FixedBufferSerializer(void *buffer, size_t size);
+      inline FixedBufferSerializer(ByteArray &array);
       inline ~FixedBufferSerializer(void);
 
       inline ptrdiff_t bytes_left(void) const;
@@ -111,7 +114,8 @@ namespace Realm {
 
       inline size_t bytes_used(void) const;
       inline const void *get_buffer(void) const;
-      inline void *detach_buffer(size_t max_wasted_bytes = 0);
+      inline void *detach_buffer(ptrdiff_t max_wasted_bytes = 0);
+      inline ByteArray detach_bytearray(ptrdiff_t max_wasted_bytes = 0);
 
       inline bool enforce_alignment(size_t granularity);
       inline bool append_bytes(const void *data, size_t datalen);
@@ -141,6 +145,7 @@ namespace Realm {
     class FixedBufferDeserializer {
     public:
       inline FixedBufferDeserializer(const void *buffer, size_t size);
+      inline FixedBufferDeserializer(const ByteArray& array);
       inline ~FixedBufferDeserializer(void);
 
       inline ptrdiff_t bytes_left(void) const;

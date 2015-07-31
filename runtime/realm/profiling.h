@@ -153,8 +153,7 @@ namespace Realm {
 
     Processor response_proc;
     Processor::TaskFuncID response_task_id;
-    void *user_data;
-    size_t user_data_size;
+    ByteArray user_data;
     std::set<ProfilingMeasurementID> requested_measurements;
   };
 
@@ -204,12 +203,7 @@ namespace Realm {
   protected:
     std::set<ProfilingMeasurementID> requested_measurements;
 
-    struct MeasurementData {
-      void* base;
-      size_t size;
-    };
-
-    std::map<ProfilingMeasurementID, MeasurementData> measurements;
+    std::map<ProfilingMeasurementID, ByteArray> measurements;
   };
 
   class ProfilingResponse {

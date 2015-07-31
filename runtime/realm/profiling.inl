@@ -101,7 +101,7 @@ namespace Realm {
   {
     return((s << pr.response_proc) &&
 	   (s << pr.response_task_id) &&
-	   (s << ByteArray(pr.user_data, pr.user_data_size)) &&
+	   (s << pr.user_data) &&
 	   (s << pr.requested_measurements));
   }
 
@@ -114,13 +114,8 @@ namespace Realm {
     if(!(s >> p)) return 0;
     if(!(s >> fid)) return 0;
     ProfilingRequest *pr = new ProfilingRequest(p, fid);
-    size_t user_data_size;
-    if(!(s >> user_data_size)) return 0;
-    if(user_data_size) {
-      pr->add_user_data(s.peek_bytes(user_data_size), user_data_size);
-      s.extract_bytes(0, user_data_size);
-    }
-    if(!(s >> pr->requested_measurements)) {
+    if(!(s >> pr->user_data) ||
+       !(s >> pr->requested_measurements)) {
       delete pr;
       return 0;
     }
@@ -153,9 +148,10 @@ namespace Realm {
     bool ok = dbs << data;
     assert(ok);
 
-    MeasurementData& md = measurements[(ProfilingMeasurementID)T::ID];
-    md.size = dbs.bytes_used();
-    md.base = dbs.detach_buffer();
+    // measurement data is stored in a ByteArray
+    ByteArray& md = measurements[(ProfilingMeasurementID)T::ID];
+    ByteArray b = dbs.detach_bytearray(-1);  // no trimming
+    md.swap(b);  // avoids a copy
   }
 
 

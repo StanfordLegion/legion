@@ -22,6 +22,9 @@
 #include <stdlib.h>
 #include <assert.h>
 
+// for std::swap
+#include <algorithm>
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

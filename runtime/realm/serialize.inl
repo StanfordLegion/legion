@@ -60,6 +60,10 @@ namespace Realm {
       : pos((char *)buffer), limit(((char *)buffer) + size)
     {}
 
+    FixedBufferSerializer::FixedBufferSerializer(ByteArray& array)
+      : pos((char *)(array.base())), limit(((char *)(array.base())) + array.size())
+    {}
+
     FixedBufferSerializer::~FixedBufferSerializer(void)
     {}
 
@@ -133,13 +137,14 @@ namespace Realm {
       return base;
     }
 
-    void *DynamicBufferSerializer::detach_buffer(size_t max_wasted_bytes /*= 0*/)
+    void *DynamicBufferSerializer::detach_buffer(ptrdiff_t max_wasted_bytes /*= 0*/)
     {
       assert(base != 0);
       assert(pos <= limit);
 
       // do we need to realloc to save space?
-      if((size_t)(limit - pos) > max_wasted_bytes) {
+      if((max_wasted_bytes >= 0) &&
+	 ((size_t)(limit - pos) > max_wasted_bytes)) {
 	void *shrunk = realloc(base, pos - base);
 	assert(shrunk != 0);
 	base = 0;
@@ -150,6 +155,13 @@ namespace Realm {
       void *retval = base;
       base = 0;
       return retval;
+    }
+
+    ByteArray DynamicBufferSerializer::detach_bytearray(ptrdiff_t max_wasted_bytes /*= 0*/)
+    {
+      size_t size = pos - base;
+      void *buffer = detach_buffer(max_wasted_bytes);
+      return ByteArray().attach(buffer, size);
     }
 
     bool DynamicBufferSerializer::enforce_alignment(size_t granularity)
@@ -257,6 +269,10 @@ namespace Realm {
 
     FixedBufferDeserializer::FixedBufferDeserializer(const void *buffer, size_t size)
       : pos((const char *)buffer), limit(((const char *)buffer) + size)
+    {}
+
+    FixedBufferDeserializer::FixedBufferDeserializer(const ByteArray& array)
+      : pos((const char *)(array.base())), limit(((const char *)(array.base())) + array.size())
     {}
 
     FixedBufferDeserializer::~FixedBufferDeserializer(void)
