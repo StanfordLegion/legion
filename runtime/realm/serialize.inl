@@ -40,16 +40,23 @@ namespace Realm {
   namespace Serialization {
 
     template <typename T>
-    static inline T do_align(T ptr_or_int, size_t granularity)
+    static inline T align_offset(T offset, size_t granularity)
     {
-      size_t v = reinterpret_cast<size_t>(ptr_or_int);
-      size_t offset = v % granularity;
-      if(offset) {
-	v += granularity - offset;
-	return reinterpret_cast<T>(v);
-      } else
-	return ptr_or_int;
+      // guarantee remainder is calculated on unsigned value
+      size_t extra = static_cast<size_t>(offset) % granularity;
+      if(extra)
+	offset += granularity - extra;
+      return offset;
     }
+
+    template <typename T>
+    static inline T *align_pointer(T *ptr, size_t granularity)
+    {
+      uintptr_t i = reinterpret_cast<uintptr_t>(ptr);
+      i = align_offset(i, granularity);
+      return reinterpret_cast<T *>(i);
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -75,7 +82,7 @@ namespace Realm {
     bool FixedBufferSerializer::enforce_alignment(size_t granularity)
     {
       // always move the pointer, but return false if we've overshot
-      pos = do_align(pos, granularity);
+      pos = align_pointer(pos, granularity);
       return (pos <= limit);
     }
 
@@ -166,7 +173,7 @@ namespace Realm {
 
     bool DynamicBufferSerializer::enforce_alignment(size_t granularity)
     {
-      char *pos2 = do_align(pos, granularity);
+      char *pos2 = align_pointer(pos, granularity);
       if(pos2 > limit) {
 	size_t used = pos - base;
 	size_t needed = pos2 - base;
@@ -245,7 +252,7 @@ namespace Realm {
 
     bool ByteCountSerializer::enforce_alignment(size_t granularity)
     {
-      count = do_align(count, granularity);
+      count = align_offset(count, granularity);
       return true;
     }
 
@@ -286,7 +293,7 @@ namespace Realm {
     bool FixedBufferDeserializer::enforce_alignment(size_t granularity)
     {
       // always move the pointer, but return false if we've overshot
-      pos = do_align(pos, granularity);
+      pos = align_pointer(pos, granularity);
       return (pos <= limit);
     }
 
