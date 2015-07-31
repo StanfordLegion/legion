@@ -102,8 +102,38 @@ namespace LegionRuntime {
 
       Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const
       {
-        assert(0);
-        return Point<ODIM>::ZEROES();
+        subrect = r;
+        for (unsigned i = 0; i < IDIM; i++)
+          strides[i] = Point<ODIM>::ZEROES();
+        int subtotal = 1;
+        for (unsigned i = 0; i < dim_sum; i++) {
+          switch (dim_kind[i]) {
+            case DIM_X:
+              if (strides[0][0] == 0) {
+                strides[0].x[0] = subtotal;
+                subrect.hi.x[0] = r.lo.x[0] - r.lo.x[0] % dim_size[i] + dim_size[i] - 1;
+              }
+              subtotal *= dim_size[i];
+              break;
+            case DIM_Y:
+              if (strides[1][0] == 0) {
+                strides[1].x[0] = subtotal;
+                subrect.hi.x[1] = r.lo.x[1] - r.lo.x[1] % dim_size[i] + dim_size[i] - 1;
+              }
+              subtotal *= dim_size[i];
+              break;
+            case DIM_Z:
+              if (strides[2][0] == 0) {
+                strides[2].x[0] = subtotal;
+                subrect.hi.x[2] = r.lo.x[2] - r.lo.x[2] % dim_size[i] + dim_size[i] - 1;
+              }
+              subtotal *= dim_size[i];
+              break;
+            default:
+              assert(0);
+          }
+        }
+        return image(r.lo);
       }
 
       Rect<IDIM> preimage(const Point<ODIM> p) const
@@ -140,7 +170,7 @@ namespace LegionRuntime {
         assert(0);
         return false;
       }
-
+#ifdef CONTINUOUS_STEPS
       int continuous_steps(const Point<IDIM> p, int &direction) const
       {
         switch (dim_kind[0]) {
@@ -161,6 +191,7 @@ namespace LegionRuntime {
         }
         return 0;
       }
+#endif
     };
 
     struct OffsetsAndSize {
@@ -196,36 +227,38 @@ namespace LegionRuntime {
 
       int continuous_steps(int &src_idx, int &dst_idx)
       {
-        Point<DIM> p;
-        Rect<DIM> r;
-        int src_direct, dst_direct, src_steps, dst_steps;
+        Rect<DIM> r, src_subrect, dst_subrect;
+        Point<1> src_strides[DIM], dst_strides[DIM];
+        int subtotal = 1;
         switch(iter_order) {
           case XferOrder::SRC_FIFO:
             r = src_mapping->preimage(make_point(cur_idx));
             assert(r.volume() == 1);
-            p = r.lo;
-            src_idx = cur_idx;
-            dst_idx = dst_mapping->image(p);
-            src_steps = src_mapping->continuous_steps(p, src_direct);
-            dst_steps = dst_mapping->continuous_steps(p, dst_direct);
+            r.hi = orig_rect.hi;
+            src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
+            dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
             break;
           case XferOrder::DST_FIFO:
           case XferOrder::ANY_ORDER:
             r = dst_mapping->preimage(make_point(cur_idx));
             assert(r.volume() == 1);
-            p = r.lo;
-            dst_idx = cur_idx;
-            src_idx = src_mapping->image(p);
-            src_steps = src_mapping->continuous_steps(p, src_direct);
-            dst_steps = dst_mapping->continuous_steps(p, dst_direct);
+            r.hi = orig_rect.hi;
+            src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
+            dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
             break;
           default:
             assert(0);
         }
-        if (src_direct != dst_direct)
-          return 1;
-        else
-          return imin(src_steps, dst_steps);
+
+        for (int i = 0; i < DIM; i++) {
+          for (int j = 0; j < DIM; j++) {
+            if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
+              subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
+            }
+          }
+        }
+
+        return subtotal;
       }
       void move(int steps)
       {
@@ -238,6 +271,7 @@ namespace LegionRuntime {
       XferOrder::Type iter_order;
       size_t cur_idx, rect_size;
     };
+
   } // namespace Layout
 } // namespace LegionRuntime
 #endif
