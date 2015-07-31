@@ -19,6 +19,8 @@
 
 #include <list>
 
+pthread_key_t thread_timer_key;
+
 namespace Realm {
 
   // if set_zero_time() is not called, relative time will equal absolute time

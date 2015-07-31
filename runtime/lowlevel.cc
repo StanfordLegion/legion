@@ -61,8 +61,6 @@ using namespace LegionRuntime::Accessor;
 GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
 #endif
 
-pthread_key_t thread_timer_key;
-
 #include "realm/timers.h"
 
 // Implementation of Detailed Timer
