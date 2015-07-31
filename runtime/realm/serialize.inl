@@ -144,7 +144,7 @@ namespace Realm {
 
       // do we need to realloc to save space?
       if((max_wasted_bytes >= 0) &&
-	 ((size_t)(limit - pos) > max_wasted_bytes)) {
+	 ((size_t)(limit - pos) > (size_t)max_wasted_bytes)) {
 	void *shrunk = realloc(base, pos - base);
 	assert(shrunk != 0);
 	base = 0;
