@@ -13355,7 +13355,7 @@ namespace LegionRuntime {
         if (final_nodes.size() == 1)
           assert(!final_nodes.contains(source));
 #endif
-        while (result == source);
+        while (result == source)
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(final_index < final_nodes.size());
