@@ -1340,7 +1340,12 @@ namespace Realm {
         complete_greenlets.clear();
       }
       if (shutdown)
-        return (task_queue.empty() && resumable_tasks.empty());
+      {
+        mutex.lock();
+        bool done = task_queue.empty() && resumable_tasks.empty();
+        mutex.unlock();
+        return done;
+      }
       return false;
     }
 
@@ -1395,6 +1400,8 @@ namespace Realm {
           // Delete the task
           if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
             delete task;
+          // Make sure we wait until we are ready
+          greenlet_thread->return_to_root();
         } else {
 	  mutex.unlock();
           if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
@@ -1408,6 +1415,8 @@ namespace Realm {
             // Remove our deletion reference
             if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
               delete task;
+            // Make sure we wait until we are ready
+            greenlet_thread->return_to_root();
           }
         }
       }
