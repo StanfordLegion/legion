@@ -1516,12 +1516,15 @@ namespace LegionRuntime {
      * region including necessary information to 
      * register execution dependences on the user.
      */
-    struct PhysicalUser : public GenericUser {
+    struct PhysicalUser : public Collectable {
     public:
       PhysicalUser(void);
-      PhysicalUser(const RegionUsage &u, const FieldMask &m, VersionID vid);
+      PhysicalUser(const RegionUsage &u, const ColorPoint &child,
+                   const LegionMap<VersionID,FieldMask>::aligned &versions);
     public:
-      VersionID version;
+      RegionUsage usage;
+      ColorPoint child;
+      LegionMap<VersionID,FieldMask>::aligned versions;
     }; 
 
     /**
@@ -3662,10 +3665,10 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
-      struct VersionUsers {
+      struct EpochUser {
       public:
         FieldMask valid_fields;
-        LegionMap<Event,PhysicalUser,PHYSICAL_USER_ALLOC>::track_aligned users;
+        PhysicalUser *user;
       };
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
@@ -3788,17 +3791,23 @@ namespace LegionRuntime {
       std::map<FieldID,Reservation> atomic_reservations;
       // Keep track of the child views
       std::map<ColorPoint,MaterializedView*> children;
-      // Keep track of the users currently using this instance
-      // There are three competing operations for this data structure
+      // There are three operations that are done on materialized views
       // 1. iterate over all the users for use analysis
       // 2. garbage collection to remove old users for an event
-      // 3. send updates indexing by version number
-      // The last two both index whereas the first one sweeps everyone
-      // anyway, so we design the data structure to be able to quickly
-      // handle the two indexing modes so that neither one has to iterate.
-      // This may cost the first past iterating to take slightly longer
-      // but it was going to have to iterate over all the users anyway.
-      LegionMap<VersionID,VersionUsers>::aligned version_users;
+      // 3. send updates for a certain set of fields
+      // The first and last both iterate over the current and previous
+      // user sets, while the second one needs to find specific events.
+      // Therefore we store the current and previous sets as maps to
+      // users indexed by events. Iterating over the maps are no worse
+      // that iterating over lists (for arbitrary insertion and deletion)
+      // and will provide fast indexing for removing items.
+      LegionMap<Event,EpochUser,CURR_PHYSICAL_ALLOC>::track_aligned 
+                                                      current_epoch_users;
+      LegionMap<Event,EpochUser,PREV_PHYSICAL_ALLOC>::track_aligned
+                                                      previous_epoch_users;
+      // Also keep a set of events for which we have outstanding
+      // garbage collection meta-tasks so we don't launch more than one
+      std::set<Event> outstanding_gc_events;
       // Keep track of the current version numbers for each field
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
