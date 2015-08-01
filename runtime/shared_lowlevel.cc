@@ -21,6 +21,7 @@
 #include "legion_utilities.h"
 #endif
 #include "realm/profiling.h"
+#include "realm/timers.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -125,6 +126,9 @@ pthread_key_t local_thread_key;
 namespace LegionRuntime {
   namespace LowLevel {
 
+    // bring Realm's DetailedTimer into this namespace
+    typedef Realm::DetailedTimer DetailedTimer;
+    
 // MAC OSX doesn't support pthread barrier type
 #ifdef __MACH__
     typedef UtilityBarrier pthread_barrier_t;
@@ -374,137 +378,6 @@ namespace LegionRuntime {
       std::map<int, double> timer_accum;
       pthread_mutex_t *mutex;
     };
-
-    pthread_mutex_t global_timer_mutex = PTHREAD_MUTEX_INITIALIZER;
-    std::vector<PerThreadTimerData*> timer_data;
-    //__thread PerThreadTimerData *thread_timer_data;
-    pthread_key_t thread_timer_key;
-    static void thread_timer_free(void *arg)
-    {
-      assert(arg != NULL);
-      PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
-      delete ptr;
-    }
-
-#ifdef DETAILED_TIMING
-    /*static*/ void DetailedTimer::clear_timers(bool all_nodes /*=true*/)
-    {
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(&global_timer_mutex));
-      for (std::vector<PerThreadTimerData*>::iterator it = timer_data.begin();
-            it != timer_data.end(); it++)
-      {
-        // Take each thread's data lock as well
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(((*it)->mutex)));
-        (*it)->timer_accum.clear();
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(((*it)->mutex)));
-      }
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(&global_timer_mutex));
-    }
-
-    /*static*/ void DetailedTimer::push_timer(int timer_kind)
-    {
-      PerThreadTimerData *thread_timer_data = 
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      if (!thread_timer_data)
-      {
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(&global_timer_mutex));
-        thread_timer_data = new PerThreadTimerData();
-        PTHREAD_SAFE_CALL(pthread_setspecific(thread_timer_key,thread_timer_data));
-        timer_data.push_back(thread_timer_data);
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&global_timer_mutex));
-      }
-
-      // no lock required here - only our thread touches the stack
-      TimerStackEntry entry;
-      entry.timer_kind = timer_kind;
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      entry.start_time = (1.0 * ts.tv_sec + 1e-9 * ts.tv_nsec);
-      entry.accum_child_time = 0;
-      thread_timer_data->timer_stack.push_back(entry);
-    }
-
-    /*static*/ void DetailedTimer::pop_timer(void)
-    {
-      PerThreadTimerData *thread_timer_data =
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      if (!thread_timer_data)
-      {
-        printf("Got pop without initialized thread data !?\n");
-        exit(1);
-      }
-
-      // no conflicts on stack
-      TimerStackEntry old_top = thread_timer_data->timer_stack.back();
-      thread_timer_data->timer_stack.pop_back();
-
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      double elapsed = (1.0 * ts.tv_sec + 1e-9 * ts.tv_nsec) - old_top.start_time;
-
-      // all the elapsed time is added to the new top as child time
-      if (!thread_timer_data->timer_stack.empty())
-        thread_timer_data->timer_stack.back().accum_child_time += elapsed;
-
-      // only the elapsed time minus our own child time goes into the timer accumulator
-      elapsed -= old_top.accum_child_time;
-
-      // We do need a lock to touch the accumulator
-      if (old_top.timer_kind > 0)
-      {
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_timer_data->mutex));
-        
-        std::map<int,double>::iterator it = thread_timer_data->timer_accum.find(old_top.timer_kind);
-        if (it != thread_timer_data->timer_accum.end())
-          it->second += elapsed;
-        else
-          thread_timer_data->timer_accum.insert(std::make_pair(old_top.timer_kind,elapsed));
-
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_timer_data->mutex));
-      }
-    }
-
-    /*static*/ void DetailedTimer::roll_up_timers(std::map<int,double> &timers, bool local_only)
-    {
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(&global_timer_mutex));
-
-      for (std::vector<PerThreadTimerData*>::iterator it = timer_data.begin();
-            it != timer_data.end(); it++)
-      {
-        // Take the local lock for each thread's data too
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(((*it)->mutex)));
-
-        for (std::map<int,double>::iterator it2 = (*it)->timer_accum.begin();
-              it2 != (*it)->timer_accum.end(); it2++)
-        {
-          std::map<int,double>::iterator it3 = timers.find(it2->first);
-          if (it3 != timers.end())
-            it3->second += it2->second;
-          else
-            timers.insert(*it2);
-        }
-
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(((*it)->mutex)));
-      }
-
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(&global_timer_mutex));
-    }
-
-    /*static*/ void DetailedTimer::report_timers(bool local_only /* = false*/)
-    {
-      std::map<int, double> timers;
-
-      roll_up_timers(timers, local_only);
-
-      printf("DETAILED_TIMING_SUMMARY:\n");
-      for (std::map<int,double>::iterator it = timers.begin();
-            it != timers.end(); it++)
-      {
-        printf("%12s - %7.3f s\n", stringify(it->first), it->second);
-      }
-      printf("END OF DETAILED TIMING SUMMARY\n");
-    }
-#endif 
 
     static size_t find_field(const std::vector<size_t>& field_sizes,
 			     size_t offset, size_t size,
@@ -6807,7 +6680,9 @@ namespace LegionRuntime {
 
     bool RuntimeImpl::init(int *argc, char ***argv)
     {
-        Realm::InitialTime::get_initial_time();
+        // make all timestamps use relative time from now
+        Realm::Clock::set_zero_time();
+
         unsigned num_cpus = NUM_PROCS;
         unsigned num_utility_cpus = NUM_UTIL_PROCS;
         unsigned num_dma_threads = NUM_DMA_THREADS;
@@ -6820,7 +6695,7 @@ namespace LegionRuntime {
 #endif
         // Create the pthread keys for thread local data
         PTHREAD_SAFE_CALL( pthread_key_create(&local_thread_key, NULL) );
-        PTHREAD_SAFE_CALL( pthread_key_create(&thread_timer_key, thread_timer_free) );
+        DetailedTimer::init_timers();
 
         for (int i=1; i < *argc; i++)
         {

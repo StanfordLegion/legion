@@ -22,6 +22,9 @@
 
 #include "redop.h"
 
+#include <set>
+#include <iostream>
+
 namespace Realm {
 
     class Event {

@@ -40,4 +40,8 @@ before_install:
   - export TERRA_CXX="$CXX"
   - export TERRA_CC="$CC"
   - export TERRA_LINK="$CXX"
-script: ./language/travis.py
+script:
+  - ./language/travis.py
+  - make -C test/realm LG_RT_DIR=../../runtime SHARED_LOWLEVEL=1 run_all
+  - make -C test/realm LG_RT_DIR=../../runtime SHARED_LOWLEVEL=1 clean
+  - make -C test/realm LG_RT_DIR=../../runtime SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all

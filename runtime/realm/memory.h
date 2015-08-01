@@ -20,7 +20,12 @@
 
 #include "lowlevel_config.h"
 
+#include <stddef.h>
+#include <iostream>
+
 namespace Realm {
+
+    typedef unsigned int AddressSpace;
 
     class Memory {
     public:

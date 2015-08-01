@@ -1373,6 +1373,24 @@ protected:
       }
       break;
 
+    case 14:
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium14(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+				 hdr->args[0], hdr->args[1], hdr->args[2],
+				 hdr->args[3], hdr->args[4], hdr->args[5],
+				 hdr->args[6], hdr->args[7], hdr->args[8],
+				 hdr->args[9], hdr->args[10], hdr->args[11],
+				 hdr->args[12], hdr->args[13]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort14(peer, hdr->msgid,
+				hdr->args[0], hdr->args[1], hdr->args[2],
+				hdr->args[3], hdr->args[4], hdr->args[5],
+				hdr->args[6], hdr->args[7], hdr->args[8],
+				hdr->args[9], hdr->args[10], hdr->args[11],
+				hdr->args[12], hdr->args[13]) );
+      }
+      break;
+
     case 16:
       if(hdr->payload_mode != PAYLOAD_NONE) {
 	CHECK_GASNET( gasnet_AMRequestMedium16(peer, hdr->msgid, hdr->payload, hdr->payload_size,
@@ -2021,6 +2039,15 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   }
 #endif
 
+  // once we've attached, attempt to synchronize all node's clocks
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  Realm::Clock::set_zero_time();
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  
   segment_info = new gasnet_seginfo_t[gasnet_nodes()];
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
@@ -2095,8 +2122,8 @@ void start_polling_threads(int count)
   for(int i = 0; i < count; i++) {
     pthread_attr_t attr;
     CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(LegionRuntime::LowLevel::proc_assignment)
-      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
+    if(Realm::proc_assignment)
+      Realm::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
     CHECK_PTHREAD( pthread_create(&polling_threads[i], 0, 
 				  gasnet_poll_thread_loop, 0) );
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
@@ -2124,8 +2151,8 @@ void start_sending_threads(void)
     if (i == gasnet_mynode()) continue;
     pthread_attr_t attr;
     CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(LegionRuntime::LowLevel::proc_assignment)
-      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
+    if(Realm::proc_assignment)
+      Realm::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
     CHECK_PTHREAD( pthread_create(&sending_threads[i], 0,
                                   sender_thread_loop, (void*)long(i)));
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
