@@ -37,6 +37,8 @@ NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:=
 
+CXX ?= g++
+
 # since we're just doing Realm and not Legion, we need to strip out a few
 #  things that might have come in from CC_FLAGS that require Legion goo
 override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
@@ -73,14 +75,14 @@ clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
 
 $(TESTS) : % : %.cc librealm.a
-	$(GCC) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LD_FLAGS)
+	$(CXX) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)
 	ar rcv $(REALM_LIB) $(REALM_OBJS)
 
 %.o : %.cc
-	$(GCC) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
 %.o : %.S
-	$(GCC) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
