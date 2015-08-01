@@ -35,6 +35,10 @@
 
 #include "machine_impl.h"
 
+#if __cplusplus >= 201103L
+#define typeof decltype
+#endif
+
 namespace Realm {
 
   class IndexSpaceImpl;
