@@ -14622,12 +14622,8 @@ namespace LegionRuntime {
           return "Pending Updates";
         case LAYOUT_DESCRIPTION_ALLOC:
           return "Layout Description";
-        case CURR_PHYSICAL_ALLOC:
-          return "Current Physical Users";
-        case PREV_PHYSICAL_ALLOC:
-          return "Previous Physical Users";
-        case EVENT_REFERENCE_ALLOC:
-          return "Instance Event References";
+        case PHYSICAL_USER_ALLOC:
+          return "Physical Users";
         case PHYSICAL_VERSION_ALLOC:
           return "Physical Versions";
         case MEMORY_INSTANCES_ALLOC:

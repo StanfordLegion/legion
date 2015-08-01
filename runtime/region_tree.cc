@@ -8948,15 +8948,15 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(void)
-      : GenericUser(), term_event(Event::NO_EVENT)
+      : GenericUser()
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, const FieldMask &m,
-                               Event term, ColorPoint c /*= ColorPoint()*/)
-      : GenericUser(u, m), term_event(term), child(c)
+                               VersionID vid)
+      : GenericUser(u, m), version(vid)
     //--------------------------------------------------------------------------
     {
     }
@@ -12567,7 +12567,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                 info.states.begin(); it != info.states.end(); it++)
           {
-            Event ready = it->first->request_final_version_state();
+            Event ready = it->first->request_merged_version_state();
             if (ready.exists() && !ready.has_triggered())
               preconditions.insert(ready);
           }
@@ -12583,7 +12583,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                 info.states.begin(); it != info.states.end(); it++)
           {
-            Event ready = it->first->request_initial_version_state();
+            Event ready = it->first->request_eventual_version_state();
             if (ready.exists() && !ready.has_triggered())
               preconditions.insert(ready);
           }
@@ -12732,9 +12732,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         currently_active(true), currently_valid(true),
 #endif
-        meta_state(initialize ? INITIAL_VERSION_STATE : INVALID_VERSION_STATE),
-        initial_ready(Event::NO_EVENT), final_ready(Event::NO_EVENT),
-        init_index(0), final_index(0)
+        meta_state(initialize ? EVENTUAL_VERSION_STATE : INVALID_VERSION_STATE),
+        eventual_ready(Event::NO_EVENT), merged_ready(Event::NO_EVENT),
+        eventual_index(0), merged_index(0)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, add a valid and resource reference
@@ -13041,11 +13041,11 @@ namespace LegionRuntime {
       // Finally update our state
       if (meta_state == INVALID_VERSION_STATE)
       {
-        meta_state = INITIAL_VERSION_STATE;
+        meta_state = EVENTUAL_VERSION_STATE;
         if (!is_owner())
           return true;
         else
-          initial_nodes.add(local_space);
+          eventual_nodes.add(local_space);
       }
       // No need to send an update
       return false;
@@ -13121,20 +13121,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event VersionState::request_initial_version_state(void)
+    Event VersionState::request_eventual_version_state(void)
     //--------------------------------------------------------------------------
     {
       UserEvent result;
       AddressSpaceID target = owner_space;
       {
         AutoLock s_lock(state_lock);
-        if (meta_state == FINAL_VERSION_STATE)
-          return final_ready;
-        if (meta_state == INITIAL_VERSION_STATE)
-          return initial_ready;
+        if (meta_state == MERGED_VERSION_STATE)
+          return merged_ready;
+        if (meta_state == EVENTUAL_VERSION_STATE)
+          return eventual_ready;
         result = UserEvent::create_user_event();
-        initial_ready = result;
-        meta_state = INITIAL_VERSION_STATE;
+        eventual_ready = result;
+        meta_state = EVENTUAL_VERSION_STATE;
         // If we make it here we have to send a request to get the data 
         // Send a request to the owner for the state which will either
         // be handled there or sent to someone who can, unless we are
@@ -13148,7 +13148,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event VersionState::request_final_version_state(void)
+    Event VersionState::request_merged_version_state(void)
     //--------------------------------------------------------------------------
     {
       UserEvent result;
@@ -13156,40 +13156,41 @@ namespace LegionRuntime {
       std::deque<AddressSpaceID> broadcast_targets;
       {
         AutoLock s_lock(state_lock);
-        if (meta_state == FINAL_VERSION_STATE)
-          return final_ready;
+        if (meta_state == MERGED_VERSION_STATE)
+          return merged_ready;
         // Case 1: we are the owner and there is only one initial 
         // version and we're it
-        if (is_owner() && (meta_state == INITIAL_VERSION_STATE) && 
-            (initial_nodes.size() ==1) && (initial_nodes.contains(local_space)))
+        if (is_owner() && (meta_state == EVENTUAL_VERSION_STATE) 
+            && (eventual_nodes.size() ==1) 
+            && (eventual_nodes.contains(local_space)))
         {
           // Upgrade ourselves and we're done
-          final_ready = initial_ready;
-          meta_state = FINAL_VERSION_STATE;
-          final_nodes.add(local_space);
-          return final_ready;
+          merged_ready = eventual_ready;
+          meta_state = MERGED_VERSION_STATE;
+          merged_nodes.add(local_space);
+          return merged_ready;
         }
         result = UserEvent::create_user_event();
-        final_ready = result;
-        meta_state = FINAL_VERSION_STATE;
+        merged_ready = result;
+        meta_state = MERGED_VERSION_STATE;
         if (is_owner())
         {
-          if (initial_nodes.size() == 1)
+          if (eventual_nodes.size() == 1)
           {
             // Case 2: there is only one initial version and it's someone else
-            target = initial_nodes.find_first_set(); 
+            target = eventual_nodes.find_first_set(); 
             // Mark that this target is upgraded
-            final_nodes.add(target);
+            merged_nodes.add(target);
           }
           else
           {
             // Case 3: there are multiple initial versions 
             // so we need to broadcast
             BroadcastFunctor functor(local_space, broadcast_targets);
-            initial_nodes.map(functor);
+            eventual_nodes.map(functor);
           }
           // Record that we are now valid for final
-          final_nodes.add(local_space);
+          merged_nodes.add(local_space);
         }
       }
       if (!broadcast_targets.empty())
@@ -13287,7 +13288,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_request(AddressSpaceID target,
                                     AddressSpaceID source, UserEvent to_trigger, 
-                                    bool final_request, bool upgrade)
+                                    bool merged_request, bool upgrade)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -13296,7 +13297,7 @@ namespace LegionRuntime {
         rez.serialize(did);
         rez.serialize(source);
         rez.serialize(to_trigger);
-        rez.serialize(final_request);
+        rez.serialize(merged_request);
         rez.serialize(upgrade);
       }
       runtime->send_version_state_request(target, rez);
@@ -13318,7 +13319,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID VersionState::select_next_target(bool initial,
+    AddressSpaceID VersionState::select_next_target(bool eventual,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -13329,40 +13330,40 @@ namespace LegionRuntime {
       AddressSpaceID result = source;
       // use a basic round-robin scheme for now, in the future
       // we might choose to do some more intelligent node selection
-      if (initial)
+      if (eventual)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!initial_nodes.empty());
-        assert(!initial_nodes.contains(local_space));
-        if (initial_nodes.size() == 1)
-          assert(!initial_nodes.contains(source));
+        assert(!eventual_nodes.empty());
+        assert(!eventual_nodes.contains(local_space));
+        if (eventual_nodes.size() == 1)
+          assert(!eventual_nodes.contains(source));
 #endif
         while (result == source)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(init_index < initial_nodes.size());
+          assert(eventual_index < eventual_nodes.size());
 #endif
-          result = initial_nodes.find_index_set(init_index++); 
-          if (init_index == initial_nodes.size())
-            init_index = 0;
+          result = eventual_nodes.find_index_set(eventual_index++); 
+          if (eventual_index == eventual_nodes.size())
+            eventual_index = 0;
         }
       }
       else
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!final_nodes.empty());
-        assert(!final_nodes.contains(local_space));
-        if (final_nodes.size() == 1)
-          assert(!final_nodes.contains(source));
+        assert(!merged_nodes.empty());
+        assert(!merged_nodes.contains(local_space));
+        if (merged_nodes.size() == 1)
+          assert(!merged_nodes.contains(source));
 #endif
         while (result == source)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(final_index < final_nodes.size());
+          assert(merged_index < merged_nodes.size());
 #endif
-          result = final_nodes.find_index_set(final_index++);
-          if (final_index == final_nodes.size())
-            final_index = 0;
+          result = merged_nodes.find_index_set(merged_index++);
+          if (merged_index == merged_nodes.size())
+            merged_index = 0;
         }
       }
       return result;
@@ -13378,30 +13379,30 @@ namespace LegionRuntime {
 #endif
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(meta_state != FINAL_VERSION_STATE);
+      assert(meta_state != MERGED_VERSION_STATE);
 #endif
-      initial_nodes.add(source);
+      eventual_nodes.add(source);
     }
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_request(AddressSpaceID source,
-                         UserEvent to_trigger, bool final_request, bool upgrade)
+                        UserEvent to_trigger, bool merged_request, bool upgrade)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, we should definitely be able to handle this
       if (!is_owner())
       {
         Event precondition;
-        if (final_request)
+        if (merged_request)
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!upgrade);
 #endif
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(meta_state == FINAL_VERSION_STATE);
+          assert(meta_state == MERGED_VERSION_STATE);
 #endif
-          precondition = final_ready;
+          precondition = merged_ready;
         }
         else
         {
@@ -13409,17 +13410,17 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(meta_state != INVALID_VERSION_STATE);
 #endif
-          if (meta_state == INITIAL_VERSION_STATE)
+          if (meta_state == EVENTUAL_VERSION_STATE)
           {
-            precondition = initial_ready;
+            precondition = eventual_ready;
             if (upgrade)
             {
-              final_ready = initial_ready;
-              meta_state = FINAL_VERSION_STATE;
+              merged_ready = eventual_ready;
+              meta_state = MERGED_VERSION_STATE;
             }
           }
           else
-            precondition = final_ready;
+            precondition = merged_ready;
         }
         launch_send_version_state(source, to_trigger, precondition);
       }
@@ -13437,25 +13438,25 @@ namespace LegionRuntime {
         // Initialize target with a dumb value because compilers are dumb
         AddressSpaceID target = source;
         std::deque<AddressSpaceID> broadcast_targets;
-        if (final_request)
+        if (merged_request)
         {
           // Handle the final requests
           AutoLock s_lock(state_lock);
           // Check to see if we are valid and can handle the request
-          if (meta_state == FINAL_VERSION_STATE)
+          if (meta_state == MERGED_VERSION_STATE)
           {
-            precondition = final_ready;
+            precondition = merged_ready;
           }
           else
           {
             // Check to see if we've made a final instance yet
-            if (final_nodes.empty())
+            if (merged_nodes.empty())
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(!initial_nodes.empty());
+              assert(!eventual_nodes.empty());
 #endif
-              size_t count = initial_nodes.size();
-              if (initial_nodes.contains(source))
+              size_t count = eventual_nodes.size();
+              if (eventual_nodes.contains(source))
                 count--;
               // Optimize for the cases where there is only one 
               // or zero targets
@@ -13476,21 +13477,21 @@ namespace LegionRuntime {
                 if (target == local_space)
                 {
 #ifdef DEBUG_HIGH_LEVEL
-                  assert(meta_state == INITIAL_VERSION_STATE);
+                  assert(meta_state == EVENTUAL_VERSION_STATE);
 #endif
-                  precondition = initial_ready;
+                  precondition = eventual_ready;
                   // Upgrade ourselves
-                  meta_state = FINAL_VERSION_STATE;
-                  final_ready = initial_ready;
-                  final_nodes.add(local_space);
+                  meta_state = MERGED_VERSION_STATE;
+                  merged_ready = eventual_ready;
+                  merged_nodes.add(local_space);
                 }
                 else
                 {
                   forward = true;
                   // Switch the request type to initial since
                   // this is the only node needed to upgrade
-                  final_request = false;
-                  final_nodes.add(target);
+                  merged_request = false;
+                  merged_nodes.add(target);
                   // tell the target that it can upgrade
                   upgrade = true;
                 }
@@ -13498,20 +13499,20 @@ namespace LegionRuntime {
               else
               {
                 BroadcastFunctor functor(source, broadcast_targets);
-                initial_nodes.map(functor);
+                eventual_nodes.map(functor);
               }
             }
             else
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(!final_nodes.contains(source));
+              assert(!merged_nodes.contains(source));
 #endif
               forward = true;
               target = select_next_target(false/*initial*/, source);
             }
           }
           // Record that this node is now a final node
-          final_nodes.add(source);
+          merged_nodes.add(source);
         }
         else
         {
@@ -13520,22 +13521,22 @@ namespace LegionRuntime {
           // Check to see if we are valid and can handle the request
           if (meta_state != INVALID_VERSION_STATE)
           {
-            if (meta_state == INITIAL_VERSION_STATE)
-              precondition = initial_ready;
+            if (meta_state == EVENTUAL_VERSION_STATE)
+              precondition = eventual_ready;
             else
-              precondition = final_ready;
+              precondition = merged_ready;
           }
           else
           {
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!initial_nodes.empty());
-            assert(!initial_nodes.contains(source));
+            assert(!eventual_nodes.empty());
+            assert(!eventual_nodes.contains(source));
 #endif
             forward = true;
             target = select_next_target(true/*initial*/, source); 
           }
           // Record that this node is now an initial node
-          initial_nodes.add(source);
+          eventual_nodes.add(source);
         }
         // If we can handle it locally, we are done
         if (precondition.exists())
@@ -13546,7 +13547,7 @@ namespace LegionRuntime {
           assert(target != source);
 #endif
           send_version_state_request(target, source, to_trigger,
-                                     final_request, upgrade); 
+                                     merged_request, upgrade); 
         }
         else if (trigger_now)
           to_trigger.trigger();
@@ -13594,7 +13595,7 @@ namespace LegionRuntime {
         // Check to see what state we are generating, if it is the initial
         // one then we can just do our unpack in-place, otherwise we have
         // to unpack separately and then do a merge.
-        if (meta_state == INITIAL_VERSION_STATE)
+        if (meta_state == EVENTUAL_VERSION_STATE)
         {
           derez.deserialize(dirty_mask);
           field_node->transform_field_mask(dirty_mask, source); 
@@ -13828,8 +13829,8 @@ namespace LegionRuntime {
       derez.deserialize(source);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      bool final_request;
-      derez.deserialize(final_request);
+      bool merged_request;
+      derez.deserialize(merged_request);
       bool upgrade;
       derez.deserialize(upgrade);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
@@ -13840,7 +13841,7 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_request(source, to_trigger, 
-                                       final_request, upgrade);
+                                       merged_request, upgrade);
     }
 
     //--------------------------------------------------------------------------
@@ -14503,7 +14504,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState* VersionManager::find_remote_version_state(VersionID vid,
                 DistributedID did, AddressSpaceID source, bool initialize,
-                bool request_initial, bool request_final)
+                bool request_eventual, bool request_merged)
     //--------------------------------------------------------------------------
     {
       // Use the lock on the version manager to ensure that we don't
@@ -14527,10 +14528,10 @@ namespace LegionRuntime {
       }
       // Make sure we get our requests outstanding, they will
       // automatically deduplicate if necessary
-      if (request_initial)
-        result->request_initial_version_state();
-      if (request_final)
-        result->request_final_version_state();
+      if (request_eventual)
+        result->request_eventual_version_state();
+      if (request_merged)
+        result->request_merged_version_state();
       return result;
     }
 
@@ -18272,12 +18273,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
                   VersionID vid, DistributedID did, AddressSpaceID source,
-                  bool initialize, bool request_initial, bool request_final)
+                  bool initialize, bool request_eventual, bool request_merged)
     //--------------------------------------------------------------------------
     {
       VersionManager *manager = version_managers.lookup_entry(ctx, this);
       return manager->find_remote_version_state(vid, did, source, initialize,
-                                                request_initial, request_final);
+                                              request_eventual, request_merged);
     }
 
     //--------------------------------------------------------------------------
@@ -23870,19 +23871,17 @@ namespace LegionRuntime {
           finder->second |= copy_mask;
       }
       if (parent != NULL)
-        parent->find_copy_preconditions_above(logical_node->get_color(),
-                                              redop, reading, copy_mask,
-                                              preconditions);
-      find_local_copy_preconditions<false>(ColorPoint()/*child color*/, redop, 
-                                           reading, copy_mask, preconditions);
+        parent->find_copy_preconditions_above(redop, reading, copy_mask,
+                                              version_info, preconditions);
+      find_local_copy_preconditions(redop, reading, copy_mask, 
+                                    version_info, preconditions);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_preconditions_above(
-                                              const ColorPoint &child_color,
-                                                         ReductionOpID redop,
+    void MaterializedView::find_copy_preconditions_above(ReductionOpID redop,
                                                          bool reading,
                                                      const FieldMask &copy_mask,
+                                                const VersionInfo &version_info,
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -23890,26 +23889,64 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_ABOVE_CALL);
 #endif
       if (parent != NULL)
-        parent->find_copy_preconditions_above(logical_node->get_color(),
-                                              redop, reading, copy_mask,
-                                              preconditions);
-      find_local_copy_preconditions<true>(child_color, redop, reading,
-                                          copy_mask, preconditions);
+        parent->find_copy_preconditions_above(redop, reading, copy_mask,
+                                              version_info, preconditions);
+      find_local_copy_preconditions(redop, reading, copy_mask, 
+                                    version_info, preconditions);
     }
     
     //--------------------------------------------------------------------------
-    template<bool ABOVE>
-    void MaterializedView::find_local_copy_preconditions(
-                                                  const ColorPoint &local_color,
-                                                         ReductionOpID redop,
+    void MaterializedView::find_local_copy_preconditions(ReductionOpID redop,
                                                          bool reading,
                                                      const FieldMask &copy_mask,
+                                                const VersionInfo &version_info,
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
 #endif
+      // Hold the lock in read-only mode when doing this analysis
+      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      // Iterate over all the users to see which ones we need to check
+      for (LegionMap<VersionID,VersionUsers>::aligned::const_iterator vit = 
+            version_users.begin(); vit != version_users.end(); vit++)
+      {
+        // See if we have fields to test
+        FieldMask analysis_mask = vit->second.valid_fields & copy_mask;
+        if (!analysis_mask)
+          continue;
+        // 
+      }
+      // Iterate over the versions we need to check
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator vit = 
+            versions.begin(); vit != versions.end(); vit++)
+      {
+        FieldMask analysis_mask = vit->second & copy_mask;
+        // Skip any versions for fields we don't need
+        if (!analysis_mask)
+          continue;
+        // Find the set of epoch users for this version
+        LegionMap<VersionID,EpochUsers>::aligned::const_iterator finder = 
+          version_epoch_users.find(vit->first);
+        // If they are all done then we might not find it
+        if (finder == version_epoch_users.end())
+          continue;
+        const EpochUsers &epoch_users = finder->second;
+        // If there are no valid fields we care about, continue
+        if (epoch_users.valid_fields * analysis_mask)
+          continue;
+        // Iterate over the users and look for interference
+        for (LegionMap<Event,PhysicalUser>::aligned::const_iterator it = 
+              epoch_users.users.begin(); it != epoch_users.users.end(); it++)
+        {
+          // If the event has already triggered, we can skip them 
+          if (it->first.has_triggered())
+            continue;
+
+        }
+      }
+
       // Need the lock when doing this analysis
       AutoLock v_lock(view_lock);
       FieldMask non_dominated;

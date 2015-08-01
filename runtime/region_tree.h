@@ -1519,11 +1519,9 @@ namespace LegionRuntime {
     struct PhysicalUser : public GenericUser {
     public:
       PhysicalUser(void);
-      PhysicalUser(const RegionUsage &u, const FieldMask &m,
-                   Event term_event, ColorPoint child = ColorPoint());
+      PhysicalUser(const RegionUsage &u, const FieldMask &m, VersionID vid);
     public:
-      Event term_event;
-      ColorPoint child;
+      VersionID version;
     }; 
 
     /**
@@ -2018,8 +2016,8 @@ namespace LegionRuntime {
     public:
       enum VersionMetaState {
         INVALID_VERSION_STATE,
-        INITIAL_VERSION_STATE,
-        FINAL_VERSION_STATE,
+        EVENTUAL_VERSION_STATE, // eventually consistent state
+        MERGED_VERSION_STATE, // merged consistent state
       };
     public:
       class BroadcastFunctor {
@@ -2069,19 +2067,19 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      Event request_initial_version_state(void);
-      Event request_final_version_state(void);
+      Event request_eventual_version_state(void);
+      Event request_merged_version_state(void);
       void send_version_state(AddressSpaceID target, UserEvent to_trigger);
       void send_initialization_notice(void);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                            UserEvent to_trigger, bool final_req, bool upgrade);
+                           UserEvent to_trigger, bool merged_req, bool upgrade);
       void launch_send_version_state(AddressSpaceID target, 
                                  UserEvent to_trigger, Event precondition);
-      AddressSpaceID select_next_target(bool initial, AddressSpaceID source);
+      AddressSpaceID select_next_target(bool eventual, AddressSpaceID source);
     public:
       void handle_version_state_initialization(AddressSpaceID source);
       void handle_version_state_request(AddressSpaceID source, 
-                       UserEvent to_trigger, bool final_req, bool upgrade);
+                       UserEvent to_trigger, bool merged_req, bool upgrade);
       void handle_version_state_response(AddressSpaceID source,
                              UserEvent to_trigger, Deserializer &derez);
       void handle_version_state_broadcast_response(UserEvent to_trigger,
@@ -2119,10 +2117,10 @@ namespace LegionRuntime {
 #endif
     protected:
       VersionMetaState meta_state;
-      Event initial_ready, final_ready;
+      Event eventual_ready, merged_ready;
       // These are valid on the owner node only
-      NodeSet initial_nodes, final_nodes;
-      unsigned init_index, final_index;
+      NodeSet eventual_nodes, merged_nodes;
+      unsigned eventual_index, merged_index;
     };
 
     /**
@@ -2174,7 +2172,7 @@ namespace LegionRuntime {
     public:
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
                                       AddressSpaceID source, bool initialize,
-                                      bool request_initial, bool request_final);
+                                    bool request_eventual, bool request_merged);
     public:
       RegionTreeNode *const owner;
     protected:
@@ -2457,8 +2455,8 @@ namespace LegionRuntime {
       LogicalView* find_view(DistributedID did);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
                                   DistributedID did, AddressSpaceID source, 
-                                  bool initialize, bool request_intial, 
-                                  bool request_final);
+                                  bool initialize, bool request_eventual, 
+                                  bool request_merged);
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
@@ -3664,6 +3662,12 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
+      struct VersionUsers {
+      public:
+        FieldMask valid_fields;
+        LegionMap<Event,PhysicalUser,PHYSICAL_USER_ALLOC>::track_aligned users;
+      };
+    public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
@@ -3735,15 +3739,15 @@ namespace LegionRuntime {
       void add_copy_user_above(PhysicalUser &user);
       void add_local_copy_user(PhysicalUser &user);
     protected: 
-      void find_copy_preconditions_above(const ColorPoint &child_color,
-                                   ReductionOpID redop, bool reading,
-                                   const FieldMask &copy_mask,
-                   LegionMap<Event,FieldMask>::aligned &preconditions);
-      template<bool ABOVE>
-      void find_local_copy_preconditions(const ColorPoint &local_color,
-                                   ReductionOpID redop, bool reading,
-                                   const FieldMask &copy_mask,
+      void find_copy_preconditions_above(ReductionOpID redop, bool reading,
+                                         const FieldMask &copy_mask,
+                                         const VersionInfo &version_info,
+                       LegionMap<Event,FieldMask>::aligned &preconditions);
+      void find_local_copy_preconditions(ReductionOpID redop, bool reading,
+                                         const FieldMask &copy_mask,
+                                         const VersionInfo &version_info,
                            LegionMap<Event,FieldMask>::aligned &preconditions);
+    protected:
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const ColorPoint &child_color);
@@ -3784,21 +3788,23 @@ namespace LegionRuntime {
       std::map<FieldID,Reservation> atomic_reservations;
       // Keep track of the child views
       std::map<ColorPoint,MaterializedView*> children;
-      // These are the sets of users in the current and next epochs
-      // for performing dependence analysis
-      LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned 
-                                                      curr_epoch_users;
-      LegionList<PhysicalUser,PREV_PHYSICAL_ALLOC>::track_aligned 
-                                                      prev_epoch_users;
-      // Keep track of how many outstanding references we have
-      // for each of the user events
-      LegionSet<Event,EVENT_REFERENCE_ALLOC>::tracked event_references;
-      // Version information for each of the fields
+      // Keep track of the users currently using this instance
+      // There are three competing operations for this data structure
+      // 1. iterate over all the users for use analysis
+      // 2. garbage collection to remove old users for an event
+      // 3. send updates indexing by version number
+      // The last two both index whereas the first one sweeps everyone
+      // anyway, so we design the data structure to be able to quickly
+      // handle the two indexing modes so that neither one has to iterate.
+      // This may cost the first past iterating to take slightly longer
+      // but it was going to have to iterate over all the users anyway.
+      LegionMap<VersionID,VersionUsers>::aligned version_users;
+      // Keep track of the current version numbers for each field
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
     };
 
-      /**
+    /**
      * \class ReductionView
      * The ReductionView class is used for providing a view
      * onto reduction physical instances from any logical perspective.
