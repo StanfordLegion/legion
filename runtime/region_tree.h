@@ -1522,6 +1522,9 @@ namespace LegionRuntime {
       PhysicalUser(const RegionUsage &u, const ColorPoint &child,
                    const LegionMap<VersionID,FieldMask>::aligned &versions);
     public:
+      bool same_versions(const FieldMask &test_mask,
+               const LegionMap<VersionID,FieldMask>::aligned &other) const;
+    public:
       RegionUsage usage;
       ColorPoint child;
       LegionMap<VersionID,FieldMask>::aligned versions;
@@ -3665,10 +3668,18 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
-      struct EpochUser {
+      template<AllocationType ALLOC>
+      struct EventUsers {
       public:
-        FieldMask valid_fields;
-        PhysicalUser *user;
+        EventUsers(void)
+          : single(true) { users.single_user = NULL; }
+      public:
+        FieldMask user_mask;
+        union {
+          PhysicalUser *single_user;
+          LegionMap<PhysicalUser*,FieldMask,ALLOC>::track_aligned *multi_users;
+        } users;
+        bool single;
       };
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
@@ -3739,27 +3750,53 @@ namespace LegionRuntime {
       template<bool ABOVE>
       void add_local_user(std::set<Event> &wait_on, 
                           const PhysicalUser &user);
-      void add_copy_user_above(PhysicalUser &user);
-      void add_local_copy_user(PhysicalUser &user);
+    protected:
+      void add_copy_user_above(const RegionUsage &usage, Event copy_term,
+                               const ColorPoint &child_color,
+                               const VersionInfo &version_info,
+                               const FieldMask &copy_mask);
+      void add_local_copy_user(const RegionUsage &usage, Event copy_term,
+                               const ColorPoint &child_color,
+                               const VersionInfo &version_info,
+                               const FieldMask &copy_mask);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
+                                         const ColorPoint &child_color,
                                          const VersionInfo &version_info,
                        LegionMap<Event,FieldMask>::aligned &preconditions);
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
+                                         const ColorPoint &child_color,
                                          const VersionInfo &version_info,
                            LegionMap<Event,FieldMask>::aligned &preconditions);
+      void find_current_copy_preconditions(Event test_event,
+                                           const PhysicalUser *user, 
+                                           const FieldMask &user_mask,
+                                           ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                           const ColorPoint &child_color,
+                        const LegionMap<VersionID,FieldMask>::aligned &versions,
+                        LegionMap<Event,FieldMask>::aligned &preconditions,
+                                           FieldMask &observed);
+      void find_previous_copy_preconditions(Event test_event,
+                                            const PhysicalUser *user,
+                                            const FieldMask &user_Mask,
+                                            ReductionOpID redop, bool reading,
+                                            const FieldMask &copy_mask,
+                                            const ColorPoint &child_dolor,
+                        const LegionMap<VersionID,FieldMask>::aligned &versions,
+                        LegionMap<Event,FieldMask>::aligned &preconditions);
+    protected:
+      void filter_previous_users(
+                    const LegionMap<Event,FieldMask>::aligned &filter_previous);
+      void filter_current_users(const FieldMask &dominated);
     protected:
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const ColorPoint &child_color);
       void update_versions(const FieldMask &update_mask);
       void filter_local_users(Event term_event);
-      void filter_local_users(const std::set<Event> &term_events);
-      template<AllocationType ALLOC>
-      void condense_user_list(typename
-          LegionList<PhysicalUser,ALLOC>::track_aligned &users, bool previous);
       void find_atomic_reservations(InstanceRef &target, const FieldMask &mask);
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
@@ -3801,16 +3838,22 @@ namespace LegionRuntime {
       // users indexed by events. Iterating over the maps are no worse
       // that iterating over lists (for arbitrary insertion and deletion)
       // and will provide fast indexing for removing items.
-      LegionMap<Event,EpochUser,CURR_PHYSICAL_ALLOC>::track_aligned 
+      LegionMap<Event,EventUsers<CURR_PHYSICAL_ALLOC> >::aligned 
                                                       current_epoch_users;
-      LegionMap<Event,EpochUser,PREV_PHYSICAL_ALLOC>::track_aligned
+      LegionMap<Event,EventUsers<PREV_PHYSICAL_ALLOC> >::aligned
                                                       previous_epoch_users;
       // Also keep a set of events for which we have outstanding
       // garbage collection meta-tasks so we don't launch more than one
+      // We need this even though we have the data structures above because
+      // an event might be filtered out for some fields, so we can't rely
+      // on it to detect when we have outstanding gc meta-tasks
       std::set<Event> outstanding_gc_events;
-      // Keep track of the current version numbers for each field
-      LegionMap<VersionID,FieldMask,
-                PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+      // TODO: Keep track of the current version numbers for each field
+      // This will allow us to detect when physical instances are no
+      // longer valid from a particular view when doing rollbacks for
+      // resilience or mis-speculation.
+      //LegionMap<VersionID,FieldMask,
+      //          PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
     };
 
     /**
