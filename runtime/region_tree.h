@@ -1360,13 +1360,25 @@ namespace LegionRuntime {
       static const int TIMEOUT = DEFAULT_LOGICAL_USER_TIMEOUT;
     };
 
+    class FieldVersions : public Collectable {
+    public:
+      FieldVersions(void);
+      FieldVersions(const FieldVersions &rhs);
+      ~FieldVersions(void);
+    public:
+      FieldVersions& operator=(const FieldVersions &rhs);
+    public:
+
+    private:
+      LegionMap<VersionID,FieldMask>::aligned field_versions;
+    };
+
     /**
      * \class VersionInfo
      * A class for tracking version information about region usage
      */
     class VersionInfo {
     public:
-      typedef LegionMap<VersionID,FieldMask>::aligned RegionVersions;
       struct NodeInfo {
       public:
         NodeInfo(void)
@@ -3755,7 +3767,8 @@ namespace LegionRuntime {
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
                                const FieldMask &copy_mask);
-      void add_local_copy_user(const RegionUsage &usage, Event copy_term,
+      void add_local_copy_user(const RegionUsage &usage, 
+                               Event copy_term, bool base_user,
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
                                const FieldMask &copy_mask);

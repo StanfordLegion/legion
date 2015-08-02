@@ -23395,7 +23395,7 @@ namespace LegionRuntime {
           parent->add_copy_user_above(usage, copy_term, local_color,
                                       version_info, copy_mask);
         }
-        add_local_copy_user(usage, copy_term, ColorPoint(),
+        add_local_copy_user(usage, copy_term, true/*base*/, ColorPoint(),
                             version_info, copy_mask);
       }
     }
@@ -23522,27 +23522,59 @@ namespace LegionRuntime {
     {
       {
         AutoLock v_lock(view_lock);
-        bool has_local_events = false;
-        for (std::set<Event>::const_iterator it = term_events.begin();
-              it != term_events.end(); it++)
+        // Remove any event users from the current and previous users
+        for (std::set<Event>::const_iterator eit = term_events.begin();
+              eit != term_events.end(); eit++)
         {
-          std::set<Event>::iterator finder = event_references.find(*it);
-          // If we find it, keep it in the set and prune it from this set
-          // otherwise it has already been collected at this level so
-          // we can remove it from the set
-          if (finder != event_references.end())
+          LegionMap<Event,EventUsers<CURR_PHYSICAL_ALLOC> >::aligned::iterator
+            current_finder = current_epoch_users.find(*eit);
+          if (current_finder != current_epoch_users.end())
           {
-            event_references.erase(finder);
-            has_local_events = true;
+            EventUser<CURR_PHYSICAL_ALLOC> &event_users = 
+              current_finder->second;
+            if (event_users.single)
+            {
+              if (event_users.users.single_user->remove_reference())
+                delete event_users.user.single_user;
+            }
+            else
+            {
+              for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                    it = event_users.user.multi_users->begin(); it !=
+                    event_users.user.multi_users->end(); it++)
+              {
+                if (it->first->remove_reference())
+                  delete it->first;
+              }
+              delete event_users.user.multi_users;
+            }
+            current_epoch_users.erase(current_finder);
           }
-        }
-        // If we still have events then filter them
-        if (has_local_events)
-        {
-          if (term_events.size() == 1)
-            filter_local_users(*(term_events.begin()));
-          else if (!term_events.empty())
-            filter_local_users(term_events);
+          LegionMap<Event,EventUsers<PREV_PHYSICAL_ALLOC> >::aligned::iterator
+            previous_finder = previous_epoch_users.find(*eit);
+          if (previous_finder != previous_epoch_users.end())
+          {
+            EventUser<PREV_PHYSICAL_ALLOC> &event_users = 
+              previous_finder->second; 
+            if (event_users.single)
+            {
+              if (event_users.user.single_user->remove_reference())
+                delete event_users.user.single_user;
+            }
+            else
+            {
+              for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                    it = event_users.user.multi_users->begin(); it !=
+                    event_users.user.multi_users->end(); it++)
+              {
+                if (it->first->remove_reference())
+                  delete it->first;
+              }
+              delete event_users.user.multi_users;
+            }
+            previous_epoch_users.erase(previous_finder);
+          }
+          outstanding_gc_events.erase(*eit);
         }
       }
       if (parent != NULL)
@@ -23627,13 +23659,13 @@ namespace LegionRuntime {
         parent->add_copy_user_above(usage, copy_term, local_color,
                                     version_info, copy_mask);
       }
-      add_local_copy_user(usage, copy_term, child_color, 
+      add_local_copy_user(usage, copy_term, false/*base*/, child_color, 
                           version_info, copy_mask);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_local_copy_user(const RegionUsage &usage, 
-                                               Event copy_term,
+                                               Event copy_term, bool base_user,
                                                const ColorPoint &child_color,
                                                const VersionInfo &version_info,
                                                const FieldMask &copy_mask)
@@ -23645,13 +23677,39 @@ namespace LegionRuntime {
       bool issue_collect = false;
       {
         AutoLock v_lock(view_lock);
-        LegionMap<PhysicalUser*,FieldMask,CURR_PHYSICAL_ALLOC>::track_aligned
-          &event_users = current_epoch_users[copy_term];
-        event_users[user] = copy_mask;
-        issue_collect = (outstanding_gc_events.find(copy_term) ==
-                          outstanding_gc_events.end());
-        if (issue_collect)
-          outstanding_gc_events.insert(copy_term);
+        EventUsers<CURR_PHYSICAL_ALLOC> &event_users = 
+                                                current_epoch_users[copy_term];
+        if (event_users.single)
+        {
+          if (event_users.users.single_user == NULL)
+          {
+            // make it the entry
+            event_users.users.single_user = user;
+            event_users.user_mask = copy_mask;
+          }
+          else
+          {
+            // convert to multi
+            LegionMap<PhysicalUser*,FieldMask,CURR_PHYSICAL_ALLOC>::
+                track_aligned *new_map = 
+                  new LegionMap<PhysicalUser*,FieldMask,CURR_PHYSICAL_ALLOC>();
+            (*new_map)[event_users.users.single_user] = event_users.user_mask;
+            (*new_map)[user] = copy_mask;
+            event_users.user_mask |= copy_mask;
+            event_users.users.multi_users = new_map;
+            event_users.single = false;
+          }
+        }
+        else
+        {
+          // Add it to the set 
+          (*event_users.users.multi_users)[user] = copy_mask;
+          event_users.user_mask |= copy_mask;
+        }
+        if (base_user)
+          issue_collect = (outstanding_gc_events.find(copy_term) ==
+                            outstanding_gc_events.end());
+        outstanding_gc_events.insert(copy_term);
       }
       if (issue_collect)
         defer_collect_user(copy_term);
@@ -24280,19 +24338,36 @@ namespace LegionRuntime {
       {
         if (cit->first.has_triggered())
         {
-          to_delete.push_back(cit->first);
+          EventUser<CURR_PHYSICAL_ALLOC> &current_users = cit->second;
+          if (current_users.single)
+          {
+            if (current_users.users.single_user->remove_reference())
+              delete current_users.users.single_user;
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
+                  current_users.user.multi_users->begin(); it !=
+                  current_users.user.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                delete it->first;
+            }
+            delete current_users.user.multi_users;
+          }
+          events_to_delete.push_back(cit->first);
           continue;
         }
-        EventUser<CURR_PHYSICAL_ALLOC> &event_users = cit->second;
-        FieldMask summary_overlap = event_users.user_mask & dominated;
+        EventUser<CURR_PHYSICAL_ALLOC> &current_users = cit->second;
+        FieldMask summary_overlap = current_users.user_mask & dominated;
         if (!summary_overlap)
           continue;
-        event_users.user_mask -= summary_overlap;
+        current_users.user_mask -= summary_overlap;
         EventUsers<PREV_PHYSICAL_ALLOC> &prev_users = 
                                           previous_epoch_users[cit->first];
-        if (event_users.single)
+        if (current_users.single)
         {
-          PhysicalUser *user = event_users.user.single_user;
+          PhysicalUser *user = current_users.user.single_user;
           if (prev_users.single)
           {
             // Single, see if something exists there yet
@@ -24300,8 +24375,8 @@ namespace LegionRuntime {
             {
               prev_users.users.single_user = user; 
               prev_users.user_mask = summary_overlap;
-              if (!event_users.user_mask)
-                to_delete.push_back(cit->first); // reference flows back
+              if (!current_users.user_mask) // reference flows back
+                events_to_delete.push_back(cit->first); 
               else
                 user->add_reference(); // add a reference
             }
@@ -24309,9 +24384,9 @@ namespace LegionRuntime {
             {
               // Same user, update the fields 
               prev_users.user_mask |= summary_overlap;
-              if (!event_users.user_mask)
+              if (!current_users.user_mask)
               {
-                to_delete.push_back(cit->first);
+                events_to_delete.push_back(cit->first);
                 user->remove_reference(); // remove unnecessary reference
               }
             }
@@ -24323,8 +24398,8 @@ namespace LegionRuntime {
                   new LegionMap<PhysicalUser*,FieldMask,PREV_PHYSICAL_ALLOC>();
               new_map[prev-Users.user.single_user] = prev_users.user_mask;
               new_map[user] = summary_overlap;
-              if (!event_users.user_mask)
-                to_delete.push_back(cit->first); // reference flows back
+              if (!current_users.user_mask) // reference flows back
+                events_to_delete.push_back(cit->first); 
               else
                 user->add_reference();
               prev_users.user_mask |= summary_overlap;
@@ -24343,8 +24418,8 @@ namespace LegionRuntime {
             {
               // Couldn't find it
               (*prev_users.users.multi_users)[user] = summary_overlap;
-              if (!event_users.user_mask)
-                to_delete.push_back(cit->first); // reference flows back
+              if (!current_users.user_mask) // reference flows back
+                events_to_delete.push_back(cit->first); 
               else
                 user->add_reference();
             }
@@ -24352,9 +24427,9 @@ namespace LegionRuntime {
             {
               // Found it, update it 
               finder->second |= summary_overlap;
-              if (!event_users.user_mask)
+              if (!current_users.user_mask)
               {
-                to_delete.push_back(cit->first);
+                events_to_delete.push_back(cit->first);
                 user->remove_reference(); // remove redundant reference
               }
             }
@@ -24363,6 +24438,179 @@ namespace LegionRuntime {
         else
         {
           // Many things, filter them and move them back
+          if (!current_users.user_mask)
+          {
+            // Moving the whole set back, see what the previous looks like
+            if (prev_users.single)
+            {
+              if (prev_users.users.single_user != NULL)
+              {
+                // Merge the one user into this map so we can move 
+                // the whole map back
+                PhysicalUser *user = prev_users.user.single_user;  
+                LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder =
+                  current_users.users.multi_users->find(user);
+                if (finder == current_users.users.multi_users->end())
+                {
+                  // Add it reference is already there
+                  (*current_users.users.multi_users)[user] = 
+                    prev_users.user_mask;
+                }
+                else
+                {
+                  // Already there, update it and remove duplicate reference
+                  finder->second |= prev_users.user_mask;
+                  user->remove_reference();
+                }
+              }
+              // Now just move the map back
+              prev_users.user_mask |= summary_overlap;
+              prev_users.users.multi_users = current_users.users.multi_users;
+              prev_users.single = false;
+            }
+            else
+            {
+              // merge the two sets
+              for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+                    it = current_users.users.multi_users->begin();
+                    it != current_users.users.multi_users->end(); it++)
+              {
+                // See if we can find it
+                LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
+                  prev_users.users.multi_users->find(it->first);
+                if (finder == prev_users.users.multi_users->end())
+                {
+                  // Didn't find it, just move it back, reference moves back
+                  prev_users.users.multi_users->insert(*it);
+                }
+                else
+                {
+                  finder->second |= it->second; 
+                  // Remove the duplicate reference
+                  it->first->remove_reference();
+                }
+              }
+              prev_users.user_mask |= summary_overlap;
+              // Now delete the set
+              delete current_users.multi_users;
+            }
+            events_to_delete.push_back(cit->first);
+          }
+          else
+          {
+            // Only send back filtered users
+            std::vector<PhysicalUser*> to_delete;
+            if (prev_users.single)
+            {
+              // Make a new map to send back  
+              LegionMap<PhysicalUser*,FieldMask,PREV_PHYSICAL_ALLOC>::
+                track_aligned *new_map = 
+                  new LegionMap<PhysicalUser*,FieldMask,PREV_PHYSICAL_ALLOC>();
+              for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
+                    current_users.users.multi_users->begin(); it !=
+                    current_users.users.multi_users->end(); it++)
+              {
+                FieldMask overlap = summary_mask & it->second;
+                if (!overlap)
+                  continue;
+                // Can move without checking
+                (*new_map)[it->first] = overlap;
+                it->second -= overlap;
+                if (!it->second)
+                  to_delete.push_back(it->first); // reference flows back
+                else
+                  it->first->add_reference(); // need new reference
+              }
+              // Also capture the existing previous user if there is one
+              if (prev_users.users.single_user != NULL)
+              {
+                LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
+                  new_map->find(prev_users.users.single_user);
+                if (finder == new_map->end())
+                {
+                  (*new_map)[prev_users.users.single_user] = 
+                    prev_users.user_mask;
+                }
+                else
+                {
+                  finder->second |= prev_users.user_mask;
+                  // Remove redundant reference
+                  finder->first->remove_reference();
+                }
+              }
+              // Make the new map the previous set
+              prev_users.user_mask |= summary_mask;
+              prev_users.users.multi_users = new_map;
+              prev_users.single = false;
+            }
+            else
+            {
+              for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it =
+                    current_users.users.multi_users->begin(); it !=
+                    current_users.users.multi_users->end(); it++)
+              {
+                FieldMask overlap = summary_mask & it->second; 
+                if (!overlap)
+                  continue;
+                it->second -= overlap;
+                LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
+                  prev_users.users.multi_users->finder(it->first);
+                // See if it already exists
+                if (finder == prev_users.users.multi_users->end())
+                {
+                  // Doesn't exist yet, so add it 
+                  (*prev_users.users.multi_users)[it->first] = overlap;
+                  it->first->add_reference(); 
+                  if (!it->second) // reference flows back
+                    to_delete.push_back(it->first);
+                  else
+                    it->first->add_reference();
+                }
+                else
+                {
+                  // Already exists so update it
+                  finder->second |= overlap;
+                  if (!it->second)
+                  {
+                    to_delete.push_back(it->first);
+                    // Remove redundant reference
+                    it->first->remove_reference();
+                  }
+                }
+              }
+              prev_users.user_mask |= summary_mask;
+            }
+            // See if we can collapse this map back down
+            if (!to_delete.empty())
+            {
+              for (std::vector<PhysicalUser*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+              {
+                current_users.users.multi_users->erase(*it);
+              }
+              if (current_users.users.multi_users->size() == 1)
+              {
+                LegionMap<PhysicalUser,FieldMask>::aligned::iterator 
+                  first_it = current_users.users.multi_users->begin();
+#ifdef DEBUG_HIGH_LEVEL
+                assert(current_users.user_mask == first_it->second);
+#endif
+                PhysicalUser *user = first_it->first;
+                delete current_users.users.multi_user;
+                current_users.users.single = true;
+                current_users.users.single_user = user;   
+              }
+            }
+          }
+        }
+      }
+      // Delete any events
+      if (!events_to_delete.empty())
+      {
+        for (std::vector<Event>::const_iterator it = events_to_delete.begin();
+              it != events_to_delete.end(); it++)
+        {
+          current_epoch_users.erase(*it); 
         }
       }
     }
