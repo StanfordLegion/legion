@@ -1368,7 +1368,10 @@ namespace LegionRuntime {
     public:
       FieldVersions& operator=(const FieldVersions &rhs);
     public:
-
+      inline const LegionMap<VersionID,FieldMask>::aligned& 
+            get_field_versions(void) const { return field_versions; }
+    public:
+      void add_field_version(VersionID vid, const FieldMask &mask);
     private:
       LegionMap<VersionID,FieldMask>::aligned field_versions;
     };
@@ -1382,14 +1385,15 @@ namespace LegionRuntime {
       struct NodeInfo {
       public:
         NodeInfo(void)
-          : physical_state(NULL), premap_only(false), 
+          : physical_state(NULL), field_versions(NULL), premap_only(false), 
             path_only(false), advance(false), needs_capture(true) { }
         // Always make deep copies of the physical state
         NodeInfo(const NodeInfo &rhs);
+        ~NodeInfo(void);
         NodeInfo& operator=(const NodeInfo &rhs);
       public:
         PhysicalState *physical_state;
-        RegionVersions version_numbers;
+        FieldVersions *field_versions;
         bool premap_only; // state needed for premapping only
         bool path_only; // state needed for intermediate path
         bool advance;
@@ -1423,6 +1427,7 @@ namespace LegionRuntime {
       PhysicalState* create_physical_state(RegionTreeNode *node,
                                            VersionManager *manager,
                                            bool initialize, bool capture);
+      FieldVersions* get_versions(RegionTreeNode *node) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);
@@ -1530,16 +1535,21 @@ namespace LegionRuntime {
      */
     struct PhysicalUser : public Collectable {
     public:
-      PhysicalUser(void);
-      PhysicalUser(const RegionUsage &u, const ColorPoint &child,
-                   const LegionMap<VersionID,FieldMask>::aligned &versions);
+      static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-      bool same_versions(const FieldMask &test_mask,
-               const LegionMap<VersionID,FieldMask>::aligned &other) const;
+      PhysicalUser(const RegionUsage &u, const ColorPoint &child,
+                   FieldVersions *versions = NULL);
+      PhysicalUser(const PhysicalUser &rhs);
+      ~PhysicalUser(void);
+    public:
+      PhysicalUser& operator=(const PhysicalUser &rhs);
+    public:
+      bool same_versions(const FieldMask &test_mask, 
+                         const FieldVersions *other) const;
     public:
       RegionUsage usage;
       ColorPoint child;
-      LegionMap<VersionID,FieldMask>::aligned versions;
+      FieldVersions *const versions;
     }; 
 
     /**
@@ -1827,112 +1837,7 @@ namespace LegionRuntime {
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
-    };
-
-    /**
-     * \class PhysicalDepAnalyzer
-     * A class for helping with doing physical dependence 
-     * analysis on a physical field tree data structure.
-     * In the process it also filters out any users which
-     * should be moved back to the next epoch.
-     */
-    template<bool FILTER>
-    class PhysicalDepAnalyzer {
-    public:
-      PhysicalDepAnalyzer(const PhysicalUser &user,
-                          const FieldMask &check_mask,
-                          RegionTreeNode *logical_node,
-                          std::set<Event> &wait_on);
-    public:
-      bool analyze(PhysicalUser &user);
-      const FieldMask& get_observed_mask(void) const;
-      const FieldMask& get_non_dominated_mask(void) const;
-    public:
-      void begin_node(FieldTree<PhysicalUser> *node);
-      void end_node(FieldTree<PhysicalUser> *node);
-    public:
-      void insert_filtered_users(FieldTree<PhysicalUser> *target);
-    private:
-      const PhysicalUser user;
-      RegionTreeNode *const logical_node;
-      std::set<Event> &wait_on;
-      FieldMask non_dominated;
-      FieldMask observed;
-    private:
-      LegionDeque<PhysicalUser>::aligned reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-    private:
-      LegionDeque<PhysicalUser>::aligned filtered_users;
-    };
-
-    /**
-     * \class PhysicalFilter
-     * A class for helping with doing filtering of 
-     * physical users of a physical user field tree.
-     */
-    class PhysicalFilter {
-    public:
-      PhysicalFilter(const FieldMask &filter_mask);
-    public:
-      bool analyze(PhysicalUser &user);
-    public:
-      void begin_node(FieldTree<PhysicalUser> *node);
-      void end_node(FieldTree<PhysicalUser> *node);
-    private:
-      const FieldMask filter_mask;
-      LegionDeque<PhysicalUser>::aligned reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-    };
-
-    /**
-     * \class PhysicalEventFilter
-     * A class for helping with garbage collection
-     * of users from the previous and current lists
-     * after they have completed.
-     */
-    class PhysicalEventFilter {
-    public:
-      PhysicalEventFilter(Event term)
-        : term_event(term) { }
-    public:
-      inline bool analyze(const PhysicalUser &user)
-      {
-        if (user.term_event == term_event)
-          return false;
-        else
-          return true;
-      }
-    public:
-      inline void begin_node(FieldTree<PhysicalUser> *node) { }
-      inline void end_node(FieldTree<PhysicalUser> *node) { }
-    private:
-      const Event term_event;
-    };
-
-    /**
-     * \class PhysicalUnpacker
-     * This class helps in restructuring and transforming
-     * field trees after they have been unpacked on a 
-     * remote node.
-     */
-    class PhysicalUnpacker {
-    public:
-      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source);
-    public:
-      void begin_node(FieldTree<PhysicalUser> *node);
-      void end_node(FieldTree<PhysicalUser> *node);
-    public:
-      bool analyze(PhysicalUser &user);
-    private:
-      FieldSpaceNode *const field_node;
-      const AddressSpaceID source;
-    private:
-      LegionDeque<PhysicalUser>::aligned reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-    };
+    }; 
 
     /**
      * \struct EventSet 
@@ -2073,7 +1978,9 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void initialize(LogicalView *view, PhysicalUser &user);
+      void initialize(LogicalView *view, Event term_event,
+                      const RegionUsage &usage,
+                      const FieldMask &user_mask);
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask, 
                                  bool path_only) const;
@@ -2162,7 +2069,9 @@ namespace LegionRuntime {
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
           bool path_only, bool advance, bool initialize, bool capture);
-      void initialize_state(LogicalView *view, PhysicalUser &user);
+      void initialize_state(LogicalView *view, Event term_event,
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask);
       void filter_states(const FieldMask &filter_mask);
       void check_init(void);
       void clear(void);
@@ -2425,6 +2334,7 @@ namespace LegionRuntime {
                                        Event copy_domains_precondition,
                                        const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+                                       const VersionInfo &src_version_info,
                            LegionMap<Event,FieldMask>::aligned &postconditions,
                                        CopyTracker *tracker = NULL);
       // Note this function can mutate the preconditions set
@@ -2705,16 +2615,22 @@ namespace LegionRuntime {
       void remap_region(ContextID ctx, MaterializedView *view, 
                         const FieldMask &user_mask, 
                         VersionInfo &version_info, FieldMask &needed_mask);
-      InstanceRef register_region(const MappableInfo &info, 
-                                  PhysicalUser &user,
+      InstanceRef register_region(const MappableInfo &info, Event term_event,
+                                  const RegionUsage &usage, 
+                                  const FieldMask &user_mask,
                                   LogicalView *view,
                                   const FieldMask &needed_fields);
-      InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
+      InstanceRef seed_state(ContextID ctx, Event term_event,
+                             const RegionUsage &usage,
+                             const FieldMask &user_mask,
                              LogicalView *new_view,
                              Processor local_proc);
-      Event close_state(const MappableInfo &info, PhysicalUser &user,
+      Event close_state(const MappableInfo &info, Event term_event,
+                        RegionUsage &usage, const FieldMask &user_mask,
                         const InstanceRef &target);
-      void find_field_descriptors(ContextID ctx, PhysicalUser &user,
+      void find_field_descriptors(ContextID ctx, Event term_event,
+                                  const RegionUsage &usage,
+                                  const FieldMask &user_mask,
                                   unsigned fid_idx, Processor proc, 
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
@@ -3640,9 +3556,12 @@ namespace LegionRuntime {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
+      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask,
                                    const VersionInfo &version_info) = 0;
-      virtual void add_initial_user(const PhysicalUser &user) = 0;
+      virtual void add_initial_user(Event term_event,
+                                    const RegionUsage &usage,
+                                    const FieldMask &user_mask) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(void) = 0;
@@ -3680,7 +3599,6 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
-      template<AllocationType ALLOC>
       struct EventUsers {
       public:
         EventUsers(void)
@@ -3689,7 +3607,7 @@ namespace LegionRuntime {
         FieldMask user_mask;
         union {
           PhysicalUser *single_user;
-          LegionMap<PhysicalUser*,FieldMask,ALLOC>::track_aligned *multi_users;
+          LegionMap<PhysicalUser*,FieldMask>::aligned *multi_users;
         } users;
         bool single;
       };
@@ -3744,9 +3662,12 @@ namespace LegionRuntime {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(PhysicalUser &user,
+      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask,
                                    const VersionInfo &version_info);
-      virtual void add_initial_user(const PhysicalUser &user);
+      virtual void add_initial_user(Event term_event,
+                                    const RegionUsage &usage,
+                                    const FieldMask &user_mask);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -3758,10 +3679,17 @@ namespace LegionRuntime {
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
     protected:
-      void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
-      template<bool ABOVE>
-      void add_local_user(std::set<Event> &wait_on, 
-                          const PhysicalUser &user);
+      void add_user_above(const RegionUsage &usage, Event term_event,
+                          const ColorPoint &child_color,
+                          const VersionInfo &version_info,
+                          const FieldMask &user_mask,
+                          std::set<Event> &preconditions);
+      bool add_local_user(const RegionUsage &usage, 
+                          Event term_event, bool base_user,
+                          const ColorPoint &child_color,
+                          const VersionInfo &version_info,
+                          const FieldMask &user_mask,
+                          std::set<Event> &preconditions);
     protected:
       void add_copy_user_above(const RegionUsage &usage, Event copy_term,
                                const ColorPoint &child_color,
@@ -3772,6 +3700,22 @@ namespace LegionRuntime {
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
                                const FieldMask &copy_mask);
+      bool find_current_preconditions(Event test_event,
+                                      const PhysicalUser *prev_user,
+                                      const FieldMask &prev_mask,
+                                      const RegionUsage &next_user,
+                                      const FieldMask &next_mask,
+                                      const ColorPoint &child_color,
+                                      std::set<Event> &preconditions,
+                                      FieldMask &observed,
+                                      FieldMask &non_dominated);
+      bool find_previous_preconditions(Event test_event,
+                                       const PhysicalUser *prev_user,
+                                       const FieldMask &prev_mask,
+                                       const RegionUsage &next_user,
+                                       const FieldMask &next_mask,
+                                       const ColorPoint &child_color,
+                                       std::set<Event> &preconditions);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
@@ -3789,38 +3733,41 @@ namespace LegionRuntime {
                                            ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                                            const ColorPoint &child_color,
-                        const LegionMap<VersionID,FieldMask>::aligned &versions,
+                                           const FieldVersions *versions,
                         LegionMap<Event,FieldMask>::aligned &preconditions,
-                                           FieldMask &observed);
+                                           FieldMask &observed,
+                                           FieldMask &non_dominated);
       void find_previous_copy_preconditions(Event test_event,
                                             const PhysicalUser *user,
                                             const FieldMask &user_Mask,
                                             ReductionOpID redop, bool reading,
                                             const FieldMask &copy_mask,
                                             const ColorPoint &child_dolor,
-                        const LegionMap<VersionID,FieldMask>::aligned &versions,
+                                            const FieldVersions *versions,
                         LegionMap<Event,FieldMask>::aligned &preconditions);
     protected:
       void filter_previous_users(
                     const LegionMap<Event,FieldMask>::aligned &filter_previous);
       void filter_current_users(const FieldMask &dominated);
+      void filter_local_users(Event term_event);
+      void add_current_user(PhysicalUser *user, Event term_event,
+                            const FieldMask &user_mask);
     protected:
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const ColorPoint &child_color);
-      void update_versions(const FieldMask &update_mask);
-      void filter_local_users(Event term_event);
+      bool has_local_war_dependence(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    const ColorPoint &child_color,
+                                    const ColorPoint &local_color);
+    public:
+      //void update_versions(const FieldMask &update_mask);
       void find_atomic_reservations(InstanceRef &target, const FieldMask &mask);
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
       virtual bool is_persistent(void) const;
       void make_persistent(void);
-    protected:
-      template<AllocationType ALLOC>
-      static void filter_list(typename 
-                              LegionList<PhysicalUser,ALLOC>::track_aligned 
-                              &user_list, const FieldMask &filter_mask);
     public:
       void send_back_atomic_reservations(
           const std::vector<std::pair<FieldID,Reservation> > &send_back);
@@ -3851,10 +3798,8 @@ namespace LegionRuntime {
       // users indexed by events. Iterating over the maps are no worse
       // that iterating over lists (for arbitrary insertion and deletion)
       // and will provide fast indexing for removing items.
-      LegionMap<Event,EventUsers<CURR_PHYSICAL_ALLOC> >::aligned 
-                                                      current_epoch_users;
-      LegionMap<Event,EventUsers<PREV_PHYSICAL_ALLOC> >::aligned
-                                                      previous_epoch_users;
+      LegionMap<Event,EventUsers>::aligned current_epoch_users;
+      LegionMap<Event,EventUsers>::aligned previous_epoch_users;
       // Also keep a set of events for which we have outstanding
       // garbage collection meta-tasks so we don't launch more than one
       // We need this even though we have the data structures above because
@@ -3867,6 +3812,10 @@ namespace LegionRuntime {
       // resilience or mis-speculation.
       //LegionMap<VersionID,FieldMask,
       //          PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+#ifdef DEBUG_HIGH_LEVEL
+      // Only need this for pruning the initial user in debug mode
+      std::set<Event> initial_user_events;
+#endif
     };
 
     /**
@@ -3877,6 +3826,19 @@ namespace LegionRuntime {
     class ReductionView : public InstanceView {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
+    public:
+      struct EventUsers {
+      public:
+        EventUsers(void)
+          : single(true) { users.single_user = NULL; }
+      public:
+        FieldMask user_mask;
+        union {
+          PhysicalUser *single_user;
+          LegionMap<PhysicalUser*,FieldMask>::aligned *multi_users;
+        } users;
+        bool single;
+      };
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
@@ -3928,9 +3890,12 @@ namespace LegionRuntime {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(PhysicalUser &user,
+      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask,
                                    const VersionInfo &version_info);
-      virtual void add_initial_user(const PhysicalUser &user);
+      virtual void add_initial_user(Event term_event,
+                                    const RegionUsage &usage,
+                                    const FieldMask &user_mask);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -3953,6 +3918,10 @@ namespace LegionRuntime {
       virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
+    protected:
+      void add_physical_user(PhysicalUser *user, bool reading,
+                             Event term_event, const FieldMask &user_mask);
+      void filter_local_users(Event term_event);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
@@ -3961,9 +3930,12 @@ namespace LegionRuntime {
     public:
       ReductionManager *const manager;
     protected:
-      LegionList<PhysicalUser>::aligned reduction_users;
-      LegionList<PhysicalUser>::aligned reading_users;
-      std::set<Event> event_references;
+      LegionMap<Event,EventUsers>::aligned reduction_users;
+      LegionMap<Event,EventUsers>::aligned reading_users;
+      std::set<Event> outstanding_gc_events;
+#ifdef DEBUG_HIGH_LEVEL
+      std::set<Event> initial_user_events;
+#endif
     };
 
     /**
@@ -4080,12 +4052,16 @@ namespace LegionRuntime {
                                                 Event precondition,
                                           std::set<Event> &postconditions) = 0;
     public:
-      virtual void find_field_descriptors(PhysicalUser &user,
+      virtual void find_field_descriptors(Event term_event,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions) = 0;
-      virtual bool find_field_descriptors(PhysicalUser &user,
+      virtual bool find_field_descriptors(Event term_event,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           LowLevel::IndexSpace target,
@@ -4150,12 +4126,16 @@ namespace LegionRuntime {
               const FieldMask &flatten_mask, CompositeCloser &closer,
               CompositeNode *target);
     public:
-      virtual void find_field_descriptors(PhysicalUser &user,
+      virtual void find_field_descriptors(Event term_event,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions);
-      virtual bool find_field_descriptors(PhysicalUser &user,
+      virtual bool find_field_descriptors(Event term_event,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           LowLevel::IndexSpace target,
@@ -4293,7 +4273,8 @@ namespace LegionRuntime {
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
       void set_owner_did(DistributedID owner_did);
     public:
-      bool find_field_descriptors(PhysicalUser &user, 
+      bool find_field_descriptors(Event term_event, const RegionUsage &usage,
+                                  const FieldMask &user_mask,
                                   unsigned fid_idx, Processor local_proc, 
                                   LowLevel::IndexSpace target, Event target_pre,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -4405,12 +4386,16 @@ namespace LegionRuntime {
                                                 Event precondition,
                                           std::set<Event> &postconditions);
     public:
-      virtual void find_field_descriptors(PhysicalUser &user,
+      virtual void find_field_descriptors(Event term_event, 
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions);
-      virtual bool find_field_descriptors(PhysicalUser &user,
+      virtual bool find_field_descriptors(Event term_event,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           LowLevel::IndexSpace target,
