@@ -217,6 +217,7 @@ namespace LegionRuntime{
       char* dst;
       hid_t mem_space_id, file_space_id;
       size_t nbytes;
+      pthread_rwlock_t *rwlock;
       HDFMemory* hdf_memory;
     };
 
@@ -226,6 +227,7 @@ namespace LegionRuntime{
       char* src;
       hid_t mem_space_id, file_space_id;
       size_t nbytes;
+      pthread_rwlock_t *rwlock;
       HDFMemory* hdf_memory;
     };
 #endif
