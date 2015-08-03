@@ -3812,10 +3812,9 @@ namespace LegionRuntime {
       // resilience or mis-speculation.
       //LegionMap<VersionID,FieldMask,
       //          PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
-#ifdef DEBUG_HIGH_LEVEL
-      // Only need this for pruning the initial user in debug mode
+    protected:
+      // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
-#endif
     };
 
     /**
@@ -3933,9 +3932,8 @@ namespace LegionRuntime {
       LegionMap<Event,EventUsers>::aligned reduction_users;
       LegionMap<Event,EventUsers>::aligned reading_users;
       std::set<Event> outstanding_gc_events;
-#ifdef DEBUG_HIGH_LEVEL
+    protected:
       std::set<Event> initial_user_events;
-#endif
     };
 
     /**

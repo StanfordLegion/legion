@@ -23012,15 +23012,16 @@ namespace LegionRuntime {
         }
         atomic_reservations.clear();
       }
+      if (!initial_user_events.empty())
+      {
+        for (std::set<Event>::const_iterator it = initial_user_events.begin();
+              it != initial_user_events.end(); it++)
+          filter_local_users(*it);
+      }
 #if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
       !defined(EVENT_GRAPH_TRACE) && defined(DEBUG_HIGH_LEVEL)
       // Don't forget to remove the initial user if there was one
       // before running these checks
-      for (std::set<Event>::const_iterator it = initial_user_events.begin();
-            it != initial_user_events.end(); it++)
-      {
-        filter_local_users(*it);
-      }
       assert(current_epoch_users.empty());
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
@@ -23337,9 +23338,7 @@ namespace LegionRuntime {
                                                     ColorPoint(), versions);
       user->add_reference();
       add_current_user(user, term_event, user_mask);
-#ifdef DEBUG_HIGH_LEVEL
       initial_user_events.insert(term_event);
-#endif
     }
  
     //--------------------------------------------------------------------------
@@ -26223,7 +26222,9 @@ namespace LegionRuntime {
     {
       CompositeNode *result = NULL;
       // If we don't have a target, go ahead and make the clone
-      if (target == NULL)
+      // We're also only allowed to flatten to a node of the same kind
+      // so go ahead make a clone if we aren't the same
+      if ((target == NULL) || (target->logical_node != logical_node))
         result = create_clone_node(parent, closer); 
       // First capture down the tree  
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
@@ -27647,15 +27648,15 @@ namespace LegionRuntime {
         else
           legion_delete(manager->as_fold_manager());
       }
+      // Remove any initial users as well
+      if (!initial_user_events.empty())
+      {
+        for (std::set<Event>::const_iterator it = initial_user_events.begin();
+              it != initial_user_events.end(); it++)
+          filter_local_users(*it);
+      }
 #if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
       !defined(EVENT_GRAPH_TRACE) && defined(DEBUG_HIGH_LEVEL)
-      // Don't forget to remove the initial user event if there was
-      // one before running these checks
-      for (std::set<Event>::const_iterator it = initial_user_events.begin();
-            it != initial_user_events.end(); it++)
-      {
-        filter_local_users(*it);
-      }
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -28425,9 +28426,7 @@ namespace LegionRuntime {
       // reductions so there is no need to record it
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint()); 
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
-#ifdef DEBUG_HIGH_LEVEL
       initial_user_events.insert(term_event);
-#endif
     }
  
     //--------------------------------------------------------------------------
