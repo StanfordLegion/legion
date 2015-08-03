@@ -28219,15 +28219,9 @@ namespace LegionRuntime {
       // We don't use field versions for doing interference 
       // tests on reductions so no need to record it
       if (reading)
-      {
-        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
         new_user = legion_new<PhysicalUser>(usage, ColorPoint());
-      }
       else
-      {
-        RegionUsage usage(REDUCE, EXCLUSIVE, usage.redop);
         new_user = legion_new<PhysicalUser>(usage, ColorPoint());
-      }
       {
         AutoLock v_lock(view_lock);
         if (!reading)
