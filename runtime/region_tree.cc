@@ -24177,9 +24177,11 @@ namespace LegionRuntime {
               LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
                             finder->second.users.multi_users->begin();     
 #ifdef DEBUG_HIGH_LEVEL
-              assert(finder->second.user_mask == first_it->second);
+              // This summary mask should dominate
+              assert(!(first_it->second - finder->second.user_mask));
 #endif
               PhysicalUser *user = first_it->first;
+              finder->second.user_mask = first_it->second;
               delete finder->second.users.multi_users;
               finder->second.users.single_user = user;
               finder->second.single = true;
@@ -24451,9 +24453,11 @@ namespace LegionRuntime {
                 LegionMap<PhysicalUser*,FieldMask>::aligned::iterator 
                   first_it = current_users.users.multi_users->begin();
 #ifdef DEBUG_HIGH_LEVEL
-                assert(current_users.user_mask == first_it->second);
+                // Should dominate as an upper bound
+                assert(!(first_it->second - current_users.user_mask));
 #endif
                 PhysicalUser *user = first_it->first;
+                current_users.user_mask = first_it->second;
                 delete current_users.users.multi_users;
                 current_users.users.single_user = user;   
                 current_users.single = true;
