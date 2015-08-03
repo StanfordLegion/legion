@@ -10,7 +10,7 @@ enum TaskIDs {
   INIT_FIELD_TASK_ID,
   STENCIL_TASK_ID,
   CHECK_TASK_ID,
-  WRITE_VALUES_TASK_ID,
+  COPY_VALUES_TASK_ID,
 };
 
 enum FieldIDs {
@@ -51,8 +51,13 @@ class PersistentRegion {
                                       Domain dom, std::map<FieldID, const char*> &field_map); 
 
     void write_persistent_subregions(Context ctx, LogicalRegion src_lr, LogicalPartition src_lp);
+    
+    void read_persistent_subregions(Context ctx, LogicalRegion src_lr, LogicalPartition src_lp);
 
-            
+
+    LogicalRegion get_logical_region() { return parent_lr; }
+    LogicalPartition get_logical_partition() { return lp; }
+    
  private:
     //LogicalRegion get_subregion(LogicalPartition lp, Color c);
     std::vector<Piece> pieces; 
