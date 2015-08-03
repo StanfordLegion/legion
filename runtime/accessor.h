@@ -28,6 +28,9 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+// for fprintf
+#include <stdio.h>
+
 using namespace LegionRuntime::Arrays;
 
 namespace Realm {

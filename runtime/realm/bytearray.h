@@ -19,6 +19,8 @@
 #ifndef REALM_BYTEARRAY_H
 #define REALM_BYTEARRAY_H
 
+#include <stddef.h>
+
 namespace Realm {
 
   class ByteArray {

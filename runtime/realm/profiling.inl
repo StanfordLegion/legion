@@ -20,16 +20,16 @@
 #include "utilities.h"
 #include "serialize.h"
 
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
+
+#include "timers.h"
 
 namespace Realm {
-
-  /*static*/ inline unsigned long long InitialTime::get_initial_time(void)
-  {
-    static const unsigned long long initial_time = 
-      LegionRuntime::TimeStamp::get_current_time_in_nanos();
-    return initial_time;
-  }
 
   namespace ProfilingMeasurements {
 
@@ -45,26 +45,22 @@ namespace Realm {
 
     inline void OperationTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
-                     InitialTime::get_initial_time();
+      create_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_ready_time(void)
     {
-      ready_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() -
-                    InitialTime::get_initial_time();
+      ready_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_start_time(void)
     {
-      start_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                    InitialTime::get_initial_time();
+      start_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void OperationTimeline::record_end_time(void)
     {
-      end_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                  InitialTime::get_initial_time();
+      end_time = Clock::current_time_in_nanoseconds();
     }
 
     inline bool OperationTimeline::is_valid(void)
@@ -77,14 +73,12 @@ namespace Realm {
 
     inline void InstanceTimeline::record_create_time(void)
     {
-      create_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                     InitialTime::get_initial_time();
+      create_time = Clock::current_time_in_nanoseconds();
     }
 
     inline void InstanceTimeline::record_delete_time(void)
     {
-      delete_time = LegionRuntime::TimeStamp::get_current_time_in_nanos() - 
-                      InitialTime::get_initial_time();
+      delete_time = Clock::current_time_in_nanoseconds();
     }
 
   }; // namespace ProfilingMeasurements
@@ -100,6 +94,32 @@ namespace Realm {
     // SJT: the typecast here is a NOP, but somehow it avoids weird linker errors
     requested_measurements.insert((ProfilingMeasurementID)T::ID);
     return *this;
+  }
+
+  template <typename S>
+  bool operator<<(S &s, const ProfilingRequest &pr)
+  {
+    return((s << pr.response_proc) &&
+	   (s << pr.response_task_id) &&
+	   (s << pr.user_data) &&
+	   (s << pr.requested_measurements));
+  }
+
+  template <typename S>
+  /*static*/ ProfilingRequest *ProfilingRequest::deserialize_new(S &s)
+  {
+    // have to get fields of the reqeuest in order to build it
+    Processor p;
+    Processor::TaskFuncID fid;
+    if(!(s >> p)) return 0;
+    if(!(s >> fid)) return 0;
+    ProfilingRequest *pr = new ProfilingRequest(p, fid);
+    if(!(s >> pr->user_data) ||
+       !(s >> pr->requested_measurements)) {
+      delete pr;
+      return 0;
+    }
+    return pr;
   }
 
 
@@ -128,9 +148,41 @@ namespace Realm {
     bool ok = dbs << data;
     assert(ok);
 
-    MeasurementData& md = measurements[(ProfilingMeasurementID)T::ID];
-    md.size = dbs.bytes_used();
-    md.base = dbs.detach_buffer();
+    // measurement data is stored in a ByteArray
+    ByteArray& md = measurements[(ProfilingMeasurementID)T::ID];
+    ByteArray b = dbs.detach_bytearray(-1);  // no trimming
+    md.swap(b);  // avoids a copy
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProfilingRequestSet
+  //
+
+  template <typename S>
+  bool operator<<(S &s, const ProfilingRequestSet &prs)
+  {
+    size_t len = prs.requests.size();
+    if(!(s << len)) return false;
+    for(size_t i = 0; i < len; i++)
+      if(!(s << *prs.requests[i])) return false;
+    return true;
+  }
+  
+  template <typename S>
+  bool operator>>(S &s, ProfilingRequestSet &prs)
+  {
+    size_t len;
+    if(!(s >> len)) return false;
+    prs.clear(); // erase any existing data cleanly
+    prs.requests.reserve(len);
+    for(size_t i = 0; i < len; i++) {
+      ProfilingRequest *pr = ProfilingRequest::deserialize_new(s);
+      if(!pr) return false;
+      prs.requests.push_back(pr);
+    }
+    return true;
   }
 
 
@@ -159,5 +211,6 @@ namespace Realm {
     } else
       return 0;
   }
+
 
 }; // namespace Realm

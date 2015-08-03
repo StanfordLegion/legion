@@ -4896,8 +4896,7 @@ namespace LegionRuntime {
       }
       // Start the profiling if requested
       if (profile_task)
-        this->start_time = (TimeStamp::get_current_time_in_micros() - 
-                              Runtime::init_time);
+        this->start_time = Realm::Clock::current_time_in_microseconds();
 #ifdef OLD_LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_EXECUTION);
 #endif
@@ -4914,8 +4913,7 @@ namespace LegionRuntime {
         if (executing_processor.kind() == Processor::TOC_PROC)
           cudaStreamSynchronize(0);
 #endif
-        this->stop_time = (TimeStamp::get_current_time_in_micros() -
-                              Runtime::init_time);
+        this->stop_time = Realm::Clock::current_time_in_microseconds();
         runtime->invoke_mapper_notify_profiling(executing_processor, this);
       }
 #ifdef DEBUG_HIGH_LEVEL

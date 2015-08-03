@@ -2446,7 +2446,7 @@ legion_runtime_register_task_uint64(
 unsigned long long
 legion_get_current_time_in_micros(void)
 {
-  return TimeStamp::get_current_time_in_micros();
+  return Realm::Clock::current_time_in_microseconds();
 }
 
 // -----------------------------------------------------------------------

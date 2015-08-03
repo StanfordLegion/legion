@@ -14917,8 +14917,6 @@ namespace LegionRuntime {
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ const long long Runtime::init_time = 
-                                      TimeStamp::get_current_time_in_micros();
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
     /*static*/ unsigned Runtime::initial_task_window_hysteresis =

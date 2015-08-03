@@ -99,7 +99,7 @@ ast_ctor.__call = function(ctor, node)
 end
 
 ast_ctor.__tostring = function(ctor)
-  return "ast." .. ctor.factory.name .. "." .. ctor.name
+  return ctor.factory.name .. "." .. ctor.name
 end
 
 -- Factories
@@ -121,7 +121,7 @@ ast_factory.__call = function(factory, ctor_name, expected_fields)
 end
 
 
-local function AST_factory(name)
+function ast.factory(name)
   local factory = {name = name}
   setmetatable(factory, ast_factory)
 
@@ -130,7 +130,7 @@ end
 
 -- Location
 
-ast.location = AST_factory("location")
+ast.location = ast.factory("location")
 
 ast.location("Position", {"line", "offset"})
 ast.location("Span", {"source", "start", "stop"})
@@ -177,7 +177,7 @@ end
 
 -- Node Types (Unspecialized)
 
-ast.unspecialized = AST_factory("unspecialized")
+ast.unspecialized = ast.factory("ast.unspecialized")
 
 ast.unspecialized("ExprID", {"name", "span"})
 ast.unspecialized("ExprEscape", {"expr", "span"})
@@ -244,7 +244,7 @@ ast.unspecialized("StatFspaceField", {"field_name", "type_expr", "span"})
 
 -- Node Types (Specialized)
 
-ast.specialized = AST_factory("specialized")
+ast.specialized = ast.factory("ast.specialized")
 
 ast.specialized("ExprID", {"value", "span"})
 ast.specialized("ExprFieldAccess", {"value", "field_name", "span"})
@@ -306,7 +306,7 @@ ast.specialized("StatFspace", {"name", "fspace", "span"})
 
 -- Node Types (Typed)
 
-ast.typed = AST_factory("typed")
+ast.typed = ast.factory("ast.typed")
 
 ast.typed("ExprInternal", {"value", "expr_type"}) -- internal use only
 

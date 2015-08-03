@@ -33,28 +33,12 @@
 
 #include <fcntl.h>
 
-#ifdef __MACH__
-#include <mach/clock.h>
-#include <mach/mach.h>
-#endif
-
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
-// outside of namespace because 50-letter-long enums are annoying
-enum {
-  TIME_NONE,
-  TIME_KERNEL,
-  TIME_COPY,
-  TIME_HIGH_LEVEL,
-  TIME_LOW_LEVEL,
-  TIME_MAPPER,
-  TIME_SYSTEM,
-  TIME_AM,
-};
-
 #include "realm/logging.h"
+#include "realm/timers.h"
 
 //#define DETAILED_TIMING
 
@@ -63,131 +47,6 @@ namespace LegionRuntime {
   namespace Logger {
     typedef Realm::Logger Category;
   };
-
-  /**
-   * Have a way of making timesteps for global timing
-   */
-#ifndef __MACH__
-  class TimeStamp {
-  private:
-    const char *print_message;
-    struct timespec spec;
-    bool diff;
-  public:
-    TimeStamp(const char *message, bool difference)
-      : print_message(message), diff(difference)
-    { 
-      if (difference)
-      {
-        clock_gettime(CLOCK_MONOTONIC, &spec); 
-      }
-      else
-      {
-        clock_gettime(CLOCK_MONOTONIC, &spec); 
-        // Give the time in s
-        double time = 1e6 * (spec.tv_sec) + 1e-3 * (spec.tv_nsec);
-        printf("%s %7.6f\n", message, time); //spec.tv_nsec);
-      }
-    }
-    ~TimeStamp(void)
-    {
-      if (diff)
-      {
-        struct timespec stop;
-        clock_gettime(CLOCK_MONOTONIC, &stop);
-        double time = get_diff_us(spec, stop);
-        printf("%s %7.3f us\n", print_message, time);
-      }
-    }
-  public:
-    static inline unsigned long long get_current_time_in_micros(void)
-    {
-      struct timespec spec;
-      clock_gettime(CLOCK_MONOTONIC, &spec);
-      unsigned long long result = (((unsigned long long)spec.tv_sec) * 1000000)
-        + (((unsigned long long)spec.tv_nsec)/1000);
-      return result;
-    }
-    static inline unsigned long long get_current_time_in_nanos(void)
-    {
-      struct timespec spec;
-      clock_gettime(CLOCK_MONOTONIC, &spec);
-      unsigned long long result = (((unsigned long long)spec.tv_sec) * 1000000000)
-        + ((unsigned long long)spec.tv_nsec);
-      return result;
-    }
-  private:
-    double get_diff_us(struct timespec &start, struct timespec &stop)
-    {
-      return (1e6 * (stop.tv_sec - spec.tv_sec) + 
-              1e-3 * (stop.tv_nsec - spec.tv_nsec));
-    }
-  };
-#else
-  class TimeStamp {
-  private:
-    const char *print_message;
-    mach_timespec_t spec;
-    bool diff;
-  public:
-    TimeStamp(const char *message, bool difference)
-      : print_message(message), diff(difference)
-    {
-      clock_serv_t cclock;
-      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-      if (difference)
-        clock_get_time(cclock, &spec);
-      else
-      {
-        clock_get_time(cclock, &spec);
-        // Give the time in s
-        double time = 1e6 * (spec.tv_sec) + 1e-3 * (spec.tv_nsec);
-        printf("%s %7.6f\n", message, time);
-      }
-      mach_port_deallocate(mach_task_self(), cclock);
-    }
-    ~TimeStamp(void)
-    {
-      if (diff)
-      {
-        mach_timespec_t stop;
-        clock_serv_t cclock;
-        host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-        clock_get_time(cclock, &stop);
-        mach_port_deallocate(mach_task_self(), cclock);
-        double time = get_diff_us(spec, stop);
-        printf("%s %7.3f us\n", print_message, time);
-      } 
-    }
-  public:
-    static inline unsigned long long get_current_time_in_micros(void)
-    {
-      mach_timespec_t spec;
-      clock_serv_t cclock;
-      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-      clock_get_time(cclock, &spec);
-      mach_port_deallocate(mach_task_self(), cclock);
-      unsigned long long result = (((unsigned long long) spec.tv_sec) * 1000000) + (((unsigned long long)spec.tv_nsec) / 1000);
-      return result;
-    }
-    static inline unsigned long long get_current_time_in_nanos(void)
-    {
-      mach_timespec_t spec;
-      clock_serv_t cclock;
-      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-      clock_get_time(cclock, &spec);
-      mach_port_deallocate(mach_task_self(), cclock);
-      unsigned long long result = (((unsigned long long) spec.tv_sec) * 1000000000) + ((unsigned long long)spec.tv_nsec);
-      return result;
-    }
-  private:
-    double get_diff_us(mach_timespec_t &start, mach_timespec_t &stop)
-    {
-      return (1e6 * (stop.tv_sec - spec.tv_sec) + 
-              1e-3 * (stop.tv_nsec - spec.tv_nsec));
-    }
-  };
-#endif
 
 #ifdef DEBUG_LOW_LEVEL
 #define PTHREAD_SAFE_CALL(cmd)			\
@@ -248,90 +107,6 @@ namespace LegionRuntime {
    * Implementation is specific to low level runtimes
    */
   namespace LowLevel {
-    /* clock that is (mostly-)synchronized across whole machine */
-    class Clock {
-    protected:
-      static double zero_time;
-
-    public:
-      static double abs_time(void)
-      {
-#ifndef __MACH__
-	struct timespec tp;
-	clock_gettime(CLOCK_REALTIME, &tp);
-#else
-        mach_timespec_t tp;
-        clock_serv_t cclock;
-        host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-        clock_get_time(cclock, &tp);
-        mach_port_deallocate(mach_task_self(), cclock);
-#endif
-	return((1.0 * tp.tv_sec) + (1e-9 * tp.tv_nsec));
-      }
-      
-      static double abs_to_rel(double abs_time)
-      {
-	return(abs_time - zero_time);
-      }
-
-      static double rel_time(void)
-      {
-	return abs_to_rel(abs_time());
-      }
-
-      static void synchronize(void);
-    };
-
-    class DetailedTimer {
-    public:
-#ifdef DETAILED_TIMING
-      static void clear_timers(bool all_nodes = true);
-      static void push_timer(int timer_kind);
-      static void pop_timer(void);
-      static void roll_up_timers(std::map<int, double>& timers, bool local_only);
-      static void report_timers(bool local_only = false);
-#else
-      static void clear_timers(bool all_nodes = true) {}
-      static void push_timer(int timer_kind) {}
-      static void pop_timer(void) {}
-      static void roll_up_timers(std::map<int, double>& timers, bool local_only) {}
-      static void report_timers(bool local_only = false) {}
-#endif
-      class ScopedPush {
-      public:
-        ScopedPush(int timer_kind) { push_timer(timer_kind); }
-        ~ScopedPush(void) { pop_timer(); }
-      };
-
-      static const char* stringify(int level)
-      {
-        switch (level)
-        {
-          case TIME_NONE:
-            return "NONE";
-          case TIME_KERNEL:
-            return "KERNEL";
-          case TIME_COPY:
-            return "COPY";
-          case TIME_HIGH_LEVEL:
-            return "HIGH-LEVEL";
-          case TIME_LOW_LEVEL:
-            return "LOW-LEVEL";
-          case TIME_MAPPER:
-            return "MAPPER";
-          case TIME_SYSTEM:
-            return "SYSTEM";
-          case TIME_AM:
-            return "ACTV_MESG";
-          default:
-            break;
-        }
-        // We only call this at the end of the run so leaking a little memory isn't too bad
-        char *result = new char[16];
-        sprintf(result,"%d",level);
-        return result;
-      }
-    };
 
     class UtilityBarrier {
     public:
@@ -386,7 +161,7 @@ namespace LegionRuntime {
 	    time_mult(refblk.time_mult), next(0)
 	{
 	  PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex,NULL));
-	  start_time = Clock::rel_time();
+	  start_time = Realm::Clock::current_time();
 	  items = new ITEM[max_size];
 	}
 
@@ -394,7 +169,7 @@ namespace LegionRuntime {
 	  : max_size(block_size), cur_size(0), next(0)
 	{
 	  PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex,NULL));
-	  start_time = Clock::rel_time();
+	  start_time = Realm::Clock::current_time();
 	  items = new ITEM[max_size];
 
 	  // set the time multiplier such that there'll likely be 2^31
@@ -476,7 +251,7 @@ namespace LegionRuntime {
 	  break;
 	}
 
-	double time_units = ((Clock::rel_time() - block->start_time) * 
+	double time_units = ((Realm::Clock::current_time() - block->start_time) * 
 			     block->time_mult);
 	assert(time_units >= 0);
 	assert(time_units < 4294967296.0);
@@ -492,9 +267,6 @@ namespace LegionRuntime {
     // Example Item types in lowlevel_impl.h 
 
   }; // LegionRuntime::LowLevel namespace
-
-  // typedef so we can use detailed timers anywhere in the runtime
-  typedef LowLevel::DetailedTimer DetailedTimer;
 
 }; // LegionRuntime namespace
 

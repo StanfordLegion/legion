@@ -17,9 +17,10 @@
 
 #include <stdio.h>
 
+GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
+
 namespace LegionRuntime {
   namespace LowLevel {
-    GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
 
     extern Logger::Category log_gpu;
 #ifdef EVENT_GRAPH_TRACE
