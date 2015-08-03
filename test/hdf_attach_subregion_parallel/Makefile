@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 
-LG_RT_DIR=../legion/runtime/
+LG_RT_DIR=../../runtime/
 
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols
