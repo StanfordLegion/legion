@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
+ * Copyright 2015 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1198,9 +1199,12 @@ namespace LegionRuntime {
         int ndims;
         hid_t file_id;
         std::vector<hid_t> dataset_ids;
+        std::vector<pthread_rwlock_t> dataset_rwlocks; /* used to serialize readers/writers to datasets in HDF5 */
         std::vector<hid_t> datatype_ids;
+        HDFMemory* hdf_memory;
       };
       std::vector<HDFMetadata*> hdf_metadata;
+      pthread_rwlock_t rwlock; /* used to deal with concurrency issues in HDF5 */ 
     };
 #endif
 
