@@ -184,12 +184,12 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
 						    Domain dom, std::map<FieldID, const char*> &field_map){
 
 
-  hid_t link_file_id, shard_group_id, shard_ds_id, dataspace_id, dtype_id, shard_file_id, attr_ds_id, link_group_id, link_group_2_id;
+  hid_t link_file_id, shard_group_id, shard_ds_id, dataspace_id, dtype_id, shard_file_id, link_group_id, link_group_2_id;
   herr_t status;
   hid_t space, src_space;
   hsize_t vdsdims[2],
           start[2],                             // Hyperslab parameters
-	  stride[2],
+    // stride[2],
 	  count[2],
           block[2];
   hid_t dset;
@@ -222,7 +222,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
   // Build the mappings.
   // Selections in the source datasets are H5S_ALL.
   // In the virtual dataset we select the 4x4 region
-  //  and map each region to the data in the corresponding source dataset. 
+  // and map each region to the data in the corresponding source dataset. 
   //
 
     int i = 0;
@@ -245,8 +245,6 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
 
       sprintf(pieces[i].shard_name, "%d-%d-%s", pieces[i].dp[0], pieces[i].dp[1], name); 
       shard_file_id = H5Fcreate(pieces[i].shard_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-      int *shard_dims;
-      
       
       switch(dim){
       case 1: {
