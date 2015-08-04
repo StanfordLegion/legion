@@ -60,7 +60,7 @@ function ast_node:printpretty()
 end
 
 function ast_node:is(node_type)
-  return self.node_type == node_type
+  return self.node_type == node_type or self.node_type.factory == node_type
 end
 
 function ast_node:type()
