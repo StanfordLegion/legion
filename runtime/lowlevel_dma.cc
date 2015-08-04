@@ -3219,6 +3219,7 @@ namespace LegionRuntime {
       switch (domain.get_dim()) {
       case 0:
         fprintf(stderr, "Unstructed data is not supported at this moment\n");
+        assert(0);
         break;
       case 1:
         perform_new_dma<1>(src_mem, dst_mem);
@@ -3824,6 +3825,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
@@ -4352,6 +4357,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 

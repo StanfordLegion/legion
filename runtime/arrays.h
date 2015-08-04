@@ -491,8 +491,6 @@ namespace LegionRuntime {
 
       virtual Rect<IDIM> preimage(const Point<ODIM> p) const { assert(0); return Rect<IDIM>(); }//= 0;
       virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); return false; }//= 0;
-      
-      virtual int continuous_steps(const Point<IDIM> p, int &direction) const {assert(0); return 0;} // = 0
 
       inline void add_reference(void)
       {
@@ -566,11 +564,6 @@ namespace LegionRuntime {
       virtual bool preimage_is_dense(const Point<ODIM> p) const
       {
 	return t.preimage_is_dense(p);
-      }
-
-      virtual int continuous_steps(const Point<IDIM> p, int &direction) const
-      {
-	return t.continuous_steps(p, direction);
       }
     };
 
@@ -739,12 +732,6 @@ namespace LegionRuntime {
 	return true;
       }
 
-      int continuous_steps(const Point<IDIM> p, int &direction) const
-      {
-	assert(0);
-	return true;
-      }
-
     protected:
       Point<DIM> offset;
     };
@@ -836,13 +823,6 @@ namespace LegionRuntime {
       {
 	return true;
       }
-
-      int continuous_steps(const Point<IDIM> p, int &direction) const
-      {
-	assert(0);
-	return 0;
-      }
-
     };
 
     template <unsigned DIM>
