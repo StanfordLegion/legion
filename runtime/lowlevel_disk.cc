@@ -206,10 +206,14 @@ namespace LegionRuntime {
         int rc = pthread_rwlock_init(&new_hdf->dataset_rwlocks[idx], NULL);
         assert(rc==0);
       }
-      if (inst.id < hdf_metadata.size())
-        hdf_metadata[inst.id] = new_hdf;
+      std::cout << "in HDFMemory::create_instance(..) inst.id: " <<
+        inst.id << " hdf_metadata.size(): " << hdf_metadata_vec.size() <<
+        std::endl;
+      
+      if (inst.id < hdf_metadata_vec.size())
+        hdf_metadata_vec[inst.id] = new_hdf;
       else
-        hdf_metadata.push_back(new_hdf);
+        hdf_metadata_vec.push_back(new_hdf);
       pthread_rwlock_unlock(&this->rwlock);
       return inst;
     }
@@ -217,9 +221,9 @@ namespace LegionRuntime {
     void HDFMemory::destroy_instance(RegionInstance i,
 				     bool local_destroy)
     {
-      HDFMetadata* new_hdf = hdf_metadata[ID(i).index_l()];
-      assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       pthread_rwlock_wrlock(&this->rwlock);
+      HDFMetadata* new_hdf = hdf_metadata_vec[ID(i).index_l()];
+      assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
         H5Tclose(new_hdf->datatype_ids[idx]);
@@ -254,7 +258,7 @@ namespace LegionRuntime {
     void HDFMemory::get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
       pthread_rwlock_rdlock(&this->rwlock);
-      HDFMetadata *metadata = hdf_metadata[inst_id];
+      HDFMetadata *metadata = hdf_metadata_vec[inst_id];
 //      std::cout << "In HDFMemory::get_bytes operating on metadata:" << metadata << std::endl;
       // use index to compute position in space
       assert(size == H5Tget_size(metadata->datatype_ids[fid]));
@@ -287,10 +291,10 @@ namespace LegionRuntime {
     void HDFMemory::put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
       pthread_rwlock_rdlock(&this->rwlock);
-      HDFMetadata *metadata = hdf_metadata[inst_id];
+      HDFMetadata *metadata = hdf_metadata_vec[inst_id];
 //      std::cout << "In HDFMemory::put_bytes operating on metadata:" << metadata << std::endl;
       // use index to compute position in space
-      assert(size == H5Tget_size(hdf_metadata[inst_id]->datatype_ids[fid]));
+      assert(size == H5Tget_size(hdf_metadata_vec[inst_id]->datatype_ids[fid]));
       hsize_t offset[3], count[3];
       for (int i = 0; i < metadata->ndims; i++) {
         offset[i] = dp.point_data[i] - metadata->lo[i];

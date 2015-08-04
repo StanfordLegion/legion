@@ -10978,7 +10978,9 @@ namespace LegionRuntime {
         }
         ID id(impl->me);
         unsigned index = id.index_l();
-        assert(dp.dim == hdf->hdf_metadata[index]->ndims);
+        pthread_rwlock_rdlock(&hdf->rwlock);
+        assert(dp.dim == hdf->hdf_metadata_vec[index]->ndims);
+        pthread_rwlock_unlock(&hdf->rwlock);
         hdf->get_bytes(index, dp, fid, dst, bytes);
         return;
       }
@@ -11044,7 +11046,7 @@ namespace LegionRuntime {
         }
         ID id(impl->me);
         unsigned index = id.index_l();
-        assert(dp.dim == hdf->hdf_metadata[index]->ndims);
+        assert(dp.dim == hdf->hdf_metadata_vec[index]->ndims);
         hdf->put_bytes(index, dp, fid, src, bytes);
         return;
       }

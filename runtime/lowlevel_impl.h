@@ -1203,7 +1203,7 @@ namespace LegionRuntime {
         std::vector<hid_t> datatype_ids;
         HDFMemory* hdf_memory;
       };
-      std::vector<HDFMetadata*> hdf_metadata;
+      std::vector<HDFMetadata*> hdf_metadata_vec;
       pthread_rwlock_t rwlock; /* used to deal with concurrency issues in HDF5 */ 
     };
 #endif
