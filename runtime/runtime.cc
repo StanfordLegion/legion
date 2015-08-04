@@ -3833,20 +3833,14 @@ namespace LegionRuntime {
               runtime->handle_send_composite_view(derez, remote_address_space);
               break;
             }
-          case SEND_COMPOSITE_UPDATE:
-            {
-              runtime->handle_send_composite_update(derez, 
-                                                    remote_address_space);
-              break;
-            }
           case SEND_FILL_VIEW:
             {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
-          case SEND_FILL_UPDATE:
+          case SEND_DEFERRED_UPDATE:
             {
-              runtime->handle_send_fill_update(derez, remote_address_space);
+              runtime->handle_send_deferred_update(derez, remote_address_space);
               break;
             }
           case SEND_REDUCTION_VIEW:
@@ -3870,11 +3864,6 @@ namespace LegionRuntime {
             {
               runtime->handle_send_reduction_manager(derez,
                                                      remote_address_space);
-              break;
-            }
-          case SEND_REMOTE_REFERENCES:
-            {
-              runtime->handle_send_remote_references(derez);
               break;
             }
           case SEND_FUTURE:
@@ -11475,14 +11464,6 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    void Runtime::send_composite_update(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_COMPOSITE_UPDATE,
-                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11491,10 +11472,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_fill_update(AddressSpaceID target, Serializer &rez)
+    void Runtime::send_deferred_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_FILL_UPDATE,
+      find_messenger(target)->send_message(rez, SEND_DEFERRED_UPDATE,
                                PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
@@ -11527,14 +11508,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
-                               PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_remote_references(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_REMOTE_REFERENCES,
                                PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
@@ -12039,14 +12012,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_composite_update(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      //CompositeView::handle_send_composite_update(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_fill_view(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -12055,11 +12020,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_fill_update(Deserializer &derez, 
-                                          AddressSpaceID source)
+    void Runtime::handle_send_deferred_update(Deserializer &derez, 
+                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //FillView::handle_fill_update(forest, derez, source);
+      DeferredView::handle_deferred_update(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12092,13 +12057,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ReductionManager::handle_send_manager(this, source, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_remote_references(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_references(derez);
     }
 
     //--------------------------------------------------------------------------

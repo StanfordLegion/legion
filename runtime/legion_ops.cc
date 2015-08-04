@@ -2019,7 +2019,7 @@ namespace LegionRuntime {
           termination_event);
       LegionLogging::log_physical_user(
           Processor::get_executing_processor(),
-          result.get_handle().get_view()->get_manager()->get_instance(),
+          result.get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
 #ifdef OLD_LEGION_PROF
@@ -2035,7 +2035,7 @@ namespace LegionRuntime {
       LegionSpy::log_implicit_dependence(termination_event, 
                                          parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          result.get_handle().get_view()->get_manager()->get_instance().id);
+          result.get_manager()->get_instance().id);
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
@@ -3041,7 +3041,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
           start_events.insert(dst_ref.get_ready_event());
           LegionSpy::log_op_user(unique_op_id, src_requirements.size()+idx,
-             dst_ref.get_handle().get_view()->get_manager()->get_instance().id);
+              dst_ref.get_manager()->get_instance().id);
 #endif
           if (!src_mapping_refs[idx].has_ref())
           {
@@ -3113,7 +3113,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
             start_events.insert(src_ref.get_ready_event());
             LegionSpy::log_op_user(unique_op_id, idx,
-             src_ref.get_handle().get_view()->get_manager()->get_instance().id);
+                src_ref.get_manager()->get_instance().id);
 #endif
           }
         }
@@ -4555,8 +4555,7 @@ namespace LegionRuntime {
           unique_op_id, Event::NO_EVENT, close_event);
       LegionLogging::log_physical_user(
           Processor::get_executing_processor(),
-          reference.get_handle().get_view()->get_manager()->get_instance(),
-          unique_op_id, 0/*idx*/);
+          reference.get_manager()->get_instance(), unique_op_id, 0/*idx*/);
 #endif
 #ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
@@ -4763,8 +4762,7 @@ namespace LegionRuntime {
           unique_op_id, Event::NO_EVENT, close_event);
       LegionLogging::log_physical_user(
           Processor::get_executing_processor(),
-          reference.get_handle().get_view()->get_manager()->get_instance(),
-          unique_op_id, 0/*idx*/);
+          reference.get_manager()->get_instance(), unique_op_id, 0/*idx*/);
 #endif
 #ifdef OLD_LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
@@ -4778,7 +4776,7 @@ namespace LegionRuntime {
       LegionSpy::log_op_events(unique_op_id, close_event, 
                              parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          reference.get_handle().get_view()->get_manager()->get_instance().id);
+          reference.get_manager()->get_instance().id);
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
@@ -5172,7 +5170,7 @@ namespace LegionRuntime {
       LegionSpy::log_implicit_dependence(acquire_complete,
           parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0,
-          result.get_handle().get_view()->get_manager()->get_instance().id);
+          result.get_manager()->get_instance().id);
       LegionSpy::log_event_dependence(acquire_complete, completion_event);
       {
         Processor proc = Processor::get_executing_processor();
@@ -5692,8 +5690,7 @@ namespace LegionRuntime {
       LegionSpy::IDType inst_id;
       {
         const InstanceRef& ref = region.impl->get_reference();
-        inst_id =
-          ref.get_handle().get_view()->get_manager()->get_instance().id;
+        inst_id = ref.get_manager()->get_instance().id;
       }
 #endif
       // Map this is a restricted region and then register it. The process
@@ -9524,8 +9521,7 @@ namespace LegionRuntime {
       requirement.copy_without_mapping_info(region.impl->get_requirement());
       initialize_privilege_path(privilege_path, requirement);
       // Check that this is actually a file
-      LogicalView *view = reference.get_handle().get_view();
-      PhysicalManager *manager = view->get_manager();
+      PhysicalManager *manager = reference.get_manager();
 #ifdef DEBUG_HIGH_LEVEL
       assert(!manager->is_reduction_manager()); 
 #endif

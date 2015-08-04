@@ -340,8 +340,7 @@ namespace LegionRuntime {
       {
         unsigned index;
         derez.deserialize(index);
-        early_mapped_regions[index] = 
-        InstanceRef::unpack_reference(derez, runtime->forest, depth);
+        early_mapped_regions[index].unpack_reference(runtime, derez); 
       }
       // Parent requirement indexes don't mean anything remotely
       parent_req_indexes.resize(regions.size(), 0);
@@ -2352,7 +2351,7 @@ namespace LegionRuntime {
       assert(idx < physical_instances.size());
       assert(physical_instances[idx].has_ref());
 #endif
-      return physical_instances[idx].get_handle().get_view()->get_manager(); 
+      return physical_instances[idx].get_manager(); 
     }
 
     //--------------------------------------------------------------------------
@@ -2398,8 +2397,7 @@ namespace LegionRuntime {
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
       {
-        physical_instances[idx] = 
-          InstanceRef::unpack_reference(derez, runtime->forest, depth);
+        physical_instances[idx].unpack_reference(runtime, derez);
       }
       locally_mapped.resize(num_phy,false);
       // Initialize the mapping paths on this node
@@ -4314,7 +4312,7 @@ namespace LegionRuntime {
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
       local_instances.resize(regions.size(), InstanceRef());
-      std::map<PhysicalManager*,LogicalView*> top_views;
+      std::map<PhysicalManager*,InstanceView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4335,7 +4333,7 @@ namespace LegionRuntime {
           local_instances[idx] = 
             runtime->forest->initialize_physical_context(context,
                 clone_requirements[idx], 
-                physical_instances[idx].get_handle().get_manager(),
+                physical_instances[idx].get_manager(),
                 unmap_events[idx], 
                 executing_processor, depth+1, top_views);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4446,7 +4444,7 @@ namespace LegionRuntime {
           // which we might not if this is locally mapped.  We also don't
           // need to do this if the user has promised us that they will
           // never actually access the physical instance with an accessor.
-          if (physical_instances[idx].get_handle().has_view() &&
+          if (physical_instances[idx].has_ref() &&
               !(regions[idx].flags & NO_ACCESS_FLAG))
           {
             Memory inst_mem = physical_instances[idx].get_memory();
@@ -4456,7 +4454,7 @@ namespace LegionRuntime {
           // If we have additional processors, then check to see if
           // they are also visible from the chosen mapped instances 
           if (!additional_procs.empty() && 
-              physical_instances[idx].get_handle().has_view() &&
+              physical_instances[idx].has_ref() &&
               !(regions[idx].flags & NO_ACCESS_FLAG))
           {
             Memory inst_mem = physical_instances[idx].get_memory();
@@ -4860,8 +4858,8 @@ namespace LegionRuntime {
         if (physical_instances[idx].has_ref())
         {
           LegionLogging::log_physical_user(executing_processor,
-            physical_instances[idx].get_handle().get_view()->
-            get_manager()->get_instance(), get_unique_task_id(), idx);
+            physical_instances[idx].get_manager()->get_instance(), 
+            get_unique_task_id(), idx);
         }
       }
 #endif
@@ -4871,8 +4869,7 @@ namespace LegionRuntime {
         if (physical_instances[idx].has_ref())
         {
           LegionSpy::log_op_user(unique_op_id, idx, 
-           physical_instances[idx].get_handle().get_view()->
-                                get_manager()->get_instance().id);
+           physical_instances[idx].get_manager()->get_instance().id);
         }
       }
       {

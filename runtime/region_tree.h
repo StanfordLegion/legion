@@ -355,7 +355,7 @@ namespace LegionRuntime {
       InstanceRef initialize_physical_context(RegionTreeContext ctx,
                     const RegionRequirement &req, PhysicalManager *manager,
                     Event term_event, Processor local_proc, unsigned depth,
-                    std::map<PhysicalManager*,LogicalView*> &top_views);
+                    std::map<PhysicalManager*,InstanceView*> &top_views);
       void invalidate_physical_context(RegionTreeContext ctx,
                                        LogicalRegion handle);
       bool perform_close_operation(RegionTreeContext ctx,
@@ -435,16 +435,6 @@ namespace LegionRuntime {
       void detach_file(RegionTreeContext ctx, 
                        const RegionRequirement &req,
                        const InstanceRef &ref);
-    public:
-      // Methods for sending and returning state information
-      void send_remote_references(
-          const std::set<PhysicalManager*> &needed_managers,
-          AddressSpaceID target);
-      void send_remote_references(
-          const LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-          const std::set<PhysicalManager*> &needed_managers, 
-          AddressSpaceID target);
-      void handle_remote_references(Deserializer &derez);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -2623,7 +2613,7 @@ namespace LegionRuntime {
       InstanceRef seed_state(ContextID ctx, Event term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
-                             LogicalView *new_view,
+                             InstanceView *new_view,
                              Processor local_proc);
       Event close_state(const MappableInfo &info, Event term_event,
                         RegionUsage &usage, const FieldMask &user_mask,
@@ -4069,6 +4059,14 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions) = 0;
     protected:
+      void send_deferred_view_updates(AddressSpaceID target, 
+                                      const FieldMask &update_mask);
+      void process_deferred_view_update(Deserializer &derez, 
+                                        AddressSpaceID source);
+    public:
+      static void handle_deferred_update(Runtime *rt, Deserializer &derez,
+                                         AddressSpaceID source);
+    protected:
       // Track the set of reduction views which need to be applied here
       FieldMask reduction_mask;
       // We need to keep these in order because there may be multiple
@@ -4414,43 +4412,6 @@ namespace LegionRuntime {
     }; 
 
     /**
-     * \class ViewHandle
-     * The view handle class provides a handle that
-     * properly maintains the reference counting property on
-     * physical views for garbage collection purposes.
-     */
-    class ViewHandle {
-    public:
-      ViewHandle(void);
-      ViewHandle(LogicalView *v);
-      ViewHandle(const ViewHandle &rhs);
-      ~ViewHandle(void);
-    public:
-      ViewHandle& operator=(const ViewHandle &rhs);
-    public:
-      inline bool has_view(void) const { return (view != NULL); }
-      inline LogicalView* get_view(void) const { return view; }
-      inline bool is_reduction_view(void) const
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(view != NULL);
-#endif
-        if (!view->is_instance_view())
-          return false;
-        return view->as_instance_view()->is_reduction_view();
-      }
-      inline PhysicalManager* get_manager(void) const
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(view != NULL);
-#endif
-        return view->get_manager();
-      }
-    private:
-      LogicalView *view;
-    };
-
-    /**
      * \class MappingRef
      * This class keeps a valid reference to a physical instance that has
      * been allocated and is ready to have dependence analysis performed.
@@ -4483,20 +4444,25 @@ namespace LegionRuntime {
     class InstanceRef {
     public:
       InstanceRef(void);
-      InstanceRef(Event ready, const ViewHandle &handle);
-      InstanceRef(Event ready, const ViewHandle &handle,
+      InstanceRef(Event ready, InstanceView *view);
+      InstanceRef(Event ready, InstanceView *view,
                   const std::vector<Reservation> &locks);
     public:
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
-      inline bool has_ref(void) const { return handle.has_view(); }
+      inline bool has_ref(void) const { return (manager != NULL); }
       inline bool has_required_locks(void) const 
                                       { return !needed_locks.empty(); }
       inline Event get_ready_event(void) const { return ready_event; }
-      const ViewHandle& get_handle(void) const { return handle; }
       inline void add_reservation(Reservation handle) 
                                   { needed_locks.push_back(handle); }
+      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline InstanceView* get_instance_view(void) const { return view; }
+    public:
+      MaterializedView* get_materialized_view(void) const;
+      ReductionView* get_reduction_view(void) const;
+    public:
       void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
                                bool exclusive) const;
       Memory get_memory(void) const;
@@ -4504,13 +4470,13 @@ namespace LegionRuntime {
         get_accessor(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_field_accessor(FieldID fid) const;
+    public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      static InstanceRef unpack_reference(Deserializer &derez,
-                                          RegionTreeForest *context,
-                                          unsigned depth);
+      void unpack_reference(Runtime *rt, Deserializer &derez);
     private:
       Event ready_event;
-      ViewHandle handle;
+      InstanceView *view; // only valid on creation node
+      PhysicalManager *manager;
       std::vector<Reservation> needed_locks;
     };
 
