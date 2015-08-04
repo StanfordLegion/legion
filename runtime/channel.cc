@@ -45,12 +45,15 @@ namespace LegionRuntime {
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 
       static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-  				     int block_size, int index)
+  				     int block_size, int index, off_t total_num_elmts = 0)
       {
-        return (alloc_offset +                                      // start address
-  	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-  	      (field_start * block_size) +                        // skip other fields
-  	      ((index % block_size) * field_size));               // some some of our fields within our block
+        if (total_num_elmts) {
+          return (alloc_offset + field_start * total_num_elmts + index * field_size);
+        }
+        return (alloc_offset +                                     // start address
+               ((index / block_size) * block_size * elmt_size) +   // full blocks
+               (field_start * block_size) +                        // skip other fields
+               ((index % block_size) * field_size));               // some some of our fields within our block
       }
 
       static inline bool scatter_ib(off_t start, size_t nbytes, size_t buf_size)
@@ -72,9 +75,9 @@ namespace LegionRuntime {
         int dst_in_block = dst_buf->block_size - dst_idx % dst_buf->block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
         src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                 src_buf->elmt_size, src_buf->block_size, src_idx);
+                                 src_buf->elmt_size, src_buf->block_size, src_idx, pre_XferDes? domain.get_volume(): 0);
         dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                 dst_buf->elmt_size, dst_buf->block_size, dst_idx);
+                                 dst_buf->elmt_size, dst_buf->block_size, dst_idx, next_XferDes? domain.get_volume() : 0);
         bool scatter_src_ib = false, scatter_dst_ib = false;
         // make sure we have source data ready
         if (src_buf->is_ib) {
