@@ -24,7 +24,7 @@ USE_GASNET=1
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 USE_CUDA	=0 # no cuda thank you
 
-GASNET		:= /Users/brtnfld/packages/FF2/GASNet-1.24.2/gasnet
+GASNET		:= $(HOME)/packages/FF2/GASNet-1.24.2/gasnet
 CONDUIT		:= udp
 # Put the binary file name here
 OUTFILE		:= tester_io
@@ -34,11 +34,11 @@ GEN_GPU_SRC	:=				# .cu files
 USE_HDF 	= 1
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	:= -I/Users/brtnfld/packages/FF2/vds/hdf5/include -I/Users/brtnfld/packages/FF2/GASNet-1.24.2/gasnet/include
+INC_FLAGS	:= -I$(HOME)/packages/FF2/vds/hdf5/include -I$(HOME)/packages/FF2/GASNet-1.24.2/gasnet/include
 CC_FLAGS	?= -g
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
-LD_FLAGS	:= -I/Users/brtnfld/packages/FF2/GASNet-1.24.2/gasnet/lib -L/Users/brtnfld/packages/FF2/vds/hdf5/lib -lhdf5
+LD_FLAGS	:= -I$(HOME)/packages/FF2/GASNet-1.24.2/gasnet/lib -L$(HOME)/packages/FF2/vds/hdf5/lib -lhdf5
 
 ###########################################################################
 #
