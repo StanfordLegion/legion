@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
+ * Copyright 2015 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +22,7 @@
 #include <errno.h>
 
 #include <queue>
+#include <algorithm>
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
@@ -56,10 +58,11 @@ namespace LegionRuntime {
 
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
-    struct OffsetsAndSize {
+    // OffsetsAndSize is defined in channel.h
+    /*struct OffsetsAndSize {
       off_t src_offset, dst_offset;
       int size;
-    };
+    };*/
     typedef std::vector<OffsetsAndSize> OASVec;
     typedef std::map<InstPair, OASVec> OASByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
@@ -164,6 +167,9 @@ namespace LegionRuntime {
 
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
+
+      template <unsigned DIM>
+      void perform_new_dma(Memory src_mem, Memory dst_mem);
 
       virtual void perform_dma(void);
 
@@ -624,6 +630,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
@@ -2694,6 +2704,358 @@ namespace LegionRuntime {
       }
     }
 
+    // we use a single queue for all xferDes
+    static XferDesQueue *xferDes_queue = 0;
+
+    // we use a single manager to organize all channels
+    static ChannelManager *channel_manager = 0;
+
+    bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
+
+    template <unsigned DIM>
+    void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
+    {
+      for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        RegionInstance src_inst = it->first.first;
+        RegionInstance dst_inst = it->first.second;
+        OASVec& oasvec = it->second;
+        RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
+        RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
+
+        MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
+        MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
+        std::vector<XferDes*> path;
+        // We don't need to care about deallocation of Buffer class
+        // This will be handled by XferDes destruction
+        Buffer* src_buf = new Buffer(&src_impl->metadata);
+        Buffer* dst_buf = new Buffer(&dst_impl->metadata);
+        switch (src_kind) {
+        case MemoryImpl::MKIND_SYSMEM:
+        case MemoryImpl::MKIND_ZEROCOPY:
+        {
+          char* src_mem_base = (char *)(get_runtime()->get_memory_impl(src_mem)->get_direct_ptr(0, 0));
+          switch (dst_kind) {
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
+          {
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
+            XferDes* xd = new MemcpyXferDes<DIM>(channel_manager->get_memcpy_channel(), false,
+                                            src_buf, dst_buf, src_mem_base, dst_mem_base,
+                                            domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                            100/*max_nr*/, XferOrder::DST_FIFO);
+            path.push_back(xd);
+            break;
+          }
+#ifdef USE_CUDA
+          case MemoryImpl::MKIND_GPUFB:
+          {
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(dst_mem))->gpu;
+            XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
+                                         src_buf, dst_buf, src_mem_base, NULL /*dst_mem_base*/,
+                                         domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                         100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_TO_FB);
+            path.push_back(xd);
+            break;
+          }
+#endif
+#ifdef USE_DISK
+          case MemoryImpl::MKIND_DISK:
+          {
+            log_dma.info("create mem->disk xferdes\n");
+            int dst_fd = ((DiskMemory*)get_runtime()->get_memory_impl(dst_mem))->fd;
+            XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), false,
+                                          src_buf, dst_buf, src_mem_base, dst_fd,
+                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_WRITE);
+            path.push_back(xd);
+            break;
+          }
+#endif /*USE_DISK*/
+#ifdef USE_HDF
+          case MemoryImpl::MKIND_HDF:
+          {
+            ID id = dst_inst.id; 
+            unsigned index = id.index_l();
+            pthread_rwlock_rdlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->rwlock);
+            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
+            pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->rwlock);
+            log_dma.info("create mem->hdf xferdes\n");
+            XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
+                                              src_buf, dst_buf, src_mem_base, hdf_metadata,
+                                              domain, oasvec, 100/*max_nr*/,
+                                              XferOrder::DST_FIFO, XferDes::XFER_HDF_WRITE);
+            path.push_back(xd);
+            break;
+          }
+#endif
+          case MemoryImpl::MKIND_GLOBAL:
+            fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
+            assert(0);
+            break;
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: cpu memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        }
+#ifdef USE_CUDA
+        case MemoryImpl::MKIND_GPUFB:
+        {
+          GPUProcessor* src_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(src_mem))->gpu;
+          switch (dst_kind) {
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
+          {
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
+            XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_from_fb_channel(src_gpu), false,
+                                              src_buf, dst_buf, NULL, dst_mem_base,
+                                              domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                              100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_FROM_FB);
+            path.push_back(xd);
+            break;
+          }
+          case MemoryImpl::MKIND_GPUFB:
+#ifdef USE_DISK
+          case MemoryImpl::MKIND_DISK:
+#endif /*USE_DISK*/
+#ifdef USE_HDF
+          case MemoryImpl::MKIND_HDF:
+#endif
+          case MemoryImpl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: gpu memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        }
+#endif /*USE_CUDA*/
+#ifdef USE_DISK
+        case MemoryImpl::MKIND_DISK:
+        {
+          int src_fd = ((DiskMemory*)get_runtime()->get_memory_impl(src_mem))->fd;
+          switch (dst_kind) {
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
+          {
+            const char* dst_mem_base = (const char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
+            XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
+                                          src_buf, dst_buf, dst_mem_base, src_fd,
+                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_READ);
+            path.push_back(xd);
+            break;
+          }
+#ifdef USE_CUDA
+          case MemoryImpl::MKIND_GPUFB:
+          {
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)get_runtime()->get_memory_impl(dst_mem))->gpu;
+            /* need to find a cpu memory as intermediate buffer*/
+            Machine machine = Machine::get_machine();
+            std::set<Memory> mem;
+            Memory cpu_mem = Memory::NO_MEMORY;
+            machine.get_all_memories(mem);
+            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
+              if (it->kind() == Memory::SYSTEM_MEM) {
+                cpu_mem = *it;
+              }
+            assert(cpu_mem != Memory::NO_MEMORY);
+            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
+            char* ib_mem_base = (char *)(get_runtime()->get_memory_impl(cpu_mem)->get_direct_ptr(ib_offset, ib_size));
+            OASVec oasvec_src, oasvec_dst;
+            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+            off_t ib_elmnt_size = 0;
+            for (int i = 0; i < oasvec.size(); i++) {
+              OffsetsAndSize oas_src, oas_dst;
+              oas_src.src_offset = oasvec[i].src_offset;
+              oas_src.dst_offset = ib_elmnt_size;
+              oas_src.size = oasvec[i].size;
+              oas_dst.src_offset = ib_elmnt_size;
+              oas_dst.dst_offset = oasvec[i].dst_offset;
+              oas_dst.size = oasvec[i].size;
+              ib_elmnt_size += oasvec[i].size;
+              oasvec_src.push_back(oas_src);
+              oasvec_dst.push_back(oas_dst);
+            }
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization, cpu_mem, ib_offset);
+            XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
+                                           src_buf, ib_buf, ib_mem_base, src_fd,
+                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
+            XferDes* xd2 = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), true,
+                                          ib_buf, dst_buf, ib_mem_base, NULL/*dst_mem_base*/,
+                                          domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
+            path.push_back(xd1);
+            path.push_back(xd2);
+            break;
+          }
+#endif
+          case MemoryImpl::MKIND_DISK:
+          {
+            int dst_fd = ((DiskMemory*)get_runtime()->get_memory_impl(dst_mem))->fd;
+            /* need to find a cpu memory as intermediate buffer*/
+            Machine machine = Machine::get_machine();
+            std::set<Memory> mem;
+            Memory cpu_mem = Memory::NO_MEMORY;
+            machine.get_all_memories(mem);
+            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
+              if (it->kind() == Memory::SYSTEM_MEM) {
+                cpu_mem = *it;
+              }
+            assert(cpu_mem != Memory::NO_MEMORY);
+            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
+            const char* ib_mem_base = (const char *)(get_runtime()->get_memory_impl(cpu_mem)->get_direct_ptr(ib_offset, ib_size));
+            OASVec oasvec_src, oasvec_dst;
+            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+            off_t ib_elmnt_size = 0;
+            for (int i = 0; i < oasvec.size(); i++) {
+              OffsetsAndSize oas_src, oas_dst;
+              oas_src.src_offset = oasvec[i].src_offset;
+              oas_src.dst_offset = ib_elmnt_size;
+              oas_src.size = oasvec[i].size;
+              oas_dst.src_offset = ib_elmnt_size;
+              oas_dst.dst_offset = oasvec[i].dst_offset;
+              oas_dst.size = oasvec[i].size;
+              ib_elmnt_size += oasvec[i].size;
+              oasvec_src.push_back(oas_src);
+              oasvec_dst.push_back(oas_dst);
+            }
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization, cpu_mem, ib_offset);
+            XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
+                                           src_buf, ib_buf, ib_mem_base, src_fd,
+                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
+            XferDes* xd2 = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), true,
+                                           ib_buf, dst_buf, ib_mem_base, dst_fd,
+                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE);
+            path.push_back(xd1);
+            path.push_back(xd2);
+            break;
+          }
+#ifdef USE_HDF
+          case MemoryImpl::MKIND_HDF:
+            fprintf(stderr, "[DMA] To be implemented:disk memory -> hdf memory\n");
+            assert(0);
+            break;
+#endif
+          case MemoryImpl::MKIND_GLOBAL:
+            fprintf(stderr, "[DMA] To be implemented: disk memory -> gasnet memory\n");
+            assert(0);
+            break;
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: disk memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        }
+#endif /*USE_DISK*/
+#ifdef USE_HDF
+        case MemoryImpl::MKIND_HDF:
+        {
+          ID src_id(src_impl->me);
+          unsigned src_index = src_id.index_l();
+          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata[src_index];
+          switch (dst_kind) {
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
+          {
+            printf("hdf->cpu XferDes\n");
+            char* dst_mem_base = (char *)(get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0));
+            XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_read_channel(), false,
+                                              src_buf, dst_buf, dst_mem_base, src_hdf_metadata,
+                                              domain, oasvec,
+                                              100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
+            path.push_back(xd);
+            break;
+          }
+#ifdef USE_CUDA
+          case MemoryImpl::MKIND_GPUFB:
+            fprintf(stderr, "To be implemented: hdf memory -> gpu memory\n");
+            assert(0);
+            break;
+#endif
+          case MemoryImpl::MKIND_DISK:
+          case MemoryImpl::MKIND_HDF:
+            fprintf(stderr, "To be implemented: hdf memory -> hdf memory\n");
+            assert(0);
+            break;
+          case MemoryImpl::MKIND_GLOBAL:
+            fprintf(stderr, "To be implemented: hdf memory -> global memory\n");
+            assert(0);
+            break;
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
+            fprintf(stderr, "To be implemented: hdf memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+          
+        }
+#endif
+        case MemoryImpl::MKIND_GLOBAL:
+          fprintf(stderr, "[DMA] To be implemented: gasnet memory transfer\n");
+          assert(0);
+          switch (dst_kind) {
+          case MemoryImpl::MKIND_SYSMEM:
+          case MemoryImpl::MKIND_ZEROCOPY:
+#ifdef USE_CUDA
+          case MemoryImpl::MKIND_GPUFB:
+#endif
+          case MemoryImpl::MKIND_DISK:
+          case MemoryImpl::MKIND_GLOBAL:
+          case MemoryImpl::MKIND_RDMA:
+          case MemoryImpl::MKIND_REMOTE:
+            fprintf(stderr, "To be implemented: global memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        case MemoryImpl::MKIND_RDMA:
+        case MemoryImpl::MKIND_REMOTE:
+          fprintf(stderr, "Source memory shouldn't be a remote kind\n");
+          assert(0);
+          break;
+        default:
+          fprintf(stderr, "Unrecognized memory kind!\n");
+          assert(0);
+        }
+        log_dma.info("enqueue xferDes");
+        xferDes_queue->enqueue_xferDes_path(path);
+        log_dma.info("finished enqueue xferdes");
+        std::set<Event> finish_events;
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++)
+          finish_events.insert((*it)->complete_event);
+
+    	if(after_copy.exists())
+    	  get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), GenEventImpl::merge_events(finish_events));
+    	log_dma.info("set event dependencies");
+      }
+    }
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -2852,6 +3214,38 @@ namespace LegionRuntime {
       // create a copier for the memory used by all of these instance pairs
       Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
       Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+
+      // <NEWDMA>
+      switch (domain.get_dim()) {
+      case 0:
+        fprintf(stderr, "Unstructed data is not supported at this moment\n");
+        assert(0);
+        break;
+      case 1:
+        perform_new_dma<1>(src_mem, dst_mem);
+        break;
+      case 2:
+        perform_new_dma<2>(src_mem, dst_mem);
+        break;
+      case 3:
+        perform_new_dma<3>(src_mem, dst_mem);
+        break;
+      default:
+        assert(0);
+      }
+      log_dma.info("dma request %p launched - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+		   this,
+		   oas_by_inst->begin()->first.first.id,
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id,
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->begin()->second.size() - 1,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+      return;
+      // </NEWDMA>
 
       MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
 
@@ -3431,6 +3825,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
@@ -3959,6 +4357,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
@@ -4137,6 +4539,9 @@ namespace LegionRuntime {
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
+    // list of all dma threads
+    static DMAThread** dma_threads = 0;
+
     static void *dma_worker_thread_loop(void *arg)
     {
       DmaRequestQueue *rq = (DmaRequestQueue *)arg;
@@ -4166,6 +4571,7 @@ namespace LegionRuntime {
       CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
 #endif
       dma_queue = new DmaRequestQueue;
+
       num_threads = count;
 
       worker_threads = new pthread_t[count];
@@ -4202,6 +4608,77 @@ namespace LegionRuntime {
       terminate_flag = false;
     }
 
+    void start_dma_system(int count, int max_nr
+#ifdef USE_CUDA
+                          ,std::vector<GPUProcessor*> &local_gpus
+#endif
+                         )
+    {
+      //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
+      xferDes_queue = new XferDesQueue;
+      channel_manager = new ChannelManager;
+      num_threads = 2;
+#ifdef USE_HDF
+      // Need a dedicated thread for handling HDF requests
+      num_threads ++;
+#endif
+      dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
+      MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
+      dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
+      std::vector<Channel*> async_channels;
+#ifdef USE_DISK
+      async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
+      async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
+#endif /*USE_DISK*/
+#ifdef USE_CUDA
+      std::vector<GPUProcessor*>::iterator it;
+      for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
+        async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
+      }
+#endif
+      dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
+#ifdef USE_HDF
+      std::vector<Channel*> hdf_channels;
+      hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
+      hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
+      dma_threads[2] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
+#endif
+      worker_threads = new pthread_t[num_threads];
+      for (int i = 0; i < num_threads; i++) {
+        // register dma thread to XferDesQueue
+        xferDes_queue->register_dma_thread(dma_threads[i]);
+        pthread_attr_t attr;
+        CHECK_PTHREAD( pthread_attr_init(&attr) );
+        if (proc_assignment)
+          proc_assignment->bind_thread(-1, &attr, "DMA worker");
+        CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, DMAThread::start, dma_threads[i]));
+        CHECK_PTHREAD( pthread_attr_destroy(&attr));
+      }
+    }
+
+    void stop_dma_system(void)
+    {
+      terminate_flag = true;
+      for(int i = 0; i < num_threads; i++)
+        dma_threads[i]->stop();
+      if(worker_threads) {
+        for (int i = 0; i < num_threads; i++) {
+          void *dummy;
+          CHECK_PTHREAD( pthread_join(worker_threads[i], &dummy) );
+        }
+        num_threads = 0;
+        delete[] worker_threads;
+      }
+      for(int i = 0; i < num_threads; i++)
+        delete dma_threads[i];
+      free(dma_threads);
+      delete xferDes_queue;
+      delete channel_manager;
+      terminate_flag = false;
+    }
   };
 };
 

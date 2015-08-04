@@ -1,5 +1,6 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
- *
+ * Copyright 2015 Los Alamos National Laboratory
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -133,6 +134,9 @@ namespace LegionRuntime {
     HDFMemory::HDFMemory(Memory _me)
       : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
     {
+      int rc = 0;
+      rc = pthread_rwlock_init(&rwlock, NULL);
+      assert(rc==0); 
     }
 
     HDFMemory::~HDFMemory(void)
@@ -181,6 +185,7 @@ namespace LegionRuntime {
                  list_size, reqs, parent_inst);
 
       HDFMetadata* new_hdf = new HDFMetadata;
+      new_hdf->hdf_memory = this;
       new_hdf->ndims = domain.get_dim();
       for (int i = 0; i < domain.get_dim(); i++) {
         new_hdf->lo[i] = domain.rect_data[i];
@@ -191,25 +196,30 @@ namespace LegionRuntime {
         flags = H5F_ACC_RDONLY;
       else
         flags = H5F_ACC_RDWR;
+      pthread_rwlock_wrlock(&this->rwlock);
       new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
       for (IDType idx = 0; idx < path_names.size(); idx ++) {
         new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx], H5P_DEFAULT));
         new_hdf->datatype_ids.push_back(H5Dget_type(new_hdf->dataset_ids[idx]));
+        pthread_rwlock_t rwlock_temp;
+        new_hdf->dataset_rwlocks.push_back(rwlock_temp); 
+        int rc = pthread_rwlock_init(&new_hdf->dataset_rwlocks[idx], NULL);
+        assert(rc==0);
       }
-
       if (inst.id < hdf_metadata.size())
         hdf_metadata[inst.id] = new_hdf;
       else
         hdf_metadata.push_back(new_hdf);
-
+      pthread_rwlock_unlock(&this->rwlock);
       return inst;
     }
 
     void HDFMemory::destroy_instance(RegionInstance i,
 				     bool local_destroy)
     {
-      HDFMetadata* new_hdf = hdf_metadata[i.id];
+      HDFMetadata* new_hdf = hdf_metadata[ID(i).index_l()];
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
+      pthread_rwlock_wrlock(&this->rwlock);
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
         H5Tclose(new_hdf->datatype_ids[idx]);
@@ -219,6 +229,8 @@ namespace LegionRuntime {
       new_hdf->datatype_ids.clear();
       delete new_hdf;
       destroy_instance_local(i, local_destroy);
+      pthread_rwlock_unlock(&this->rwlock);
+     
     }
 
     off_t HDFMemory::alloc_bytes(size_t size)
@@ -241,7 +253,9 @@ namespace LegionRuntime {
 
     void HDFMemory::get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
+      pthread_rwlock_rdlock(&this->rwlock);
       HDFMetadata *metadata = hdf_metadata[inst_id];
+//      std::cout << "In HDFMemory::get_bytes operating on metadata:" << metadata << std::endl;
       // use index to compute position in space
       assert(size == H5Tget_size(metadata->datatype_ids[fid]));
       hsize_t offset[3], count[3];
@@ -251,10 +265,18 @@ namespace LegionRuntime {
       count[0] = count[1] = count[2] = 1;
       hid_t dataspace_id = H5Dget_space(metadata->dataset_ids[fid]);
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+      pthread_rwlock_unlock(&this->rwlock);
+      pthread_rwlock_wrlock(&this->rwlock);
       hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
+      pthread_rwlock_unlock(&this->rwlock);
+      pthread_rwlock_rdlock(&metadata->dataset_rwlocks[fid]);
+//      std::cout << "in HDFMemory::get_bytes reading dataset_id: " << metadata->dataset_ids[fid] << std::endl;
       H5Dread(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, dst);
+      pthread_rwlock_unlock(&metadata->dataset_rwlocks[fid]);
+      pthread_rwlock_wrlock(&this->rwlock);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
+      pthread_rwlock_unlock(&this->rwlock);
     }
 
     void HDFMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -264,7 +286,9 @@ namespace LegionRuntime {
 
     void HDFMemory::put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
+      pthread_rwlock_rdlock(&this->rwlock);
       HDFMetadata *metadata = hdf_metadata[inst_id];
+//      std::cout << "In HDFMemory::put_bytes operating on metadata:" << metadata << std::endl;
       // use index to compute position in space
       assert(size == H5Tget_size(hdf_metadata[inst_id]->datatype_ids[fid]));
       hsize_t offset[3], count[3];
@@ -274,10 +298,20 @@ namespace LegionRuntime {
       count[0] = count[1] = count[2] = 1;
       hid_t dataspace_id = H5Dget_space(metadata->dataset_ids[fid]);
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+      pthread_rwlock_unlock(&this->rwlock);
+      pthread_rwlock_wrlock(&this->rwlock);
       hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
+      pthread_rwlock_unlock(&this->rwlock);
+      pthread_rwlock_wrlock(&metadata->dataset_rwlocks[fid]);
+//      std::cout << "in HDFMemory::put_bytes writing dataset_id: " << metadata->dataset_ids[fid] << std::endl;
+      
       H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, src);
+      pthread_rwlock_unlock(&metadata->dataset_rwlocks[fid]);
+      pthread_rwlock_wrlock(&this->rwlock);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
+      pthread_rwlock_unlock(&this->rwlock);
+
     }
 
     void HDFMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,

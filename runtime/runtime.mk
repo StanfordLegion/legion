@@ -1,5 +1,5 @@
 # Copyright 2015 Stanford University, NVIDIA Corporation
-#
+# Copyright 2015 Los Alamos National Laboratory 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,6 +13,13 @@
 # limitations under the License.
 #
 
+ifeq ($(shell uname -s),Darwin)
+DARWIN = 1
+CC_FLAGS += -DDARWIN
+else
+#use disk unless on DARWIN 
+CC_FLAGS += -DUSE_DISK 
+endif
 
 # If using the general low-level runtime
 # select a target GPU architecture
@@ -101,10 +108,11 @@ ifneq (${MARCH},)
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/greenlet
-ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -lrt -lpthread
-else
+
+ifeq ($(strip $(DARWIN)),1)
 LD_FLAGS	+= -lpthread
+else
+LD_FLAGS	+= -lrt -lpthread
 endif
 
 USE_LIBDL = 1
@@ -134,10 +142,10 @@ NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 else
 NVCC_FLAGS	+= -O2
 endif
-ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
-else
+ifeq ($(strip $(DARWIN)),1)
 LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+else
+LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
@@ -164,11 +172,11 @@ ifeq ($(strip $(USE_GASNET)),1)
 
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
-  ifneq ($(shell uname -s),Darwin)
-    LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
-  else
-    LD_FLAGS	+= -L$(GASNET)/lib -lm
-  endif 
+ifeq ($(strip $(DARWIN)),1)
+  LD_FLAGS	+= -L$(GASNET)/lib -lm
+else
+  LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+endif
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
@@ -256,7 +264,7 @@ ASM_SRC		?=
 
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
-LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc
+LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc $(LG_RT_DIR)/channel.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_gpu.cc
 endif

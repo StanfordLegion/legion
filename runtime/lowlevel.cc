@@ -7295,7 +7295,12 @@ namespace Realm {
 	switch(get_dim()) {
 	case 1:
 	  {
-	    Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+	    std::vector<Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(Layouts::DIM_X);
+	    size_vec.push_back(get_rect<1>().dim_size(0));
+	    Layouts::SplitDimLinearization<1> cl(kind_vec, size_vec);
+	    //Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<1>(Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<1>());
 	    dl.serialize(linearization_bits);
@@ -7399,8 +7404,6 @@ namespace Realm {
       assert(false);
       return RegionInstance::NO_INST;
 #else
-      Realm::ProfilingRequestSet requests;
-
       assert(field_sizes.size() == field_files.size());
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
@@ -7459,9 +7462,10 @@ namespace Realm {
 	num_elements = inst_extent.volume();
       }
 
+      Realm::ProfilingRequestSet requests;
       size_t inst_bytes = elem_size * num_elements;
-      RegionInstance i = hdf_mem->create_instance(get_index_space(), linearization_bits, inst_bytes, 
-                                                  1/*block_size*/, elem_size, field_sizes,
+      RegionInstance i = hdf_mem->create_instance(get_index_space(), linearization_bits, inst_bytes,
+                                                  get_volume() /*block_size*/, elem_size, field_sizes,
                                                   0 /*redop_id*/, -1/*list_size*/, requests, RegionInstance::NO_INST,
                                                   file_name, field_files, *this, read_only);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
@@ -9852,6 +9856,11 @@ namespace LegionRuntime {
       Arrays::Mapping<3,1>::register_mapping<Arrays::FortranArrayLinearization<3> >();
       Arrays::Mapping<1,1>::register_mapping<Translation<1> >();
 
+      // we also register split dim linearization
+      Arrays::Mapping<1,1>::register_mapping<Layouts::SplitDimLinearization<1> >();
+      Arrays::Mapping<2,1>::register_mapping<Layouts::SplitDimLinearization<2> >();
+      Arrays::Mapping<3,1>::register_mapping<Layouts::SplitDimLinearization<3> >();
+
       // Create the key for the thread local data
       CHECK_PTHREAD( pthread_key_create(&thread_timer_key,thread_timer_free) );
 
@@ -10139,7 +10148,7 @@ namespace LegionRuntime {
 
       start_handler_threads(active_msg_handler_threads, stack_size_in_mb << 20);
 
-      start_dma_worker_threads(dma_worker_threads);
+      //start_dma_worker_threads(dma_worker_threads);
 
       if (active_msg_sender_threads)
         start_sending_threads();
@@ -10659,6 +10668,14 @@ namespace LegionRuntime {
       }
 #endif
 
+      // start dma system at the very ending of initialization
+      // since we need list of local gpus to create channels
+      start_dma_system(dma_worker_threads, 100
+#ifdef USE_CUDA
+                       ,local_gpus
+#endif
+                       );
+
       return true;
     }
 
@@ -10836,7 +10853,8 @@ namespace LegionRuntime {
 
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
-      stop_dma_worker_threads();
+      //stop_dma_worker_threads();
+      stop_dma_system();
 #ifdef USE_CUDA
       GPUWorker::stop_gpu_worker_thread();
 #endif
