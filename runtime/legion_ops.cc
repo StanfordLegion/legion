@@ -4597,6 +4597,17 @@ namespace LegionRuntime {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    unsigned InterCloseOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+      assert(create_op != NULL);
+#endif
+      return create_op->find_parent_index(close_idx);
+    }
+
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
     /////////////////////////////////////////////////////////////
@@ -4808,6 +4819,16 @@ namespace LegionRuntime {
         deferred_complete();
       // This should always succeed
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PostCloseOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_idx;
     }
 
     /////////////////////////////////////////////////////////////

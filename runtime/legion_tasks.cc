@@ -9439,6 +9439,9 @@ namespace LegionRuntime {
       {
         points[idx]->pack_task(rez, target);
       }
+      // Release our version infos
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        version_infos[idx].release();
       // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
       return true;

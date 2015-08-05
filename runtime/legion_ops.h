@@ -823,6 +823,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       std::set<ColorPoint> target_children;
       bool leave_open;
@@ -866,6 +867,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       InstanceRef reference;
       unsigned parent_idx;

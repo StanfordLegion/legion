@@ -3173,16 +3173,20 @@ namespace LegionRuntime {
       }
       // Otherwise it hasn't been made yet, so make it
       IndexSpaceNode *index_node = get_node(handle.index_space);
+      if (index_node->parent != NULL)
+      {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(index_node->parent != NULL);
+        assert(index_node->parent != NULL);
 #endif
-      LogicalPartition parent_handle(handle.tree_id, index_node->parent->handle,
-                                     handle.field_space);
-      // Note this request can recursively build more nodes, but we
-      // are guaranteed that the top level node exists
-      PartitionNode *parent = get_node(parent_handle);
-      // Now make our node and then return it
-      return create_node(handle, parent);
+        LogicalPartition parent_handle(handle.tree_id, 
+                              index_node->parent->handle, handle.field_space);
+        // Note this request can recursively build more nodes, but we
+        // are guaranteed that the top level node exists
+        PartitionNode *parent = get_node(parent_handle);
+        // Now make our node and then return it
+        return create_node(handle, parent);
+      }
+      return create_node(handle, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -8887,10 +8891,8 @@ namespace LegionRuntime {
                                      const FieldVersions *other) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(versions != NULL);
-      assert(other != NULL);
-#endif
+      if ((other == NULL) || (versions == NULL))
+        return false;
       const LegionMap<VersionID,FieldMask>::aligned &local_versions = 
         versions->get_field_versions();
       const LegionMap<VersionID,FieldMask>::aligned &other_versions = 
@@ -9274,9 +9276,7 @@ namespace LegionRuntime {
     void VersionInfo::release(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!packed);
-#endif
+      // Might be called when packed, in which case this is a no-op
       // Now it is safe to go through and delete all the physical states
       // which will free up all the references on all the version managers
       for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
@@ -9733,7 +9733,7 @@ namespace LegionRuntime {
       derez.deserialize(info.advance);
       info.needs_capture = true;
       // Unpack the version states
-      unsigned num_states;
+      size_t num_states;
       derez.deserialize(num_states);
       if (num_states > 0)
       {
@@ -14355,8 +14355,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(owner_space != local_space);
+#endif
       return legion_new<VersionState>(vid, owner->context->runtime, did,
-                                    local_space, local_space, this, initialize);
+                                    owner_space, local_space, this, initialize);
     }
 
     //--------------------------------------------------------------------------
@@ -23299,11 +23302,8 @@ namespace LegionRuntime {
                                             const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
-      FieldVersions *versions = new FieldVersions();
-      versions->add_field_version(0, user_mask);
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = legion_new<PhysicalUser>(usage, 
-                                                    ColorPoint(), versions);
+      PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint());
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -23740,8 +23740,15 @@ namespace LegionRuntime {
                                                const FieldMask &copy_mask)
     //--------------------------------------------------------------------------
     {
-      PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color,
-                                       version_info.get_versions(logical_node));
+      PhysicalUser *user;
+      // We currently only use the version information for avoiding
+      // WAR dependences on the same version number, so we don't need
+      // it if we aren't only reading
+      if (IS_READ_ONLY(usage))
+        user = legion_new<PhysicalUser>(usage, child_color,
+                                        version_info.get_versions(logical_node));
+      else
+        user = legion_new<PhysicalUser>(usage, child_color);
       user->add_reference();
       bool issue_collect = false;
       {
@@ -23897,8 +23904,13 @@ namespace LegionRuntime {
       PhysicalUser *new_user = NULL;
       if (term_event.exists())
       {
-        new_user = legion_new<PhysicalUser>(usage, child_color,
-                                    version_info.get_versions(logical_node));
+        // Only need to record version info if we are read-only
+        // because we only use the version info for avoiding WAR dependences
+        if (IS_READ_ONLY(usage))
+          new_user = legion_new<PhysicalUser>(usage, child_color,
+                                      version_info.get_versions(logical_node));
+        else
+          new_user = legion_new<PhysicalUser>(usage, child_color);
         new_user->add_reference();
       }
       // No matter what, we retake the lock in exclusive mode so we
