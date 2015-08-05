@@ -322,13 +322,14 @@ namespace Realm {
   Logger::~Logger(void)
   {
     // go through our streams and delete any we're supposed to
-    for(std::vector<LogStream>::iterator it = streams.begin();
-	it != streams.end();
-	it++)
-      if(it->delete_when_done)
-	delete it->s;
+    // FIXME (Elliott): This causes non-deterministic crashes in tests.
+    // for(std::vector<LogStream>::iterator it = streams.begin();
+    //     it != streams.end();
+    //     it++)
+    //   if(it->delete_when_done)
+    //     delete it->s;
 
-    streams.clear();
+    // streams.clear();
   }
 
   /*static*/ void Logger::configure_from_cmdline(int argc, const char *argv[])
