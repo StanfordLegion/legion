@@ -1471,6 +1471,7 @@ namespace LegionRuntime {
                 break;
             }
             while(!finish_xferdes.empty()) {
+              std::cout << " finished xferdes type: " << finish_xferdes.back()->kind << std::endl;
               delete finish_xferdes.back();
               it->second->erase(finish_xferdes.back());
               finish_xferdes.pop_back();
