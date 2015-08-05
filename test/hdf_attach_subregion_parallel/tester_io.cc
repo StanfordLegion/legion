@@ -207,7 +207,7 @@ void check_task(const Task *task,
     task->regions[0].region.get_index_space());
   Rect<2> rect = dom.get_rect<2>();
   
-  for(int i = 0; i < task->regions[0].instance_fields.size(); i++) {
+  for(unsigned i = 0; i < task->regions[0].instance_fields.size(); i++) {
     RegionAccessor<AccessorType::Generic, double> acc_src = 
       regions[0].get_field_accessor(i).typeify<double>();
     RegionAccessor<AccessorType::Generic, double> acc_dst = 

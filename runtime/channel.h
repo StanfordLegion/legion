@@ -636,6 +636,7 @@ namespace LegionRuntime{
         delete pir;
         delete lsi;
         // trigger complete event
+        printf("XD: trigger complete event\n");
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
 
@@ -997,23 +998,29 @@ namespace LegionRuntime{
     class XferDesQueue {
     public:
       XferDesQueue() {
+        pthread_mutex_init(&queues_lock, NULL);
       }
 
       ~XferDesQueue() {
         // clean up the priority queues
+        pthread_mutex_lock(&queues_lock);
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
         for (it2 = queues.begin(); it2 != queues.end(); it2++) {
           delete it2->second;
         }
+        pthread_mutex_unlock(&queues_lock);
+        pthread_mutex_destroy(&queues_lock);
       }
 
       void register_dma_thread(DMAThread* dma_thread)
       {
         std::map<Channel*, PriorityXferDesQueue*>::iterator it;
+        pthread_mutex_lock(&queues_lock);
         for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
           channel_to_dma_thread[it->first] = dma_thread;
           queues[it->first] = new PriorityXferDesQueue;
         }
+        pthread_mutex_unlock(&queues_lock);
       }
 
       void enqueue_xferDes(XferDes* xd) {
@@ -1022,6 +1029,7 @@ namespace LegionRuntime{
         assert(it != channel_to_dma_thread.end());
         DMAThread* dma_thread = it->second;
         pthread_mutex_lock(&dma_thread->enqueue_lock);
+        pthread_mutex_lock(&queues_lock);
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
         it2 = queues.find(xd->channel);
         if (it2 == queues.end()) {
@@ -1034,6 +1042,7 @@ namespace LegionRuntime{
           // push ourself into the priority queue
           it2->second->insert(xd);
         }
+        pthread_mutex_unlock(&queues_lock);
         if (dma_thread->sleep) {
           dma_thread->sleep = false;
           pthread_cond_signal(&dma_thread->enqueue_cond);
@@ -1064,13 +1073,13 @@ namespace LegionRuntime{
         if (wait_on_empty) {
           bool empty = true;
           for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
+            pthread_mutex_lock(&queues_lock);
             std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
             it2 = queues.find(it->first);
             assert(it2 != queues.end());
-            if (it2->second->size() > 0) {
+            if (it2->second->size() > 0)
               empty = false;
-              break;
-            }
+            pthread_mutex_unlock(&queues_lock);
           }
 
           if (empty && !dma_thread->is_stopped) {
@@ -1080,11 +1089,13 @@ namespace LegionRuntime{
         }
 
         for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
+          pthread_mutex_lock(&queues_lock);
           std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
           it2 = queues.find(it->first);
           assert(it2 != queues.end());
           it->second->insert(it2->second->begin(), it2->second->end());
           it2->second->clear();
+          pthread_mutex_unlock(&queues_lock);
         }
         pthread_mutex_unlock(&dma_thread->enqueue_lock);
         return true;
@@ -1092,6 +1103,7 @@ namespace LegionRuntime{
     protected:
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
+      pthread_mutex_t queues_lock;
     };
 
   }  // namespace LowLevel
