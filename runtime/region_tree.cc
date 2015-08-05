@@ -8850,6 +8850,10 @@ namespace LegionRuntime {
       // Can be NULL in some cases
       if (versions != NULL)
         versions->add_reference();
+#ifdef DEBUG_HIGH_LEVEL
+      if (usage.redop > 0) // Use this property in pack and unpack
+        assert(versions == NULL);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8908,6 +8912,85 @@ namespace LegionRuntime {
         }
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalUser::pack_user(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(child);
+      rez.serialize(usage.privilege);
+      rez.serialize(usage.prop);
+      if (versions != NULL)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(usage.redop == 0);
+#endif
+        const LegionMap<VersionID,FieldMask>::aligned &field_versions =
+          versions->get_field_versions();
+        int count = field_versions.size();
+        count = -count; // negate for disambiguation
+        rez.serialize(count);
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              field_versions.begin(); it != field_versions.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(usage.redop != 0);
+#endif
+        int redop = usage.redop;
+        rez.serialize(redop);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
+                                                       FieldSpaceNode *node,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ColorPoint child;
+      derez.deserialize(child);
+      RegionUsage usage;
+      derez.deserialize(usage.privilege);
+      derez.deserialize(usage.prop);
+      int redop;
+      derez.deserialize(redop);
+      PhysicalUser *result = NULL;
+      if (redop <= 0)
+      {
+        usage.redop = 0;
+        FieldVersions *versions = NULL;
+        if (redop < 0)
+        {
+          int count = -redop;
+          versions = new FieldVersions();
+          for (int idx = 0; idx < count; idx++)
+          {
+            VersionID vid;
+            derez.deserialize(vid);
+            FieldMask version_mask;
+            derez.deserialize(version_mask);
+            node->transform_field_mask(version_mask, source);
+            versions->add_field_version(vid, version_mask);
+          }
+        }
+        result = legion_new<PhysicalUser>(usage, child, versions);
+      }
+      else
+      {
+        usage.redop = redop;
+        result = legion_new<PhysicalUser>(usage, child);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -23224,6 +23307,9 @@ namespace LegionRuntime {
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
+      // Don't need to actual launch a collection task, destructor
+      // will handle this case
+      outstanding_gc_events.insert(term_event);
     }
  
     //--------------------------------------------------------------------------
@@ -23339,7 +23425,270 @@ namespace LegionRuntime {
                                              const FieldMask &update_mask)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      std::map<PhysicalUser*,int/*index*/> needed_users;  
+      Serializer current_rez, previous_rez;
+      unsigned current_events = 0, previous_events = 0;
+      // Take the lock in read-only mode
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (LegionMap<Event,EventUsers>::aligned::const_iterator cit = 
+              current_epoch_users.begin(); cit != 
+              current_epoch_users.end(); cit++)
+        {
+          FieldMask overlap = cit->second.user_mask & update_mask;
+          if (!overlap)
+            continue;
+          current_events++;
+          current_rez.serialize(cit->first);
+          const EventUsers &event_users = cit->second;
+          if (event_users.single)
+          {
+            int index = needed_users.size();
+            needed_users[event_users.users.single_user] = index;
+            event_users.users.single_user->add_reference();
+            current_rez.serialize(index);
+            current_rez.serialize(overlap);
+          }
+          else
+          {
+            Serializer event_rez;
+            int count = 0;
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it != 
+                  event_users.users.multi_users->end(); it++)
+            {
+              FieldMask overlap2 = it->second & overlap;
+              if (!overlap2)
+                continue;
+              count--; // Make the count negative to disambiguate
+              int index = needed_users.size();
+              needed_users[it->first] = index;
+              it->first->add_reference();
+              event_rez.serialize(index);
+              event_rez.serialize(overlap2);
+            }
+            // If there was only one, we can take the normal path
+            if (count < -1)
+              current_rez.serialize(count);
+            size_t event_rez_size = event_rez.get_buffer_size();
+            current_rez.serialize(event_rez.get_buffer(), event_rez_size);
+          }
+        }
+        for (LegionMap<Event,EventUsers>::aligned::const_iterator pit = 
+              previous_epoch_users.begin(); pit != 
+              previous_epoch_users.end(); pit++)
+        {
+          FieldMask overlap = pit->second.user_mask & update_mask;
+          if (!overlap)
+            continue;
+          previous_events++;
+          previous_rez.serialize(pit->first);
+          const EventUsers &event_users = pit->second;
+          if (event_users.single)
+          {
+            std::map<PhysicalUser*,int>::const_iterator finder = 
+              needed_users.find(event_users.users.single_user);
+            if (finder == needed_users.end())
+            {
+              int index = needed_users.size();
+              needed_users[event_users.users.single_user] = index;
+              event_users.users.single_user->add_reference();
+            }
+            else
+              previous_rez.serialize(finder->second);
+            previous_rez.serialize(overlap);
+          }
+          else 
+          {
+            Serializer event_rez;
+            int count = 0;
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              FieldMask overlap2 = it->second & overlap;
+              if (!overlap2)
+                continue;
+              count--; // Make the count negative to disambiguate
+              std::map<PhysicalUser*,int>::const_iterator finder = 
+                needed_users.find(it->first);
+              if (finder == needed_users.end())
+              {
+                int index = needed_users.size();
+                needed_users[it->first] = index;
+                event_rez.serialize(index);
+                it->first->add_reference();
+              }
+              else
+                event_rez.serialize(finder->second);
+              event_rez.serialize(overlap2);
+            }
+            // If there was only one user, we can take the normal path
+            if (count < -1)
+              previous_rez.serialize(count);
+            size_t event_rez_size = event_rez.get_buffer_size();
+            previous_rez.serialize(event_rez.get_buffer(), event_rez_size); 
+          }
+        }
+      }
+      // Now build our buffer and send the result
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        bool is_region = logical_node->is_region();
+        rez.serialize(is_region);
+        if (is_region)
+          rez.serialize(logical_node->as_region_node()->handle);
+        else
+          rez.serialize(logical_node->as_partition_node()->handle);
+        rez.serialize(did);
+        // Pack the needed users first
+        rez.serialize<size_t>(needed_users.size());
+        for (std::map<PhysicalUser*,int>::const_iterator it = 
+              needed_users.begin(); it != needed_users.end(); it++)
+        {
+          rez.serialize(it->second);
+          it->first->pack_user(rez);
+          if (it->first->remove_reference())
+            legion_delete(it->first);
+        }
+        // Then pack the current and previous events
+        rez.serialize(current_events);
+        size_t current_size = current_rez.get_buffer_size();
+        rez.serialize(current_rez.get_buffer(), current_size);
+        rez.serialize(previous_events);
+        size_t previous_size = previous_rez.get_buffer_size();
+        rez.serialize(previous_rez.get_buffer(), previous_size);
+      }
+      runtime->send_materialized_update(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_update(Deserializer &derez,
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_users;
+      derez.deserialize(num_users);
+      std::vector<PhysicalUser*> users(num_users);
+      FieldSpaceNode *field_node = logical_node->column_source;
+      for (unsigned idx = 0; idx < num_users; idx++)
+      {
+        int index;
+        derez.deserialize(index);
+        users[index] = PhysicalUser::unpack_user(derez, field_node, source); 
+      }
+      std::deque<Event> collect_events;
+      {
+        // Hold the lock when updating the view
+        AutoLock v_lock(view_lock); 
+        unsigned num_current;
+        derez.deserialize(num_current);
+        for (unsigned idx = 0; idx < num_current; idx++)
+        {
+          Event current_event;
+          derez.deserialize(current_event);
+          int index;
+          derez.deserialize(index);
+          if (index < 0)
+          {
+            int count = -index;
+            for (int i = 0; i < count; i++)
+            {
+              derez.deserialize(index);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(unsigned(index) < num_users);
+#endif
+              FieldMask user_mask;
+              derez.deserialize(user_mask);
+              field_node->transform_field_mask(user_mask, source);
+              add_current_user(users[index], current_event, user_mask);
+            }
+          }
+          else
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(unsigned(index) < num_users);
+#endif
+            // Just one user
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            field_node->transform_field_mask(user_mask, source);
+            add_current_user(users[index], current_event, user_mask);
+          }
+          if (outstanding_gc_events.find(current_event) ==
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(current_event);
+            collect_events.push_back(current_event);
+          }
+        }
+        unsigned num_previous;
+        derez.deserialize(num_previous);
+        for (unsigned idx = 0; idx < num_previous; idx++)
+        {
+          Event previous_event;
+          derez.deserialize(previous_event);
+          int index;
+          derez.deserialize(index);
+          if (index < 0)
+          {
+            int count = -index;
+            for (int i = 0; i < count; i++)
+            {
+              derez.deserialize(index);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(unsigned(index) < num_users);
+#endif
+              FieldMask user_mask;
+              derez.deserialize(user_mask);
+              field_node->transform_field_mask(user_mask, source);
+              add_previous_user(users[index], previous_event, user_mask);
+            }
+          }
+          else
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(unsigned(index) < num_users);
+#endif
+            // Just one user
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            field_node->transform_field_mask(user_mask, source);
+            add_previous_user(users[index], previous_event, user_mask);
+          }
+          if (outstanding_gc_events.find(previous_event) ==
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(previous_event);
+            collect_events.push_back(previous_event);
+          }
+        }
+      }
+      if (!collect_events.empty())
+      {
+        if (parent != NULL)
+          parent->update_gc_events(collect_events);
+        for (std::deque<Event>::const_iterator it = 
+              collect_events.begin(); it != collect_events.end(); it++)
+        {
+          defer_collect_user(*it); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::update_gc_events(const std::deque<Event> &gc_events)
+    //--------------------------------------------------------------------------
+    {
+      if (parent != NULL)
+        parent->update_gc_events(gc_events);
+      AutoLock v_lock(view_lock);
+      for (std::deque<Event>::const_iterator it = gc_events.begin();
+            it != gc_events.end(); it++)
+      {
+        outstanding_gc_events.insert(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -24399,6 +24748,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MaterializedView::add_previous_user(PhysicalUser *user, 
+                                             Event term_event,
+                                             const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      // Reference should already have been added
+      EventUsers &event_users = previous_epoch_users[term_event];
+      if (event_users.single)
+      {
+        if (event_users.users.single_user == NULL)
+        {
+          // make it the entry
+          event_users.users.single_user = user;
+          event_users.user_mask = user_mask;
+        }
+        else
+        {
+          // convert to multi
+          LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
+                           new LegionMap<PhysicalUser*,FieldMask>::aligned();
+          (*new_map)[event_users.users.single_user] = event_users.user_mask;
+          (*new_map)[user] = user_mask;
+          event_users.user_mask |= user_mask;
+          event_users.users.multi_users = new_map;
+          event_users.single = false;
+        }
+      }
+      else
+      {
+        // Add it to the set 
+        (*event_users.users.multi_users)[user] = user_mask;
+        event_users.user_mask |= user_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool MaterializedView::has_war_dependence_above(const RegionUsage &usage,
                                                     const FieldMask &user_mask,
                                                   const ColorPoint &child_color)
@@ -24537,53 +24922,58 @@ namespace LegionRuntime {
       // all of the dependences on an instance
 #if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
       !defined(EVENT_GRAPH_TRACE)
-      LegionMap<Event,EventUsers>::aligned::iterator current_finder = 
-        current_epoch_users.find(term_event);
-      if (current_finder != current_epoch_users.end())
+      std::set<Event>::iterator event_finder = 
+        outstanding_gc_events.find(term_event); 
+      if (event_finder != outstanding_gc_events.end())
       {
-        EventUsers &event_users = current_finder->second;
-        if (event_users.single)
+        LegionMap<Event,EventUsers>::aligned::iterator current_finder = 
+          current_epoch_users.find(term_event);
+        if (current_finder != current_epoch_users.end())
         {
-          if (event_users.users.single_user->remove_reference())
-            legion_delete(event_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
+          EventUsers &event_users = current_finder->second;
+          if (event_users.single)
           {
-            if (it->first->remove_reference())
-              legion_delete(it->first);
+            if (event_users.users.single_user->remove_reference())
+              legion_delete(event_users.users.single_user);
           }
-          delete event_users.users.multi_users;
-        }
-        current_epoch_users.erase(current_finder);
-      }
-      LegionMap<Event,EventUsers>::aligned::iterator previous_finder = 
-        previous_epoch_users.find(term_event);
-      if (previous_finder != previous_epoch_users.end())
-      {
-        EventUsers &event_users = previous_finder->second; 
-        if (event_users.single)
-        {
-          if (event_users.users.single_user->remove_reference())
-            legion_delete(event_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
+          else
           {
-            if (it->first->remove_reference())
-              legion_delete(it->first);
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                legion_delete(it->first);
+            }
+            delete event_users.users.multi_users;
           }
-          delete event_users.users.multi_users;
+          current_epoch_users.erase(current_finder);
         }
-        previous_epoch_users.erase(previous_finder);
+        LegionMap<Event,EventUsers>::aligned::iterator previous_finder = 
+          previous_epoch_users.find(term_event);
+        if (previous_finder != previous_epoch_users.end())
+        {
+          EventUsers &event_users = previous_finder->second; 
+          if (event_users.single)
+          {
+            if (event_users.users.single_user->remove_reference())
+              legion_delete(event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                legion_delete(it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          previous_epoch_users.erase(previous_finder);
+        }
+        outstanding_gc_events.erase(event_finder);
       }
-      outstanding_gc_events.erase(term_event);
 #endif
     }
 
@@ -24773,6 +25163,39 @@ namespace LegionRuntime {
         legion_delete(new_view);
       else
         new_view->update_remote_instances(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_send_update(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      DistributedID did;
+      derez.deserialize(did);
+      LogicalView *view = target_node->find_view(did);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view->is_instance_view());
+      assert(view->as_instance_view()->is_materialized_view());
+#endif
+      MaterializedView *mat_view = 
+        view->as_instance_view()->as_materialized_view();
+      mat_view->process_update(derez, source);
     }
 
     /////////////////////////////////////////////////////////////
@@ -28394,46 +28817,52 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Better be holding the lock before calling this
-      LegionMap<Event,EventUsers>::aligned::iterator finder = 
-        reduction_users.find(term_event);
-      if (finder != reduction_users.end())
+      std::set<Event>::iterator event_finder = 
+        outstanding_gc_events.find(term_event);
+      if (event_finder != outstanding_gc_events.end())
       {
-        EventUsers &event_users = finder->second;
-        if (event_users.single)
+        LegionMap<Event,EventUsers>::aligned::iterator finder = 
+          reduction_users.find(term_event);
+        if (finder != reduction_users.end())
         {
-          legion_delete(event_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator it
-                = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
+          EventUsers &event_users = finder->second;
+          if (event_users.single)
           {
-            legion_delete(it->first);
+            legion_delete(event_users.users.single_user);
           }
-          delete event_users.users.multi_users;
-        }
-        reduction_users.erase(finder);
-      }
-      finder = reading_users.find(term_event);
-      if (finder != reading_users.end())
-      {
-        EventUsers &event_users = finder->second;
-        if (event_users.single)
-        {
-          legion_delete(event_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator it
-                = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
+          else
           {
-            legion_delete(it->first);
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator it
+                  = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              legion_delete(it->first);
+            }
+            delete event_users.users.multi_users;
           }
-          delete event_users.users.multi_users;
+          reduction_users.erase(finder);
         }
-        reading_users.erase(finder);
+        finder = reading_users.find(term_event);
+        if (finder != reading_users.end())
+        {
+          EventUsers &event_users = finder->second;
+          if (event_users.single)
+          {
+            legion_delete(event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              legion_delete(it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          reading_users.erase(finder);
+        }
+        outstanding_gc_events.erase(event_finder);
       }
     }
 
@@ -28448,6 +28877,9 @@ namespace LegionRuntime {
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint()); 
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
+      // Don't need to actual launch a collection task, destructor
+      // will handle this case
+      outstanding_gc_events.insert(term_event);
     }
  
     //--------------------------------------------------------------------------
@@ -28553,7 +28985,6 @@ namespace LegionRuntime {
             it != term_events.end(); it++)
       {
         filter_local_users(*it); 
-        outstanding_gc_events.erase(*it);
       }
 #endif
     }
@@ -28590,7 +29021,176 @@ namespace LegionRuntime {
                                           const FieldMask &update_mask)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      Serializer reduction_rez, reading_rez;
+      std::deque<PhysicalUser*> red_users, read_users;
+      unsigned reduction_events = 0, reading_events = 0;
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
+              reduction_users.begin(); rit != reduction_users.end(); rit++)
+        {
+          FieldMask overlap = rit->second.user_mask & update_mask;
+          if (!overlap)
+            continue;
+          reduction_events++;
+          const EventUsers &event_users = rit->second;
+          reduction_rez.serialize(rit->first);
+          if (event_users.single)
+          {
+            reduction_rez.serialize<size_t>(1);
+            reduction_rez.serialize(overlap);
+            red_users.push_back(event_users.users.single_user);
+          }
+          else
+          {
+            reduction_rez.serialize<size_t>(
+                                      event_users.users.multi_users->size());
+            // Just send them all
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+                  it = event_users.users.multi_users->begin(); it != 
+                  event_users.users.multi_users->end(); it++)
+            {
+              reduction_rez.serialize(it->second);
+              red_users.push_back(it->first);
+            }
+          }
+        }
+        for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
+              reading_users.begin(); rit != reading_users.end(); rit++)
+        {
+          FieldMask overlap = rit->second.user_mask & update_mask;
+          if (!overlap)
+            continue;
+          reading_events++;
+          const EventUsers &event_users = rit->second;
+          reading_rez.serialize(rit->first);
+          if (event_users.single)
+          {
+            reading_rez.serialize<size_t>(1);
+            reading_rez.serialize(overlap);
+            read_users.push_back(event_users.users.single_user);
+          }
+          else
+          {
+            reading_rez.serialize<size_t>(
+                                      event_users.users.multi_users->size());
+            // Just send them all
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+                  it = event_users.users.multi_users->begin(); it != 
+                  event_users.users.multi_users->end(); it++)
+            {
+              reading_rez.serialize(it->second);
+              read_users.push_back(it->first);
+            }
+          }
+        }
+      }
+      // We've released the lock, so reassemble the message
+      Serializer rez;
+      {
+        RezCheck z(rez);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(logical_node->is_region());
+#endif
+        rez.serialize(logical_node->as_region_node()->handle);
+        rez.serialize(did);
+        rez.serialize<size_t>(red_users.size());
+        for (std::deque<PhysicalUser*>::const_iterator it = 
+              red_users.begin(); it != red_users.end(); it++)
+        {
+          (*it)->pack_user(rez);
+        }
+        rez.serialize<size_t>(read_users.size());
+        for (std::deque<PhysicalUser*>::const_iterator it = 
+              read_users.begin(); it != read_users.end(); it++)
+        {
+          (*it)->pack_user(rez);
+        }
+        rez.serialize(reduction_events);
+        size_t reduction_size = reduction_rez.get_buffer_size(); 
+        rez.serialize(reduction_rez.get_buffer(), reduction_size);
+        rez.serialize(reading_events);
+        size_t reading_size = reading_rez.get_buffer_size();
+        rez.serialize(reading_rez.get_buffer(), reading_size);
+      }
+      runtime->send_reduction_update(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_update(Deserializer &derez, 
+                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_reduction_users;
+      derez.deserialize(num_reduction_users);
+      std::vector<PhysicalUser*> red_users(num_reduction_users);
+      FieldSpaceNode *field_node = logical_node->column_source;
+      for (unsigned idx = 0; idx < num_reduction_users; idx++)
+        red_users[idx] = PhysicalUser::unpack_user(derez, field_node, source);
+      size_t num_reading_users;
+      derez.deserialize(num_reading_users);
+      std::deque<PhysicalUser*> read_users(num_reading_users);
+      for (unsigned idx = 0; idx < num_reading_users; idx++)
+        read_users[idx] = PhysicalUser::unpack_user(derez, field_node, source);
+      std::deque<Event> collect_events;
+      {
+        unsigned reduction_index = 0, reading_index = 0;
+        unsigned num_reduction_events;
+        derez.deserialize(num_reduction_events);
+        AutoLock v_lock(view_lock);
+        for (unsigned idx = 0; idx < num_reduction_events; idx++)
+        {
+          Event red_event;
+          derez.deserialize(red_event);
+          size_t num_users;
+          derez.deserialize(num_users);
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          {
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            field_node->transform_field_mask(user_mask, source);
+            add_physical_user(red_users[reduction_index++], false/*reading*/,
+                              red_event, user_mask);
+          }
+          if (outstanding_gc_events.find(red_event) == 
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(red_event);
+            collect_events.push_back(red_event);
+          }
+        }
+        unsigned num_reading_events;
+        derez.deserialize(num_reading_events);
+        for (unsigned idx = 0; idx < num_reading_events; idx++)
+        {
+          Event read_event;
+          derez.deserialize(read_event);
+          size_t num_users;
+          derez.deserialize(num_users);
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          {
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            field_node->transform_field_mask(user_mask, source);
+            add_physical_user(read_users[reading_index++], true/*reading*/,
+                              read_event, user_mask);
+          }
+          if (outstanding_gc_events.find(read_event) ==
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(read_event);
+            collect_events.push_back(read_event);
+          }
+        }
+      }
+      if (!collect_events.empty())
+      {
+        for (std::deque<Event>::const_iterator it = collect_events.begin();
+              it != collect_events.end(); it++)
+        {
+          defer_collect_user(*it);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -28644,6 +29244,26 @@ namespace LegionRuntime {
         legion_delete(new_view);
       else
         new_view->update_remote_instances(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionView::handle_send_update(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionTreeNode *node = runtime->forest->get_node(handle);
+      DistributedID did;
+      derez.deserialize(did);
+      LogicalView *view = node->find_view(did);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view->is_instance_view());
+      assert(view->as_instance_view()->is_reduction_view());
+#endif
+      ReductionView *red_view = view->as_instance_view()->as_reduction_view();
+      red_view->process_update(derez, source);
     }
 
     /////////////////////////////////////////////////////////////

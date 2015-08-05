@@ -333,6 +333,9 @@ namespace LegionRuntime {
         return point;
       }
       inline void clear(void) { valid = false; }
+    public:
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     private:
       DomainPoint point;
       bool valid;
@@ -384,6 +387,7 @@ namespace LegionRuntime {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void serialize(const ColorPoint &point);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -453,6 +457,7 @@ namespace LegionRuntime {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void deserialize(ColorPoint &color);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -1204,7 +1209,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     // Give the implementations here so the templates get instantiated
-    //--------------------------------------------------------------------------
+    //-------------------------------------------------------------------------- 
 
     //--------------------------------------------------------------------------
     inline Serializer& Serializer::operator=(const Serializer &rhs)
@@ -1301,6 +1306,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       int_set.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const ColorPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      point.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
@@ -1459,6 +1471,13 @@ namespace LegionRuntime {
     {
       int_set.deserialize(*this);
     }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(ColorPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      point.deserialize(*this);
+    }
       
     //--------------------------------------------------------------------------
     inline void Deserializer::deserialize(void *dst, size_t bytes)
@@ -1531,6 +1550,32 @@ namespace LegionRuntime {
       context_bytes += bytes;
 #endif
       index += bytes;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ColorPoint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(valid);
+      if (valid)
+      {
+        rez.serialize(point.dim);
+        for (int idx = 0; idx < point.dim; idx++)
+          rez.serialize(point.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ColorPoint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(valid);
+      if (valid)
+      {
+        derez.deserialize(point.dim);
+        for (int idx = 0; idx < point.dim; idx++)
+          derez.deserialize(point.point_data[idx]);
+      }
     }
 
     // There is an interesting design decision about how to break up the 32 bit

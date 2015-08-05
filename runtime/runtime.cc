@@ -12000,7 +12000,7 @@ namespace LegionRuntime {
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //MaterializedView::handle_send_updates(forest, derez, source);
+      MaterializedView::handle_send_update(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12040,7 +12040,7 @@ namespace LegionRuntime {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      //ReductionView::handle_send_update(forest, derez, source);
+      ReductionView::handle_send_update(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

@@ -1537,6 +1537,11 @@ namespace LegionRuntime {
       bool same_versions(const FieldMask &test_mask, 
                          const FieldVersions *other) const;
     public:
+      void pack_user(Serializer &rez);
+      static PhysicalUser* unpack_user(Deserializer &derez, 
+                                       FieldSpaceNode *node,
+                                       AddressSpaceID source);
+    public:
       RegionUsage usage;
       ColorPoint child;
       FieldVersions *const versions;
@@ -3668,6 +3673,8 @@ namespace LegionRuntime {
       virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
+      void process_update(Deserializer &derez, AddressSpaceID source);
+      void update_gc_events(const std::deque<Event> &gc_events);
     protected:
       void add_user_above(const RegionUsage &usage, Event term_event,
                           const ColorPoint &child_color,
@@ -3742,6 +3749,8 @@ namespace LegionRuntime {
       void filter_local_users(Event term_event);
       void add_current_user(PhysicalUser *user, Event term_event,
                             const FieldMask &user_mask);
+      void add_previous_user(PhysicalUser *user, Event term_event,
+                             const FieldMask &user_mask);
     protected:
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -3767,6 +3776,8 @@ namespace LegionRuntime {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_send_update(Runtime *runtime, Deserializer &derez,
+                                     AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -3907,12 +3918,15 @@ namespace LegionRuntime {
       virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
+      void process_update(Deserializer &derez, AddressSpaceID source);
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
                              Event term_event, const FieldMask &user_mask);
       void filter_local_users(Event term_event);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
+                              Deserializer &derez, AddressSpaceID source);
+      static void handle_send_update(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       ReductionOpID get_redop(void) const;
