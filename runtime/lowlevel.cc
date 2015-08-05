@@ -7293,7 +7293,14 @@ namespace Realm {
 
 	case 2:
 	  {
-	    Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
+	    std::vector<Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(Layouts::DIM_X);
+	    kind_vec.push_back(Layouts::DIM_Y);
+	    size_vec.push_back(get_rect<2>().dim_size(0));
+	    size_vec.push_back(get_rect<2>().dim_size(1));
+	    Layouts::SplitDimLinearization<2> cl(kind_vec, size_vec);
+	    //Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<2>(Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<2>());
 	    dl.serialize(linearization_bits);
@@ -7302,7 +7309,16 @@ namespace Realm {
 
 	case 3:
 	  {
-	    Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
+	    std::vector<Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(Layouts::DIM_X);
+	    kind_vec.push_back(Layouts::DIM_Y);
+	    kind_vec.push_back(Layouts::DIM_Z);
+	    size_vec.push_back(get_rect<3>().dim_size(0));
+	    size_vec.push_back(get_rect<3>().dim_size(1));
+	    size_vec.push_back(get_rect<3>().dim_size(2));
+	    Layouts::SplitDimLinearization<3> cl(kind_vec, size_vec);
+	    //Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<3>(Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<3>());
 	    dl.serialize(linearization_bits);
