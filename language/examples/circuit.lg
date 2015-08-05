@@ -12,6 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+import "legion"
+
 -- Compile and link circuit.cc
 local ccircuit
 do
@@ -39,8 +41,6 @@ do
   terralib.linklibrary(circuit_so)
   ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
 end
-
-import "legion"
 
 local c = legionlib.c
 local std = terralib.includec("stdlib.h")
