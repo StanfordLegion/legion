@@ -31,7 +31,6 @@
 #include "arrays.h"
 #include "layouts.h"
 #include "lowlevel_config.h"
-#define USE_HDF
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
