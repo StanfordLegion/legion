@@ -11641,7 +11641,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VERSION_STATE_INIT,
-                                 PHYSICAL_STATE_VIRTUAL_CHANNEL, true/*flush*/);
+                                PHYSICAL_STATE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------

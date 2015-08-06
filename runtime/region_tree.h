@@ -1287,12 +1287,17 @@ namespace LegionRuntime {
       std::map<FieldID,FieldInfo> fields;
       FieldMask allocated_indexes;
       int next_allocation_index; // for use in the random case
+    private:
       /*
        * Every field space contains a permutation transformer that
        * can translate a field mask from any other node onto
-       * this node.
+       * this node, this is only necessary when we are doing
+       * distributed field allocations on multiple nodes.
        */
       LegionMap<AddressSpaceID,FieldPermutation>::aligned transformers;
+      // Track if we are in a distributed allocation mode
+      // and if not, are we the owner space
+      bool distributed_allocation, allocation_owner; 
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
@@ -1540,7 +1545,8 @@ namespace LegionRuntime {
       void pack_user(Serializer &rez);
       static PhysicalUser* unpack_user(Deserializer &derez, 
                                        FieldSpaceNode *node,
-                                       AddressSpaceID source);
+                                       AddressSpaceID source,
+                                       bool add_reference);
     public:
       RegionUsage usage;
       ColorPoint child;
@@ -1979,7 +1985,7 @@ namespace LegionRuntime {
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask, 
                                  bool path_only) const;
-      bool merge_physical_state(const PhysicalState *state, 
+      void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
     public:
       virtual void notify_active(void);
@@ -1990,7 +1996,6 @@ namespace LegionRuntime {
       Event request_eventual_version_state(void);
       Event request_merged_version_state(void);
       void send_version_state(AddressSpaceID target, UserEvent to_trigger);
-      void send_initialization_notice(void);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
                            UserEvent to_trigger, bool merged_req, bool upgrade);
       void launch_send_version_state(AddressSpaceID target, 

@@ -7406,7 +7406,8 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
-      : handle(sp), context(ctx), next_allocation_index(-1)
+      : handle(sp), context(ctx), next_allocation_index(-1),
+        distributed_allocation(false), allocation_owner(true)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -7998,6 +7999,9 @@ namespace LegionRuntime {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // This is monotonic, so we can test it here
+      if (!distributed_allocation)
+        return;
       // Need an exclusive lock since we might change the state
       // of the transformer.
       AutoLock n_lock(node_lock);
@@ -8942,9 +8946,6 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(usage.redop != 0);
-#endif
         int redop = usage.redop;
         rez.serialize(redop);
       }
@@ -8953,7 +8954,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
                                                        FieldSpaceNode *node,
-                                                       AddressSpaceID source)
+                                                       AddressSpaceID source,
+                                                       bool add_reference)
     //--------------------------------------------------------------------------
     {
       ColorPoint child;
@@ -8992,6 +8994,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
+      if (add_reference)
+        result->add_reference();
       return result;
     }
 
@@ -12188,15 +12192,7 @@ namespace LegionRuntime {
               FieldMask non_closed = it->second - closed_mask;
               if (!non_closed)
                 continue;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-              bool check = 
-#endif
-#endif
-               it->first->merge_physical_state(this, non_closed); 
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!check);
-#endif
+              it->first->merge_physical_state(this, non_closed); 
             }
           }
         }
@@ -12219,8 +12215,7 @@ namespace LegionRuntime {
               FieldMask non_closed = it->second - closed_mask;
               if (!non_closed)
                 continue;
-              if (it->first->merge_physical_state(this, non_closed)) 
-                it->first->send_initialization_notice();
+              it->first->merge_physical_state(this, non_closed);
             }
           }
         }
@@ -12237,15 +12232,7 @@ namespace LegionRuntime {
             for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                   info.states.begin(); it != info.states.end(); it++)
             {
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-              bool check = 
-#endif
-#endif
-                it->first->merge_physical_state(this, it->second); 
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!check);
-#endif
+              it->first->merge_physical_state(this, it->second); 
             }
           }
         }
@@ -12262,8 +12249,7 @@ namespace LegionRuntime {
             for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
                   info.states.begin(); it != info.states.end(); it++)
             {
-              if (it->first->merge_physical_state(this, it->second)) 
-                it->first->send_initialization_notice();
+              it->first->merge_physical_state(this, it->second);
             }
           }
         }
@@ -12596,6 +12582,16 @@ namespace LegionRuntime {
       {
         add_base_valid_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
+        // If we are remote and we are now initialized send our notification
+        if (meta_state == EVENTUAL_VERSION_STATE)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+          }
+          runtime->send_version_state_initialization(owner_space, rez);
+        }
       }
     }
 
@@ -12625,27 +12621,6 @@ namespace LegionRuntime {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this); 
         map_over_remote_instances(functor);
-      }
-      // Remove our resource references
-      if (!valid_views.empty())
-      {
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          if (it->first->remove_nested_resource_ref(did))
-            LogicalView::delete_logical_view(it->first);
-        }
-        valid_views.clear();
-      }
-      if (!reduction_views.empty())
-      {
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              reduction_views.begin(); it != reduction_views.end(); it++)
-        {
-          if (it->first->remove_nested_resource_ref(did))
-            legion_delete(it->first);
-        }
-        reduction_views.clear();
       }
     }
 
@@ -12696,7 +12671,6 @@ namespace LegionRuntime {
       assert(currently_valid);
       assert(new_view->is_instance_view());
 #endif
-      new_view->add_nested_resource_ref(did);
       new_view->add_nested_gc_ref(did);
       new_view->add_nested_valid_ref(did);
       InstanceView *inst_view = new_view->as_instance_view();
@@ -12820,7 +12794,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool VersionState::merge_physical_state(const PhysicalState *state,
+    void VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask)
     //--------------------------------------------------------------------------
     {
@@ -12864,7 +12838,6 @@ namespace LegionRuntime {
           track_aligned::iterator finder = valid_views.find(it->first);
         if (finder == valid_views.end())
         {
-          it->first->add_nested_resource_ref(did);
           it->first->add_nested_gc_ref(did);
           it->first->add_nested_valid_ref(did);
           valid_views[it->first] = overlap;
@@ -12885,7 +12858,6 @@ namespace LegionRuntime {
             track_aligned::iterator finder = reduction_views.find(it->first);
           if (finder == reduction_views.end())
           {
-            it->first->add_nested_resource_ref(did);
             it->first->add_nested_gc_ref(did);
             it->first->add_nested_valid_ref(did);
             reduction_views[it->first] = overlap;
@@ -12894,17 +12866,12 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
-      // Finally update our state
-      if (meta_state == INVALID_VERSION_STATE)
+      // Finally update our state if we are the owner
+      if (is_owner() && (meta_state == INVALID_VERSION_STATE))
       {
         meta_state = EVENTUAL_VERSION_STATE;
-        if (!is_owner())
-          return true;
-        else
-          eventual_nodes.add(local_space);
+        eventual_nodes.add(local_space);
       }
-      // No need to send an update
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -12988,6 +12955,14 @@ namespace LegionRuntime {
           return merged_ready;
         if (meta_state == EVENTUAL_VERSION_STATE)
           return eventual_ready;
+        // If we are the owner and there are no existing versions we
+        // can immediately make ourselves a local version
+        if (is_owner() && eventual_nodes.empty())
+        {
+          meta_state = EVENTUAL_VERSION_STATE;
+          eventual_nodes.add(local_space);
+          return eventual_ready; // this will be a no-event
+        }
         result = UserEvent::create_user_event();
         eventual_ready = result;
         meta_state = EVENTUAL_VERSION_STATE;
@@ -13014,17 +12989,28 @@ namespace LegionRuntime {
         AutoLock s_lock(state_lock);
         if (meta_state == MERGED_VERSION_STATE)
           return merged_ready;
-        // Case 1: we are the owner and there is only one initial 
-        // version and we're it
-        if (is_owner() && (meta_state == EVENTUAL_VERSION_STATE) 
-            && (eventual_nodes.size() ==1) 
-            && (eventual_nodes.contains(local_space)))
+        if (is_owner())
         {
-          // Upgrade ourselves and we're done
-          merged_ready = eventual_ready;
-          meta_state = MERGED_VERSION_STATE;
-          merged_nodes.add(local_space);
-          return merged_ready;
+          // Case 1: we are the owner and there is only one initial 
+          // version and we're it
+          if ((meta_state == EVENTUAL_VERSION_STATE) 
+              && (eventual_nodes.size() == 1) 
+              && (eventual_nodes.contains(local_space)))
+          {
+            // Upgrade ourselves and we're done
+            merged_ready = eventual_ready;
+            meta_state = MERGED_VERSION_STATE;
+            merged_nodes.add(local_space);
+            return merged_ready;
+          }
+          // Case 2: we are the owner and there are no initial versions
+          // so we can immediately upgrade
+          if (eventual_nodes.empty())
+          {
+            meta_state = MERGED_VERSION_STATE;
+            merged_nodes.add(local_space);
+            return merged_ready; // this will be a no-event
+          }
         }
         result = UserEvent::create_user_event();
         merged_ready = result;
@@ -13124,21 +13110,6 @@ namespace LegionRuntime {
       // The owner will get updated automatically so only update remotely
       if (!is_owner())
         update_remote_instances(target);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::send_initialization_notice(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_owner());
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-      }
-      runtime->send_version_state_initialization(owner_space, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -13291,6 +13262,7 @@ namespace LegionRuntime {
         Event precondition = Event::NO_EVENT;
         bool forward = false;
         bool trigger_now = false;
+        bool handle_locally = false;
         // Initialize target with a dumb value because compilers are dumb
         AddressSpaceID target = source;
         std::deque<AddressSpaceID> broadcast_targets;
@@ -13302,6 +13274,7 @@ namespace LegionRuntime {
           if (meta_state == MERGED_VERSION_STATE)
           {
             precondition = merged_ready;
+            handle_locally = true;
           }
           else
           {
@@ -13336,6 +13309,7 @@ namespace LegionRuntime {
                   assert(meta_state == EVENTUAL_VERSION_STATE);
 #endif
                   precondition = eventual_ready;
+                  handle_locally = true;
                   // Upgrade ourselves
                   meta_state = MERGED_VERSION_STATE;
                   merged_ready = eventual_ready;
@@ -13381,21 +13355,29 @@ namespace LegionRuntime {
               precondition = eventual_ready;
             else
               precondition = merged_ready;
+            handle_locally = true;
           }
           else
           {
+            if (eventual_nodes.empty())
+            {
+              // There are no valid copies, so we can trigger it now 
+              trigger_now = true;
+            }
+            else
+            {
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!eventual_nodes.empty());
-            assert(!eventual_nodes.contains(source));
+              assert(!eventual_nodes.contains(source));
 #endif
-            forward = true;
-            target = select_next_target(true/*initial*/, source); 
+              forward = true;
+              target = select_next_target(true/*initial*/, source); 
+            }
           }
           // Record that this node is now an initial node
           eventual_nodes.add(source);
         }
         // If we can handle it locally, we are done
-        if (precondition.exists())
+        if (handle_locally)
           launch_send_version_state(source, to_trigger, precondition);
         else if (forward)
         {
@@ -13485,6 +13467,8 @@ namespace LegionRuntime {
             FieldMask &mask = valid_views[view];
             derez.deserialize(mask);
             field_node->transform_field_mask(mask, source);
+            view->add_nested_gc_ref(did);
+            view->add_nested_valid_ref(did);
           }
           size_t num_reduction_views;
           derez.deserialize(num_reduction_views);
@@ -13502,6 +13486,8 @@ namespace LegionRuntime {
             FieldMask &mask = reduction_views[red_view];
             derez.deserialize(mask);
             field_node->transform_field_mask(mask, source);
+            view->add_nested_gc_ref(did);
+            view->add_nested_valid_ref(did);
           }
         }
         else
@@ -13570,6 +13556,8 @@ namespace LegionRuntime {
               FieldMask &mask = valid_views[view];
               derez.deserialize(mask);
               field_node->transform_field_mask(mask, source);
+              view->add_nested_gc_ref(did);
+              view->add_nested_valid_ref(did);
             }
           }
           size_t num_reduction_views;
@@ -13599,6 +13587,8 @@ namespace LegionRuntime {
               FieldMask &mask = reduction_views[red_view];
               derez.deserialize(mask);
               field_node->transform_field_mask(mask, source);
+              view->add_nested_gc_ref(did);
+              view->add_nested_valid_ref(did);
             }
           }
         }
@@ -21632,7 +21622,7 @@ namespace LegionRuntime {
         // notify_invalid because we are guaranteed they are called
         // sequentially by the state machine in the distributed
         // collectable implementation.
-        bool reclaimed = context->runtime->reclaim_physical_instance(this);
+        //bool reclaimed = context->runtime->reclaim_physical_instance(this);
         // Now tell the runtime that this instance will no longer exist
         context->runtime->free_physical_instance(this);
         AutoLock gc(gc_lock);
@@ -21644,7 +21634,7 @@ namespace LegionRuntime {
         // trying to recycle it, see if someone else has claimed it.
         // If not then take it back and delete it now to reclaim
         // the memory.
-        if (!recycled || reclaimed)
+        if (!recycled) // || reclaimed)
         {
           // If either of these conditions were true, then we
           // should actually delete the physical instance.
@@ -21711,7 +21701,7 @@ namespace LegionRuntime {
         // will always be called before garbage_collect, ensuring that
         // the instance is still valid.  This property is guaranteed by
         // the state machine in the distributed collectable implementation.
-        context->runtime->recycle_physical_instance(this);
+        //context->runtime->recycle_physical_instance(this);
         AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
@@ -23452,7 +23442,7 @@ namespace LegionRuntime {
           else
           {
             Serializer event_rez;
-            int count = 0;
+            int count = -1; // start this at negative one
             for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
                   it = event_users.users.multi_users->begin(); it != 
                   event_users.users.multi_users->end(); it++)
@@ -23468,9 +23458,9 @@ namespace LegionRuntime {
               event_rez.serialize(overlap2);
             }
             // If there was only one, we can take the normal path
-            if (count < -1)
+            if ((count == -1) || (count < -2))
               current_rez.serialize(count);
-            size_t event_rez_size = event_rez.get_buffer_size();
+            size_t event_rez_size = event_rez.get_used_bytes();
             current_rez.serialize(event_rez.get_buffer(), event_rez_size);
           }
         }
@@ -23491,6 +23481,7 @@ namespace LegionRuntime {
             if (finder == needed_users.end())
             {
               int index = needed_users.size();
+              previous_rez.serialize(index);
               needed_users[event_users.users.single_user] = index;
               event_users.users.single_user->add_reference();
             }
@@ -23501,7 +23492,7 @@ namespace LegionRuntime {
           else 
           {
             Serializer event_rez;
-            int count = 0;
+            int count = -1; // start this at negative one
             for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
                   it = event_users.users.multi_users->begin(); it !=
                   event_users.users.multi_users->end(); it++)
@@ -23524,9 +23515,9 @@ namespace LegionRuntime {
               event_rez.serialize(overlap2);
             }
             // If there was only one user, we can take the normal path
-            if (count < -1)
+            if ((count == -1) || (count < -2))
               previous_rez.serialize(count);
-            size_t event_rez_size = event_rez.get_buffer_size();
+            size_t event_rez_size = event_rez.get_used_bytes();
             previous_rez.serialize(event_rez.get_buffer(), event_rez_size); 
           }
         }
@@ -23554,10 +23545,10 @@ namespace LegionRuntime {
         }
         // Then pack the current and previous events
         rez.serialize(current_events);
-        size_t current_size = current_rez.get_buffer_size();
+        size_t current_size = current_rez.get_used_bytes();
         rez.serialize(current_rez.get_buffer(), current_size);
         rez.serialize(previous_events);
-        size_t previous_size = previous_rez.get_buffer_size();
+        size_t previous_size = previous_rez.get_used_bytes();
         rez.serialize(previous_rez.get_buffer(), previous_size);
       }
       runtime->send_materialized_update(target, rez);
@@ -23576,8 +23567,12 @@ namespace LegionRuntime {
       {
         int index;
         derez.deserialize(index);
-        users[index] = PhysicalUser::unpack_user(derez, field_node, source); 
+        users[index] = PhysicalUser::unpack_user(derez, field_node, 
+                                                 source, true/*add ref*/); 
       }
+      // We've already added a reference for all users since we'll know
+      // that we'll be adding them at least once
+      std::vector<bool> need_reference(num_users, false);
       std::deque<Event> collect_events;
       {
         // Hold the lock when updating the view
@@ -23592,7 +23587,7 @@ namespace LegionRuntime {
           derez.deserialize(index);
           if (index < 0)
           {
-            int count = -index;
+            int count = (-index) - 1;
             for (int i = 0; i < count; i++)
             {
               derez.deserialize(index);
@@ -23602,6 +23597,10 @@ namespace LegionRuntime {
               FieldMask user_mask;
               derez.deserialize(user_mask);
               field_node->transform_field_mask(user_mask, source);
+              if (need_reference[index])
+                users[index]->add_reference();
+              else
+                need_reference[index] = true;
               add_current_user(users[index], current_event, user_mask);
             }
           }
@@ -23614,6 +23613,10 @@ namespace LegionRuntime {
             FieldMask user_mask;
             derez.deserialize(user_mask);
             field_node->transform_field_mask(user_mask, source);
+            if (need_reference[index])
+              users[index]->add_reference();
+            else
+              need_reference[index] = true;
             add_current_user(users[index], current_event, user_mask);
           }
           if (outstanding_gc_events.find(current_event) ==
@@ -23633,7 +23636,7 @@ namespace LegionRuntime {
           derez.deserialize(index);
           if (index < 0)
           {
-            int count = -index;
+            int count = (-index) - 1;
             for (int i = 0; i < count; i++)
             {
               derez.deserialize(index);
@@ -23643,6 +23646,10 @@ namespace LegionRuntime {
               FieldMask user_mask;
               derez.deserialize(user_mask);
               field_node->transform_field_mask(user_mask, source);
+              if (need_reference[index])
+                users[index]->add_reference();
+              else
+                need_reference[index] = true;
               add_previous_user(users[index], previous_event, user_mask);
             }
           }
@@ -23655,6 +23662,10 @@ namespace LegionRuntime {
             FieldMask user_mask;
             derez.deserialize(user_mask);
             field_node->transform_field_mask(user_mask, source);
+            if (need_reference[index])
+              users[index]->add_reference();
+            else
+              need_reference[index] = true;
             add_previous_user(users[index], previous_event, user_mask);
           }
           if (outstanding_gc_events.find(previous_event) ==
@@ -23675,6 +23686,10 @@ namespace LegionRuntime {
           defer_collect_user(*it); 
         }
       }
+#ifdef DEBUG_HIGH_LEVEL
+      for (unsigned idx = 0; idx < need_reference.size(); idx++)
+        assert(need_reference[idx]);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -24446,6 +24461,8 @@ namespace LegionRuntime {
             current_epoch_users.begin(); cit !=
             current_epoch_users.end(); cit++)
       {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
         if (cit->first.has_triggered())
         {
           EventUsers &current_users = cit->second;
@@ -24468,6 +24485,7 @@ namespace LegionRuntime {
           events_to_delete.push_back(cit->first);
           continue;
         }
+#endif
         EventUsers &current_users = cit->second;
         FieldMask summary_overlap = current_users.user_mask & dominated;
         if (!summary_overlap)
@@ -29119,10 +29137,10 @@ namespace LegionRuntime {
           (*it)->pack_user(rez);
         }
         rez.serialize(reduction_events);
-        size_t reduction_size = reduction_rez.get_buffer_size(); 
+        size_t reduction_size = reduction_rez.get_used_bytes(); 
         rez.serialize(reduction_rez.get_buffer(), reduction_size);
         rez.serialize(reading_events);
-        size_t reading_size = reading_rez.get_buffer_size();
+        size_t reading_size = reading_rez.get_used_bytes();
         rez.serialize(reading_rez.get_buffer(), reading_size);
       }
       runtime->send_reduction_update(target, rez);
@@ -29138,12 +29156,14 @@ namespace LegionRuntime {
       std::vector<PhysicalUser*> red_users(num_reduction_users);
       FieldSpaceNode *field_node = logical_node->column_source;
       for (unsigned idx = 0; idx < num_reduction_users; idx++)
-        red_users[idx] = PhysicalUser::unpack_user(derez, field_node, source);
+        red_users[idx] = PhysicalUser::unpack_user(derez, field_node, 
+                                                   source, true/*add ref*/);
       size_t num_reading_users;
       derez.deserialize(num_reading_users);
       std::deque<PhysicalUser*> read_users(num_reading_users);
       for (unsigned idx = 0; idx < num_reading_users; idx++)
-        read_users[idx] = PhysicalUser::unpack_user(derez, field_node, source);
+        read_users[idx] = PhysicalUser::unpack_user(derez, field_node, 
+                                                    source, true/*add ref*/);
       std::deque<Event> collect_events;
       {
         unsigned reduction_index = 0, reading_index = 0;

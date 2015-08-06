@@ -263,9 +263,6 @@ namespace LegionRuntime {
     void DistributedCollectable::update_remote_instances(AddressSpaceID remote)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_owner()); // This should only happen on non-owner nodes
-#endif
       if (remote != owner_space)
       {
         AutoLock gc(gc_lock);
@@ -408,7 +405,7 @@ namespace LegionRuntime {
         runtime->find_distributed_collectable(did);
       if (add)
         target->add_base_gc_ref(REMOTE_DID_REF, count);
-      else if (target->remove_base_valid_ref(REMOTE_DID_REF, count))
+      else if (target->remove_base_gc_ref(REMOTE_DID_REF, count))
         delete target;
     }
 
