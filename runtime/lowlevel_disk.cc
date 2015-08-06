@@ -179,7 +179,7 @@ namespace LegionRuntime {
                      bool read_only)
 
     {
-      RegionInstance inst = create_instance_local(is,
+      RegionInstance i = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
                  list_size, reqs, parent_inst);
@@ -206,16 +206,12 @@ namespace LegionRuntime {
         int rc = pthread_rwlock_init(&new_hdf->dataset_rwlocks[idx], NULL);
         assert(rc==0);
       }
-      std::cout << "in HDFMemory::create_instance(..) inst.id: " <<
-        inst.id << " hdf_metadata.size(): " << hdf_metadata_vec.size() <<
-        std::endl;
-      
-      if (inst.id < hdf_metadata_vec.size())
-        hdf_metadata_vec[inst.id] = new_hdf;
+      if (ID(i).index_l() < hdf_metadata_vec.size())
+        hdf_metadata_vec[ID(i).index_l()] = new_hdf;
       else
         hdf_metadata_vec.push_back(new_hdf);
       pthread_rwlock_unlock(&this->rwlock);
-      return inst;
+      return i;
     }
 
     void HDFMemory::destroy_instance(RegionInstance i,

@@ -636,7 +636,6 @@ namespace LegionRuntime{
         delete pir;
         delete lsi;
         // trigger complete event
-        printf("XD: trigger complete event\n");
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
 
@@ -931,7 +930,7 @@ namespace LegionRuntime{
       }
     };
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
-    typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
+    typedef std::multiset<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
     class XferDesQueue;
     class DMAThread {
@@ -1032,16 +1031,9 @@ namespace LegionRuntime{
         pthread_mutex_lock(&queues_lock);
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
         it2 = queues.find(xd->channel);
-        if (it2 == queues.end()) {
-          // nothing with this channel, create a new one
-          PriorityXferDesQueue* pq = new PriorityXferDesQueue;
-          pq->insert(xd);
-          queues[xd->channel] = pq;
-        }
-        else {
-          // push ourself into the priority queue
-          it2->second->insert(xd);
-        }
+        assert(it2 != queues.end());
+        // push ourself into the priority queue
+        it2->second->insert(xd);
         pthread_mutex_unlock(&queues_lock);
         if (dma_thread->sleep) {
           dma_thread->sleep = false;
@@ -1066,7 +1058,6 @@ namespace LegionRuntime{
         }
       }
 
-      // Note that getting the XferDes doesn't remove it from priority queue
       bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
         pthread_mutex_lock(&dma_thread->enqueue_lock);
         std::map<Channel*, PriorityXferDesQueue*>::iterator it;
