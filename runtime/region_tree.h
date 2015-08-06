@@ -460,7 +460,7 @@ namespace LegionRuntime {
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   ColorPoint color, Domain color_space,
                                   Event ready_event, AllocateMode mode);
-      FieldSpaceNode* create_node(FieldSpace space);
+      FieldSpaceNode* create_node(FieldSpace space, Event dist_alloc);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
@@ -1180,8 +1180,20 @@ namespace LegionRuntime {
         FieldID field;
         Runtime *runtime;
       };
+      struct UpgradeFunctor {
+      public:
+        UpgradeFunctor(std::map<AddressSpaceID,UserEvent> &ts,
+                       std::set<Event> &pre)
+          : to_send(ts), preconditions(pre) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        std::map<AddressSpaceID,UserEvent> &to_send;
+        std::set<Event> &preconditions;
+      };
     public:
-      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
+      FieldSpaceNode(FieldSpace sp, Event dist_alloc,
+                     RegionTreeForest *ctx);
       FieldSpaceNode(const FieldSpaceNode &rhs);
       ~FieldSpaceNode(void);
     public:
@@ -1255,6 +1267,9 @@ namespace LegionRuntime {
                                    const std::vector<unsigned> &indexes);
       LayoutDescription* register_layout_description(LayoutDescription *desc);
     public:
+      void upgrade_distributed_alloc(UserEvent to_trigger);
+      void process_upgrade(UserEvent to_trigger, Event ready_event);
+    public:
       void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
@@ -1264,6 +1279,10 @@ namespace LegionRuntime {
                                       Deserializer &derez,
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
+      static void handle_distributed_alloc_request(RegionTreeForest *forest,
+                                                   Deserializer &derez);
+      static void handle_distributed_alloc_upgrade(RegionTreeForest *forest,
+                                                   Deserializer &derez);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;
@@ -1276,6 +1295,7 @@ namespace LegionRuntime {
       void free_index(unsigned index);
     public:
       const FieldSpace handle;
+      const bool is_owner;
       RegionTreeForest *const context;
     public:
       NodeSet creation_set;
@@ -1297,7 +1317,7 @@ namespace LegionRuntime {
       LegionMap<AddressSpaceID,FieldPermutation>::aligned transformers;
       // Track if we are in a distributed allocation mode
       // and if not, are we the owner space
-      bool distributed_allocation, allocation_owner; 
+      Event distributed_allocation;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help

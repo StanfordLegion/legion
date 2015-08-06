@@ -1077,7 +1077,7 @@ namespace LegionRuntime {
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
-      create_node(handle);
+      create_node(handle, Event::NO_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -2853,13 +2853,14 @@ namespace LegionRuntime {
     }
  
     //--------------------------------------------------------------------------
-    FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space)
+    FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space,
+                                                  Event dist_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(this, CREATE_NODE_CALL);
 #endif
-      FieldSpaceNode *result = new FieldSpaceNode(space, this);
+      FieldSpaceNode *result = new FieldSpaceNode(space, dist_alloc, this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -3096,7 +3097,6 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_field_space_request(owner, rez);
       // Be safe and block for now
-      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -7405,9 +7405,11 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
     
     //--------------------------------------------------------------------------
-    FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
-      : handle(sp), context(ctx), next_allocation_index(-1),
-        distributed_allocation(false), allocation_owner(true)
+    FieldSpaceNode::FieldSpaceNode(FieldSpace sp, Event dist_alloc,
+                                   RegionTreeForest *ctx)
+      : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
+          ctx->runtime->address_space), context(ctx), 
+        next_allocation_index(-1), distributed_allocation(dist_alloc)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -7416,7 +7418,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(const FieldSpaceNode &rhs)
-      : handle(FieldSpace::NO_SPACE), context(NULL)
+      : handle(FieldSpace::NO_SPACE), is_owner(false), context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7733,6 +7735,18 @@ namespace LegionRuntime {
     void FieldSpaceNode::allocate_field(FieldID fid, size_t size, bool local)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner && !distributed_allocation.exists())
+      {
+        // Send a request to the owner node to convert to 
+        // distributed allocation mode
+        UserEvent wait_on = UserEvent::create_user_event();
+        AddressSpace owner = handle.id % context->runtime->runtime_stride;
+        Serializer rez;
+        rez.serialize(handle);
+        rez.serialize(wait_on);
+        context->runtime->send_distributed_alloc_request(owner, rez);
+        wait_on.wait();
+      }
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(fields.find(fid) == fields.end());
@@ -7999,13 +8013,33 @@ namespace LegionRuntime {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // This is monotonic, so we can test it here
-      if (!distributed_allocation)
+      // If we don't have an event for distributed allocation, then we
+      // don't have to do this
+      if (!distributed_allocation.exists())
         return;
-      // Need an exclusive lock since we might change the state
-      // of the transformer.
+      {
+        // Need an exclusive lock since we might change the state
+        // of the transformer.
+        AutoLock n_lock(node_lock);
+        LegionMap<AddressSpaceID,FieldPermutation>::aligned::iterator finder =
+          transformers.find(source);
+        if (finder != transformers.end())
+        {
+          finder->second.permute(mask);
+          return;
+        }
+      }
+      // If we didn't find it, we have to send a request
+      // so we can get all the updated field placements and have
+      // a valid transformer
+      UserEvent wait_on = UserEvent::create_user_event();
+      Serializer rez;
+      rez.serialize(handle);
+      rez.serialize(wait_on);
+      context->runtime->send_field_space_request(source, rez);
+      wait_on.wait();
       AutoLock n_lock(node_lock);
-      LegionMap<AddressSpaceID,FieldPermutation>::aligned::iterator finder = 
+      LegionMap<AddressSpaceID,FieldPermutation>::aligned::iterator finder =
         transformers.find(source);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != transformers.end());
@@ -8487,6 +8521,62 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::UpgradeFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent to_trigger = UserEvent::create_user_event();
+      to_send[target] = to_trigger;
+      preconditions.insert(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::upgrade_distributed_alloc(UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner);
+#endif
+      std::map<AddressSpaceID,UserEvent> to_send;
+      {
+        AutoLock n_lock(node_lock);
+        if (!distributed_allocation.exists())
+        {
+          std::set<Event> preconditions;
+          UpgradeFunctor functor(to_send, preconditions);
+          creation_set.map(functor);
+          distributed_allocation = Event::merge_events(preconditions);
+        }
+      }
+      // Send the messages
+      if (!to_send.empty())
+      {
+        for (std::map<AddressSpaceID,UserEvent>::const_iterator it = 
+              to_send.begin(); it != to_send.end(); it++)
+        {
+          Serializer rez;
+          rez.serialize(handle);
+          rez.serialize(it->second);
+          rez.serialize(distributed_allocation);
+          context->runtime->send_distributed_alloc_upgrade(it->first, rez);
+        }
+      }
+      // Trigger the result;
+      to_trigger.trigger(distributed_allocation);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::process_upgrade(UserEvent to_trigger, Event ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_owner);
+      assert(!distributed_allocation.exists());
+#endif
+      distributed_allocation = ready;
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::send_node(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -8499,6 +8589,7 @@ namespace LegionRuntime {
         {
           RezCheck z(rez);
           rez.serialize(handle);
+          rez.serialize(distributed_allocation);
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8554,7 +8645,9 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       FieldSpace handle;
       derez.deserialize(handle);
-      FieldSpaceNode *node = context->create_node(handle);
+      Event dist_allocation;
+      derez.deserialize(dist_allocation);
+      FieldSpaceNode *node = context->create_node(handle, dist_allocation);
 #ifdef DEBUG_HIGH_LEVEL
       assert(node != NULL);
 #endif
@@ -8616,6 +8709,34 @@ namespace LegionRuntime {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_distributed_alloc_request(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace handle;
+      derez.deserialize(handle);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      FieldSpaceNode *target = forest->get_node(handle);
+      target->upgrade_distributed_alloc(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_distributed_alloc_upgrade(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace handle;
+      derez.deserialize(handle);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      Event ready_event;
+      derez.deserialize(ready_event);
+      FieldSpaceNode *target = forest->get_node(handle);
+      target->process_upgrade(to_trigger, ready_event);
     }
 
     //--------------------------------------------------------------------------

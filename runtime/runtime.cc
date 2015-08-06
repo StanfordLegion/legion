@@ -3694,6 +3694,16 @@ namespace LegionRuntime {
               runtime->handle_field_space_return(derez);
               break;
             }
+          case SEND_DISTRIBUTED_ALLOC:
+            {
+              runtime->handle_distributed_alloc_request(derez);
+              break;
+            }
+          case SEND_DISTRIBUTED_UPGRADE:
+            {
+              runtime->handle_distributed_alloc_upgrade(derez);
+              break;
+            }
           case SEND_LOGICAL_REGION_NODE:
             {
               runtime->handle_logical_region_node(derez, remote_address_space);
@@ -11180,6 +11190,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_distributed_alloc_request(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_DISTRIBUTED_ALLOC,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_distributed_alloc_upgrade(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_DISTRIBUTED_UPGRADE,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_logical_region_node(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11783,6 +11811,20 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_node_return(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_distributed_alloc_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_distributed_alloc_request(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_distributed_alloc_upgrade(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_distributed_alloc_upgrade(forest, derez);
     }
 
     //--------------------------------------------------------------------------
