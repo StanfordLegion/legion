@@ -4634,8 +4634,8 @@ namespace LegionRuntime {
         xferDes_queue->register_dma_thread(dma_threads[i]);
         pthread_attr_t attr;
         CHECK_PTHREAD( pthread_attr_init(&attr) );
-        if (proc_assignment)
-          proc_assignment->bind_thread(-1, &attr, "DMA worker");
+        if (Realm::proc_assignment)
+          Realm::proc_assignment->bind_thread(-1, &attr, "DMA worker");
         CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, DMAThread::start, dma_threads[i]));
         CHECK_PTHREAD( pthread_attr_destroy(&attr));
       }
