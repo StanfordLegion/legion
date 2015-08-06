@@ -20,7 +20,10 @@
 
 #include "lowlevel_config.h"
 
+#include "event.h"
 #include "memory.h"
+
+#include "accessor.h"
 
 namespace Realm {
 

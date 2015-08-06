@@ -49,11 +49,12 @@ function legion:set_top_level_script(name)
 end
 
 if not rawget(_G, "initialized") then
-  local flag = package.loadlib("liblegion_terra.so", "*")
-  if not flag then
-    print "Error: failed to load the shared binding library"
-    os.exit(-1)
-  end
+  -- local flag = package.loadlib("liblegion_terra.so", "*")
+  -- if not flag then
+  --   print "Error: failed to load the shared binding library"
+  --   os.exit(-1)
+  -- end
+  terralib.linklibrary("liblegion_terra.so")
   if not rawget(_G, "arg") then
     print "Error: legionlib requires a top-level script as a command line argument"
     os.exit(-1)

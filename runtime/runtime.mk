@@ -271,7 +271,16 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/metadata.cc \
+		   $(LG_RT_DIR)/realm/event_impl.cc \
+		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
+		   $(LG_RT_DIR)/realm/proc_impl.cc \
+		   $(LG_RT_DIR)/realm/mem_impl.cc \
+		   $(LG_RT_DIR)/realm/inst_impl.cc \
+		   $(LG_RT_DIR)/realm/idx_impl.cc \
+		   $(LG_RT_DIR)/realm/machine_impl.cc \
+		   $(LG_RT_DIR)/realm/runtime_impl.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
 		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
 		   $(LG_RT_DIR)/greenlet/greenlet-cc.cc
@@ -283,8 +292,8 @@ LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
-		   $(LG_RT_DIR)/realm/operation.cc
-
+		   $(LG_RT_DIR)/realm/operation.cc \
+		   $(LG_RT_DIR)/realm/timers.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
@@ -344,6 +353,7 @@ endif
 
 ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
 
+ifndef NO_BUILD_RULES
 .PHONY: all
 all: $(OUTFILE)
 
@@ -375,4 +385,5 @@ $(GPU_RUNTIME_OBJS): %.o : %.cu
 
 clean:
 	@$(RM) -rf $(ALL_OBJS) $(OUTFILE)
+endif
 

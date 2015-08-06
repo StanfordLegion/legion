@@ -897,7 +897,7 @@ function optimize_futures.stat_top(cx, node)
 end
 
 function optimize_futures.entry(node)
-  local cx = context.new_global_scope({})
+  local cx = context.new_global_scope()
   return optimize_futures.stat_top(cx, node)
 end
 

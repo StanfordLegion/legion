@@ -18,6 +18,7 @@
 #ifndef _ARRAYS_H
 #define _ARRAYS_H
 
+#include <string.h>
 #include <vector>
 #include <map>
 

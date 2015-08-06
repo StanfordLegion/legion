@@ -18,6 +18,10 @@
 #ifndef REALM_INDEXSPACE_H
 #define REALM_INDEXSPACE_H
 
+#include "event.h"
+#include "memory.h"
+#include "instance.h"
+
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
@@ -27,6 +31,8 @@
 
 namespace Realm {
 
+  class ProfilingRequestSet;
+  
     class ElementMask {
     public:
       ElementMask(void);
@@ -233,39 +239,39 @@ namespace Realm {
       // Variants of the above but with profiling information
       Event create_equal_subspaces(size_t count, size_t granularity,
 				   std::vector<IndexSpace>& subspaces,
-                                   const Realm::ProfilingRequestSet &reqs,
+                                   const ProfilingRequestSet &reqs,
 				   bool mutable_results,
 				   Event wait_on = Event::NO_EVENT) const;
       Event create_weighted_subspaces(size_t count, size_t granularity,
 				      const std::vector<int>& weights,
 				      std::vector<IndexSpace>& subspaces,
-                                      const Realm::ProfilingRequestSet &reqs,
+                                      const ProfilingRequestSet &reqs,
 				      bool mutable_results,
 				      Event wait_on = Event::NO_EVENT) const;
       static Event compute_index_spaces(std::vector<BinaryOpDescriptor>& pairs,
-                                        const Realm::ProfilingRequestSet &reqs,
+                                        const ProfilingRequestSet &reqs,
 					bool mutable_results,
 					Event wait_on = Event::NO_EVENT);
       static Event reduce_index_spaces(IndexSpaceOperation op,
 				       const std::vector<IndexSpace>& spaces,
-                                       const Realm::ProfilingRequestSet &reqs,
+                                       const ProfilingRequestSet &reqs,
 				       IndexSpace& result,
 				       bool mutable_results,
                                        IndexSpace parent = IndexSpace::NO_SPACE,
 				       Event wait_on = Event::NO_EVENT);
       Event create_subspaces_by_field(const std::vector<FieldDataDescriptor>& field_data,
 				      std::map<DomainPoint, IndexSpace>& subspaces,
-                                      const Realm::ProfilingRequestSet &reqs,
+                                      const ProfilingRequestSet &reqs,
 				      bool mutable_results,
 				      Event wait_on = Event::NO_EVENT) const;
       Event create_subspaces_by_image(const std::vector<FieldDataDescriptor>& field_data,
 				      std::map<IndexSpace, IndexSpace>& subspaces,
-                                      const Realm::ProfilingRequestSet &reqs,
+                                      const ProfilingRequestSet &reqs,
 				      bool mutable_results,
 				      Event wait_on = Event::NO_EVENT) const;
       Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor>& field_data,
 					 std::map<IndexSpace, IndexSpace>& subspaces,
-                                         const Realm::ProfilingRequestSet &reqs,
+                                         const ProfilingRequestSet &reqs,
 					 bool mutable_results,
 					 Event wait_on = Event::NO_EVENT) const;
     };
@@ -895,13 +901,13 @@ namespace Realm {
 				     ReductionOpID redop_id = 0) const;
 
       RegionInstance create_instance(Memory memory, size_t elem_size,
-                                     const Realm::ProfilingRequestSet &reqs,
+                                     const ProfilingRequestSet &reqs,
                                      ReductionOpID redop_id = 0) const;
 
       RegionInstance create_instance(Memory memory,
 				     const std::vector<size_t> &field_sizes,
 				     size_t block_size,
-                                     const Realm::ProfilingRequestSet &reqs,
+                                     const ProfilingRequestSet &reqs,
 				     ReductionOpID redop_id = 0) const;
 
       RegionInstance create_hdf5_instance(const char *file_name,
@@ -953,13 +959,13 @@ namespace Realm {
 
       // Variants of the above for profiling
       Event fill(const std::vector<CopySrcDstField> &dsts,
-                 const Realm::ProfilingRequestSet &requests,
+                 const ProfilingRequestSet &requests,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
       
       Event copy(const std::vector<CopySrcDstField>& srcs,
 		 const std::vector<CopySrcDstField>& dsts,
-                 const Realm::ProfilingRequestSet &reqeusts,
+                 const ProfilingRequestSet &reqeusts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
     };
