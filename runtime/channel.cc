@@ -1457,7 +1457,7 @@ namespace LegionRuntime {
             if (nr == 0)
               continue;
             std::vector<XferDes*> finish_xferdes;
-            PriorityXferDesQueue::iterator it2;
+            PriorityXferDesQueue::const_iterator it2;
             for (it2 = it->second->begin(); it2 != it->second->end(); it2++) {
               assert((*it2)->channel == it->first);
               long nr_got = (*it2)->get_requests(requests, nr);
