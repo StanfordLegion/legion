@@ -929,8 +929,67 @@ namespace LegionRuntime{
         return (a->priority < b->priority);
       }
     };
-    //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
-    typedef std::multiset<XferDes*, CompareXferDes> PriorityXferDesQueue;
+
+    class PriorityXferDesQueue {
+     public:
+      typedef std::multiset<XferDes*, CompareXferDes>::const_iterator const_iterator;
+
+      /*
+       *
+       */
+      void insert(XferDes *xd) {
+        // we can stash this iterators because insertion on a multiset doesn't
+        // invalidate previous iterators
+        std::multiset<XferDes*, CompareXferDes>::iterator it = pq.insert(xd);
+        assert(pqinv.find(xd) == pqinv.end());
+        pqinv[xd] = it;
+      }
+
+      /*
+       *
+       */
+      void insert(const_iterator begin, const_iterator end) {
+        for (const_iterator it = begin; it != end; it++) {
+          insert(*it);
+        }
+      }
+
+      size_t size() const {
+        return pq.size();
+      }
+
+      void clear() {
+        pq.clear();
+        pqinv.clear();
+      }
+
+      bool empty() {
+        return pq.empty();
+      }
+
+      const_iterator begin() {
+        return pq.begin();
+      }
+
+      const_iterator end() {
+        return pq.end();
+      }
+
+      /*
+       *
+       */
+      void erase(XferDes *xd) {
+        std::map<XferDes*, std::set<XferDes*, CompareXferDes>::iterator>::iterator it =
+          pqinv.find(xd);
+        assert(it != pqinv.end());
+        pq.erase(it->second);
+        pqinv.erase(it);
+      }
+
+     private:
+      std::multiset<XferDes*, CompareXferDes> pq;
+      std::map<XferDes*, std::set<XferDes*, CompareXferDes>::iterator> pqinv;
+    };
 
     class XferDesQueue;
     class DMAThread {
