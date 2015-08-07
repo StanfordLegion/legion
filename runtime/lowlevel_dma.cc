@@ -2753,7 +2753,7 @@ namespace LegionRuntime {
             ID id = dst_inst.id; 
             unsigned index = id.index_l();
             pthread_rwlock_rdlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->rwlock);
-            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata[index];
+            HDFMemory::HDFMetadata* hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->hdf_metadata_vec[index];
             pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_mem))->rwlock);
             log_dma.info("create mem->hdf xferdes\n");
             XferDes* xd = new HDFXferDes<DIM>(channel_manager->get_hdf_write_channel(), false,
@@ -2948,7 +2948,7 @@ namespace LegionRuntime {
         {
           ID src_id(src_impl->me);
           unsigned src_index = src_id.index_l();
-          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata[src_index];
+          HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata_vec[src_index];
           switch (dst_kind) {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:

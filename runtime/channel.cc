@@ -880,7 +880,6 @@ namespace LegionRuntime {
           switch (kind) {
             case XferDes::XFER_HDF_READ:
             {
-//              std::cout << "In HDFXferDes::get_requests READ operating on metadata:" << hdf_metadata << std::endl;
               // Recall that src_offset means the index of the involving dataset in hdf file
               off_t hdf_idx = fit->src_offset;
               pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
@@ -914,7 +913,6 @@ namespace LegionRuntime {
             case XferDes::XFER_HDF_WRITE:
             {
               // Recall that src_offset means the index of the involving dataset in hdf file
-//              std::cout << "In HDFXferDes::get_requests WRITE operating on metadata:" << hdf_metadata << std::endl;
               off_t hdf_idx = fit->dst_offset;
               pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
               size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
