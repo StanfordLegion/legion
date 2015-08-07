@@ -23,7 +23,7 @@
 #include <errno.h>
 
 namespace Realm {
-
+  
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
@@ -179,7 +179,7 @@ namespace Realm {
                      bool read_only)
 
     {
-      RegionInstance i = create_instance_local(is,
+      RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
                  list_size, reqs, parent_inst);
@@ -206,20 +206,21 @@ namespace Realm {
         int rc = pthread_rwlock_init(&new_hdf->dataset_rwlocks[idx], NULL);
         assert(rc==0);
       }
-      if (ID(i).index_l() < hdf_metadata.size())
-        hdf_metadata[ID(i).index_l()] = new_hdf;
-      else
-        hdf_metadata.push_back(new_hdf);
+      if (ID(inst).index_l() < hdf_metadata_vec.size()) {
+        hdf_metadata_vec[ID(inst).index_l()] = new_hdf;
+      } else {
+        hdf_metadata_vec.push_back(new_hdf);
+      }
       pthread_rwlock_unlock(&this->rwlock);
-      return i;
+      return inst;
     }
 
     void HDFMemory::destroy_instance(RegionInstance i,
 				     bool local_destroy)
     {
-      HDFMetadata* new_hdf = hdf_metadata[ID(i).index_l()];
-      assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       pthread_rwlock_wrlock(&this->rwlock);
+      HDFMetadata* new_hdf = hdf_metadata_vec[ID(i).index_l()];
+      assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
         H5Tclose(new_hdf->datatype_ids[idx]);
@@ -254,8 +255,7 @@ namespace Realm {
     void HDFMemory::get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
       pthread_rwlock_rdlock(&this->rwlock);
-      HDFMetadata *metadata = hdf_metadata[inst_id];
-//      std::cout << "In HDFMemory::get_bytes operating on metadata:" << metadata << std::endl;
+      HDFMetadata *metadata = hdf_metadata_vec[inst_id];
       // use index to compute position in space
       assert(size == H5Tget_size(metadata->datatype_ids[fid]));
       hsize_t offset[3], count[3];
@@ -287,10 +287,9 @@ namespace Realm {
     void HDFMemory::put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
       pthread_rwlock_rdlock(&this->rwlock);
-      HDFMetadata *metadata = hdf_metadata[inst_id];
-//      std::cout << "In HDFMemory::put_bytes operating on metadata:" << metadata << std::endl;
+      HDFMetadata *metadata = hdf_metadata_vec[inst_id];
       // use index to compute position in space
-      assert(size == H5Tget_size(hdf_metadata[inst_id]->datatype_ids[fid]));
+      assert(size == H5Tget_size(metadata->datatype_ids[fid]));
       hsize_t offset[3], count[3];
       for (int i = 0; i < metadata->ndims; i++) {
         offset[i] = dp.point_data[i] - metadata->lo[i];
@@ -329,5 +328,5 @@ namespace Realm {
       return gasnet_mynode();
     }
 #endif
-
 }
+
