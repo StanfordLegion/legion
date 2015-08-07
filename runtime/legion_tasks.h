@@ -459,6 +459,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
+      virtual void record_remote_context(void) = 0;
       virtual void record_remote_instance(AddressSpaceID remote_inst) = 0;
     public:
       // Has a base implementation but can override
@@ -521,6 +522,7 @@ namespace LegionRuntime {
       std::deque<Event> frame_events;
       Event deferred_map;
       Event deferred_complete;
+      Event pending_done;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -688,6 +690,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
+      virtual void record_remote_context(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual void trigger_task_complete(void);
@@ -739,6 +742,7 @@ namespace LegionRuntime {
     protected:
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
+      bool has_remote_context;
       NodeSet remote_instances;
     };
 
@@ -779,6 +783,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
+      virtual void record_remote_context(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual void trigger_task_complete(void);
@@ -798,9 +803,9 @@ namespace LegionRuntime {
       friend class SliceTask;
       SliceTask                   *slice_owner;
       UserEvent                   point_termination;
-      std::vector<VersionInfo>    version_infos;
     protected:
       bool has_remote_subtasks;
+      bool has_remote_context;
       NodeSet remote_instances;
     };
 
@@ -837,6 +842,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
+      virtual void record_remote_context(void) = 0;
       virtual void record_remote_instance(AddressSpaceID remote_inst) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
@@ -890,6 +896,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
+      virtual void record_remote_context(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual Event get_task_completion(void) const;
@@ -934,6 +941,7 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
+      virtual void record_remote_context(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual Event get_task_completion(void) const;
@@ -1047,6 +1055,7 @@ namespace LegionRuntime {
       virtual void register_must_epoch(void);
     public:
       void enumerate_points(void);
+      void record_locally_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points, long long denom);
       void return_slice_complete(unsigned points);
@@ -1081,6 +1090,7 @@ namespace LegionRuntime {
       size_t predicate_false_size;
     protected:
       std::vector<RegionTreePath> privilege_paths;
+      std::deque<SliceTask*> locally_mapped_slices;
     };
 
     /**

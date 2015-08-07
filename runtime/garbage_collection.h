@@ -176,6 +176,7 @@ namespace LegionRuntime {
     public:
       // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, Event destroy_event);
+      void register_with_runtime(void);
     public:
       virtual void send_remote_registration(void);
       virtual void send_remote_valid_update(AddressSpaceID target, 

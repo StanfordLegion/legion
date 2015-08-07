@@ -2065,6 +2065,7 @@ namespace LegionRuntime {
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
+      pending_done = Event::NO_EVENT;
       current_trace = NULL;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
@@ -2360,7 +2361,7 @@ namespace LegionRuntime {
     {
       RezCheck z(rez);
       pack_base_task(rez, target);
-      rez.serialize(virtual_mapped.size());
+      rez.serialize<size_t>(virtual_mapped.size());
       for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
       {
         bool virt = virtual_mapped[idx];
@@ -2368,7 +2369,7 @@ namespace LegionRuntime {
       }
       rez.serialize(num_virtual_mappings);
       rez.serialize(executing_processor);
-      rez.serialize(physical_instances.size());
+      rez.serialize<size_t>(physical_instances.size());
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
         physical_instances[idx].pack_reference(rez, target);
@@ -4277,9 +4278,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           // All these better succeed since we already made the instances
           assert(physical_instances[idx].has_ref());
-#endif
-          // Flush out the physical regions
-          version_info.apply_mapping(enclosing_physical_contexts[idx].get_id());
+#endif 
         }
         executing_processor = target;
         if (notify)
@@ -4888,7 +4887,7 @@ namespace LegionRuntime {
         DecrementArgs decrement_args;
         decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
         decrement_args.parent_ctx = parent_ctx;
-        runtime->issue_runtime_meta_task(&decrement_args, 
+        pending_done = runtime->issue_runtime_meta_task(&decrement_args, 
             sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
       }
       // Start the profiling if requested
@@ -5003,13 +5002,13 @@ namespace LegionRuntime {
       
       // See if we want to move the rest of this computation onto
       // the utility processor
-      if (runtime->has_explicit_utility_procs)
+      if (runtime->has_explicit_utility_procs || !pending_done.has_triggered())
       {
         PostEndArgs post_end_args;
         post_end_args.hlr_id = HLR_POST_END_ID;
         post_end_args.proxy_this = this;
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-                                         HLR_POST_END_ID, this);
+                                         HLR_POST_END_ID, this, pending_done);
       }
       else
         post_end_task();
@@ -5401,6 +5400,12 @@ namespace LegionRuntime {
     void MultiTask::trigger_remote_state_analysis(UserEvent ready_event)
     //--------------------------------------------------------------------------
     {
+      // If we're remote and locally mapped, we are done
+      if (is_remote() && is_locally_mapped())
+      {
+        ready_event.trigger();
+        return;
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == version_infos.size());
 #endif
@@ -5702,6 +5707,7 @@ namespace LegionRuntime {
       sent_remotely = false;
       top_level_task = false;
       has_remote_subtasks = false;
+      has_remote_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5712,7 +5718,7 @@ namespace LegionRuntime {
       if (top_level_task)
         parent_ctx->deactivate();
       deactivate_single();
-      if (has_remote_subtasks)
+      if (has_remote_context)
       {
         UniqueID local_uid = get_unique_task_id();
         runtime->unregister_remote_receiver(local_uid);
@@ -6012,6 +6018,12 @@ namespace LegionRuntime {
     void IndividualTask::trigger_remote_state_analysis(UserEvent ready_event)
     //--------------------------------------------------------------------------
     {
+      // If we're remote and locally mapped, we are done
+      if (is_remote() && is_locally_mapped())
+      {
+        ready_event.trigger();
+        return;
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == version_infos.size());
 #endif
@@ -6229,9 +6241,15 @@ namespace LegionRuntime {
       // throughout the duration of the computation
       bool map_success = map_all_regions(target_proc, 
                                          get_task_completion(), mapper_invoked);
-      // If we mapped, then we are no longer stealable
       if (map_success)
+      {
+        // If we mapped, then we are no longer stealable
         spawn_task = false;
+        // Also flush out physical regions
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].apply_mapping(
+                              enclosing_physical_contexts[idx].get_id());
+      }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
       if (map_success && (num_virtual_mappings == 0))
@@ -6330,11 +6348,19 @@ namespace LegionRuntime {
     void IndividualTask::record_remote_state(void)
     //--------------------------------------------------------------------------
     {
+      // Monotonic so no need to hold the lock 
+      has_remote_subtasks = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_remote_context(void)
+    //--------------------------------------------------------------------------
+    {
       // No need for a lock since this is monotonic
       // It's alright for there to be races in the registration
-      if (!has_remote_subtasks)
+      if (!has_remote_context)
         runtime->register_remote_receiver(get_unique_task_id(), this);
-      has_remote_subtasks = true;
+      has_remote_context = true;
     }
 
     //--------------------------------------------------------------------------
@@ -6469,12 +6495,14 @@ namespace LegionRuntime {
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote() && !is_locally_mapped())
+      if (!is_remote())
       {
         // Notify our enclosing parent task that we are being sent 
         // remotely if we are not locally mapped because now there
         // will be remote state
-        parent_ctx->record_remote_state();
+        parent_ctx->record_remote_context();
+        if (!is_locally_mapped())
+          parent_ctx->record_remote_state();
       }
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
@@ -6487,8 +6515,11 @@ namespace LegionRuntime {
       rez.serialize(remote_outermost_context);
       rez.serialize(remote_owner_uid);
       parent_ctx->pack_parent_task(rez);
-      pack_version_infos(rez, version_infos);
-      pack_restrict_infos(rez, restrict_infos);
+      if (!is_locally_mapped())
+      {
+        pack_version_infos(rez, version_infos);
+        pack_restrict_infos(rez, restrict_infos);
+      }
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6512,8 +6543,11 @@ namespace LegionRuntime {
       RemoteTask *remote_ctx = 
         runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
-      unpack_version_infos(derez, version_infos);
-      unpack_restrict_infos(derez, restrict_infos);
+      if (!is_locally_mapped())
+      {
+        unpack_version_infos(derez, version_infos);
+        unpack_restrict_infos(derez, restrict_infos);
+      }
       // Add our enclosing parent regions to the list of 
       // top regions maintained by the remote context
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -6775,6 +6809,7 @@ namespace LegionRuntime {
       activate_single();
       slice_owner = NULL;
       has_remote_subtasks = false;
+      has_remote_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6782,7 +6817,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_single();
-      if (has_remote_subtasks)
+      if (has_remote_context)
       {
         UniqueID local_uid = get_unique_task_id();
         runtime->unregister_remote_receiver(local_uid);
@@ -6795,7 +6830,6 @@ namespace LegionRuntime {
         remote_instances.map(releaser);
         remote_instances.clear();
       }
-      version_infos.clear();
       runtime->free_point_task(this);
     }
 
@@ -6891,7 +6925,7 @@ namespace LegionRuntime {
     VersionInfo& PointTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      return version_infos[idx];
+      return slice_owner->get_version_info(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -6937,11 +6971,19 @@ namespace LegionRuntime {
     void PointTask::record_remote_state(void)
     //--------------------------------------------------------------------------
     {
+      // Monotonic so no need to hold the lock
+      has_remote_subtasks = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_remote_context(void)
+    //--------------------------------------------------------------------------
+    {
       // No need for a lock since this is monotonic
       // It's alright for there to be races in the registration
-      if (!has_remote_subtasks)
+      if (!has_remote_context)
         runtime->register_remote_receiver(get_unique_task_id(), this);
-      has_remote_subtasks = true;
+      has_remote_context = true;
     }
 
     //--------------------------------------------------------------------------
@@ -7004,12 +7046,6 @@ namespace LegionRuntime {
     void PointTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
-      // We can release our version infos now
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-            it != version_infos.end(); it++)
-      {
-        it->release();
-      }
       // Commit this operation
       commit_operation();
       // Then tell our slice owner that we're done
@@ -7412,6 +7448,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTask::record_remote_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTask::record_remote_instance(AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
@@ -7572,6 +7616,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void InlineTask::record_remote_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineTask::record_remote_instance(AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
@@ -7711,6 +7763,16 @@ namespace LegionRuntime {
     {
       deactivate_multi();
       privilege_paths.clear();
+      if (!locally_mapped_slices.empty())
+      {
+        for (std::deque<SliceTask*>::const_iterator it = 
+              locally_mapped_slices.begin(); it != 
+              locally_mapped_slices.end(); it++)
+        {
+          (*it)->deactivate();
+        }
+        locally_mapped_slices.clear();
+      }
       // Remove our reference to the argument map
       argument_map = ArgumentMap();
       // Remove our reference to the future map
@@ -8920,6 +8982,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::record_locally_mapped_slice(SliceTask *local_slice)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      locally_mapped_slices.push_back(local_slice);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom)
     //--------------------------------------------------------------------------
     {
@@ -9169,6 +9239,12 @@ namespace LegionRuntime {
     void SliceTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      if (!version_infos.empty())
+      {
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].release();
+        version_infos.clear();
+      }
       deactivate_multi();
       // Deactivate all our points 
       for (std::deque<PointTask*>::const_iterator it = points.begin();
@@ -9407,12 +9483,14 @@ namespace LegionRuntime {
     bool SliceTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote() && !is_locally_mapped())
+      if (!is_remote())
       {
         // Notify our enclosing parent task that we are being sent 
         // remotely if we are not locally mapped because now there
         // will be remote state
-        parent_ctx->record_remote_state();
+        parent_ctx->record_remote_context();
+        if (!is_locally_mapped())
+          parent_ctx->record_remote_state();
       }
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
@@ -9430,21 +9508,37 @@ namespace LegionRuntime {
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
       parent_ctx->pack_parent_task(rez);
-      pack_version_infos(rez, version_infos);
-      if (is_remote())
-        pack_restrict_infos(rez, restrict_infos);
-      else
-        index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
+      if (!is_locally_mapped())
+      {
+        pack_version_infos(rez, version_infos);
+        if (is_remote())
+          pack_restrict_infos(rez, restrict_infos);
+        else
+          index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
+      }
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
       }
-      // Release our version infos
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].release();
+      bool deactivate_now = true;
+      if (!is_remote() && is_locally_mapped())
+      {
+        // If we're not remote and locally mapped then we need
+        // to hold onto these version infos until we are done
+        // with the whole index space task, so tell our owner
+        index_owner->record_locally_mapped_slice(this);
+        deactivate_now = false;
+      }
+      else
+      {
+        // Release our version infos
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].release();
+        version_infos.clear();
+      }
       // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
-      return true;
+      return deactivate_now;
     }
     
     //--------------------------------------------------------------------------
@@ -9466,8 +9560,11 @@ namespace LegionRuntime {
       RemoteTask *remote_ctx = 
         runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
       remote_ctx->unpack_parent_task(derez);
-      unpack_version_infos(derez, version_infos);
-      unpack_restrict_infos(derez, restrict_infos);
+      if (!is_locally_mapped())
+      {
+        unpack_version_infos(derez, version_infos);
+        unpack_restrict_infos(derez, restrict_infos);
+      }
       // Add our parent regions to the list of top regions
       for (unsigned idx = 0; idx < regions.size(); idx++)
         remote_ctx->add_top_region(regions[idx].parent);
@@ -9633,9 +9730,6 @@ namespace LegionRuntime {
                                    this->task_id);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
-      result->version_infos.resize(this->version_infos.size());
-      for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
-        result->version_infos[idx] = this->version_infos[idx];
       result->enclosing_physical_contexts = this->enclosing_physical_contexts;
       result->is_index_space = true;
       result->must_parallelism = this->must_parallelism;
@@ -9825,6 +9919,18 @@ namespace LegionRuntime {
     void SliceTask::trigger_slice_mapped(void)
     //--------------------------------------------------------------------------
     {
+      // No matter what, flush out our physical states
+      if (!version_infos.empty())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(version_infos.size() == enclosing_physical_contexts.size());
+#endif
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        {
+          version_infos[idx].apply_mapping(
+                              enclosing_physical_contexts[idx].get_id());
+        }
+      }
       if (is_remote())
       {
         // Only need to send something back if this wasn't mapped locally
@@ -9887,9 +9993,7 @@ namespace LegionRuntime {
       else
       {
         // created and deleted privilege information already passed back
-
         // futures already sent back
-
         index_owner->return_slice_commit(points.size());
       }
       // We can release our version infos now
@@ -9898,6 +10002,7 @@ namespace LegionRuntime {
       {
         it->release();
       }
+      version_infos.clear();
       commit_operation();
       // After we're done with this, then we can reclaim oursleves
       deactivate();

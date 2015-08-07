@@ -284,6 +284,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::register_with_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!registered_with_runtime);
+#endif
+      registered_with_runtime = true;
+      runtime->register_distributed_collectable(did, this);
+      if (!is_owner())
+        send_remote_registration();
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {

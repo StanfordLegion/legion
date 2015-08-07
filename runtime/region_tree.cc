@@ -3013,11 +3013,7 @@ namespace LegionRuntime {
       if (finder == index_nodes.end())
       {
         log_index.error("Unable to find entry for index space %x."
-                              "This is either a runtime bug, or requires "
-                              "Legion fences if index space names are being "
-                              "returned out of the context in which they are "
-                              "created.",
-                              space.id);
+                        "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -3059,10 +3055,7 @@ namespace LegionRuntime {
       if (finder == index_parts.end())
       {
         log_index.error("Unable to find entry for index partition %x. "
-                              "This is either a runtime bug, or requires "
-                              "Legion fences if index partition names are "
-                              "being returned out of the context in which "
-                              "they are created.", part.id);
+                        "This is definitely a runtime bug.", part.id);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -3096,17 +3089,14 @@ namespace LegionRuntime {
       rez.serialize(space);
       rez.serialize(wait_on);
       runtime->send_field_space_request(owner, rez);
-      // Be safe and block for now
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
       if (finder == field_nodes.end())
       {
-        log_field.error("Unable to find entry for field space %x.  This "
-                              "is either a runtime bug, or requires Legion "
-                              "fences if field space names are being returned "
-                              "out of the context in which they are created.",
-                              space.id);
+        log_field.error("Unable to find entry for field space %x. "
+                        "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -3121,47 +3111,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(this, GET_NODE_CALL);
-#endif
-      // Don't need these error messages now that we can migrate nodes
-#if 0
-#ifdef DEBUG_HIGH_LEVEL
-      if (!has_node(handle.index_space))
-      {
-        log_region.error("Unable to find index space entry %x for "
-                               "logical region. This is either a runtime bug "
-                               "or requires Legion fences if names are being "
-                               "returned out of the context in which they are "
-                               "being created.", handle.index_space.id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_REGION_ENTRY);
-      }
-      if (!has_node(handle.field_space))
-      {
-        log_region.error("Unable to find field space entry %x for "
-                               "logical region. This is either a runtime bug "
-                               "or requires Legion fences if names are being "
-                               "returned out of the context in which they are "
-                               "being created.", handle.field_space.id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_REGION_ENTRY);
-      }
-      if (!has_tree(handle.tree_id))
-      {
-        log_region.error("Unable to find region tree ID %x for "
-                               "logical region. This is either a runtime bug "
-                               "or requires Legion fences if names are being "
-                               "returned out of the context in which they are "
-                               "being created.", handle.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_REGION_ENTRY);
-      }
-#endif
 #endif
       // Check to see if the node already exists
       {
@@ -3195,50 +3144,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(this, GET_NODE_CALL);
-#endif
-      // Don't need these error messages now that we can migrate nodes
-#if 0
-#ifdef DEBUG_HIGH_LEVEL
-      if (!has_node(handle.index_partition))
-      {
-        log_region.error("Unable to find index partition entry %x for "
-                               "logical partition.  This is either a runtime "
-                               "bug or requires Legion fences if names are "
-                               "being returned out of the context in which "
-                               "they are being created.", 
-                               handle.index_partition.id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARTITION_ENTRY);
-      }
-      if (!has_node(handle.field_space))
-      {
-        log_region.error("Unable to find field space entry %x for "
-                               "logical partition.  This is either a runtime "
-                               "bug or requires Legion fences if names are "
-                               "being returned out of the context in which "
-                               "they are being created.", 
-                               handle.field_space.id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARTITION_ENTRY);
-      }
-      if (!has_tree(handle.tree_id))
-      {
-        log_region.error("Unable to find region tree ID entry %x for "
-                               "logical partition.  This is either a runtime "
-                               "bug or requires Legion fences if names are "
-                               "being returned out of the context in which "
-                               "they are being created.", 
-                               handle.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARTITION_ENTRY);
-      }
-#endif
 #endif
       // Check to see if the node already exists
       {
@@ -9513,8 +9418,8 @@ namespace LegionRuntime {
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != node_infos.end());
-      assert(finder->second.field_versions != NULL);
 #endif
+      // It's alright for this to return NULL
       return finder->second.field_versions;
     }
 
@@ -12714,6 +12619,9 @@ namespace LegionRuntime {
           runtime->send_version_state_initialization(owner_space, rez);
         }
       }
+      // If we're the owner and we are in eventual state, add ourselves
+      else if (meta_state == EVENTUAL_VERSION_STATE)
+        eventual_nodes.add(local_space);
     }
 
     //--------------------------------------------------------------------------
@@ -13282,7 +13190,6 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!eventual_nodes.empty());
-        assert(!eventual_nodes.contains(local_space));
         if (eventual_nodes.size() == 1)
           assert(!eventual_nodes.contains(source));
 #endif
@@ -13300,7 +13207,6 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!merged_nodes.empty());
-        assert(!merged_nodes.contains(local_space));
         if (merged_nodes.size() == 1)
           assert(!merged_nodes.contains(source));
 #endif
@@ -14486,13 +14392,13 @@ namespace LegionRuntime {
         AutoLock v_lock(version_lock);
         if (owner->context->runtime->has_distributed_collectable(did))
         {
-          DistributedCollectable *result = 
+          DistributedCollectable *dc = 
             owner->context->runtime->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
-          result = dynamic_cast<VersionState*>(result);
+          result = dynamic_cast<VersionState*>(dc);
           assert(result != NULL);
 #else
-          result = static_cast<VersionState*>(result);
+          result = static_cast<VersionState*>(dc);
 #endif
         }
         else // Otherwise make it
@@ -21551,7 +21457,8 @@ namespace LegionRuntime {
                                      AddressSpaceID local_space,
                                      Memory mem, RegionNode *node,
                                      PhysicalInstance inst, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, owner_space, local_space), 
+      : DistributedCollectable(ctx->runtime, did, owner_space, 
+                               local_space, register_now), 
         context(ctx), memory(mem), region_node(node), instance(inst)
     //--------------------------------------------------------------------------
     {
@@ -21986,7 +21893,10 @@ namespace LegionRuntime {
       if (!target_node->register_physical_manager(inst_manager))
         legion_delete(inst_manager);
       else
+      {
+        inst_manager->register_with_runtime();
         inst_manager->update_remote_instances(source);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22262,7 +22172,10 @@ namespace LegionRuntime {
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
         else
+        {
+          manager->register_with_runtime();
           manager->update_remote_instances(source);
+        }
       }
       else
       {
@@ -22274,7 +22187,10 @@ namespace LegionRuntime {
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
         else
+        {
+          manager->register_with_runtime();
           manager->update_remote_instances(source);
+        }
       }
     }
 
@@ -29565,7 +29481,7 @@ namespace LegionRuntime {
           rez.serialize(*it);
       }
       else
-        rez.serialize(0);
+        rez.serialize<DistributedID>(0);
     }
 
     //--------------------------------------------------------------------------
