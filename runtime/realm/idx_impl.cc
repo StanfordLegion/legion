@@ -468,6 +468,9 @@ namespace Realm {
       for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++) {
         if (it->kind() == Memory::HDF_MEM) {
           memory = *it;
+          HDFMemory* hdf_mem = (HDFMemory*) get_runtime()->get_memory_impl(memory);
+          if(hdf_mem->kind == MemoryImpl::MKIND_HDF)
+            break; /* this is usable, take it */ 
         }
       }
       assert(memory.kind() == Memory::HDF_MEM);
