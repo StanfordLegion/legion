@@ -16987,6 +16987,11 @@ namespace LegionRuntime {
                                                VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      log_run.error("Unfortunately Legion Spy doesn't support composite "
+                    "instance analysis yet");
+      assert(false); // TODO: Teach Legion Spy to analyze composite instances
+#endif
       PhysicalState *state = get_physical_state(ctx_id, version_info);
       FieldMask dirty_mask, complete_mask; 
       const bool capture_children = !is_region();
