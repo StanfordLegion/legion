@@ -245,6 +245,9 @@ namespace LegionRuntime {
       SEND_VERSION_STATE_REQUEST,
       SEND_VERSION_STATE_RESPONSE,
       SEND_VERSION_STATE_BROADCAST_RESPONSE,
+      SEND_INSTANCE_CREATION,
+      SEND_REDUCTION_CREATION,
+      SEND_CREATION_RESPONSE,
     };
 
     // Forward declarations for user level objects

@@ -674,18 +674,6 @@ namespace LegionRuntime {
       void allocate_physical_instance(PhysicalManager *manager);
       void free_physical_instance(PhysicalManager *manager);
     public:
-      void recycle_physical_instance(InstanceManager *manager);
-      bool reclaim_physical_instance(InstanceManager *manager);
-    public:
-      PhysicalInstance find_physical_instance(size_t field_size,
-                                              const Domain &dom, 
-                                              const unsigned depth,
-                                              Event &use_event);
-      PhysicalInstance find_physical_instance(
-                          const std::vector<size_t> &field_sizes,
-                          const Domain &dom, const size_t blocking_factor,
-                          const unsigned depth, Event &use_event);
-    public:
       // Method for mapper introspection
       size_t sample_allocated_space(void);
       size_t sample_free_space(void);
@@ -708,9 +696,6 @@ namespace LegionRuntime {
       // Current set of reduction instances and their sizes
       LegionMap<ReductionManager*, size_t,
                 MEMORY_REDUCTION_ALLOC>::tracked reduction_instances;
-      // Set of physical instances which are currently eligible for recycling
-      LegionSet<InstanceManager*,
-                MEMORY_AVAILABLE_ALLOC>::tracked available_instances;
     };
 
     /**
@@ -1379,18 +1364,7 @@ namespace LegionRuntime {
       MemoryManager* find_memory(Memory mem);
       void allocate_physical_instance(PhysicalManager *instance);
       void free_physical_instance(PhysicalManager *instance);
-    public:
-      // Functions for recycling physical instances
-      void recycle_physical_instance(InstanceManager *instance);
-      bool reclaim_physical_instance(InstanceManager *instance);
-      PhysicalInstance find_physical_instance(Memory mem, size_t field_size,
-                   const Domain &dom, const unsigned depth, Event &use_event);
-      PhysicalInstance find_physical_instance(Memory mem, 
-                                     const std::vector<size_t> &field_sizes,
-                                     const Domain &dom, 
-                                     const size_t blocking_factor,
-                                     const unsigned depth,
-                                     Event &use_event);
+      AddressSpaceID find_address_space(Memory handle) const;
     public:
       // Mapper introspection methods
       size_t sample_allocated_space(Memory mem);
@@ -1489,6 +1463,11 @@ namespace LegionRuntime {
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_broadcast_response(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_remote_instance_creation_request(AddressSpaceID target,
+                                                 Serializer &rez);
+      void send_remote_reduction_creation_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1579,6 +1558,11 @@ namespace LegionRuntime {
       void handle_version_state_response(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_version_state_broadcast_response(Deserializer &derez);
+      void handle_remote_instance_creation(Deserializer &derez, 
+                                           AddressSpaceID source);
+      void handle_remote_reduction_creation(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_remote_creation_response(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1681,6 +1665,8 @@ namespace LegionRuntime {
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
+      DistributedCollectable* weak_find_distributed_collectable(
+                                                           DistributedID did);
     public:
       void register_future(DistributedID did, Future::Impl *impl);
       void unregister_future(DistributedID did);

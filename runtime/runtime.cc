@@ -3267,120 +3267,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::recycle_physical_instance(InstanceManager *instance)
-    //--------------------------------------------------------------------------
-    {
-      instance->add_base_resource_ref(MEMORY_MANAGER_REF);
-      AutoLock m_lock(manager_lock); 
-#ifdef DEBUG_HIGH_LEVEL
-      assert(available_instances.find(instance) == available_instances.end());
-#endif
-      available_instances.insert(instance);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MemoryManager::reclaim_physical_instance(InstanceManager *instance)
-    //--------------------------------------------------------------------------
-    {
-      bool reclaim = false;
-      {
-        AutoLock m_lock(manager_lock);
-        std::set<InstanceManager*>::iterator finder = 
-          available_instances.find(instance);
-        // If we found it, remove it from the set of available resources
-        if (finder != available_instances.end())
-        {
-          reclaim = true;
-          available_instances.erase(finder);
-        }
-      }
-      // If we are reclaiming it, remove our resource reference
-      if (reclaim && instance->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        legion_delete(instance);
-      return reclaim;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance MemoryManager::find_physical_instance(size_t field_size,
-                                                           const Domain &dom,
-                                                           const unsigned depth,
-                                                           Event &use_event)
-    //--------------------------------------------------------------------------
-    {
-      InstanceManager *to_recycle = NULL;
-      {
-        AutoLock m_lock(manager_lock);
-        for (std::set<InstanceManager*>::iterator it = 
-              available_instances.begin(); it != 
-              available_instances.end(); it++)
-        {
-          // To avoid deadlock it is imperative that the recycled instance
-          // be used by an operation which is at the same level or higher
-          // in the task graph.
-          if (depth > (*it)->depth)
-            continue;
-          if ((*it)->match_instance(field_size, dom))
-          {
-            to_recycle = (*it);
-            available_instances.erase(it);
-            break;
-          }
-        }
-      }
-      if (to_recycle != NULL)
-      {
-        // If we found one, then compute the recycle event
-        // and then return the 
-        PhysicalInstance result = to_recycle->get_instance();
-        use_event = to_recycle->get_recycle_event();
-        // Remove our resource reference
-        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          legion_delete(to_recycle);
-        return result;
-      }
-      return PhysicalInstance::NO_INST;
-    }
-    
-    //--------------------------------------------------------------------------
-    PhysicalInstance MemoryManager::find_physical_instance(
-                    const std::vector<size_t> &field_sizes, const Domain &dom,
-                    const size_t blocking_factor, const unsigned depth,
-                    Event &use_event)
-    //--------------------------------------------------------------------------
-    {
-      InstanceManager *to_recycle = NULL;
-      {
-        AutoLock m_lock(manager_lock);
-        for (std::set<InstanceManager*>::iterator it = 
-              available_instances.begin(); it != 
-              available_instances.end(); it++)
-        {
-          // To avoid deadlock it is imperative that the recycled instance
-          // be used by an operation which is at the same level or higher
-          // in the task graph.
-          if (depth > (*it)->depth)
-            continue;
-          if ((*it)->match_instance(field_sizes, dom, blocking_factor))
-          {
-            to_recycle = (*it);
-            available_instances.erase(it);
-            break;
-          }
-        }
-      }
-      if (to_recycle != NULL)
-      {
-        PhysicalInstance result = to_recycle->get_instance();
-        use_event = to_recycle->get_recycle_event();
-        // Remove our resource reference
-        if (to_recycle->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          legion_delete(to_recycle);
-        return result;
-      }
-      return PhysicalInstance::NO_INST;
-    } 
-
-    //--------------------------------------------------------------------------
     size_t MemoryManager::sample_allocated_space(void)
     //--------------------------------------------------------------------------
     {
@@ -3967,6 +3853,23 @@ namespace LegionRuntime {
           case SEND_VERSION_STATE_BROADCAST_RESPONSE:
             {
               runtime->handle_version_state_broadcast_response(derez);
+              break;
+            }
+          case SEND_INSTANCE_CREATION:
+            {
+              runtime->handle_remote_instance_creation(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_CREATION:
+            {
+              runtime->handle_remote_reduction_creation(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_CREATION_RESPONSE:
+            {
+              runtime->handle_remote_creation_response(derez);
               break;
             }
           default:
@@ -10811,38 +10714,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::recycle_physical_instance(InstanceManager *inst)
+    AddressSpaceID Runtime::find_address_space(Memory handle) const
     //--------------------------------------------------------------------------
     {
-      find_memory(inst->memory)->recycle_physical_instance(inst);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::reclaim_physical_instance(InstanceManager *inst)
-    //--------------------------------------------------------------------------
-    {
-      return find_memory(inst->memory)->reclaim_physical_instance(inst);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance Runtime::find_physical_instance(Memory mem, 
-                                        size_t field_size, const Domain &dom, 
-                                        const unsigned depth, Event &use_event)
-    //--------------------------------------------------------------------------
-    {
-      return find_memory(mem)->find_physical_instance(field_size, 
-                                                      dom, depth, use_event);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance Runtime::find_physical_instance(Memory mem,
-        const std::vector<size_t> &field_sizes, const Domain &dom,
-        const size_t blocking_factor, const unsigned depth, Event &use_event)
-    //--------------------------------------------------------------------------
-    {
-      return find_memory(mem)->find_physical_instance(field_sizes, dom,
-                                                      blocking_factor, 
-                                                      depth, use_event);
+      // Just use the standard translation for now
+      AddressSpaceID result = handle.address_space();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11704,6 +11581,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_instance_creation_request(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_CREATION,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_reduction_creation_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REDUCTION_CREATION,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_creation_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATION_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -12276,6 +12180,31 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_broadcast_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_instance_creation(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_remote_instance_creation(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_reduction_creation(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_remote_reduction_creation(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_creation_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      done_event.trigger();
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -13093,6 +13022,19 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != dist_collectables.end());
 #endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::weak_find_distributed_collectable(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
+        dist_collectables.find(did);
+      if (finder == dist_collectables.end())
+        return NULL;
       return finder->second;
     }
     
@@ -15922,33 +15864,12 @@ namespace LegionRuntime {
         }
         else
         {
-          std::map<unsigned,AddressSpaceID> address_space_indexes;
-          // Compute an index for each address space
+          local_space_id = p.address_space();
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++)
           {
-            const unsigned space = it->address_space(); 
-            std::map<unsigned,AddressSpaceID>::const_iterator finder = 
-              address_space_indexes.find(space);
-            if (finder == address_space_indexes.end())
-            {
-              AddressSpaceID index = address_space_indexes.size();
-              address_space_indexes[space] = index;
-              address_spaces.insert(index);
-            }
-            // Record our local address space
-            if ((*it) == p)
-              local_space_id = address_space_indexes[space];
-          }
-          for (std::set<Processor>::const_iterator it = all_procs.begin();
-                it != all_procs.end(); it++)
-          {
-            std::map<unsigned,AddressSpaceID>::const_iterator finder = 
-              address_space_indexes.find(it->address_space());
-#ifdef DEBUG_HIGH_LEVEL
-            assert(finder != address_space_indexes.end());
-#endif
-            AddressSpaceID sid = finder->second;
+            AddressSpaceID sid = it->address_space();
+            address_spaces.insert(sid);
             proc_spaces[*it] = sid;
             if (sid == local_space_id)
             {

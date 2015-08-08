@@ -482,6 +482,91 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
+                                        Processor::TaskFuncID tid, UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_TASK); 
+      info.id = tid;
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
+                                          HLRTaskID tid, UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_META); 
+      info.id = tid;
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
+                                          UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_COPY); 
+      // No ID here
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
+                                          UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_FILL);
+      // No ID here
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationMemoryUsage>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_inst_request(Realm::ProfilingRequestSet &requests,
+                                          UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_INST); 
+      // No ID here
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+                        ? target_proc : Processor::get_executing_processor(),
+                        HLR_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::InstanceTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::process_results(Processor p, const void *buffer,
                                          size_t size)
     //--------------------------------------------------------------------------

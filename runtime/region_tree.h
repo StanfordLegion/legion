@@ -515,7 +515,7 @@ namespace LegionRuntime {
                        const std::vector<Domain::CopySrcDstField> &src_fields,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
-      Event issue_fill(const Domain &dom, Operation *op,
+      Event issue_fill(const Domain &dom, UniqueID uid,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        const void *fill_value, size_t fill_size,
                        Event precondition = Event::NO_EVENT);
@@ -531,13 +531,13 @@ namespace LegionRuntime {
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
       PhysicalInstance create_instance(const Domain &dom, Memory target, 
-                                       size_t field_size, Operation *op);
+                                       size_t field_size, UniqueID op_id);
       PhysicalInstance create_instance(const Domain &dom, Memory target,
                                        const std::vector<size_t> &field_sizes,
-                                       size_t blocking_factor, Operation *op);
+                                       size_t blocking_factor, UniqueID op_id);
       PhysicalInstance create_instance(const Domain &dom, Memory target,
                                        size_t field_size, ReductionOpID redop,
-                                       Operation *op);
+                                       UniqueID op_id);
     protected:
       void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
                            RegionTreePath &path);
@@ -1246,11 +1246,12 @@ namespace LegionRuntime {
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
                                        size_t blocking_factor, unsigned depth,
-                                       RegionNode *node, Operation *op);
+                                       RegionNode *node, DistributedID did,
+                                       UniqueID op_id);
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop,
-                                        Operation *op);
+                                        DistributedID did, UniqueID op_id);
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
@@ -1283,6 +1284,11 @@ namespace LegionRuntime {
                                                    Deserializer &derez);
       static void handle_distributed_alloc_upgrade(RegionTreeForest *forest,
                                                    Deserializer &derez);
+    public:
+      static void handle_remote_instance_creation(RegionTreeForest *forest,
+                                Deserializer &derez, AddressSpaceID source);
+      static void handle_remote_reduction_creation(RegionTreeForest *forest,
+                                Deserializer &derez, AddressSpaceID source);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;

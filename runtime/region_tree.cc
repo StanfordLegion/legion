@@ -3658,7 +3658,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event RegionTreeForest::issue_fill(const Domain &dom, Operation *op,
+    Event RegionTreeForest::issue_fill(const Domain &dom, UniqueID uid,
                          const std::vector<Domain::CopySrcDstField> &dst_fields,
                          const void *fill_value, size_t fill_size,
                                        Event precondition)
@@ -3667,7 +3667,7 @@ namespace LegionRuntime {
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_fill_request(requests, op);
+        runtime->profiler->add_fill_request(requests, uid);
         return dom.fill(dst_fields, requests, 
                         fill_value, fill_size, precondition);
       }
@@ -3711,13 +3711,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-                                Memory target, size_t field_size, Operation *op)
+                               Memory target, size_t field_size, UniqueID op_id)
     //--------------------------------------------------------------------------
     {
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_inst_request(requests, op);
+        runtime->profiler->add_inst_request(requests, op_id);
         return dom.create_instance(target, field_size, requests);
       }
       else
@@ -3727,13 +3727,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
                           Memory target, const std::vector<size_t> &field_sizes, 
-                          size_t blocking_factor, Operation *op)
+                          size_t blocking_factor, UniqueID op_id)
     //--------------------------------------------------------------------------
     {
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet reqs;
-        runtime->profiler->add_inst_request(reqs, op);
+        runtime->profiler->add_inst_request(reqs, op_id);
         return dom.create_instance(target, field_sizes, blocking_factor, reqs);
       }
       else
@@ -3742,13 +3742,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-           Memory target, size_t field_size, ReductionOpID redop, Operation *op)
+          Memory target, size_t field_size, ReductionOpID redop, UniqueID op_id)
     //--------------------------------------------------------------------------
     {
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_inst_request(requests, op);
+        runtime->profiler->add_inst_request(requests, op_id);
         return dom.create_instance(target, field_size, requests, redop);
       }
       else
@@ -8062,7 +8062,8 @@ namespace LegionRuntime {
                                                      size_t blocking_factor,
                                                      unsigned depth,
                                                      RegionNode *node,
-                                                     Operation *op)
+                                                     DistributedID result_did,
+                                                     UniqueID op_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -8071,6 +8072,51 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!create_fields.empty());
 #endif
+      // First check to see if the memory is even local, if not we
+      // need to send a message to the local address space because 
+      // the low-level has a nasty habit of blocking for remote 
+      // instance creation
+      AddressSpaceID local_space = 
+        context->runtime->find_address_space(location);
+      if (local_space != context->runtime->address_space)
+      {
+        // Create a wait event and then send the message 
+        UserEvent wait_on = UserEvent::create_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(location);
+          rez.serialize(domain);
+          rez.serialize<size_t>(create_fields.size());
+          for (std::set<FieldID>::const_iterator it = create_fields.begin();
+                it != create_fields.end(); it++)
+          {
+            rez.serialize(*it);
+          }
+          rez.serialize(blocking_factor);
+          rez.serialize(depth);
+          rez.serialize(node->handle);
+          rez.serialize(result_did);
+          rez.serialize(op_id);
+          rez.serialize(wait_on);
+        }
+        context->runtime->send_remote_instance_creation_request(local_space, 
+                                                                rez);
+        wait_on.wait();
+        // When we wake up, see if we can find the distributed ID
+        // if not then we failed, otherwise we succeeded
+        DistributedCollectable *dc = 
+          context->runtime->weak_find_distributed_collectable(result_did);
+        if (dc == NULL)
+          return NULL;
+#ifdef DEBUG_HIGH_LEVEL
+        InstanceManager *result = dynamic_cast<InstanceManager*>(dc);
+        assert(result != NULL);
+#else
+        InstanceManager *result = static_cast<InstanceManager*>(dc);
+#endif
+        return result;
+      }
       InstanceManager *result = NULL;
       if (create_fields.size() == 1)
       {
@@ -8089,15 +8135,8 @@ namespace LegionRuntime {
         }
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
-#ifndef DISABLE_RECYCLING
-        PhysicalInstance inst = context->runtime->find_physical_instance(
-                          location, field_size, domain, depth, use_event);
-#else
-        PhysicalInstance inst = PhysicalInstance::NO_INST;
-#endif
-        // If we couldn't recycle one, then try making one
-        if (!inst.exists())
-          inst = context->create_instance(domain, location, field_size, op);
+        PhysicalInstance inst = 
+          context->create_instance(domain, location, field_size, op_id);
         if (inst.exists())
         {
           FieldMask inst_mask = get_field_mask(create_fields);
@@ -8120,8 +8159,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(layout != NULL);
 #endif
-          DistributedID did = context->runtime->get_available_distributed_id();
-          result = legion_new<InstanceManager>(context, did, 
+          result = legion_new<InstanceManager>(context, result_did, 
                                        context->runtime->address_space,
                                        context->runtime->address_space,
                                        location, inst, node, layout, 
@@ -8148,16 +8186,9 @@ namespace LegionRuntime {
         compute_create_offsets(create_fields, field_sizes, indexes);
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
-#ifndef DISABLE_RECYCLING
-        PhysicalInstance inst = context->runtime->find_physical_instance(
-            location, field_sizes, domain, blocking_factor, depth, use_event);
-#else
-        PhysicalInstance inst = PhysicalInstance::NO_INST;
-#endif
-        // If that didn't work, try making one
-        if (!inst.exists())
-          inst = context->create_instance(domain, location, field_sizes, 
-                                          blocking_factor, op);
+        PhysicalInstance inst = 
+          context->create_instance(domain, location, field_sizes, 
+                                   blocking_factor, op_id);
         if (inst.exists())
         {
           FieldMask inst_mask = get_field_mask(create_fields);
@@ -8175,8 +8206,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(layout != NULL);
 #endif
-          DistributedID did = context->runtime->get_available_distributed_id();
-          result = legion_new<InstanceManager>(context, did,
+          result = legion_new<InstanceManager>(context, result_did,
                                        context->runtime->address_space,
                                        context->runtime->address_space,
                                        location, inst, node, layout, 
@@ -8208,13 +8238,62 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_remote_instance_creation(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory location;
+      derez.deserialize(location);
+      Domain domain;
+      derez.deserialize(domain);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::set<FieldID> fields;
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        fields.insert(fid);
+      }
+      size_t blocking_factor;
+      derez.deserialize(blocking_factor);
+      unsigned depth;
+      derez.deserialize(depth);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      DistributedID did;
+      derez.deserialize(did);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+
+      RegionNode *region_node = forest->get_node(handle);
+      FieldSpaceNode *target = region_node->column_source;
+
+      // Try to make the manager
+      InstanceManager *result = target->create_instance(location, domain,
+                                          fields, blocking_factor, depth,
+                                          region_node, did, op_id);
+      // If we succeeded, send the manager back
+      if (result != NULL)
+        result->send_manager(source);
+      // No matter what send the notification
+      Serializer rez;
+      rez.serialize(done_event);
+      forest->runtime->send_remote_creation_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
     ReductionManager* FieldSpaceNode::create_reduction(Memory location,
                                                        Domain domain,
                                                        FieldID fid,
                                                        bool reduction_list,
                                                        RegionNode *node,
                                                        ReductionOpID redop,
-                                                       Operation *op)
+                                                       DistributedID result_did,
+                                                       UniqueID op_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -8223,6 +8302,46 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop > 0);
 #endif
+      // First check to see if the memory is even local, if not we
+      // need to send a message to the local address space because 
+      // the low-level has a nasty habit of blocking for remote 
+      // instance creation
+      AddressSpaceID local_space = 
+        context->runtime->find_address_space(location);
+      if (local_space != context->runtime->address_space)
+      {
+        // Create a wait event and then send the message 
+        UserEvent wait_on = UserEvent::create_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(location);
+          rez.serialize(domain);
+          rez.serialize(fid);
+          rez.serialize(reduction_list);
+          rez.serialize(node->handle);
+          rez.serialize(redop);
+          rez.serialize(result_did);
+          rez.serialize(op_id);
+          rez.serialize(wait_on);
+        }
+        context->runtime->send_remote_reduction_creation_request(local_space, 
+                                                                 rez);
+        wait_on.wait();
+        // When we wake up, see if we can find the distributed ID
+        // if not then we failed, otherwise we succeeded
+        DistributedCollectable *dc = 
+          context->runtime->weak_find_distributed_collectable(result_did);
+        if (dc == NULL)
+          return NULL;
+#ifdef DEBUG_HIGH_LEVEL
+        ReductionManager *result = dynamic_cast<ReductionManager*>(dc);
+        assert(result != NULL);
+#else
+        ReductionManager *result = static_cast<ReductionManager*>(dc);
+#endif
+        return result;
+      }
       ReductionManager *result = NULL;
       // Find the reduction operation for this instance
       const ReductionOp *reduction_op = Runtime::get_reduction_op(redop);
@@ -8249,11 +8368,10 @@ namespace LegionRuntime {
         // Don't give the reduction op here since this is a list instance and we
         // don't want to initialize any of the fields
         PhysicalInstance inst = context->create_instance(ptr_space, location,
-                                            element_sizes, 1/*true list*/, op);
+                                          element_sizes, 1/*true list*/, op_id);
         if (inst.exists())
         {
-          DistributedID did = context->runtime->get_available_distributed_id();
-          result = legion_new<ListReductionManager>(context, did,
+          result = legion_new<ListReductionManager>(context, result_did,
                                             context->runtime->address_space,
                                             context->runtime->address_space, 
                                             location, inst, node, 
@@ -8276,10 +8394,9 @@ namespace LegionRuntime {
       {
         // Easy case of making a foldable reduction
         PhysicalInstance inst = context->create_instance(domain, location,
-                                           reduction_op->sizeof_rhs, redop, op);
+                                        reduction_op->sizeof_rhs, redop, op_id);
         if (inst.exists())
         {
-          DistributedID did = context->runtime->get_available_distributed_id();
           // Issue the fill operation to fill in the init values for the field
           std::vector<Domain::CopySrcDstField> init(1);
           Domain::CopySrcDstField &dst = init[0];
@@ -8289,10 +8406,10 @@ namespace LegionRuntime {
           // Get the initial value
           void *init_value = malloc(reduction_op->sizeof_rhs);
           reduction_op->init(init_value, 1);
-          Event ready_event = context->issue_fill(domain, op, init, init_value, 
-                                                  reduction_op->sizeof_rhs);
+          Event ready_event = context->issue_fill(domain, op_id, init, 
+                                      init_value, reduction_op->sizeof_rhs);
           free(init_value);
-          result = legion_new<FoldReductionManager>(context, did,
+          result = legion_new<FoldReductionManager>(context, result_did,
                                             context->runtime->address_space,
                                             context->runtime->address_space, 
                                             location, inst, node, redop, 
@@ -8312,6 +8429,45 @@ namespace LegionRuntime {
         }
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_remote_reduction_creation(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory location;
+      derez.deserialize(location);
+      Domain domain;
+      derez.deserialize(domain);
+      FieldID fid;
+      derez.deserialize(fid);
+      bool reduction_list;
+      derez.deserialize(reduction_list);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      DistributedID did;
+      derez.deserialize(did);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+
+      RegionNode *region_node = forest->get_node(handle);
+      FieldSpaceNode *target = region_node->column_source;
+
+      ReductionManager *result = target->create_reduction(location, domain,
+                                          fid, reduction_list, region_node,
+                                          redop, did, op_id);
+      if (result != NULL)
+        result->send_manager(source);
+      // No matter what send the notification
+      Serializer rez;
+      rez.serialize(done_event);
+      forest->runtime->send_remote_creation_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -19078,9 +19234,12 @@ namespace LegionRuntime {
                                                 Operation *op)
     //--------------------------------------------------------------------------
     {
+      DistributedID did = context->runtime->get_available_distributed_id();
+      UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
       InstanceManager *manager = column_source->create_instance(target_mem,
                                       row_source->get_domain_blocking(),
-                                      fields, blocking_factor, depth, this, op);
+                                      fields, blocking_factor, depth, this, 
+                                      did, op_id);
       // See if we made the instance
       MaterializedView *result = NULL;
       if (manager != NULL)
@@ -19104,6 +19263,8 @@ namespace LegionRuntime {
           LegionSpy::log_instance_field(manager->get_instance().id, *it);
 #endif
       }
+      else
+        context->runtime->free_distributed_id(did);
       return result;
     }
 
@@ -19114,9 +19275,12 @@ namespace LegionRuntime {
                                                 Operation *op)
     //--------------------------------------------------------------------------
     {
+      DistributedID did = context->runtime->get_available_distributed_id();
+      UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
       ReductionManager *manager = column_source->create_reduction(target_mem,
                                       row_source->get_domain_blocking(),
-                                      fid, reduction_list, this, redop, op);
+                                      fid, reduction_list, this, redop, 
+                                      did, op_id);
       ReductionView *result = NULL;
       if (manager != NULL)
       {
@@ -19140,6 +19304,8 @@ namespace LegionRuntime {
         LegionSpy::log_instance_field(manager->get_instance().id, fid);
 #endif
       }
+      else
+        context->runtime->free_distributed_id(did);
       return result;
     }
 
@@ -28060,10 +28226,11 @@ namespace LegionRuntime {
             dst->logical_node->get_component_domains(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
+          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(context->issue_fill(*it, info.op,
+            post_events.insert(context->issue_fill(*it, op_id,
                                                    dst_fields, value->value,
                                                    value->value_size,fill_pre));
           }
@@ -28075,7 +28242,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = context->issue_fill(dom, info.op, dst_fields,
+          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
+          fill_post = context->issue_fill(dom, op_id, dst_fields,
                                           value->value, value->value_size, 
                                           fill_pre);
         }
@@ -28176,10 +28344,11 @@ namespace LegionRuntime {
             dst->logical_node->get_component_domains(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
+          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
-            post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+            post_events.insert(context->issue_fill(*it, op_id, dst_fields,
                                                    value->value, 
                                                    value->value_size,fill_pre));
           }
@@ -28191,7 +28360,8 @@ namespace LegionRuntime {
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
             fill_pre = Event::merge_events(fill_pre, dom_pre);
-          fill_post = context->issue_fill(dom, info.op, dst_fields,
+          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
+          fill_post = context->issue_fill(dom, op_id, dst_fields,
                                           value->value, value->value_size, 
                                           fill_pre);
         }
@@ -28224,10 +28394,11 @@ namespace LegionRuntime {
       std::set<Event> post_events;
       const std::set<Domain> &overlap_domains = 
         logical_node->get_intersection_domains(dst->logical_node);
+      UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
       for (std::set<Domain>::const_iterator it = overlap_domains.begin();
             it != overlap_domains.end(); it++)
       {
-        post_events.insert(context->issue_fill(*it, info.op, dst_fields,
+        post_events.insert(context->issue_fill(*it, op_id, dst_fields,
                                               value->value, value->value_size, 
                                               precondition));
       }
