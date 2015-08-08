@@ -18,6 +18,7 @@
 #include "proc_impl.h"
 #include "runtime_impl.h"
 #include "logging.h"
+#include "threads.h"
 
 #ifdef USE_CUDA
 GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
@@ -61,6 +62,51 @@ namespace Realm {
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
+  class EventTriggeredCondition {
+  public:
+    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen);
+
+    class Callback : public EventWaiter {
+    public:
+      virtual ~Callback(void);
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+      virtual void operator()(void) = 0;
+    };
+
+    void add_callback(Callback& cb) const;
+
+  protected:
+    EventImpl *event;
+    Event::gen_t gen;
+  };
+
+  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen)
+    : event(_event), gen(_gen)
+  {}
+
+  void EventTriggeredCondition::add_callback(Callback& cb) const
+  {
+    event->add_waiter(gen, &cb);
+  }
+
+  EventTriggeredCondition::Callback::~Callback(void)
+  {
+  }
+  
+  bool EventTriggeredCondition::Callback::event_triggered(void)
+  {
+    // call through to the actual callback
+    (*this)();
+    // we don't manage the memory any more
+    return false;
+  }
+
+  void EventTriggeredCondition::Callback::print_info(FILE *f)
+  {
+    fprintf(f, "EventTriggeredCondition (thread unknown)");
+  }  
+
   void Event::wait(void) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -72,6 +118,15 @@ namespace Realm {
 
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
+
+    // all of the stuff below will hopefully get subsumed by this
+    Thread *thread = Thread::self();
+    if(thread) {
+      // describe the condition we want the thread to wait on
+      printf("using new-fangled blocking event wait\n");
+      thread->wait_for_condition(EventTriggeredCondition(e, gen));
+      return;
+    }
 
     // are we a thread that knows how to do something useful while waiting?
     if(PreemptableThread::preemptable_sleep(*this))
