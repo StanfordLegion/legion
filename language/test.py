@@ -114,7 +114,8 @@ class Counter:
         self.failed = 0
 
 tests = [
-    ('compile_fail', (test_compile_fail, ([],)),
+    # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
+    ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'],)),
      (os.path.join('tests', 'compile_fail'),)),
     ('run_pass', (test_run_pass, ([],)),
      (os.path.join('tests', 'run_pass'),
