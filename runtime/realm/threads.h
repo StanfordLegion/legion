@@ -1,0 +1,353 @@
+/* Copyright 2015 Stanford University, NVIDIA Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// generic Realm interface to threading libraries (e.g. pthreads)
+
+#ifndef REALM_THREADS_H
+#define REALM_THREADS_H
+
+#include <stddef.h>
+
+#include <string>
+#include <list>
+#include <iostream>
+
+namespace Realm {
+
+  // ALL work inside Realm (i.e. both tasks and internal Realm work) should be done
+  //  inside a Thread, which comes in (at least) two flavors:
+  // a) KernelThread - a kernel-managed thread, supporting preemptive multitasking
+  //     and possibly-blocking system calls
+  // b) UserThread - a userspace-managed thread, supporting only cooperative multitasking
+  //     but with (hopefully) much lower switching overhead
+  //
+  // Cooperative multitasking is handled with the help of a "scheduler" that the thread
+  //  calls into when it wishes to sleep
+  //
+  // Threads return a void * on completion, available to any object that "joins" on it.
+  // A thread may also be sent a "signal", which can be delivered either synchronously (i.e.
+  //  upon interaction with the scheduler) or asynchronously (e.g. via POSIX signals).
+
+  class ThreadLaunchParameters;
+  class ThreadScheduler;
+  class CoreReservation;
+
+  //template <class CONDTYPE> class ThreadWaker;
+
+  class Thread {
+  protected:
+    // thread objects are not constructed directly
+    Thread(ThreadScheduler *_scheduler);    
+
+    template <typename T, void (T::*START_MTHD)(void)>
+    static void thread_entry_wrapper(void *obj);
+ 
+    static Thread *create_kernel_thread_untyped(void *target, void (*entry_wrapper)(void *),
+						const ThreadLaunchParameters& params,
+						CoreReservation& rsrv,
+						ThreadScheduler *_scheduler);
+   
+    static Thread *create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
+					      const ThreadLaunchParameters& params,
+					      ThreadScheduler *_scheduler);
+   
+  public:
+    // for kernel threads, the scheduler is optional - however, a thread with no scheduler
+    //  is not allowed to wait on a Realm Event or any internal object
+    // a kernel thread also requires a core reservation that tells it which core(s) it may
+    //  use when executing
+    template <typename T, void (T::*START_MTHD)(void)>
+    static Thread *create_kernel_thread(T *target,
+					const ThreadLaunchParameters& params,
+					CoreReservation& rsrv,
+					ThreadScheduler *_scheduler = 0);
+
+    // user threads must specify a scheduler - the whole point is that the OS isn't
+    //  controlling them...
+    template <typename T, void (T::*START_MTHD)(void)>
+    static Thread *create_user_thread(T *target,
+				      const ThreadLaunchParameters& params,
+				      ThreadScheduler *_scheduler);
+
+    virtual ~Thread(void);
+
+    enum State { STATE_STARTUP,
+		 STATE_RUNNING,
+		 STATE_BLOCKING,
+		 STATE_BLOCKED,
+		 STATE_READY,
+		 STATE_FINISHED };
+
+    State get_state(void);
+
+    void signal(int sig, bool asynchronous);
+
+    virtual void join(void) = 0; // BLOCKS until the thread completes
+
+    // called from within a thread
+    static Thread *self(void);
+    static void abort(void);
+
+    template <typename CONDTYPE>
+    static void wait_for_condition(const CONDTYPE& cond);
+
+  protected:
+    friend class ThreadScheduler;
+
+    template <class CONDTYPE>
+    friend class ThreadWaker;
+
+    // atomically updates the thread's state, returning the old state
+    Thread::State update_state(Thread::State new_state);
+
+    // updates the thread's state, but only if it's in the specified 'old_state' (i.e. an
+    //  atomic compare and swap) - returns true on success and false on failure
+    bool try_update_state(Thread::State old_state, Thread::State new_state);
+
+    State state;
+    ThreadScheduler *scheduler;
+  };
+
+  // Finally, a Thread may operate as a co-routine, "yielding" intermediate values and 
+  //  suspending until it is "resumed" (with an optional value)
+
+  template <typename YT, typename RT = int>
+  class Coroutine : public Thread {
+  public:
+    virtual ~Coroutine(void);
+
+    YT get_yield_value(void);
+    void resume(RT value = RT());
+
+    static RT yield(YT value);
+
+  protected:
+    YT yield_value;
+    RT resume_value;
+  };
+
+  class ThreadScheduler {
+  public:
+    virtual ~ThreadScheduler(void);
+
+    // callbacks from a thread when it wants to sleep (i.e. yielding on a co-routine interaction
+    //  or blocking on some condition) or terminate - either will generally result in some other
+    //  thread being woken up)
+    virtual void thread_yielding(Thread *thread) = 0;
+    virtual void thread_blocking(Thread *thread) = 0;
+    virtual void thread_terminating(Thread *thread) = 0;
+
+    // notification that a thread is ready (this will generally come from some thread other
+    //  than the one that's now ready)
+    virtual void thread_ready(Thread *thread) = 0;
+
+  protected:
+    // delegates friendship of Thread with subclasses
+    Thread::State update_thread_state(Thread *thread, Thread::State new_state);
+    bool try_update_thread_state(Thread *thread, Thread::State old_state, Thread::State new_state);
+  };
+
+  template <typename T, T _DEFAULT>
+  struct WithDefault {
+  public:
+    static const T DEFAULT_VALUE = _DEFAULT;
+
+    WithDefault(void); // uses default
+    WithDefault(T _val);
+
+    operator T(void) const;
+    WithDefault<T,_DEFAULT>& operator=(T newval);
+
+  protected:
+    T val;
+  };
+
+  // any thread (user or kernel) will have its own stack and heap - the size of which can
+  //  be controlled when the thread is launched - defaults are provided for all
+  //  values, along with convenient mutators
+  class ThreadLaunchParameters {
+  public:
+    static const ptrdiff_t STACK_SIZE_DEFAULT = -1;
+    static const ptrdiff_t HEAP_SIZE_DEFAULT = -1;
+
+    WithDefault<ptrdiff_t, STACK_SIZE_DEFAULT> stack_size;
+    WithDefault<ptrdiff_t, HEAP_SIZE_DEFAULT> heap_size;
+
+    ThreadLaunchParameters(void);
+
+    ThreadLaunchParameters& set_stack_size(ptrdiff_t new_stack_size);
+    ThreadLaunchParameters& set_heap_size(ptrdiff_t new_heap_size);
+  };
+
+  // Kernel threads will generally be much happier if they decide up front which core(s)
+  //  each of them are going to use.  Since this is a global optimization problem, we allow
+  //  different parts of the system to create "reservations", which the runtime will then
+  //  attempt to satisfy.  A thread can be launched before this happens, but will not actually
+  //  run until the reservations are satisfied.
+  
+  // A reservation can request one or more cores, optionally restricted to a particular NUMA
+  //  domain (as numbered by the OS).  The reservation should also indicate how heavily (if at
+  //  all) it intends to use the integer, floating-point, and load/store datapaths of the core(s).
+  //  A reservation with EXCLUSIVE use is compatible with those expecting MINIMAL use of the
+  //  same datapath, but not with any other reservation desiring EXCLUSIVE or SHARED access.
+  class CoreReservationParameters {
+  public:
+    enum CoreUsage { CORE_USAGE_NONE,
+		     CORE_USAGE_MINIMAL,
+		     CORE_USAGE_SHARED,
+		     CORE_USAGE_EXCLUSIVE };
+
+    static const int NUMA_DOMAIN_DONTCARE = -1;
+    static const ptrdiff_t STACK_SIZE_DEFAULT = -1;
+    static const ptrdiff_t HEAP_SIZE_DEFAULT = -1;
+
+    WithDefault<int, 1>                        num_cores;   // how many cores are requested
+    WithDefault<int, NUMA_DOMAIN_DONTCARE>     numa_domain; // which NUMA domain the cores should come from
+    WithDefault<CoreUsage, CORE_USAGE_SHARED>  alu_usage;   // "integer" datapath usage
+    WithDefault<CoreUsage, CORE_USAGE_MINIMAL> fpu_usage;   // floating-point usage
+    WithDefault<CoreUsage, CORE_USAGE_SHARED>  ldst_usage;  // "memory" datapath usage
+    WithDefault<ptrdiff_t, STACK_SIZE_DEFAULT> max_stack_size;
+    WithDefault<ptrdiff_t, HEAP_SIZE_DEFAULT>  max_heap_size;
+
+    CoreReservationParameters(void);
+
+    CoreReservationParameters& set_num_cores(int new_num_cores);
+    CoreReservationParameters& set_numa_domain(int new_numa_domain);
+    CoreReservationParameters& set_alu_usage(CoreUsage new_alu_usage);
+    CoreReservationParameters& set_fpu_usage(CoreUsage new_fpu_usage);
+    CoreReservationParameters& set_ldst_usage(CoreUsage new_ldst_usage);
+    CoreReservationParameters& set_max_stack_size(ptrdiff_t new_max_stack_size);
+    CoreReservationParameters& set_max_heap_size(ptrdiff_t new_max_heap_size);
+  };
+
+  class CoreReservation {
+  public:
+    CoreReservation(const std::string& _name, const CoreReservationParameters& _params);
+
+    static bool satisfy_reservations(void);
+    static void report_reservations(std::ostream& os);
+
+    // eventually we'll get an Allocation, which is an opaque type because it's OS-dependent :(
+    struct Allocation;
+
+    // to be informed of the eventual allocation, you supply one of these:
+    class NotificationListener {
+    public:
+      virtual ~NotificationListener(void) {}
+      virtual void notify_allocation(const CoreReservation& rsrv) = 0;
+    };
+
+    void add_listener(NotificationListener *listener);
+
+  public:
+    std::string name;
+    CoreReservationParameters params;
+
+    // no locks needed here because we aren't multi-threaded until the allocation exists
+    Allocation *allocation;
+  protected:
+    std::list<NotificationListener *> listeners;
+  };    
+
+#if 0
+  class ThreadScheduler;
+
+  class KernelThread : public Thread {
+  public:
+    KernelThread(CoreReservation& _rsrv, ThreadScheduler *scheduler);
+    virtual ~KernelThread(void);
+
+    virtual State state(void) = 0;
+    virtual void await_state(State desired, bool invert = false) = 0;
+    virtual void *yield_value(void) = 0;
+    virtual void *finish_value(void) = 0;
+
+    virtual void resume(void *value = 0) = 0;
+    virtual void signal(int sig, bool asynchronous) = 0;
+    virtual void detach(void) = 0;
+  };
+
+  class Thread;
+  class ThreadLaunchParameters;
+  class ThreadReservation;
+  class ThreadReservationParameters;
+  class ThreadFactory;
+
+  // basically a struct with nice defaults
+
+  // also a struct with defaults
+  class ThreadReservationParameters {
+
+    ThreadReservationParameters(void)
+      : num_cores(1)
+      , numa_domain(NUMA_DOMAIN_DONTCARE)
+      , core_usage(CORE_USAGE_SHARED)
+      , fpu_usage(CORE_USAGE_MINIMAL)
+      , max_stack_size(STACK_SIZE_DEFAULT)
+      , max_heap_size(HEAP_SIZE_DEFAULT)
+    {}
+    virtual ~ThreadReservationParameters(void) {}
+  };
+
+  // object that describes a thread from the "outside" - operations performed
+  //  by the thread itself are static methods on this class (i.e. you don't need
+  //  to carry around your Thread * inside the thread)
+  class ThreadFactory {
+  public:
+    virtual ~ThreadFactory(void) = 0;
+
+    virtual ThreadReservation *add_reservation(const ThreadReservationParameters& params) = 0;
+    virtual bool satisfy_reservations(void) = 0;
+
+    template <typename T, void *(T::*MTHD)(void *)>
+    Thread *create_thread(T *target, void *data, 
+			  ThreadReservation *rsrv, const ThreadLaunchParameters& params);
+
+    typedef void *(* ThreadEntryUntypedFnptr)(void *, void *);
+
+  protected:
+    template <typename T, void *(T::*MTHD)(void *)>
+    static void *thread_entry_untyped(void *target, void *data) {
+      return (((T *)target)->*MTHD)(data);
+    }
+
+    virtual Thread *create_thread_untyped(ThreadEntryUntypedFnptr fnptr,
+					  void *target, void *data, 
+					  ThreadReservation *rsrv,
+					  const ThreadLaunchParameters& params) = 0;
+  };
+
+  template <typename T, void *(T::*MTHD)(void *)>
+  Thread *ThreadFactory::create_thread(T *target, void *data, 
+				       ThreadReservation *rsrv, const ThreadLaunchParameters& params)
+  {
+    return create_thread_untyped(thread_entry_untyped<T, MTHD>,
+				 target, data, rsrv, params);
+  }
+
+  // ThreadReservations cannot be created directly - they are subclassesed and created/destroyed
+  //  by actual ThreadFactory implementations
+  class ThreadReservation {
+  protected:
+    ThreadReservation(void) {}
+    ~ThreadReservation(void) {}
+  };
+#endif
+
+} // namespace Realm
+
+#include "threads.inl"
+
+#endif // REALM_THREADS_H
