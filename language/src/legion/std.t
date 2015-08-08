@@ -28,7 +28,9 @@ if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 -- ## Legion Bindings
 -- #################
 
-require('legionlib')
+-- FIXME (Elliott): This appears to be tickling a memory corruption bug.
+-- require('legionlib')
+terralib.linklibrary("liblegion_terra.so")
 local c = terralib.includecstring([[
 #include "legion_c.h"
 #include "legion_terra.h"
@@ -44,6 +46,14 @@ std.c = c
 
 function std.min(a, b)
   if a < b then
+    return a
+  else
+    return b
+  end
+end
+
+function std.max(a, b)
+  if a > b then
     return a
   else
     return b

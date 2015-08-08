@@ -524,9 +524,6 @@ function analyze_inner.expr(cx, node)
   elseif node:is(ast.typed.ExprIspace) then
     return analyze_inner.expr_ispace(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
-    return analyze_inner.expr_ispace(cx, node)
-
   elseif node:is(ast.typed.ExprRegion) then
     return analyze_inner.expr_region(cx, node)
 

@@ -13,7 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [
+-- []
+
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-compact", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
@@ -30,6 +31,8 @@
 -- Inspired by https://github.com/losalamos/PENNANT
 
 -- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+
+import "legion"
 
 -- Compile and link pennant.cc
 local cpennant
@@ -58,8 +61,6 @@ do
   terralib.linklibrary(pennant_so)
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
-
-import "legion"
 
 local c = legionlib.c
 

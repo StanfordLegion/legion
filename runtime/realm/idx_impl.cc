@@ -1,4 +1,5 @@
 /* Copyright 2015 Stanford University, NVIDIA Corporation
+ * Copyright 2015 Los Alamos National Laboratory 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -468,6 +469,9 @@ namespace Realm {
       for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++) {
         if (it->kind() == Memory::HDF_MEM) {
           memory = *it;
+          HDFMemory* hdf_mem = (HDFMemory*) get_runtime()->get_memory_impl(memory);
+          if(hdf_mem->kind == MemoryImpl::MKIND_HDF)
+            break; /* this is usable, take it */ 
         }
       }
       assert(memory.kind() == Memory::HDF_MEM);
