@@ -35,6 +35,8 @@
 
 #include "machine_impl.h"
 
+#include "threads.h"
+
 #if __cplusplus >= 201103L
 #define typeof decltype
 #endif

@@ -1787,10 +1787,27 @@ public:
     gasnett_cond_init(&condvar);
     todo_list = new int[total_endpoints + 1];  // one extra to distinguish full/empty
     todo_oldest = todo_newest = 0;
+
+#ifdef TRACE_MESSAGES
+    char filename[80];
+    sprintf(filename, "ams_%d.log", gasnet_mynode());
+    msgtrace_file = fopen(filename, "w");
+    last_msgtrace_report = (int)(Realm::Clock::current_time()); // just keep the integer seconds
+#endif
+
+    // for worker threads
+    shutdown_flag = false;
+    core_rsrv = new Realm::CoreReservation("EndpointManager workers",
+					   Realm::CoreReservationParameters());
   }
 
   ~EndpointManager(void)
   {
+#ifdef TRACE_MESSAGES
+    report_activemsg_status(msgtrace_file);
+    fclose(f);
+#endif
+
     delete[] todo_list;
   }
 
@@ -1919,6 +1936,14 @@ public:
     endpoints[source]->record_message(sent_reply);
   }
 
+  void start_polling_threads(int count);
+
+  void stop_threads(void);
+
+protected:
+  // runs in a separeate thread
+  void polling_worker_loop(void);
+
 private:
   const int total_endpoints;
   ActiveMessageEndpoint **endpoints;
@@ -1926,6 +1951,13 @@ private:
   gasnett_cond_t condvar;
   int *todo_list;
   int todo_oldest, todo_newest;
+  bool shutdown_flag;
+  Realm::CoreReservation *core_rsrv;
+  std::vector<Realm::Thread *> polling_threads;
+#ifdef TRACE_MESSAGES
+  FILE *msgtrace_file;
+  int last_msgtrace_report;
+#endif
 };
 
 static EndpointManager *endpoint_manager;
@@ -2067,10 +2099,12 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   init_deferred_frees();
 }
 
+#ifdef OLDTHREADS
 static int num_polling_threads = 0;
 static pthread_t *polling_threads = 0;
 static int num_sending_threads = 0;
 static pthread_t *sending_threads = 0;
+#endif
 static int num_handler_threads = 0;
 static HandlerThread **handler_threads = 0;
 static volatile bool thread_shutdown_flag = false;
@@ -2084,6 +2118,53 @@ void do_some_polling(void)
   CHECK_GASNET( gasnet_AMPoll() );
 }
 
+void EndpointManager::start_polling_threads(int count)
+{
+  polling_threads.resize(count);
+  for(int i = 0; i < count; i++)
+    polling_threads[i] = Realm::Thread::create_kernel_thread<EndpointManager, 
+							     &EndpointManager::polling_worker_loop>(this,
+												    Realm::ThreadLaunchParameters(),
+												    *core_rsrv);
+}
+
+void EndpointManager::stop_threads(void)
+{
+  // none of our threads actually sleep, so we can just set the flag and wait for them to notice
+  shutdown_flag = true;
+  
+  for(std::vector<Realm::Thread *>::iterator it = polling_threads.begin();
+      it != polling_threads.end();
+      it++) {
+    (*it)->join();
+    delete (*it);
+  }
+  polling_threads.clear();
+}
+
+void EndpointManager::polling_worker_loop(void)
+{
+  printf("POLLING WORKER STARTED\n");
+  while(!shutdown_flag) {
+    endpoint_manager->push_messages(max_msgs_to_send);
+
+    CHECK_GASNET( gasnet_AMPoll() );
+
+#ifdef TRACE_MESSAGES
+    // see if it's time to write out another update
+    int now = (int)(Realm::Clock::current_time());
+    int old = last_msgtrace_report;
+    if(now > (old + 29)) {
+      // looks like it's time - use an atomic test to see if we should do it
+      if(__sync_bool_compare_and_swap(&last_msgtrace_report, old, now))
+	report_activemsg_status(msgtrace_file);
+    }
+#endif
+  }
+  printf("POLLING WORKER SHUTDOWN\n");
+}
+
+#ifdef OLDTHREADS
 static void *gasnet_poll_thread_loop(void *data)
 {
 #ifdef TRACE_MESSAGES
@@ -2113,9 +2194,12 @@ static void *gasnet_poll_thread_loop(void *data)
 #endif
   return 0;
 }
+#endif
 
 void start_polling_threads(int count)
 {
+  endpoint_manager->start_polling_threads(count);
+#ifdef OLDTHREADS
   num_polling_threads = count;
   polling_threads = new pthread_t[count];
 
@@ -2131,8 +2215,10 @@ void start_polling_threads(int count)
     LegionRuntime::LowLevel::get_runtime()->add_thread(&polling_threads[i]);
 #endif
   }
+#endif
 }
 
+#ifdef OLDTHREADS
 static void* sender_thread_loop(void * /*unused*/)
 {
   while (!thread_shutdown_flag) {
@@ -2140,9 +2226,12 @@ static void* sender_thread_loop(void * /*unused*/)
   }
   return 0;
 }
+#endif
 
 void start_sending_threads(void)
 {
+  assert(0 && "sending threads no longer supported in activemsg.cc");
+#ifdef OLDTHREADS
   num_sending_threads = gasnet_nodes();
   sending_threads = new pthread_t[num_sending_threads];
 
@@ -2160,6 +2249,7 @@ void start_sending_threads(void)
     LegionRuntime::LowLevel::get_runtime()->add_thread(&sending_threads[i]);
 #endif
   }
+#endif
 }
 
 void start_handler_threads(int count, size_t stack_size)
@@ -2180,6 +2270,7 @@ void stop_activemsg_threads(void)
 {
   thread_shutdown_flag = true;
 
+#ifdef OLDTHREADS
   if(polling_threads) {
     for(int i = 0; i < num_polling_threads; i++) {
       void *dummy;
@@ -2188,7 +2279,11 @@ void stop_activemsg_threads(void)
     num_polling_threads = 0;
     delete[] polling_threads;
   }
+#endif
+
+  endpoint_manager->stop_threads();
 	
+#ifdef OLDTHREADS
   if(sending_threads) {
     for(int i = 0; i < num_sending_threads; i++) {
       void *dummy;
@@ -2197,6 +2292,7 @@ void stop_activemsg_threads(void)
     num_sending_threads = 0;
     delete[] sending_threads;
   }
+#endif
 
   incoming_message_manager->shutdown();
   for(int i = 0; i < num_handler_threads; i++) {

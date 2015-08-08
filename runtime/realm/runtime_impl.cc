@@ -738,6 +738,17 @@ namespace Realm {
       }
 #endif
 
+      // now that we've created all the processors/etc., we can try to come up with core
+      //  allocations that satisfy everybody's requirements - this will also start up any
+      //  threads that have already been requested
+      bool ok = Realm::CoreReservation::satisfy_reservations();
+      if(ok) {
+	Realm::CoreReservation::report_reservations(std::cout);
+      } else {
+	printf("HELP!  Could not satisfy all core reservations!\n");
+	exit(1);
+      }
+
       {
 	const unsigned ADATA_SIZE = 4096;
 	size_t adata[ADATA_SIZE];
