@@ -32,6 +32,7 @@ namespace LegionRuntime {
       PENDING_COLLECTIVE_REF,
       MEMORY_MANAGER_REF,
       COMPOSITE_NODE_REF,
+      PERSISTENCE_REF,
       LAST_SOURCE_REF,
     };
 

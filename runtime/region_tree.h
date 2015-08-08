@@ -2007,6 +2007,7 @@ namespace LegionRuntime {
                                  bool path_only) const;
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
+      void add_persistent_views(const std::set<MaterializedView*> &views);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -2096,12 +2097,14 @@ namespace LegionRuntime {
       void check_init(void);
       void clear(void);
       void sanity_check(void);
-      void detach_instance(const FieldMask &mask, PhysicalManager *target);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
+    public:
+      void add_persistent_view(MaterializedView *view);
+      void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
       void filter_current_states(VersionID vid, const FieldMask &filter_mask);
@@ -2130,6 +2133,8 @@ namespace LegionRuntime {
       // Debug only since this can grow unbounded
       LegionMap<VersionID,FieldMask>::aligned observed;
 #endif
+    protected:
+      std::set<MaterializedView*> persistent_views;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
@@ -2397,6 +2402,7 @@ namespace LegionRuntime {
       void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
                                  PhysicalManager *target);
       void clear_physical_states(const FieldMask &mask);
+      void add_persistent_view(ContextID ctx, MaterializedView *persist_view);
     public:
       bool register_logical_view(LogicalView *view);
       void unregister_logical_view(LogicalView *view);
@@ -3240,20 +3246,7 @@ namespace LegionRuntime {
     public:
       enum InstanceFlag {
         NO_INSTANCE_FLAG = 0x00000000,
-        PERSISTENT_FLAG  = 0x00000001,
-        ATTACH_FILE_FLAG = 0x00000002,
-      };
-    public:
-      class PersistenceFunctor {
-      public:
-        PersistenceFunctor(AddressSpaceID src, Runtime *rt, Serializer &z) 
-          : source(src), runtime(rt), rez(z) { }
-      public:
-        void apply(AddressSpaceID target);
-      protected:
-        const AddressSpaceID source;
-        Runtime *const runtime;
-        Serializer &rez;
+        ATTACH_FILE_FLAG = 0x00000001,
       };
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
@@ -3302,12 +3295,6 @@ namespace LegionRuntime {
       bool match_instance(size_t field_size, const Domain &dom) const;
       bool match_instance(const std::vector<size_t> &fields_sizes,
                           const Domain &dom, const size_t bf) const;
-    public:
-      bool is_persistent(void) const;
-      void make_persistent(AddressSpaceID origin);
-      static void handle_make_persistent(Deserializer &derez,
-                                         RegionTreeForest *context,
-                                         AddressSpaceID source);
     public:
       bool is_attached_file(void) const;
     public:
@@ -3502,7 +3489,6 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
-      virtual bool is_persistent(void) const = 0;
     public:
       static void handle_view_remote_registration(RegionTreeForest *forest,
                                                   Deserializer &derez,
@@ -3566,7 +3552,6 @@ namespace LegionRuntime {
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual Memory get_location(void) const = 0;
-      virtual bool is_persistent(void) const = 0;
     public:
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -3632,11 +3617,31 @@ namespace LegionRuntime {
         bool single;
       };
     public:
+      struct PersistenceFunctor {
+      public:
+        PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
+                           SingleTask *p, LogicalRegion h,
+                           DistributedID id, unsigned pidx, 
+                           std::set<Event> &d)
+          : source(s), runtime(rt), parent(p), handle(h),
+            did(id), parent_idx(pidx), done_events(d) { }
+      public:
+        void apply(AddressSpaceID target);
+      protected:
+        AddressSpaceID source;
+        Runtime *runtime;
+        SingleTask *parent;
+        LogicalRegion handle;
+        DistributedID did;
+        unsigned parent_idx;
+        std::set<Event> &done_events;
+      };
+    public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
                        MaterializedView *parent, unsigned depth,
-                       bool register_now);
+                       bool register_now, bool persist = false);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -3652,6 +3657,10 @@ namespace LegionRuntime {
     public:
       MaterializedView* get_materialized_subview(const ColorPoint &c);
       MaterializedView* get_materialized_parent_view(void) const;
+    public:
+      bool is_persistent(void) const;
+      void make_persistent(SingleTask *parent_ctx, unsigned parent_idx,
+                           AddressSpaceID source, UserEvent to_trigger);
     public:
       void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
     public:
@@ -3790,9 +3799,6 @@ namespace LegionRuntime {
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      virtual bool is_persistent(void) const;
-      void make_persistent(void);
-    public:
       void send_back_atomic_reservations(
           const std::vector<std::pair<FieldID,Reservation> > &send_back);
       void process_atomic_reservations(Deserializer &derez);
@@ -3803,6 +3809,8 @@ namespace LegionRuntime {
                               Deserializer &derez, AddressSpaceID source);
       static void handle_send_update(Runtime *runtime, Deserializer &derez,
                                      AddressSpaceID source);
+      static void handle_make_persistent(Runtime *runtime, Deserializer &derez,
+                                         AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -3841,6 +3849,8 @@ namespace LegionRuntime {
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
+    protected:
+      bool persistent_view; // only valid at the top-most node
     };
 
     /**
@@ -3906,7 +3916,6 @@ namespace LegionRuntime {
         { assert(false); return NULL; } 
       virtual LogicalView* get_subview(const ColorPoint &c);
       virtual Memory get_location(void) const;
-      virtual bool is_persistent(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -4002,9 +4011,6 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
-      // Deferred views are never persistent
-      virtual bool is_persistent(void) const { return false; }
-    public:
     public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;

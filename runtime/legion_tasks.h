@@ -267,19 +267,6 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         SingleTask *parent_ctx;
       };
-      struct RemoteReleaser {
-      public:
-        RemoteReleaser(Serializer &z, Runtime *rt)
-          : rez(z), runtime(rt) { }
-      public:
-        inline void apply(AddressSpaceID target)
-        {
-          runtime->send_free_remote_context(target, rez);
-        }
-      protected:
-        Serializer &rez;
-        Runtime *runtime;
-      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -429,6 +416,7 @@ namespace LegionRuntime {
       void initialize_mapping_paths(void);
     public:
       void pack_parent_task(Serializer &rez);
+      virtual void pack_remote_ctx_info(Serializer &rez);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
@@ -459,8 +447,8 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
-      virtual void record_remote_context(void) = 0;
-      virtual void record_remote_instance(AddressSpaceID remote_inst) = 0;
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx) = 0;
     public:
       // Has a base implementation but can override
       virtual RegionTreeContext find_enclosing_physical_context(unsigned idx);
@@ -690,8 +678,8 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_context(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst);
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -729,6 +717,7 @@ namespace LegionRuntime {
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
       UniqueID remote_owner_uid;
+      SingleTask *remote_parent_ctx; // Not a valid pointer when remote
     protected:
       Future predicate_false_future;
       void *predicate_false_result;
@@ -742,8 +731,7 @@ namespace LegionRuntime {
     protected:
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
-      bool has_remote_context;
-      NodeSet remote_instances;
+      std::map<AddressSpaceID,RemoteTask*> remote_instances;
     };
 
     /**
@@ -783,8 +771,8 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_context(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst);
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -805,8 +793,7 @@ namespace LegionRuntime {
       UserEvent                   point_termination;
     protected:
       bool has_remote_subtasks;
-      bool has_remote_context;
-      NodeSet remote_instances;
+      std::map<AddressSpaceID,RemoteTask*> remote_instances;
     };
 
     /**
@@ -842,8 +829,8 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
-      virtual void record_remote_context(void) = 0;
-      virtual void record_remote_instance(AddressSpaceID remote_inst) = 0;
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -885,7 +872,7 @@ namespace LegionRuntime {
     public:
       RemoteTask& operator=(const RemoteTask &rhs);
     public:
-      void initialize_remote(void);
+      void initialize_remote(UniqueID uid, SingleTask *remote_parent);
       void unpack_parent_task(Deserializer &derez);
     public:
       virtual void activate(void);
@@ -896,18 +883,22 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_context(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst);
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
+      virtual void pack_remote_ctx_info(Serializer &rez);
     public:
       void add_top_region(LogicalRegion handle);
     protected:
       std::set<LogicalRegion> top_level_regions;
+    protected:
+      UniqueID remote_owner_uid;
+      SingleTask *remote_parent_ctx; // Never a valid pointer
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
     protected:
       Event remote_legion_spy_completion;
@@ -941,8 +932,8 @@ namespace LegionRuntime {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_context(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst);
+      virtual void record_remote_instance(AddressSpaceID remote_inst,
+                                          RemoteTask *remote_ctx);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1178,6 +1169,7 @@ namespace LegionRuntime {
       RegionTreeContext remote_outermost_context;
       bool locally_mapped;
       UniqueID remote_owner_uid;
+      SingleTask *remote_parent_ctx; // Not a valid pointer when remote
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;

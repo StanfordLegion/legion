@@ -4935,7 +4935,7 @@ namespace LegionRuntime {
         IndividualTask *top_task = get_available_individual_task();
         // Get a remote task to serve as the top of the top-level task
         RemoteTask *top_context = get_available_remote_task();
-        top_context->initialize_remote();
+        top_context->initialize_remote(0, NULL);
         // Set the executing processor
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -4978,7 +4978,7 @@ namespace LegionRuntime {
       IndividualTask *mapper_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *map_context = get_available_remote_task();
-      map_context->initialize_remote();
+      map_context->initialize_remote(0, NULL);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -11572,7 +11572,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MAKE_PERSISTENT,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12130,7 +12130,7 @@ namespace LegionRuntime {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceManager::handle_make_persistent(derez, forest, source);
+      MaterializedView::handle_make_persistent(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12218,19 +12218,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      UniqueID owner_uid;
-      derez.deserialize(owner_uid);
       SingleTask *receiver;
-      {
-        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
-        std::map<UniqueID,SingleTask*>::const_iterator finder = 
-          remote_receivers.find(owner_uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != remote_receivers.end());
-#endif
-        receiver = finder->second;
-      }
-      receiver->record_remote_instance(source);
+      derez.deserialize(receiver);
+      RemoteTask *remote_ctx;
+      derez.deserialize(remote_ctx);
+      receiver->record_remote_instance(source, remote_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -14162,7 +14154,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid,
-                                                     Processor orig_proc)
+                                                     Processor orig_proc,
+                                                     SingleTask *remote_parent)
     //--------------------------------------------------------------------------
     {
       {
@@ -14192,12 +14185,13 @@ namespace LegionRuntime {
         free_remote_task(remote_ctx);
       else
       {
-        remote_ctx->initialize_remote();
+        remote_ctx->initialize_remote(uid, remote_parent);
         // Send back the subscription message
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(uid);
+          rez.serialize(remote_parent);
+          rez.serialize(remote_ctx);
         }
         AddressSpaceID target = find_address_space(orig_proc);
         send_subscribe_remote_context(target, rez);
@@ -14206,19 +14200,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_remote_receiver(UniqueID uid, SingleTask *receiver)
+    SingleTask* Runtime::find_remote_context(UniqueID uid, 
+                                             SingleTask *remote_parent_ctx)
     //--------------------------------------------------------------------------
     {
-      AutoLock rem_lock(remote_lock);
-      remote_receivers[uid] = receiver;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::unregister_remote_receiver(UniqueID uid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock rem_lock(remote_lock);
-      remote_receivers.erase(uid);
+      // See if we can find it in the set of remote contexts, if
+      // not then we must be local so return the remote parent ctx
+      AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
+      std::map<UniqueID,RemoteTask*>::const_iterator finder = 
+        remote_contexts.find(uid);
+      if (finder != remote_contexts.end())
+        return finder->second;
+      return remote_parent_ctx;
     }
 
     //--------------------------------------------------------------------------

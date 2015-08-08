@@ -2438,6 +2438,17 @@ namespace LegionRuntime {
 #endif
     }
 
+    //-------------------------------------------------------------------------
+    void SingleTask::pack_remote_ctx_info(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Assume we are the owner in this case
+      UniqueID remote_owner_proxy = get_unique_task_id();
+      rez.serialize(remote_owner_proxy);
+      SingleTask *proxy_this = this;
+      rez.serialize(proxy_this);
+    }
+
     //--------------------------------------------------------------------------
     void SingleTask::register_child_operation(Operation *op)
     //--------------------------------------------------------------------------
@@ -5702,12 +5713,12 @@ namespace LegionRuntime {
       predicate_false_size = 0;
       orig_task = this;
       remote_owner_uid = 0;
+      remote_parent_ctx = NULL;
       remote_completion_event = get_completion_event();
       remote_unique_id = get_unique_task_id();
       sent_remotely = false;
       top_level_task = false;
       has_remote_subtasks = false;
-      has_remote_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5718,17 +5729,19 @@ namespace LegionRuntime {
       if (top_level_task)
         parent_ctx->deactivate();
       deactivate_single();
-      if (has_remote_context)
+      if (!remote_instances.empty())
       {
         UniqueID local_uid = get_unique_task_id();
-        runtime->unregister_remote_receiver(local_uid);
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(local_uid);
         }
-        RemoteReleaser releaser(rez, runtime);
-        remote_instances.map(releaser);
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          runtime->send_free_remote_context(it->first, rez);
+        }
         remote_instances.clear();
       }
       if (future_store != NULL)
@@ -5795,6 +5808,7 @@ namespace LegionRuntime {
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       remote_owner_uid = ctx->get_unique_task_id();
+      remote_parent_ctx = parent_ctx;
       if (launcher.predicate != Predicate::TRUE_PRED)
       {
         if (launcher.predicate_false_future.impl != NULL)
@@ -5917,6 +5931,7 @@ namespace LegionRuntime {
       is_index_space = false;
       initialize_base_task(ctx, track, pred, task_id);
       remote_owner_uid = ctx->get_unique_task_id();
+      remote_parent_ctx = parent_ctx;
       if (check_privileges)
         perform_privilege_checks();
       remote_outermost_context = 
@@ -6353,22 +6368,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_remote_context(void)
-    //--------------------------------------------------------------------------
-    {
-      // No need for a lock since this is monotonic
-      // It's alright for there to be races in the registration
-      if (!has_remote_context)
-        runtime->register_remote_receiver(get_unique_task_id(), this);
-      has_remote_context = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::record_remote_instance(AddressSpaceID remote_instance)
+    void IndividualTask::record_remote_instance(AddressSpaceID remote_instance,
+                                                RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      remote_instances.add(remote_instance);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -6495,15 +6503,11 @@ namespace LegionRuntime {
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote())
-      {
-        // Notify our enclosing parent task that we are being sent 
-        // remotely if we are not locally mapped because now there
-        // will be remote state
-        parent_ctx->record_remote_context();
-        if (!is_locally_mapped())
-          parent_ctx->record_remote_state();
-      }
+      // Notify our enclosing parent task that we are being sent 
+      // remotely if we are not locally mapped because now there
+      // will be remote state
+      if (!is_remote() && !is_locally_mapped())
+        parent_ctx->record_remote_state();
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       AddressSpaceID addr_target = runtime->find_address_space(target);
@@ -6514,6 +6518,7 @@ namespace LegionRuntime {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_outermost_context);
       rez.serialize(remote_owner_uid);
+      rez.serialize(remote_parent_ctx);
       parent_ctx->pack_parent_task(rez);
       if (!is_locally_mapped())
       {
@@ -6540,8 +6545,10 @@ namespace LegionRuntime {
       derez.deserialize(remote_outermost_context);
       current_proc = current;
       derez.deserialize(remote_owner_uid);
+      derez.deserialize(remote_parent_ctx);
       RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
+        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
+                                             remote_parent_ctx);
       remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
       {
@@ -6809,7 +6816,6 @@ namespace LegionRuntime {
       activate_single();
       slice_owner = NULL;
       has_remote_subtasks = false;
-      has_remote_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6817,17 +6823,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_single();
-      if (has_remote_context)
+      if (!remote_instances.empty())
       {
         UniqueID local_uid = get_unique_task_id();
-        runtime->unregister_remote_receiver(local_uid);
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(local_uid);
         }
-        RemoteReleaser releaser(rez, runtime);
-        remote_instances.map(releaser);
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          runtime->send_free_remote_context(it->first, rez);
+        }
         remote_instances.clear();
       }
       runtime->free_point_task(this);
@@ -6976,22 +6984,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::record_remote_context(void)
-    //--------------------------------------------------------------------------
-    {
-      // No need for a lock since this is monotonic
-      // It's alright for there to be races in the registration
-      if (!has_remote_context)
-        runtime->register_remote_receiver(get_unique_task_id(), this);
-      has_remote_context = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::record_remote_instance(AddressSpaceID remote_instance)
+    void PointTask::record_remote_instance(AddressSpaceID remote_instance,
+                                           RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      remote_instances.add(remote_instance);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -7363,11 +7364,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_wrapper();
-      runtime->allocate_context(this);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(context.exists());
-      runtime->forest->check_context_state(context);
-#endif
+      context = RegionTreeContext();
+      remote_owner_uid = 0;
+      remote_parent_ctx = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -7375,22 +7374,33 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Before deactivating the context, clean it out
-      for (std::set<LogicalRegion>::const_iterator it = 
-            top_level_regions.begin(); it != top_level_regions.end(); it++)
+      if (!top_level_regions.empty())
       {
-        runtime->forest->invalidate_physical_context(context, *it); 
+        for (std::set<LogicalRegion>::const_iterator it = 
+              top_level_regions.begin(); it != top_level_regions.end(); it++)
+        {
+          runtime->forest->invalidate_physical_context(context, *it); 
+        }
       }
       top_level_regions.clear();
-      runtime->free_context(this);
+      if (context.exists())
+        runtime->free_context(this);
       deactivate_wrapper();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
     
     //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(void)
+    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent)
     //--------------------------------------------------------------------------
     {
+      remote_owner_uid = uid;
+      remote_parent_ctx = remote_parent;
+      runtime->allocate_context(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(context.exists());
+      runtime->forest->check_context_state(context);
+#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -7448,15 +7458,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_context(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst)
+    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst,
+                                            RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7493,6 +7496,14 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < local_fields.size(); idx++)
         infos.push_back(local_fields[idx]);
     } 
+
+    //--------------------------------------------------------------------------
+    void RemoteTask::pack_remote_ctx_info(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(remote_owner_uid);
+      rez.serialize(remote_parent_ctx);
+    }
 
     //--------------------------------------------------------------------------
     void RemoteTask::add_top_region(LogicalRegion handle)
@@ -7616,15 +7627,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::record_remote_context(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::record_remote_instance(AddressSpaceID remote_inst)
+    void InlineTask::record_remote_instance(AddressSpaceID remote_inst,
+                                            RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8820,6 +8824,7 @@ namespace LegionRuntime {
       result->denominator = scale_denominator;
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_task_id();
+      result->remote_parent_ctx = parent_ctx;
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_slice(Processor::get_executing_processor(),
                                      unique_op_id, result->get_unique_op_id());
@@ -9231,6 +9236,7 @@ namespace LegionRuntime {
       denominator = 0;
       index_owner = NULL;
       remote_owner_uid = 0;
+      remote_parent_ctx = NULL;
       remote_unique_id = get_unique_task_id();
       locally_mapped = false;
     }
@@ -9483,15 +9489,11 @@ namespace LegionRuntime {
     bool SliceTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote())
-      {
-        // Notify our enclosing parent task that we are being sent 
-        // remotely if we are not locally mapped because now there
-        // will be remote state
-        parent_ctx->record_remote_context();
-        if (!is_locally_mapped())
-          parent_ctx->record_remote_state();
-      }
+      // Notify our enclosing parent task that we are being sent 
+      // remotely if we are not locally mapped because now there
+      // will be remote state
+      if (!is_remote() && !is_locally_mapped())
+        parent_ctx->record_remote_state();
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped
@@ -9507,6 +9509,7 @@ namespace LegionRuntime {
       rez.serialize(remote_outermost_context);
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
+      rez.serialize(remote_parent_ctx);
       parent_ctx->pack_parent_task(rez);
       if (!is_locally_mapped())
       {
@@ -9557,8 +9560,10 @@ namespace LegionRuntime {
       derez.deserialize(remote_outermost_context);
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
+      derez.deserialize(remote_parent_ctx);
       RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc);
+        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
+                                             remote_parent_ctx);
       remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
       {

@@ -1754,9 +1754,9 @@ namespace LegionRuntime {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
     public:
-      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig); 
-      void register_remote_receiver(UniqueID uid, SingleTask *receiver);
-      void unregister_remote_receiver(UniqueID uid);
+      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
+                                              SingleTask *remote_parent_ctx); 
+      SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
     public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
@@ -1906,8 +1906,6 @@ namespace LegionRuntime {
       Reservation remote_lock;
       LegionMap<UniqueID,RemoteTask*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
-      LegionMap<UniqueID,SingleTask*,
-                RUNTIME_REMOTE_ALLOC>::tracked remote_receivers;
     protected:
       // For generating random numbers
       Reservation random_lock;
