@@ -518,6 +518,8 @@ namespace LegionRuntime {
       unsigned pending_subtasks;
       // Number of pending_frames
       unsigned pending_frames;
+      // Event used to order operations to the runtime
+      Event context_order_event;
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;

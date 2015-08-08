@@ -2070,6 +2070,7 @@ namespace LegionRuntime {
       outstanding_subtasks = 0;
       pending_subtasks = 0;
       pending_frames = 0;
+      context_order_event = Event::NO_EVENT;
       // Set some of the default values for a context
       max_window_size = Runtime::initial_task_window_size;
       hysteresis_percentage = Runtime::initial_task_window_hysteresis;
@@ -2821,14 +2822,28 @@ namespace LegionRuntime {
       assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
       assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
 #endif
-      AutoLock o_lock(op_lock);
-      if ((outstanding_subtasks == 0) && 
-          (((min_tasks_to_schedule > 0) && 
-            (pending_subtasks < min_tasks_to_schedule)) ||
-           ((min_frames_to_schedule > 0) &&
-            (pending_frames < min_frames_to_schedule))))
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
+        if ((outstanding_subtasks == 0) && 
+            (((min_tasks_to_schedule > 0) && 
+              (pending_subtasks < min_tasks_to_schedule)) ||
+             ((min_frames_to_schedule > 0) &&
+              (pending_frames < min_frames_to_schedule))))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+        outstanding_subtasks++;
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->activate_context(this);
-      outstanding_subtasks++;
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2839,17 +2854,31 @@ namespace LegionRuntime {
       assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
       assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
 #endif
-      AutoLock o_lock(op_lock);
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_subtasks > 0);
+        assert(outstanding_subtasks > 0);
 #endif
-      outstanding_subtasks--;
-      if ((outstanding_subtasks == 0) && 
-          (((min_tasks_to_schedule > 0) &&
-            (pending_subtasks < min_tasks_to_schedule)) ||
-           ((min_frames_to_schedule > 0) &&
-            (pending_frames < min_frames_to_schedule))))
+        outstanding_subtasks--;
+        if ((outstanding_subtasks == 0) && 
+            (((min_tasks_to_schedule > 0) &&
+              (pending_subtasks < min_tasks_to_schedule)) ||
+             ((min_frames_to_schedule > 0) &&
+              (pending_frames < min_frames_to_schedule))))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->deactivate_context(this);
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2859,11 +2888,25 @@ namespace LegionRuntime {
       // Don't need to do this if we are scheduling based on mapped frames
       if (min_tasks_to_schedule == 0)
         return;
-      AutoLock o_lock(op_lock);
-      pending_subtasks++;
-      if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == min_tasks_to_schedule))
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
+        pending_subtasks++;
+        if ((outstanding_subtasks > 0) &&
+            (pending_subtasks == min_tasks_to_schedule))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->deactivate_context(this);
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2873,14 +2916,28 @@ namespace LegionRuntime {
       // Don't need to do this if we are schedule based on mapped frames
       if (min_tasks_to_schedule == 0)
         return;
-      AutoLock o_lock(op_lock);
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pending_subtasks > 0);
+        assert(pending_subtasks > 0);
 #endif
-      if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == min_tasks_to_schedule))
+        if ((outstanding_subtasks > 0) &&
+            (pending_subtasks == min_tasks_to_schedule))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+        pending_subtasks--;
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->activate_context(this);
-      pending_subtasks--;
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2890,11 +2947,25 @@ namespace LegionRuntime {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (min_frames_to_schedule == 0)
         return;
-      AutoLock o_lock(op_lock);
-      pending_frames++;
-      if ((outstanding_subtasks > 0) &&
-          (pending_frames == min_frames_to_schedule))
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
+        pending_frames++;
+        if ((outstanding_subtasks > 0) &&
+            (pending_frames == min_frames_to_schedule))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->deactivate_context(this);
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2904,14 +2975,28 @@ namespace LegionRuntime {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (min_frames_to_schedule == 0)
         return;
-      AutoLock o_lock(op_lock);
+      Event wait_on = Event::NO_EVENT;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pending_frames > 0);
+        assert(pending_frames > 0);
 #endif
-      if ((outstanding_subtasks > 0) &&
-          (pending_frames == min_frames_to_schedule))
+        if ((outstanding_subtasks > 0) &&
+            (pending_frames == min_frames_to_schedule))
+        {
+          wait_on = context_order_event;
+          to_trigger = UserEvent::create_user_event();
+          context_order_event = to_trigger;
+        }
+        pending_frames--;
+      }
+      if (to_trigger.exists())
+      {
+        wait_on.wait();
         runtime->activate_context(this);
-      pending_frames--;
+        to_trigger.trigger();
+      }
     }
 
     //--------------------------------------------------------------------------
