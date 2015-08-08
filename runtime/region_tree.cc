@@ -4422,11 +4422,6 @@ namespace LegionRuntime {
               fprintf(stdout,"  Notify Invalid Call:\n");
               break;
             }
-          case GET_RECYCLE_EVENT_CALL:
-            {
-              fprintf(stdout,"  Get Recycle Event Call:\n");
-              break;
-            }
           case DEFER_COLLECT_USER_CALL:
             {
               fprintf(stdout,"  Defer Collect User Call:\n");
@@ -21811,7 +21806,7 @@ namespace LegionRuntime {
                                      bool reg_now, InstanceFlag flags)
       : PhysicalManager(ctx, did, owner_space, local_space, mem, 
                         node, inst, reg_now), layout(desc), use_event(u_event), 
-        depth(dep), recycled(false), instance_flags(flags)
+        depth(dep), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -21922,8 +21917,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, GARBAGE_COLLECT_CALL);
 #endif
-      bool release_valid_views = true;
-      std::vector<MaterializedView*> to_release;
       if (is_owner())
       {
         // Always call this up front to see if we need to reclaim the
@@ -21939,45 +21932,23 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
-        // See if we should actually delete this instance
-        // or whether we are trying to recycle it.  If we're
-        // trying to recycle it, see if someone else has claimed it.
-        // If not then take it back and delete it now to reclaim
-        // the memory.
-        if (!recycled) // || reclaimed)
-        {
-          // If either of these conditions were true, then we
-          // should actually delete the physical instance.
-          log_garbage.debug("Garbage collecting physical instance " IDFMT
-                                " in memory " IDFMT " in address space %d",
-                                instance.id, memory.id, owner_space);
+        // Do the deletion for this instance
+        // If either of these conditions were true, then we
+        // should actually delete the physical instance.
+        log_garbage.debug("Garbage collecting physical instance " IDFMT
+                              " in memory " IDFMT " in address space %d",
+                              instance.id, memory.id, owner_space);
 #ifdef OLD_LEGION_PROF
-          LegionProf::register_instance_deletion(instance.id);
+        LegionProf::register_instance_deletion(instance.id);
 #endif
 #ifndef DISABLE_GC
-          instance.destroy(use_event);
+        instance.destroy(use_event);
 #endif
-          to_release.insert(to_release.end(), 
-                            valid_views.begin(), valid_views.end());
-          valid_views.clear();
-        }
-        else // Otherwise it has been recycled, so don't release valid views
-          release_valid_views = false;
         // Mark that this instance has been garbage collected
         instance = PhysicalInstance::NO_INST;
       }
       else // Remove our gc reference
         send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
-
-      if (release_valid_views)
-      {
-        for (std::vector<MaterializedView*>::const_iterator it = 
-              to_release.begin(); it != to_release.end(); it++)
-        {
-          if ((*it)->remove_nested_resource_ref(did))
-            legion_delete(*it);
-        }
-      }
     }
 
 
@@ -21987,7 +21958,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-      assert(!recycled);
       PhysicalManager::notify_valid();
     }
 #endif
@@ -21999,66 +21969,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, NOTIFY_INVALID_CALL);
 #endif
-      // If we're the owner and we're now invalid and have no remote
-      // references then we can tell the runtime that it is safe to 
-      // recycle this physical instance.  Pass on the information to the
-      // runtime and save the event that we should trigger to mark that
-      // we're done using this physical instance.
-      if (is_owner())
-      {
-        // Tell the runtime this instance is available for recycling
-        // Note that doing this relies on the guarantee that notify_invalid
-        // will always be called before garbage_collect, ensuring that
-        // the instance is still valid.  This property is guaranteed by
-        // the state machine in the distributed collectable implementation.
-        //context->runtime->recycle_physical_instance(this);
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(instance.exists());
-        assert(!recycled);
-#endif
-        // Mark that we are recycling this instance
-        recycled = true;
-      }
-      else // If we are not the owner, remove our valid reference
+      if (!is_owner()) // If we are not the owner, remove our valid reference
         send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
-    Event InstanceManager::get_recycle_event(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, GET_RECYCLE_EVENT_CALL);
-#endif
-      // Now do our operation, as we finish with each view we
-      // can remove the resource reference that we are holding on it.
-      // We accumulate the set of events representing all the users
-      // still actively using the region from the given level. The
-      // region can be recycled once they are all done using it.
-      // Note we can do this without holding the lock because if we
-      // get here, then we are ready to be reclaimed and no more
-      // valid views will be added because we've already been 
-      // garbage collected.
-      std::set<Event> recycle_events;
-      recycle_events.insert(use_event);
-      std::vector<MaterializedView*> valid_copy;
-      {
-        AutoLock gc(gc_lock);
-        valid_copy.insert(valid_copy.end(),
-                          valid_views.begin(), valid_views.end());
-        valid_views.clear();
-      }
-      for (std::vector<MaterializedView*>::const_iterator it = 
-            valid_copy.begin(); it != valid_copy.end(); it++)
-      {
-        (*it)->accumulate_events(recycle_events);
-        if ((*it)->remove_nested_resource_ref(did))
-          legion_delete(*it);
-      }
-      // Compute the recycle event
-      Event recycle_event = Event::merge_events(recycle_events);
-      return recycle_event;
     }
 
     //--------------------------------------------------------------------------
@@ -22179,37 +22091,6 @@ namespace LegionRuntime {
         inst_manager->register_with_runtime();
         inst_manager->update_remote_instances(source);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::add_valid_view(MaterializedView *view)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view->depth == depth);
-#endif
-      // Add a resource reference so it can't be deleted
-      view->add_nested_resource_ref(did);
-      bool remove_extra_reference = false;
-      {
-        AutoLock gc(gc_lock);
-        if (valid_views.find(view) == valid_views.end())
-          valid_views.insert(view);
-        else
-          remove_extra_reference = true;
-      }
-      if (remove_extra_reference && view->remove_nested_resource_ref(did))
-        legion_delete(view);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::remove_valid_view(MaterializedView *view)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view->depth == depth);
-#endif
-      // Do nothing for right now
     }
 
     //--------------------------------------------------------------------------

@@ -716,7 +716,6 @@ namespace LegionRuntime {
       CLOSE_PHYSICAL_STATE_CALL,
       GARBAGE_COLLECT_CALL,
       NOTIFY_INVALID_CALL,
-      GET_RECYCLE_EVENT_CALL,
       DEFER_COLLECT_USER_CALL,
       GET_SUBVIEW_CALL,
       COPY_FIELD_CALL,
@@ -3281,7 +3280,6 @@ namespace LegionRuntime {
       virtual void notify_invalid(void);
     public:
       inline Event get_use_event(void) const { return use_event; }
-      Event get_recycle_event(void);
     public:
       MaterializedView* create_top_view(unsigned depth);
       void compute_copy_offsets(const FieldMask &copy_mask,
@@ -3296,8 +3294,6 @@ namespace LegionRuntime {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      void add_valid_view(MaterializedView *view);
-      void remove_valid_view(MaterializedView *view);
       bool match_instance(size_t field_size, const Domain &dom) const;
       bool match_instance(const std::vector<size_t> &fields_sizes,
                           const Domain &dom, const size_t bf) const;
@@ -3309,11 +3305,6 @@ namespace LegionRuntime {
       // this physical instance.
       const Event use_event;
       const unsigned depth;
-    protected:
-      // Keep track of whether we've recycled this instance or not
-      bool recycled;
-      // Keep a set of the views we need to see when recycling
-      std::set<MaterializedView*> valid_views;
     protected:
       // This is monotonic variable that once it becomes true
       // will remain true for the duration of the instance lifetime.
