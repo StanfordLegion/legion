@@ -1680,7 +1680,8 @@ namespace LegionRuntime {
       void recycle_distributed_id(DistributedID did, Event recycle_event);
     public:
       void register_distributed_collectable(DistributedID did,
-                                            DistributedCollectable *dc);
+                                            DistributedCollectable *dc,
+                                            bool needs_lock = true);
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
@@ -2187,6 +2188,43 @@ namespace LegionRuntime {
       Runtime *const runtime;
       Reservation reservation;
       T result;
+    };
+
+    class RegisterDistributedContinuation : public LegionContinuation {
+    public:
+      RegisterDistributedContinuation(DistributedID id,
+                                      DistributedCollectable *d,
+                                      Runtime *rt, Reservation r)
+        : did(id), dc(d), runtime(rt), reservation(r), release(false) { }
+      ~RegisterDistributedContinuation(void)
+      { if (release) reservation.release(); }
+    public:
+      inline bool perform_now(void)
+      {
+        // Try to take the lock
+        Event acquire_event = reservation.acquire();
+        if (!acquire_event.has_triggered())
+        {
+          // Didn't get it, issue the continuation
+          Event done_event = issue(runtime, acquire_event);
+          done_event.wait();
+          return false;
+        }
+        release = true;
+        return true;
+      }
+      virtual void execute(void)
+      {
+        runtime->register_distributed_collectable(did, dc, false/*need lock*/);
+        // Release the reservation after we are done
+        reservation.release();
+      }
+    protected:
+      const DistributedID did;
+      DistributedCollectable *const dc;
+      Runtime *const runtime;
+      Reservation reservation;
+      bool release;
     };
 
     //--------------------------------------------------------------------------

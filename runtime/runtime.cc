@@ -12967,14 +12967,30 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Runtime::register_distributed_collectable(DistributedID did,
-                                                   DistributedCollectable *dc)
+                                                   DistributedCollectable *dc,
+                                                   bool needs_lock)
     //--------------------------------------------------------------------------
     {
-      AutoLock d_lock(distributed_collectable_lock);
+      if (needs_lock)
+      {
+        // Make a continuation just in case we have to defer this
+        RegisterDistributedContinuation 
+          continuation(did, dc, this, distributed_collectable_lock);
+        if (continuation.perform_now())
+        {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(dist_collectables.find(did) == dist_collectables.end());
+          assert(dist_collectables.find(did) == dist_collectables.end());
 #endif
-      dist_collectables[did] = dc;
+          dist_collectables[did] = dc;
+        }
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(dist_collectables.find(did) == dist_collectables.end());
+#endif
+        dist_collectables[did] = dc;
+      }
     }
     
     //--------------------------------------------------------------------------
