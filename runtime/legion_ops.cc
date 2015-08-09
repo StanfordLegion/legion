@@ -235,7 +235,7 @@ namespace LegionRuntime {
       track_parent = track;
       children_mapped = child_event;
       if (track_parent)
-        parent_ctx->register_child_operation(this);
+        parent_ctx->register_new_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
     }
@@ -3793,7 +3793,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       FenceOp::initialize(ctx, MIXED_FENCE);
-      parent_ctx->issue_frame(completion_event); 
+      parent_ctx->issue_frame(this, completion_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::set_previous(Event previous)
+    //--------------------------------------------------------------------------
+    {
+      previous_completion = previous;
     }
 
     //--------------------------------------------------------------------------
@@ -3801,6 +3808,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      previous_completion = Event::NO_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3831,7 +3839,39 @@ namespace LegionRuntime {
     {
       // Increment the number of mapped frames
       parent_ctx->increment_frame();
-      return FenceOp::trigger_execution();
+      // Mark that we finished our mapping now
+      complete_mapping();
+      // Go through and launch a completion task dependent upon
+      // all the completion events of our incoming dependences.
+      // Make sure that the events that we pulled out our still valid.
+      // Note since we are performing this operation, then we know
+      // that we are mapped and therefore our set of input dependences
+      // have been fixed so we can read them without holding the lock.
+      std::set<Event> trigger_events;
+      // Include our previous completion event if necessary
+      if (previous_completion.exists())
+        trigger_events.insert(previous_completion);
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            incoming.begin(); it != incoming.end(); it++)
+      {
+        Event complete = it->first->get_completion_event();
+        if (it->second == it->first->get_generation())
+          trigger_events.insert(complete);
+      }
+      Event wait_on = Event::merge_events(trigger_events);
+      if (!wait_on.has_triggered())
+      {
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, wait_on);
+      }
+      else
+        deferred_complete();
+      return true;
     }
 
     //--------------------------------------------------------------------------

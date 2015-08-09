@@ -127,6 +127,7 @@ namespace LegionRuntime {
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
+      inline bool is_tracking_parent(void) const { return track_parent; } 
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
@@ -676,6 +677,7 @@ namespace LegionRuntime {
       FrameOp& operator=(const FrameOp &rhs);
     public:
       void initialize(SingleTask *ctx);
+      void set_previous(Event previous);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -684,6 +686,8 @@ namespace LegionRuntime {
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
+    protected:
+      Event previous_completion;
     };
 
     /**

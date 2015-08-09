@@ -2066,7 +2066,9 @@ namespace LegionRuntime {
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
       pending_done = Event::NO_EVENT;
+      last_registration = Event::NO_EVENT;
       current_trace = NULL;
+      outstanding_children_count = 0;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
       pending_frames = 0;
@@ -2098,7 +2100,11 @@ namespace LegionRuntime {
       mapping_paths.clear();
       safe_cast_domains.clear();
       restricted_trees.clear();
-      frame_events.clear();
+      // Have to hold the lock when clearing this one
+      {
+        AutoLock o_lock(op_lock);
+        frame_events.clear();
+      }
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -2451,11 +2457,73 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::register_child_operation(Operation *op)
+    void SingleTask::register_new_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      // If we are performing a trace mark that the child has a trace
+      if (current_trace != NULL)
+        op->set_trace(current_trace);
+      int outstanding_count = 
+        __sync_add_and_fetch(&outstanding_children_count,1);
+      // Only need to check if we are not tracing by frames
+      if ((max_outstanding_frames <= 0) && (max_window_size > 0) && 
+            (outstanding_count >= max_window_size))
+      {
+        // Launch a window-wait task and then wait on the event 
+        WindowWaitArgs args;
+        args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
+        args.parent_ctx = this;
+        Event wait_done = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                HLR_WINDOW_WAIT_TASK_ID, this);
+        wait_done.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_window_wait(void)
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
-      // Only do this if we are not tracing by frames
+      {
+        // Take the lock and make sure we didn't lose the race
+        AutoLock o_lock(op_lock);
+        // We can read this without locking because we know the application
+        // task isn't running if we are here and the lock serializes us
+        // with all the other meta-tasks
+        if (outstanding_children_count >= max_window_size)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!valid_wait_event);
+#endif
+          window_wait = UserEvent::create_user_event();
+          valid_wait_event = true;
+          wait_event = window_wait;
+        }
+      }
+      if (wait_event.exists() && !wait_event.has_triggered())
+        wait_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::add_to_dependence_queue(Operation *op, 
+                                             ProcessorManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Since this call always comes from the application, we have to
+      // defer it using a meta-task
+      AddToDepQueueArgs args;
+      args.hlr_id = HLR_ADD_TO_DEP_QUEUE_TASK_ID;
+      args.manager = manager;
+      args.op = op;
+      last_registration = runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                           HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, last_registration);
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID SingleTask::register_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_tracking_parent())
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2465,42 +2533,11 @@ namespace LegionRuntime {
 #endif
         // Put this in the list of child operations that need to map
         executing_children.insert(op);
-        // Check to see if we have too many active children
-        // Only do this if we are not tracing frames
-        if ((max_outstanding_frames <= 0) && (max_window_size > 0) && 
-            (executing_children.size() >= (size_t)max_window_size))
-        {
-          // Check to see if we have an active wait, if not make
-          // one and then wait on it
-          if (!valid_wait_event)
-          {
-            window_wait = UserEvent::create_user_event();
-            valid_wait_event = true;
-          }
-          wait_event = window_wait;
-        }
       }
-      // See if we need to preempt this task because it has exceeded
-      // the maximum number of outstanding operations within its context
-      if (wait_event.exists() && !wait_event.has_triggered())
-      {
-#ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(executing_processor,
-                                        get_unique_task_id(), 
-                                        BEGIN_WINDOW_WAIT);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(context.exists());
 #endif
-        runtime->pre_wait(executing_processor);
-        wait_event.wait();
-        runtime->post_wait(executing_processor);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(executing_processor,
-                                        get_unique_task_id(), 
-                                        END_WINDOW_WAIT);
-#endif
-      }
-      // Finally if we are performing a trace mark that the child has a trace
-      if (current_trace != NULL)
-        op->set_trace(current_trace);
+      return context.get_id();
     }
 
     //--------------------------------------------------------------------------
@@ -2522,9 +2559,14 @@ namespace LegionRuntime {
       // Add some hysteresis here so that we have some runway for when
       // the paused task resumes it can run for a little while.
       executed_children.insert(op);
+      int outstanding_count = 
+        __sync_add_and_fetch(&outstanding_children_count,-1);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(outstanding_count >= 0);
+#endif
       if (valid_wait_event && (max_window_size > 0) &&
-          (executing_children.size() <=
-           (hysteresis_percentage * max_window_size / 100)))
+          (outstanding_count <=
+           int(hysteresis_percentage * max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2601,9 +2643,14 @@ namespace LegionRuntime {
       executing_children.erase(op);
       executed_children.erase(op);
       complete_children.erase(op);
+      int outstanding_count = 
+        __sync_add_and_fetch(&outstanding_children_count,-1);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(outstanding_count >= 0);
+#endif
       if (valid_wait_event && (max_window_size > 0) &&
-          (executing_children.size() <=
-           (hysteresis_percentage * max_window_size / 100)))
+          (outstanding_count <=
+           int(hysteresis_percentage * max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2768,35 +2815,44 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::issue_frame(Event frame_termination)
+    void SingleTask::issue_frame(FrameOp *frame, Event frame_termination)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT; 
-      // Only do this if we have a maximum number of outstanding frames
+      // This happens infrequently enough that we can just issue
+      // a meta-task to see what we should do without holding the lock
       if (max_outstanding_frames > 0)
+      {
+        IssueFrameArgs args;
+        args.hlr_id = HLR_ISSUE_FRAME_TASK_ID;
+        args.parent_ctx = this;
+        args.frame = frame;
+        args.frame_termination = frame_termination;
+        // We know that the issuing is done in order because we block after
+        // we launch this meta-task which blocks the application task
+        Event wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                              HLR_ISSUE_FRAME_TASK_ID, this); 
+        wait_on.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_frame_issue(FrameOp *frame,Event frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      Event wait_on = Event::NO_EVENT;
+      Event previous = Event::NO_EVENT;
       {
         AutoLock o_lock(op_lock);
         const size_t current_frames = frame_events.size();
+        if (current_frames > 0)
+          previous = frame_events.back();
         if (current_frames > (size_t)max_outstanding_frames)
           wait_on = frame_events[current_frames - max_outstanding_frames];
         frame_events.push_back(frame_termination); 
       }
-      if (wait_on.exists() && !wait_on.has_triggered())
-      {
-#ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(executing_processor,
-                                        get_unique_task_id(), 
-                                        BEGIN_WINDOW_WAIT);
-#endif
-        runtime->pre_wait(executing_processor);
+      frame->set_previous(previous);
+      if (!wait_on.has_triggered())
         wait_on.wait();
-        runtime->post_wait(executing_processor);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(executing_processor,
-                                        get_unique_task_id(), 
-                                        END_WINDOW_WAIT);
-#endif
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2804,13 +2860,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Pull off all the frame events until we reach ours
-      AutoLock o_lock(op_lock);
-      while (!frame_events.empty())
+      if (max_outstanding_frames > 0)
       {
-        Event next = frame_events.front();
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(frame_events.front() == frame_termination);
+#endif
         frame_events.pop_front();
-        if (next == frame_termination)
-          break;
       }
     }
 
@@ -3352,8 +3408,9 @@ namespace LegionRuntime {
     {
       parent_conflict = false;
       inline_conflict = false;
-      // Need to hold our local lock when reading regions
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the regions data structure
+      // but we are here so we aren't mutating
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
 #endif
@@ -5051,7 +5108,61 @@ namespace LegionRuntime {
             runtime->add_to_dependence_queue(executing_processor, close_op);
           }
         }
-        // Also compute the conditions for the children being mapped
+      }
+
+      // Handle the future result
+      handle_future(res, res_size, owned); 
+
+      // If this is a GPU processor and we are profiling, 
+      // synchronize the stream for now
+#if defined(LEGION_LOGGING) || defined(OLD_LEGION_PROF)
+#ifdef USE_CUDA
+      if (executing_processor.kind() == Processor::TOC_PROC) 
+        cudaStreamSynchronize(0);
+#endif
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      get_unique_task_id(),
+                                      END_EXECUTION);
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(get_unique_task_id(), PROF_END_EXECUTION);
+#endif
+      // See if we want to move the rest of this computation onto
+      // the utility processor
+      if (runtime->has_explicit_utility_procs || 
+          !last_registration.has_triggered() || !pending_done.has_triggered())
+      {
+        PostEndArgs post_end_args;
+        post_end_args.hlr_id = HLR_POST_END_ID;
+        post_end_args.proxy_this = this;
+        Event post_pre = Event::merge_events(pending_done, last_registration);
+        runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
+                                         HLR_POST_END_ID, this, post_pre);
+      }
+      else
+        post_end_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::post_end_task(void)
+    //--------------------------------------------------------------------------
+    {
+#if defined(OLD_LEGION_PROF) || defined(LEGION_LOGGING)
+      UniqueID local_id = get_unique_task_id();
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(local_id, PROF_BEGIN_POST);
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      local_id,
+                                      BEGIN_POST_EXEC);
+#endif
+      // First complete the conditions for the children being mapped
+      if (!is_leaf() || (num_virtual_mappings > 0))
+      {
         std::set<Event> preconditions;
         AutoLock o_lock(op_lock);
         // Only need to do this for executing and executed children
@@ -5075,56 +5186,6 @@ namespace LegionRuntime {
         all_children_mapped = UserEvent::NO_USER_EVENT;
 #endif
       }
-
-      // Handle the future result
-      handle_future(res, res_size, owned); 
-
-      // If this is a GPU processor and we are profiling, 
-      // synchronize the stream for now
-#if defined(LEGION_LOGGING) || defined(OLD_LEGION_PROF)
-#ifdef USE_CUDA
-      if (executing_processor.kind() == Processor::TOC_PROC) 
-        cudaStreamSynchronize(0);
-#endif
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_EXECUTION);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(get_unique_task_id(), PROF_END_EXECUTION);
-#endif
-      
-      // See if we want to move the rest of this computation onto
-      // the utility processor
-      if (runtime->has_explicit_utility_procs || !pending_done.has_triggered())
-      {
-        PostEndArgs post_end_args;
-        post_end_args.hlr_id = HLR_POST_END_ID;
-        post_end_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-                                         HLR_POST_END_ID, this, pending_done);
-      }
-      else
-        post_end_task();
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::post_end_task(void)
-    //--------------------------------------------------------------------------
-    {
-#if defined(OLD_LEGION_PROF) || defined(LEGION_LOGGING)
-      UniqueID local_id = get_unique_task_id();
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(local_id, PROF_BEGIN_POST);
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id,
-                                      BEGIN_POST_EXEC);
-#endif
       // Mark that we are done executing this operation
       complete_execution();
       // Mark that we are done executing and then see if we need to
@@ -7746,10 +7807,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::register_child_operation(Operation *op)
+    void InlineTask::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      enclosing->register_child_operation(op);
+      enclosing->register_new_child_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineTask::add_to_dependence_queue(Operation *op,
+                                             ProcessorManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_to_dependence_queue(op, manager);
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID InlineTask::register_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_child_operation(op);
     }
 
     //--------------------------------------------------------------------------

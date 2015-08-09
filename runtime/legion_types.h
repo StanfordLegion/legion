@@ -132,6 +132,9 @@ namespace LegionRuntime {
       HLR_PENDING_CHILD_TASK_ID,
       HLR_DECREMENT_PENDING_TASK_ID,
       HLR_SEND_VERSION_STATE_TASK_ID,
+      HLR_ADD_TO_DEP_QUEUE_TASK_ID,
+      HLR_WINDOW_WAIT_TASK_ID,
+      HLR_ISSUE_FRAME_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 

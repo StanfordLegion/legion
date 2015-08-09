@@ -2852,7 +2852,8 @@ namespace LegionRuntime {
       args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
       args.manager = this;
       args.op = op;
-      ContextID ctx_id = op->get_parent()->get_context_id();
+      SingleTask *parent = op->get_parent();
+      ContextID ctx_id = parent->register_child_operation(op);
       AutoLock d_lock(dependence_lock);
       Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_TRIGGER_DEPENDENCE_ID, op,
@@ -2904,7 +2905,6 @@ namespace LegionRuntime {
       {
         if (!prev_failure)
         {
-          
           AutoLock l_lock(local_queue_lock); 
           Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
                                                         HLR_TRIGGER_OP_ID, op,
@@ -12419,7 +12419,8 @@ namespace LegionRuntime {
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      proc_managers[p]->add_to_dependence_queue(op);
+      SingleTask *parent = op->get_parent();
+      parent->add_to_dependence_queue(op, proc_managers[p]);
     }
     
     //--------------------------------------------------------------------------
@@ -16247,6 +16248,28 @@ namespace LegionRuntime {
               (VersionState::SendVersionStateArgs*)args;
             vargs->proxy_this->send_version_state(vargs->target, 
                                                   vargs->to_trigger);
+            break;
+          }
+        case HLR_ADD_TO_DEP_QUEUE_TASK_ID:
+          {
+            SingleTask::AddToDepQueueArgs *dargs = 
+              (SingleTask::AddToDepQueueArgs*)args;
+            dargs->manager->add_to_dependence_queue(dargs->op);
+            break;
+          }
+        case HLR_WINDOW_WAIT_TASK_ID:
+          {
+            SingleTask::WindowWaitArgs *wargs = 
+              (SingleTask::WindowWaitArgs*)args;
+            wargs->parent_ctx->perform_window_wait();
+            break;
+          }
+        case HLR_ISSUE_FRAME_TASK_ID:
+          {
+            SingleTask::IssueFrameArgs *fargs = 
+              (SingleTask::IssueFrameArgs*)args;
+            fargs->parent_ctx->perform_frame_issue(fargs->frame, 
+                                                   fargs->frame_termination);
             break;
           }
         default:

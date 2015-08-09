@@ -267,6 +267,21 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         SingleTask *parent_ctx;
       };
+      struct WindowWaitArgs {
+        HLRTaskID hlr_id;
+        SingleTask *parent_ctx;
+      };
+      struct IssueFrameArgs {
+        HLRTaskID hlr_id;
+        SingleTask *parent_ctx;
+        FrameOp *frame;
+        Event frame_termination;
+      };
+      struct AddToDepQueueArgs {
+        HLRTaskID hlr_id;
+        ProcessorManager *manager;
+        Operation *op;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -304,7 +319,10 @@ namespace LegionRuntime {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual void register_child_operation(Operation *op);
+      virtual void register_new_child_operation(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           ProcessorManager *manager);
+      virtual ContextID register_child_operation(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -314,13 +332,15 @@ namespace LegionRuntime {
       bool has_executing_operation(Operation *op);
       bool has_executed_operation(Operation *op);
       void print_children(void);
+      void perform_window_wait(void);
     public:
       virtual void update_current_fence(FenceOp *op);
     public:
       void begin_trace(TraceID tid);
       void end_trace(TraceID tid);
     public:
-      void issue_frame(Event frame_termination);
+      void issue_frame(FrameOp *frame, Event frame_termination);
+      void perform_frame_issue(FrameOp *frame, Event frame_termination);
       void finish_frame(Event frame_termination);
     public:
       void increment_outstanding(void);
@@ -497,6 +517,7 @@ namespace LegionRuntime {
       RegionTreeContext context; 
     protected:
       // Track whether this task has finished executing
+      int outstanding_children_count;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children;
@@ -511,6 +532,7 @@ namespace LegionRuntime {
       Event deferred_map;
       Event deferred_complete;
       Event pending_done;
+      Event last_registration;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -943,7 +965,10 @@ namespace LegionRuntime {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     public:
-      virtual void register_child_operation(Operation *op);
+      virtual void register_new_child_operation(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op,
+                                           ProcessorManager *manager);
+      virtual ContextID register_child_operation(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
