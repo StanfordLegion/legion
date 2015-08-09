@@ -8492,7 +8492,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
-      DistributedID did = context->runtime->get_available_distributed_id();
+      DistributedID did = context->runtime->get_available_distributed_id(false);
       Memory location = inst.get_location();
       InstanceManager *result = legion_new<InstanceManager>(context, did, 
                                          context->runtime->address_space,
@@ -12127,7 +12127,7 @@ namespace LegionRuntime {
     {
       RegionTreeNode *node = root->logical_node;
       DistributedID did = 
-                        node->context->runtime->get_available_distributed_id();
+                    node->context->runtime->get_available_distributed_id(false);
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
@@ -14610,7 +14610,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = 
-        owner->context->runtime->get_available_distributed_id();
+        owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
       VersionState *vs = legion_new<VersionState>(vid, owner->context->runtime, 
                           new_did, local_space, local_space, this, initialize);
@@ -19131,7 +19131,7 @@ namespace LegionRuntime {
                                               const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      InterCloseOp *op = context->runtime->get_available_inter_close_op();
+      InterCloseOp *op = context->runtime->get_available_inter_close_op(false);
       // Construct a reigon requirement for this operation
       // All privileges are based on the parent logical region
       RegionRequirement req(handle, READ_WRITE, EXCLUSIVE, 
@@ -19234,7 +19234,7 @@ namespace LegionRuntime {
                                                 Operation *op)
     //--------------------------------------------------------------------------
     {
-      DistributedID did = context->runtime->get_available_distributed_id();
+      DistributedID did = context->runtime->get_available_distributed_id(false);
       UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
       InstanceManager *manager = column_source->create_instance(target_mem,
                                       row_source->get_domain_blocking(),
@@ -19275,7 +19275,7 @@ namespace LegionRuntime {
                                                 Operation *op)
     //--------------------------------------------------------------------------
     {
-      DistributedID did = context->runtime->get_available_distributed_id();
+      DistributedID did = context->runtime->get_available_distributed_id(false);
       UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
       ReductionManager *manager = column_source->create_reduction(target_mem,
                                       row_source->get_domain_blocking(),
@@ -19726,7 +19726,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Make the fill instance
-      DistributedID did = context->runtime->get_available_distributed_id();
+      DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
@@ -20530,7 +20530,7 @@ namespace LegionRuntime {
                                                  const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      InterCloseOp *op = context->runtime->get_available_inter_close_op();
+      InterCloseOp *op = context->runtime->get_available_inter_close_op(false);
       // Construct a region requirement for this operation
       // Make it a projection requirement so we walk to a partition
       RegionRequirement req(handle, 0/*projection id */,
@@ -21977,7 +21977,8 @@ namespace LegionRuntime {
     MaterializedView* InstanceManager::create_top_view(unsigned depth)
     //--------------------------------------------------------------------------
     {
-      DistributedID view_did = context->runtime->get_available_distributed_id();
+      DistributedID view_did = 
+        context->runtime->get_available_distributed_id(false);
       MaterializedView *result = legion_new<MaterializedView>(context, view_did,
                                                 context->runtime->address_space,
                                                 context->runtime->address_space,
@@ -22301,7 +22302,8 @@ namespace LegionRuntime {
     ReductionView* ReductionManager::create_view(void)
     //--------------------------------------------------------------------------
     {
-      DistributedID view_did = context->runtime->get_available_distributed_id();
+      DistributedID view_did = 
+        context->runtime->get_available_distributed_id(false);
       ReductionView *result = legion_new<ReductionView>(context, view_did,
                                                 context->runtime->address_space,
                                                 context->runtime->address_space,
@@ -26501,7 +26503,7 @@ namespace LegionRuntime {
 #endif
         // Make a new composite view and then iterate over the roots
         DistributedID flat_did = 
-          context->runtime->get_available_distributed_id();
+          context->runtime->get_available_distributed_id(false);
         CompositeView *result = legion_new<CompositeView>(context, flat_did,
                                               context->runtime->address_space,
                                               logical_node,

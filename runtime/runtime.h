@@ -847,6 +847,24 @@ namespace LegionRuntime {
     private:
       int ctx;
     };
+
+    /**
+     * \class LegionContinuation
+     * A generic interface class for issuing a continuation
+     */
+    class LegionContinuation {
+    public:
+      struct ContinuationArgs {
+        HLRTaskID hlr_id;
+        LegionContinuation *continuation;
+      };
+    public:
+      Event issue(Runtime *runtime, Event precondition = Event::NO_EVENT);
+    public:
+      virtual void execute(void) = 0;
+    public:
+      static void handle_continuation(const void *args);
+    }; 
  
     /**
      * \class Runtime
@@ -895,7 +913,7 @@ namespace LegionRuntime {
         Processor proc;
         Event event;
         RemoteTask *context;
-      };
+      }; 
     public:
       struct ProcessorGroupInfo {
       public:
@@ -1656,7 +1674,8 @@ namespace LegionRuntime {
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
     public:
-      DistributedID get_available_distributed_id(void);
+      DistributedID get_available_distributed_id(bool need_cont, 
+                                                 bool has_lock = false);
       void free_distributed_id(DistributedID did);
       void recycle_distributed_id(DistributedID did, Event recycle_event);
     public:
@@ -1682,34 +1701,66 @@ namespace LegionRuntime {
       void decrement_outstanding_top_level_tasks(void);
       void initiate_runtime_shutdown(void);
     public:
-      IndividualTask*       get_available_individual_task(void);
-      PointTask*            get_available_point_task(void);
-      IndexTask*            get_available_index_task(void);
-      SliceTask*            get_available_slice_task(void);
-      RemoteTask*           get_available_remote_task(void);
-      InlineTask*           get_available_inline_task(void);
-      MapOp*                get_available_map_op(void);
-      CopyOp*               get_available_copy_op(void);
-      FenceOp*              get_available_fence_op(void);
-      FrameOp*              get_available_frame_op(void);
-      DeletionOp*           get_available_deletion_op(void);
-      InterCloseOp*         get_available_inter_close_op(void);
-      PostCloseOp*          get_available_post_close_op(void);
-      DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
-      FuturePredOp*         get_available_future_pred_op(void);
-      NotPredOp*            get_available_not_pred_op(void);
-      AndPredOp*            get_available_and_pred_op(void);
-      OrPredOp*             get_available_or_pred_op(void);
-      AcquireOp*            get_available_acquire_op(void);
-      ReleaseOp*            get_available_release_op(void);
-      TraceCaptureOp*       get_available_capture_op(void);
-      TraceCompleteOp*      get_available_trace_op(void);
-      MustEpochOp*          get_available_epoch_op(void);
-      PendingPartitionOp*   get_available_pending_partition_op(void);
-      DependentPartitionOp* get_available_dependent_partition_op(void);
-      FillOp*               get_available_fill_op(void);
-      AttachOp*             get_available_attach_op(void);
-      DetachOp*             get_available_detach_op(void);
+      template<typename T>
+      inline T* get_available(Reservation reservation,
+                              std::deque<T*> &queue, bool has_lock);
+    public:
+      IndividualTask*       get_available_individual_task(bool need_cont,
+                                                  bool has_lock = false);
+      PointTask*            get_available_point_task(bool need_cont,
+                                                  bool has_lock = false);
+      IndexTask*            get_available_index_task(bool need_cont,
+                                                  bool has_lock = false);
+      SliceTask*            get_available_slice_task(bool need_cont,
+                                                  bool has_lock = false);
+      RemoteTask*           get_available_remote_task(bool need_cont,
+                                                  bool has_lock = false);
+      InlineTask*           get_available_inline_task(bool need_cont,
+                                                  bool has_lock = false);
+      MapOp*                get_available_map_op(bool need_cont,
+                                                  bool has_lock = false);
+      CopyOp*               get_available_copy_op(bool need_cont,
+                                                  bool has_lock = false);
+      FenceOp*              get_available_fence_op(bool need_cont,
+                                                  bool has_lock = false);
+      FrameOp*              get_available_frame_op(bool need_cont,
+                                                  bool has_lock = false);
+      DeletionOp*           get_available_deletion_op(bool need_cont,
+                                                  bool has_lock = false);
+      InterCloseOp*         get_available_inter_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      PostCloseOp*          get_available_post_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      DynamicCollectiveOp*  get_available_dynamic_collective_op(bool need_cont,
+                                                  bool has_lock = false);
+      FuturePredOp*         get_available_future_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      NotPredOp*            get_available_not_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      AndPredOp*            get_available_and_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      OrPredOp*             get_available_or_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      AcquireOp*            get_available_acquire_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReleaseOp*            get_available_release_op(bool need_cont,
+                                                  bool has_lock = false);
+      TraceCaptureOp*       get_available_capture_op(bool need_cont,
+                                                  bool has_lock = false);
+      TraceCompleteOp*      get_available_trace_op(bool need_cont,
+                                                  bool has_lock = false);
+      MustEpochOp*          get_available_epoch_op(bool need_cont,
+                                                  bool has_lock = false);
+      PendingPartitionOp*   get_available_pending_partition_op(bool need_cont,
+                                                  bool has_lock = false);
+      DependentPartitionOp* get_available_dependent_partition_op(bool need_cont,
+                                                  bool has_lock = false);
+      FillOp*               get_available_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      AttachOp*             get_available_attach_op(bool need_cont,
+                                                  bool has_lock = false);
+      DetachOp*             get_available_detach_op(bool need_cont,
+                                                  bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1979,7 +2030,6 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
-      std::set<AcquireOp*>      out_acquire_ops; 
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
@@ -1988,7 +2038,6 @@ namespace LegionRuntime {
       void print_out_index_tasks(FILE *f = stdout, int cnt = -1);
       void print_out_slice_tasks(FILE *f = stdout, int cnt = -1);
       void print_out_point_tasks(FILE *f = stdout, int cnt = -1);
-      void print_out_acquire_ops(FILE *f = stdout, int cnt = -1);
       void print_outstanding_tasks(FILE *f = stdout, int cnt = -1);
 #endif
     public:
@@ -2101,6 +2150,78 @@ namespace LegionRuntime {
     public:
       static unsigned num_profiling_nodes;
     };
+
+    template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
+    class GetAvailableContinuation : public LegionContinuation {
+    public:
+      GetAvailableContinuation(Runtime *rt, Reservation r)
+        : runtime(rt), reservation(r) { }
+    public:
+      inline T get_result(void)
+      {
+        // Try to take the reservation, see if we get it
+        Event acquire_event = reservation.acquire();
+        if (acquire_event.has_triggered())
+        {
+          // We got it! Do it now!
+          result = (runtime->*FUNC_PTR)(false/*do continuation*/,
+                                        true/*has lock*/);
+          reservation.release();
+          return result;
+        }
+        // Otherwise we didn't get so issue the deferred task
+        // to avoid waiting for a reservation in an application task
+        Event done_event = issue(runtime, acquire_event);
+        done_event.wait();
+        return result;
+      }
+      virtual void execute(void)
+      {
+        // If we got here we know we have the reservation
+        result = (runtime->*FUNC_PTR)(false/*do continuation*/,
+                                      true/*has lock*/); 
+        // Now release the reservation 
+        reservation.release();
+      }
+    protected:
+      Runtime *const runtime;
+      Reservation reservation;
+      T result;
+    };
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline T* Runtime::get_available(Reservation reservation, 
+                                     std::deque<T*> &queue, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      T *result = NULL;
+      if (!has_lock)
+      {
+        AutoLock r_lock(reservation);
+        if (!queue.empty())
+        {
+          result = queue.front();
+          queue.pop_front();
+        }
+      }
+      else
+      {
+        if (!queue.empty())
+        {
+          result = queue.front();
+          queue.pop_front();
+        }
+      }
+      // Couldn't find one so make one
+      if (result == NULL)
+        result = legion_new<T>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

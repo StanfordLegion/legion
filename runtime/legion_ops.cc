@@ -6120,7 +6120,7 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       future = Future(legion_new<Future::Impl>(runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(true), runtime->address_space,
             runtime->address_space, this));
       collective = dc;
       return future;
@@ -6966,7 +6966,7 @@ namespace LegionRuntime {
       indiv_tasks.resize(launcher.single_tasks.size());
       for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
       {
-        indiv_tasks[idx] = runtime->get_available_individual_task();
+        indiv_tasks[idx] = runtime->get_available_individual_task(true);
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           check_privileges, false/*track*/);
         indiv_tasks[idx]->set_must_epoch(this, idx);
@@ -6979,7 +6979,7 @@ namespace LegionRuntime {
       index_tasks.resize(launcher.index_tasks.size());
       for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
       {
-        index_tasks[idx] = runtime->get_available_index_task();
+        index_tasks[idx] = runtime->get_available_index_task(true);
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           check_privileges, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);

@@ -135,6 +135,7 @@ namespace LegionRuntime {
       HLR_ADD_TO_DEP_QUEUE_TASK_ID,
       HLR_WINDOW_WAIT_TASK_ID,
       HLR_ISSUE_FRAME_TASK_ID,
+      HLR_CONTINUATION_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -175,6 +176,7 @@ namespace LegionRuntime {
         "Add to Dependence Queue",                                \
         "Window Wait",                                            \
         "Issue Frame",                                            \
+        "Legion Continuation",                                    \
       };
 
     enum VirtualChannelKind {

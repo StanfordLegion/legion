@@ -361,7 +361,7 @@ namespace LegionRuntime {
       {
         case INDIVIDUAL_TASK_KIND:
           {
-            IndividualTask *task = rt->get_available_individual_task();
+            IndividualTask *task = rt->get_available_individual_task(false);
             if (task->unpack_task(derez, current))
               rt->add_to_ready_queue(current, task, 
                                      false/*prev fail*/);
@@ -369,7 +369,7 @@ namespace LegionRuntime {
           }
         case SLICE_TASK_KIND:
           {
-            SliceTask *task = rt->get_available_slice_task();
+            SliceTask *task = rt->get_available_slice_task(false);
             if (task->unpack_task(derez, current))
               rt->add_to_ready_queue(current, task,
                                      false/*prev fail*/);
@@ -2262,7 +2262,7 @@ namespace LegionRuntime {
       }
 
       // Get an available inline task
-      InlineTask *inline_task = runtime->get_available_inline_task();
+      InlineTask *inline_task = runtime->get_available_inline_task(true);
       inline_task->initialize_inline_task(this, child);
       // Record the inline task as one we need to deactivate
       // when we are done executing
@@ -2307,7 +2307,7 @@ namespace LegionRuntime {
         if (phy_regions_mapped[idx] && !is_region_mapped(idx))
         {
           // Need to remap
-          MapOp *op = runtime->get_available_map_op();
+          MapOp *op = runtime->get_available_map_op(true);
           op->initialize(this, physical_regions[idx]);
           wait_events.insert(op->get_completion_event());
           runtime->add_to_dependence_queue(executing_processor, op);
@@ -2769,7 +2769,7 @@ namespace LegionRuntime {
       if (current_trace->is_fixed())
       {
         // Already fixed, dump a complete trace op into the stream
-        TraceCompleteOp *complete_op = runtime->get_available_trace_op();
+        TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
         complete_op->initialize_complete(this);
 #ifdef INORDER_EXECUTION
         Event term_event = complete_op->get_completion_event();
@@ -2788,7 +2788,7 @@ namespace LegionRuntime {
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
-        TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
+        TraceCaptureOp *capture_op = runtime->get_available_capture_op(true); 
         capture_op->initialize_capture(this);
 #ifdef INORDER_EXECUTION
         Event term_event = capture_op->get_completion_event();
@@ -5099,15 +5099,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(local_instances[idx].has_ref());
 #endif
-            PostCloseOp *close_op = runtime->get_available_post_close_op();
+            PostCloseOp *close_op = runtime->get_available_post_close_op(true);
             close_op->initialize(this, idx, local_instances[idx]);
             runtime->add_to_dependence_queue(executing_processor, close_op);
           }
         }
       }
 
-      // Handle the future result
-      handle_future(res, res_size, owned); 
+       
 
       // If this is a GPU processor and we are profiling, 
       // synchronize the stream for now
@@ -5133,16 +5132,25 @@ namespace LegionRuntime {
         PostEndArgs post_end_args;
         post_end_args.hlr_id = HLR_POST_END_ID;
         post_end_args.proxy_this = this;
+        post_end_args.result_size = res_size;
+        // If it is not owned make a copy
+        if (!owned)
+        {
+          post_end_args.result = malloc(res_size);
+          memcpy(post_end_args.result, res, res_size);
+        }
+        else
+          post_end_args.result = const_cast<void*>(res);
         Event post_pre = Event::merge_events(pending_done, last_registration);
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
                                          HLR_POST_END_ID, this, post_pre);
       }
       else
-        post_end_task();
+        post_end_task(res, res_size, owned);
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::post_end_task(void)
+    void SingleTask::post_end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
 #if defined(OLD_LEGION_PROF) || defined(LEGION_LOGGING)
@@ -5156,6 +5164,8 @@ namespace LegionRuntime {
                                       local_id,
                                       BEGIN_POST_EXEC);
 #endif
+      // Handle the future result
+      handle_future(res, res_size, owned);
       // First complete the conditions for the children being mapped
       if (!is_leaf() || (num_virtual_mappings > 0))
       {
@@ -6015,8 +6025,8 @@ namespace LegionRuntime {
       initialize_paths(); 
       // Get a future from the parent context to use as the result
       result = Future(legion_new<Future::Impl>(runtime, true/*register*/, 
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, this));
+            runtime->get_available_distributed_id(!top_level_task), 
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
@@ -6083,8 +6093,8 @@ namespace LegionRuntime {
 #endif
       initialize_paths();
       result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, this));
+            runtime->get_available_distributed_id(!top_level_task), 
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
@@ -8086,7 +8096,7 @@ namespace LegionRuntime {
       initialize_paths();
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<Future::Impl>(runtime, 
-            true/*register*/, runtime->get_available_distributed_id(), 
+            true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
@@ -8245,7 +8255,7 @@ namespace LegionRuntime {
       initialize_paths();
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<Future::Impl>(runtime, 
-            true/*register*/, runtime->get_available_distributed_id(), 
+            true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
@@ -8966,7 +8976,7 @@ namespace LegionRuntime {
                                               long long scale_denominator)
     //--------------------------------------------------------------------------
     {
-      SliceTask *result = runtime->get_available_slice_task(); 
+      SliceTask *result = runtime->get_available_slice_task(false); 
       result->initialize_base_task(parent_ctx, 
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);
@@ -9762,7 +9772,7 @@ namespace LegionRuntime {
       num_uncommitted_points = num_points;
       for (unsigned idx = 0; idx < num_points; idx++)
       {
-        PointTask *point = runtime->get_available_point_task(); 
+        PointTask *point = runtime->get_available_point_task(false); 
         point->slice_owner = this;
         point->unpack_task(derez, current);
         point->parent_ctx = parent_ctx;
@@ -9802,7 +9812,7 @@ namespace LegionRuntime {
                                               long long scale_denominator)
     //--------------------------------------------------------------------------
     {
-      SliceTask *result = runtime->get_available_slice_task(); 
+      SliceTask *result = runtime->get_available_slice_task(false); 
       result->initialize_base_task(parent_ctx, 
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);
@@ -9886,7 +9896,7 @@ namespace LegionRuntime {
                                               MinimalPoint *mp)
     //--------------------------------------------------------------------------
     {
-      PointTask *result = runtime->get_available_point_task();
+      PointTask *result = runtime->get_available_point_task(false);
       result->initialize_base_task(parent_ctx,
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);

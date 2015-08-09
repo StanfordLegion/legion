@@ -262,6 +262,8 @@ namespace LegionRuntime {
       public:
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
+        void *result;
+        size_t result_size;
       };
       struct DecrementArgs {
         HLRTaskID hlr_id;
@@ -440,7 +442,7 @@ namespace LegionRuntime {
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
-      void post_end_task(void);
+      void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_mapped_regions(void);
       void inline_child_task(TaskOp *child);
       void restart_task(void);

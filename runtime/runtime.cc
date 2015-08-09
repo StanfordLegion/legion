@@ -4800,17 +4800,17 @@ namespace LegionRuntime {
         perform_one_time_logging();
 #endif
         // Get an individual task to be the top-level task
-        IndividualTask *top_task = get_available_individual_task();
+        IndividualTask *top_task = get_available_individual_task(false);
         // Get a remote task to serve as the top of the top-level task
-        RemoteTask *top_context = get_available_remote_task();
+        RemoteTask *top_context = get_available_remote_task(false);
         top_context->initialize_remote(0, NULL);
         // Set the executing processor
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
         // Mark that this task is the top-level task
         top_task->top_level_task = true;
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*check priv*/, false/*track parent*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -4843,9 +4843,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Get an individual task to be the top-level task
-      IndividualTask *mapper_task = get_available_individual_task();
+      IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
-      RemoteTask *map_context = get_available_remote_task();
+      RemoteTask *map_context = get_available_remote_task(false);
       map_context->initialize_remote(0, NULL);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
@@ -5170,7 +5170,7 @@ namespace LegionRuntime {
 
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_index_space_deletion(ctx, handle);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -5793,7 +5793,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_index_part_deletion(ctx, handle);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -6107,7 +6107,7 @@ namespace LegionRuntime {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_equal_partition(ctx, pid, granularity);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
@@ -6162,7 +6162,7 @@ namespace LegionRuntime {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_weighted_partition(ctx, pid, granularity, weights);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
@@ -6238,7 +6238,7 @@ namespace LegionRuntime {
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
                                           LowLevel::IndexSpace::ISO_UNION);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_union_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
@@ -6315,7 +6315,7 @@ namespace LegionRuntime {
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
                                           LowLevel::IndexSpace::ISO_INTERSECT);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_intersection_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
@@ -6392,7 +6392,7 @@ namespace LegionRuntime {
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
                                           LowLevel::IndexSpace::ISO_SUBTRACT);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_difference_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
@@ -6455,7 +6455,7 @@ namespace LegionRuntime {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       Event handle_ready = part_op->get_handle_ready();
       Event term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
@@ -6512,7 +6512,8 @@ namespace LegionRuntime {
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
-      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      DependentPartitionOp *part_op = 
+        get_available_dependent_partition_op(true);
       part_op->initialize_by_field(ctx, pid, handle, 
                                    parent_priv, color_space, fid);
       Event term_event = part_op->get_completion_event();
@@ -6539,7 +6540,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -6609,7 +6610,8 @@ namespace LegionRuntime {
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
-      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      DependentPartitionOp *part_op = 
+        get_available_dependent_partition_op(true);
       part_op->initialize_by_image(ctx, pid, projection,
                                    parent, fid, color_space);
       Event term_event = part_op->get_completion_event();
@@ -6636,7 +6638,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -6707,7 +6709,8 @@ namespace LegionRuntime {
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
-      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      DependentPartitionOp *part_op = 
+        get_available_dependent_partition_op(true);
       part_op->initialize_by_preimage(ctx, pid, projection, handle,
                                       parent, fid, color_space);
       Event term_event = part_op->get_completion_event();
@@ -6734,7 +6737,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -6834,7 +6837,7 @@ namespace LegionRuntime {
       IndexSpace result = forest->find_pending_space(parent, color, 
                                                      handle_ready, 
                                                      domain_ready);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
@@ -6885,7 +6888,7 @@ namespace LegionRuntime {
       IndexSpace result = forest->find_pending_space(parent, color, 
                                                      handle_ready, 
                                                      domain_ready);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
@@ -6938,7 +6941,7 @@ namespace LegionRuntime {
       IndexSpace result = forest->find_pending_space(parent, color, 
                                                      handle_ready, 
                                                      domain_ready);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(ctx, result, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
@@ -6991,7 +6994,7 @@ namespace LegionRuntime {
       IndexSpace result = forest->find_pending_space(parent, color, 
                                                      handle_ready, 
                                                      domain_ready);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(ctx, result, handle);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
@@ -7045,7 +7048,7 @@ namespace LegionRuntime {
       IndexSpace result = forest->find_pending_space(parent, color, 
                                                      handle_ready, 
                                                      domain_ready);
-      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_difference(ctx, result, initial, handles);
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
@@ -7513,7 +7516,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_space_deletion(ctx, handle);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -7632,7 +7635,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_logical_region_deletion(ctx, handle);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -7674,7 +7677,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_logical_partition_deletion(ctx, handle);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -7996,7 +7999,7 @@ namespace LegionRuntime {
         }
         // Otherwise check to see if we have a value
         Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/,
-          get_available_distributed_id(), address_space, address_space);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -8029,7 +8032,7 @@ namespace LegionRuntime {
         result->complete_future();
         return Future(result);
       }
-      IndividualTask *task = get_available_individual_task();
+      IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
@@ -8166,7 +8169,7 @@ namespace LegionRuntime {
         result->complete_all_futures();
         return FutureMap(result);
       }
-      IndexTask *task = get_available_index_task();
+      IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
@@ -8217,7 +8220,7 @@ namespace LegionRuntime {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/, 
-          get_available_distributed_id(), address_space, address_space);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -8250,7 +8253,7 @@ namespace LegionRuntime {
         result->complete_future();
         return Future(result);
       }
-      IndexTask *task = get_available_index_task();
+      IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
@@ -8297,8 +8300,8 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<Future::Impl>(this, true/*register*/,
-          get_available_distributed_id(), address_space, address_space));
-      IndividualTask *task = get_available_individual_task();
+          get_available_distributed_id(true), address_space, address_space));
+      IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8353,7 +8356,7 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return FutureMap(legion_new<FutureMap::Impl>(ctx,this));
-      IndexTask *task = get_available_index_task();
+      IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8413,8 +8416,8 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<Future::Impl>(this, true/*register*/,
-          get_available_distributed_id(), address_space, address_space));
-      IndexTask *task = get_available_index_task();
+          get_available_distributed_id(true), address_space, address_space));
+      IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8460,7 +8463,7 @@ namespace LegionRuntime {
                                                 const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      MapOp *map_op = get_available_map_op();
+      MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
@@ -8532,7 +8535,7 @@ namespace LegionRuntime {
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      MapOp *map_op = get_available_map_op();
+      MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
@@ -8635,7 +8638,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      MapOp *map_op = get_available_map_op();
+      MapOp *map_op = get_available_map_op(true);
       map_op->initialize(ctx, region);
       ctx->register_inline_mapped_region(region);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
@@ -8686,7 +8689,7 @@ namespace LegionRuntime {
                              const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op();
+      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8733,7 +8736,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -8780,7 +8783,7 @@ namespace LegionRuntime {
                              Future f, const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op();
+      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8827,7 +8830,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -8876,7 +8879,7 @@ namespace LegionRuntime {
                               const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op();
+      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8923,7 +8926,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -8971,7 +8974,7 @@ namespace LegionRuntime {
                               Future f, const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op();
+      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9018,7 +9021,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -9067,7 +9070,7 @@ namespace LegionRuntime {
                                         LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachOp *attach_op = get_available_attach_op(); 
+      AttachOp *attach_op = get_available_attach_op(true); 
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9158,7 +9161,7 @@ namespace LegionRuntime {
       
       // Then issue the detach operation
       Processor proc = ctx->get_executing_processor();
-      DetachOp *detach_op = get_available_detach_op();
+      DetachOp *detach_op = get_available_detach_op(true);
       detach_op->initialize_detach(ctx, region);
 #ifdef INORDER_EXECUTION
       Event term_event = detach_op->get_completion_event();
@@ -9185,7 +9188,7 @@ namespace LegionRuntime {
                                        const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      CopyOp *copy_op = get_available_copy_op();  
+      CopyOp *copy_op = get_available_copy_op(true);  
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9233,7 +9236,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -9309,7 +9312,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      FuturePredOp *pred_op = get_available_future_pred_op();
+      FuturePredOp *pred_op = get_available_future_pred_op(true);
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(ctx, f);
@@ -9353,7 +9356,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      NotPredOp *pred_op = get_available_not_pred_op();
+      NotPredOp *pred_op = get_available_not_pred_op(true);
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(ctx, p);
@@ -9398,7 +9401,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      AndPredOp *pred_op = get_available_and_pred_op();
+      AndPredOp *pred_op = get_available_and_pred_op(true);
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
@@ -9443,7 +9446,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      OrPredOp *pred_op = get_available_or_pred_op();
+      OrPredOp *pred_op = get_available_or_pred_op(true);
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
@@ -9663,7 +9666,8 @@ namespace LegionRuntime {
       log_run.debug("Get dynamic collective result in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
-      DynamicCollectiveOp *collective = get_available_dynamic_collective_op();
+      DynamicCollectiveOp *collective = 
+        get_available_dynamic_collective_op(true);
       Future result = collective->initialize(ctx, dc);
 #ifdef INORDER_EXECUTION
       Event term_event = collective->get_completion_event();
@@ -9709,7 +9713,7 @@ namespace LegionRuntime {
     void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      AcquireOp *acquire_op = get_available_acquire_op();
+      AcquireOp *acquire_op = get_available_acquire_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9755,7 +9759,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -9800,7 +9804,7 @@ namespace LegionRuntime {
     void Runtime::issue_release(Context ctx, const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      ReleaseOp *release_op = get_available_release_op();
+      ReleaseOp *release_op = get_available_release_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9846,7 +9850,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -9891,7 +9895,7 @@ namespace LegionRuntime {
     void Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp *fence_op = get_available_fence_op();
+      FenceOp *fence_op = get_available_fence_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9930,7 +9934,7 @@ namespace LegionRuntime {
     void Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp *fence_op = get_available_fence_op();
+      FenceOp *fence_op = get_available_fence_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -10027,7 +10031,7 @@ namespace LegionRuntime {
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FrameOp *frame_op = get_available_frame_op();
+      FrameOp *frame_op = get_available_frame_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -10067,7 +10071,7 @@ namespace LegionRuntime {
                                           const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      MustEpochOp *epoch_op = get_available_epoch_op();
+      MustEpochOp *epoch_op = get_available_epoch_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -10118,7 +10122,7 @@ namespace LegionRuntime {
         std::set<Event> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = get_available_map_op();
+          MapOp *op = get_available_map_op(true);
           op->initialize(ctx, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           add_to_dependence_queue(proc, op);
@@ -10522,7 +10526,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_deletion(ctx, space, fid);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -10607,7 +10611,7 @@ namespace LegionRuntime {
       }
 #endif
       Processor proc = ctx->get_executing_processor();
-      DeletionOp *op = get_available_deletion_op();
+      DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_deletions(ctx, space, to_free);
 #ifdef INORDER_EXECUTION
       Event term_event = op->get_completion_event();
@@ -12341,7 +12345,7 @@ namespace LegionRuntime {
           std::set<Event> mapped_events;
           for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           {
-            MapOp *op = get_available_map_op();
+            MapOp *op = get_available_map_op(true);
             op->initialize(ctx, unmapped_regions[idx]);
             mapped_events.insert(op->get_completion_event());
             add_to_dependence_queue(proc, op);
@@ -12897,10 +12901,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID Runtime::get_available_distributed_id(void)
+    DistributedID Runtime::get_available_distributed_id(bool need_cont,
+                                                        bool has_lock)
     //--------------------------------------------------------------------------
     {
-      AutoLock d_lock(distributed_id_lock);
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<DistributedID,
+                     &Runtime::get_available_distributed_id> 
+                       continuation(this, distributed_id_lock);
+        return continuation.get_result();
+      }
+      else if (!has_lock)
+      {
+        AutoLock d_lock(distributed_id_lock);
+        return get_available_distributed_id(false,true);
+      }
       if (!available_distributed_ids.empty())
       {
         DistributedID result = available_distributed_ids.front();
@@ -13159,638 +13178,544 @@ namespace LegionRuntime {
       LLRuntime::get_runtime().shutdown();
     }
 
+    
+
     //--------------------------------------------------------------------------
-    IndividualTask* Runtime::get_available_individual_task(void)
+    IndividualTask* Runtime::get_available_individual_task(bool need_cont,
+                                                           bool has_lock)
     //--------------------------------------------------------------------------
     {
-      IndividualTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock i_lock(individual_task_lock);
-        if (!available_individual_tasks.empty())
-        {
-          result = available_individual_tasks.front();
-          available_individual_tasks.pop_front();
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndividualTask*,
+                     &Runtime::get_available_individual_task> 
+                       continuation(this, individual_task_lock);
+        return continuation.get_result();
       }
-      // Couldn't find one so make a new one
-      if (result == NULL)
-        result = legion_new<IndividualTask>(this);
+      IndividualTask *result = get_available(individual_task_lock, 
+                                         available_individual_tasks, has_lock);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      assert(result != NULL);
+      if (!has_lock)
       {
         AutoLock i_lock(individual_task_lock);
         out_individual_tasks.insert(result);
       }
+      else
+        out_individual_tasks.insert(result);
 #endif
-      result->activate();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    PointTask* Runtime::get_available_point_task(void)
+    PointTask* Runtime::get_available_point_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      PointTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock p_lock(point_task_lock);
-        if (!available_point_tasks.empty())
-        {
-          result = available_point_tasks.front();
-          available_point_tasks.pop_front();
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointTask*,
+                     &Runtime::get_available_point_task> 
+                       continuation(this, point_task_lock);
+        return continuation.get_result();
       }
-      if (result == NULL)
-        result = legion_new<PointTask>(this);
+      PointTask *result = get_available(point_task_lock, 
+                                        available_point_tasks, has_lock);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      assert(result != NULL);
+      if (!has_lock)
       {
         AutoLock p_lock(point_task_lock);
         out_point_tasks.insert(result);
       }
+      else
+        out_point_tasks.insert(result);
 #endif
-      result->activate();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexTask* Runtime::get_available_index_task(void)
+    IndexTask* Runtime::get_available_index_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      IndexTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock i_lock(index_task_lock);
-        if (!available_index_tasks.empty())
-        {
-          result = available_index_tasks.front();
-          available_index_tasks.pop_front();
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexTask*,
+                     &Runtime::get_available_index_task> 
+                       continuation(this, index_task_lock);
+        return continuation.get_result();
       }
-      if (result == NULL)
-        result = legion_new<IndexTask>(this);
+      IndexTask *result = get_available(index_task_lock, 
+                                       available_index_tasks, has_lock);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      assert(result != NULL);
+      if (!has_lock)
       {
         AutoLock i_lock(index_task_lock);
         out_index_tasks.insert(result);
       }
+      else
+        out_index_tasks.insert(result);
 #endif
-      result->activate();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    SliceTask* Runtime::get_available_slice_task(void)
+    SliceTask* Runtime::get_available_slice_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      SliceTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock s_lock(slice_task_lock);
-        if (!available_slice_tasks.empty())
-        {
-          result = available_slice_tasks.front();
-          available_slice_tasks.pop_front();
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<SliceTask*,
+                     &Runtime::get_available_slice_task> 
+                       continuation(this, slice_task_lock);
+        return continuation.get_result();
       }
-      if (result == NULL)
-        result = legion_new<SliceTask>(this);
+      SliceTask *result = get_available(slice_task_lock, 
+                                       available_slice_tasks, has_lock);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      assert(result != NULL);
+      if (!has_lock)
       {
         AutoLock s_lock(slice_task_lock);
         out_slice_tasks.insert(result);
       }
+      else
+        out_slice_tasks.insert(result);
 #endif
-      result->activate();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    RemoteTask* Runtime::get_available_remote_task(void)
+    RemoteTask* Runtime::get_available_remote_task(bool need_cont, 
+                                                   bool has_lock)
     //--------------------------------------------------------------------------
     {
-      RemoteTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock r_lock(remote_task_lock);
-        if (!available_remote_tasks.empty())
-        {
-          result = available_remote_tasks.front();
-          available_remote_tasks.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<RemoteTask>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<RemoteTask*,
+                     &Runtime::get_available_remote_task> 
+                       continuation(this, remote_task_lock);
+        return continuation.get_result();
+      }
+      return get_available(remote_task_lock, available_remote_tasks, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    InlineTask* Runtime::get_available_inline_task(void)
+    InlineTask* Runtime::get_available_inline_task(bool need_cont,
+                                                   bool has_lock)
     //--------------------------------------------------------------------------
     {
-      InlineTask *result = NULL;
+      if (need_cont)
       {
-        AutoLock i_lock(inline_task_lock);
-        if (!available_inline_tasks.empty())
-        {
-          result = available_inline_tasks.front();
-          available_inline_tasks.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<InlineTask>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<InlineTask*,
+                     &Runtime::get_available_inline_task> 
+                       continuation(this, inline_task_lock);
+        return continuation.get_result();
+      }
+      return get_available(inline_task_lock, available_inline_tasks, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    MapOp* Runtime::get_available_map_op(void)
+    MapOp* Runtime::get_available_map_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      MapOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock m_lock(map_op_lock);
-        if (!available_map_ops.empty())
-        {
-          result = available_map_ops.front();
-          available_map_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<MapOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<MapOp*,
+                     &Runtime::get_available_map_op> 
+                       continuation(this, map_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(map_op_lock, available_map_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    CopyOp* Runtime::get_available_copy_op(void)
+    CopyOp* Runtime::get_available_copy_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      CopyOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock c_lock(copy_op_lock);
-        if (!available_copy_ops.empty())
-        {
-          result = available_copy_ops.front();
-          available_copy_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<CopyOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<CopyOp*,
+                     &Runtime::get_available_copy_op> 
+                       continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_copy_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    FenceOp* Runtime::get_available_fence_op(void)
+    FenceOp* Runtime::get_available_fence_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      FenceOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock f_lock(fence_op_lock);
-        if (!available_fence_ops.empty())
-        {
-          result = available_fence_ops.front();
-          available_fence_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<FenceOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<FenceOp*,
+                     &Runtime::get_available_fence_op> 
+                       continuation(this, fence_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fence_op_lock, available_fence_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    FrameOp* Runtime::get_available_frame_op(void)
+    FrameOp* Runtime::get_available_frame_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      FrameOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock f_lock(frame_op_lock);
-        if (!available_frame_ops.empty())
-        {
-          result = available_frame_ops.front();
-          available_frame_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<FrameOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<FrameOp*,
+                     &Runtime::get_available_frame_op> 
+                       continuation(this, frame_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(frame_op_lock, available_frame_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    DeletionOp* Runtime::get_available_deletion_op(void)
+    DeletionOp* Runtime::get_available_deletion_op(bool need_cont, 
+                                                   bool has_lock)
     //--------------------------------------------------------------------------
     {
-      DeletionOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock d_lock(deletion_op_lock);
-        if (!available_deletion_ops.empty())
-        {
-          result = available_deletion_ops.front();
-          available_deletion_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<DeletionOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<DeletionOp*,
+                     &Runtime::get_available_deletion_op> 
+                       continuation(this, deletion_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(deletion_op_lock, available_deletion_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(void)
+    InterCloseOp* Runtime::get_available_inter_close_op(bool need_cont,
+                                                        bool has_lock)
     //--------------------------------------------------------------------------
     {
-      InterCloseOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock i_lock(inter_close_op_lock);
-        if (!available_inter_close_ops.empty())
-        {
-          result = available_inter_close_ops.front();
-          available_inter_close_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<InterCloseOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<InterCloseOp*,
+                     &Runtime::get_available_inter_close_op> 
+                       continuation(this, inter_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(inter_close_op_lock, 
+                           available_inter_close_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    PostCloseOp* Runtime::get_available_post_close_op(void)
+    PostCloseOp* Runtime::get_available_post_close_op(bool need_cont,
+                                                      bool has_lock)
     //--------------------------------------------------------------------------
     {
-      PostCloseOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock p_lock(post_close_op_lock);
-        if (!available_post_close_ops.empty())
-        {
-          result = available_post_close_ops.front();
-          available_post_close_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<PostCloseOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<PostCloseOp*,
+                     &Runtime::get_available_post_close_op> 
+                       continuation(this, post_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(post_close_op_lock, 
+                           available_post_close_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
+    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(
+                                                  bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      DynamicCollectiveOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock dc_lock(dynamic_collective_op_lock);
-        if (!available_dynamic_collective_ops.empty())
-        {
-          result = available_dynamic_collective_ops.front();
-          available_dynamic_collective_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<DynamicCollectiveOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<DynamicCollectiveOp*,
+                     &Runtime::get_available_dynamic_collective_op> 
+                       continuation(this, dynamic_collective_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(dynamic_collective_op_lock, 
+                           available_dynamic_collective_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    FuturePredOp* Runtime::get_available_future_pred_op(void)
+    FuturePredOp* Runtime::get_available_future_pred_op(bool need_cont,
+                                                        bool has_lock)
     //--------------------------------------------------------------------------
     {
-      FuturePredOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock f_lock(future_pred_op_lock);
-        if (!available_future_pred_ops.empty())
-        {
-          result = available_future_pred_ops.front();
-          available_future_pred_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<FuturePredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<FuturePredOp*,
+                     &Runtime::get_available_future_pred_op> 
+                       continuation(this, future_pred_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(future_pred_op_lock, 
+                           available_future_pred_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    NotPredOp* Runtime::get_available_not_pred_op(void)
+    NotPredOp* Runtime::get_available_not_pred_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      NotPredOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock n_lock(not_pred_op_lock);
-        if (!available_not_pred_ops.empty())
-        {
-          result = available_not_pred_ops.front();
-          available_not_pred_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<NotPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<NotPredOp*,
+                     &Runtime::get_available_not_pred_op> 
+                       continuation(this, not_pred_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(not_pred_op_lock, available_not_pred_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    AndPredOp* Runtime::get_available_and_pred_op(void)
+    AndPredOp* Runtime::get_available_and_pred_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      AndPredOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock a_lock(and_pred_op_lock);
-        if (!available_and_pred_ops.empty())
-        {
-          result = available_and_pred_ops.front();
-          available_and_pred_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<AndPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<AndPredOp*,
+                     &Runtime::get_available_and_pred_op> 
+                       continuation(this, and_pred_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(and_pred_op_lock, available_and_pred_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    OrPredOp* Runtime::get_available_or_pred_op(void)
+    OrPredOp* Runtime::get_available_or_pred_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      OrPredOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock o_lock(or_pred_op_lock);
-        if (!available_or_pred_ops.empty())
-        {
-          result = available_or_pred_ops.front();
-          available_or_pred_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<OrPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<OrPredOp*,
+                     &Runtime::get_available_or_pred_op> 
+                       continuation(this, or_pred_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(or_pred_op_lock, available_or_pred_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    AcquireOp* Runtime::get_available_acquire_op(void)
+    AcquireOp* Runtime::get_available_acquire_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      AcquireOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock a_lock(acquire_op_lock);
-        if (!available_acquire_ops.empty())
-        {
-          result = available_acquire_ops.front();
-          available_acquire_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<AcquireOp>(this);
-#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      assert(result != NULL);
-      {
-        AutoLock a_lock(acquire_op_lock);
-        out_acquire_ops.insert(result);
-      }
-#endif
-      result->activate();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ReleaseOp* Runtime::get_available_release_op(void)
-    //--------------------------------------------------------------------------
-    {
-      ReleaseOp *result = NULL;
-      {
-        AutoLock r_lock(release_op_lock);
-        if (!available_release_ops.empty())
-        {
-          result = available_release_ops.front();
-          available_release_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<ReleaseOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<AcquireOp*,
+                     &Runtime::get_available_acquire_op> 
+                       continuation(this, acquire_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(acquire_op_lock, available_acquire_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp* Runtime::get_available_capture_op(void)
+    ReleaseOp* Runtime::get_available_release_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      TraceCaptureOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock c_lock(capture_op_lock);
-        if (!available_capture_ops.empty())
-        {
-          result = available_capture_ops.front();
-          available_capture_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<TraceCaptureOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<ReleaseOp*,
+                     &Runtime::get_available_release_op> 
+                       continuation(this, release_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(release_op_lock, available_release_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp* Runtime::get_available_trace_op(void)
+    TraceCaptureOp* Runtime::get_available_capture_op(bool need_cont, 
+                                                      bool has_lock)
     //--------------------------------------------------------------------------
     {
-      TraceCompleteOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock t_lock(trace_op_lock);
-        if (!available_trace_ops.empty())
-        {
-          result = available_trace_ops.front();
-          available_trace_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<TraceCompleteOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<TraceCaptureOp*,
+                     &Runtime::get_available_capture_op> 
+                       continuation(this, capture_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(capture_op_lock, available_capture_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    MustEpochOp* Runtime::get_available_epoch_op(void)
+    TraceCompleteOp* Runtime::get_available_trace_op(bool need_cont, 
+                                                     bool has_lock)
     //--------------------------------------------------------------------------
     {
-      MustEpochOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock e_lock(epoch_op_lock);
-        if (!available_epoch_ops.empty())
-        {
-          result = available_epoch_ops.front();
-          available_epoch_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<MustEpochOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<TraceCompleteOp*,
+                     &Runtime::get_available_trace_op> 
+                       continuation(this, trace_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(trace_op_lock, available_trace_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    PendingPartitionOp* Runtime::get_available_pending_partition_op(void)
+    MustEpochOp* Runtime::get_available_epoch_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      PendingPartitionOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock p_lock(pending_partition_op_lock);
-        if (!available_pending_partition_ops.empty())
-        {
-          result = available_pending_partition_ops.front();
-          available_pending_partition_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<PendingPartitionOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<MustEpochOp*,
+                     &Runtime::get_available_epoch_op> 
+                       continuation(this, epoch_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(epoch_op_lock, available_epoch_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    DependentPartitionOp* Runtime::get_available_dependent_partition_op(void)
+    PendingPartitionOp* Runtime::get_available_pending_partition_op(
+                                                  bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock p_lock(dependent_partition_op_lock);
-        if (!available_dependent_partition_ops.empty())
-        {
-          result = available_dependent_partition_ops.front();
-          available_dependent_partition_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<DependentPartitionOp>(this);
-      result->activate();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    FillOp* Runtime::get_available_fill_op(void)
-    //--------------------------------------------------------------------------
-    {
-      FillOp *result = NULL;
-      {
-        AutoLock f_lock(fill_op_lock);
-        if (!available_fill_ops.empty())
-        {
-          result = available_fill_ops.front();
-          available_fill_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<FillOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<PendingPartitionOp*,
+                     &Runtime::get_available_pending_partition_op> 
+                       continuation(this, pending_partition_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(pending_partition_op_lock, 
+                           available_pending_partition_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    AttachOp* Runtime::get_available_attach_op(void)
+    DependentPartitionOp* Runtime::get_available_dependent_partition_op(
+                                                  bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      AttachOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock a_lock(attach_op_lock);
-        if (!available_attach_ops.empty())
-        {
-          result = available_attach_ops.front();
-          available_attach_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<AttachOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<DependentPartitionOp*,
+                     &Runtime::get_available_dependent_partition_op> 
+                       continuation(this, dependent_partition_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(dependent_partition_op_lock, 
+                           available_dependent_partition_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
-    DetachOp* Runtime::get_available_detach_op(void)
+    FillOp* Runtime::get_available_fill_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      DetachOp *result = NULL;
+      if (need_cont)
       {
-        AutoLock d_lock(detach_op_lock);
-        if (!available_detach_ops.empty())
-        {
-          result = available_detach_ops.front();
-          available_detach_ops.pop_front();
-        }
-      }
-      if (result == NULL)
-        result = legion_new<DetachOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result != NULL);
+        assert(!has_lock);
 #endif
-      result->activate();
-      return result;
+        GetAvailableContinuation<FillOp*,
+                     &Runtime::get_available_fill_op> 
+                       continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    AttachOp* Runtime::get_available_attach_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<AttachOp*,
+                     &Runtime::get_available_attach_op> 
+                       continuation(this, attach_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(attach_op_lock, available_attach_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    DetachOp* Runtime::get_available_detach_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<DetachOp*,
+                     &Runtime::get_available_detach_op> 
+                       continuation(this, detach_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(detach_op_lock, available_detach_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
@@ -13983,9 +13908,6 @@ namespace LegionRuntime {
     {
       AutoLock a_lock(acquire_op_lock);
       available_acquire_ops.push_front(op);
-#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
-      out_acquire_ops.erase(op);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14074,7 +13996,7 @@ namespace LegionRuntime {
           return finder->second;
       }
       // Otherwise we need to make one
-      RemoteTask *remote_ctx = get_available_remote_task();
+      RemoteTask *remote_ctx = get_available_remote_task(false);
       RemoteTask *result = remote_ctx;
       bool lost_race = false;
       {
@@ -14299,7 +14221,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return Future(legion_new<Future::Impl>(this, true/*register*/,
-                                     get_available_distributed_id(),
+                                     get_available_distributed_id(true),
                                      address_space, address_space, op));
     }
 
@@ -14700,40 +14622,6 @@ namespace LegionRuntime {
           cnt--;
         else if (cnt == 0)
           break;
-      }
-      fflush(f);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::print_out_acquire_ops(FILE *f, int cnt /*= -1*/)
-    //--------------------------------------------------------------------------
-    {
-      std::map<UniqueID,AcquireOp*> out_ops;
-      for (std::set<AcquireOp*>::const_iterator it = 
-            out_acquire_ops.begin(); it !=
-            out_acquire_ops.end(); it++)
-      {
-        out_ops[(*it)->get_unique_op_id()] = *it;
-      }
-      for (std::map<UniqueID,AcquireOp*>::const_iterator it = 
-            out_ops.begin(); it != out_ops.end(); it++)
-      {
-        Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Acquire Op: %lld: %p (" 
-                  IDFMT ",%d) triggered %d\n",
-                  it->first, it->second, completion.id, completion.gen,
-                  completion.has_triggered());
-        if (!it->second->wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator bit = 
-                it->second->wait_barriers.begin(); bit !=
-                it->second->wait_barriers.end(); bit++)
-          {
-            Event e = bit->phase_barrier.get_previous_phase();
-            fprintf(f,"Preceding barrier (" IDFMT ",%d) has triggered %d\n",
-                    e.id, e.gen, e.has_triggered());
-          }
-        }
       }
       fflush(f);
     }
@@ -15965,7 +15853,8 @@ namespace LegionRuntime {
           {
             const SingleTask::PostEndArgs *post_end_args = 
               (const SingleTask::PostEndArgs*)args;
-            post_end_args->proxy_this->post_end_task();
+            post_end_args->proxy_this->post_end_task(post_end_args->result, 
+                                post_end_args->result_size, true/*owned*/);
             break;
           }
         case HLR_DEFERRED_MAPPING_ID:
@@ -16237,6 +16126,11 @@ namespace LegionRuntime {
                                                    fargs->frame_termination);
             break;
           }
+        case HLR_CONTINUATION_TASK_ID:
+          {
+            LegionContinuation::handle_continuation(args);
+            break;
+          }
         default:
           assert(false); // should never get here
       }
@@ -16249,6 +16143,26 @@ namespace LegionRuntime {
     {
       Runtime *rt = Runtime::get_runtime(p);
       rt->process_profiling_task(p, args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    Event LegionContinuation::issue(Runtime *runtime, Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      ContinuationArgs args;
+      args.hlr_id = HLR_CONTINUATION_TASK_ID;
+      args.continuation = this;
+      Event done = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                          HLR_CONTINUATION_TASK_ID, NULL, precondition);
+      return done;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionContinuation::handle_continuation(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      ContinuationArgs *cargs = (ContinuationArgs*)args;
+      cargs->continuation->execute();
     }
 
 #ifdef TRACE_ALLOCATION
