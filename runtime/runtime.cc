@@ -1864,7 +1864,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -1908,7 +1908,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -1953,7 +1953,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -1999,7 +1999,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2045,7 +2045,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -2091,7 +2091,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2137,7 +2137,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -2183,7 +2183,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning("Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
