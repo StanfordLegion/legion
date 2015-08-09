@@ -3013,41 +3013,6 @@ namespace LegionRuntime {
             }
           }
         }
-        // Acquire the mapper lock and ask the mapper about scheduling
-        // and then about stealing if not disabled
-#if 0
-        {
-          AutoLock map_lock(mapper_locks[map_id]);
-          if (!visible_tasks.empty())
-          {
-            // TODO
-            mapper_objects[map_id]->select_tasks_to_schedule(ready_tasks);
-          }
-          if (!stealing_disabled)
-          {
-            AutoLock steal_lock(stealing_lock);
-            std::set<Processor> &blacklist = outstanding_steal_requests[map_id];
-            if (blacklist.size() < max_outstanding_steals)
-            {
-              std::set<Processor> steal_targets;
-              // TODO
-              mapper_objects[map_id]->target_task_steal(blacklist, 
-                                                        steal_targets);
-              for (std::set<Processor>::const_iterator it = 
-                    steal_targets.begin(); it != steal_targets.end(); it++)
-              {
-                if (it->exists() && ((*it) != local_proc) &&
-                    (blacklist.find(*it) == blacklist.end()))
-                {
-                  stealing_targets.insert(std::pair<Processor,MapperID>(
-                                                            *it,map_id));
-                  blacklist.insert(*it);
-                }
-              }
-            }
-          }
-        }
-#endif
         // Process the results first remove the operations that were
         // selected to be mapped from the queue.  Note its possible
         // that we can't actually find the task because it has been

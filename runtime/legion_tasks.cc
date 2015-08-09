@@ -2100,11 +2100,7 @@ namespace LegionRuntime {
       mapping_paths.clear();
       safe_cast_domains.clear();
       restricted_trees.clear();
-      // Have to hold the lock when clearing this one
-      {
-        AutoLock o_lock(op_lock);
-        frame_events.clear();
-      }
+      frame_events.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
