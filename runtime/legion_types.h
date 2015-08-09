@@ -172,6 +172,9 @@ namespace LegionRuntime {
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
         "Send Version State",                                     \
+        "Add to Dependence Queue",                                \
+        "Window Wait",                                            \
+        "Issue Frame",                                            \
       };
 
     enum VirtualChannelKind {
