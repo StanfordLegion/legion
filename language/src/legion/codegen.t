@@ -39,6 +39,12 @@ local cache_index_iterator = std.config["cached-iterators"]
 -- would require the use of the divergence-safe code path to be used.
 local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 
+-- Setting this flag directs the compiler to emit bounds checks on all
+-- pointer accesses. This is independent from the runtime's bounds
+-- checks flag as the compiler does not use standard runtime
+-- accessors.
+local bounds_checks = std.config["bounds-checks"]
+
 if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
 
 local codegen = {}
@@ -615,7 +621,38 @@ function ref:new(value_expr, value_type, field_path)
   return values.ref(value_expr, value_type, field_path)
 end
 
-local function get_element_pointer(index_type, field_type, base_pointer, strides, index)
+local function get_element_pointer(cx, region_types, index_type, field_type,
+                                   base_pointer, strides, index)
+  if bounds_checks then
+    local terra check(runtime : c.legion_runtime_t,
+                      ctx : c.legion_context_t,
+                      pointer : c.legion_ptr_t,
+                      pointer_index : uint32,
+                      region : c.legion_logical_region_t,
+                      region_index : uint32)
+      if region_index == pointer_index then
+        var check = c.legion_ptr_safe_cast(runtime, ctx, pointer, region)
+        if c.legion_ptr_is_null(check) then
+          std.assert(false, ["pointer " .. tostring(index_type) .. " is out-of-bounds"])
+        end
+      end
+      return pointer
+    end
+    local pointer_index = 1
+    if #region_types > 1 then
+      pointer_index = `([index].__index)
+    end
+    for region_index, region_type in ipairs(region_types) do
+      assert(cx:has_region(region_type))
+      local lr = cx:region(region_type).logical_region
+      index = `([index_type] {
+          __ptr = check(
+            [cx.runtime], [cx.context],
+            [index].__ptr, [pointer_index],
+            [lr].impl, [region_index])})
+    end
+  end
+
   -- Note: This code is performance-critical and tends to be sensitive
   -- to small changes. Please thoroughly performance-test any changes!
   if not index_type.fields then
@@ -726,7 +763,7 @@ function ref:__ref(cx, expr_type)
     values = std.zip(field_types, base_pointers, strides):map(
       function(field)
         local field_type, base_pointer, stride = unpack(field)
-        return get_element_pointer(self.value_type, field_type, base_pointer, stride, value)
+        return get_element_pointer(cx, region_types, self.value_type, field_type, base_pointer, stride, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
@@ -734,7 +771,7 @@ function ref:__ref(cx, expr_type)
       function(field)
         local field_type, base_pointer, stride = unpack(field)
         local vec = vector(field_type, std.as_read(expr_type).N)
-        return `(@[&vec](&[get_element_pointer(self.value_type, field_type, base_pointer, stride, value)]))
+        return `(@[&vec](&[get_element_pointer(cx, region_types, self.value_type, field_type, base_pointer, stride, value)]))
       end)
     value_type = expr_type
   end

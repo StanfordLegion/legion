@@ -23,6 +23,11 @@
 
 #include "activemsg.h"
 
+#ifndef USE_GASNET
+/*extern*/ void *fake_gasnet_mem_base = 0;
+/*extern*/ size_t fake_gasnet_mem_size = 0;
+#endif
+
 // remote copy active messages from from lowlevel_dma.h for now
 #include "lowlevel_dma.h"
 namespace Realm {

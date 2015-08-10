@@ -178,8 +178,8 @@ namespace Realm {
 				      RequestArgs, 
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Reservation lock,
-			     unsigned mode);
+    static void send_request(gasnet_node_t target, gasnet_node_t req_node,
+			     Reservation lock, unsigned mode);
   };
 
   struct LockReleaseMessage {

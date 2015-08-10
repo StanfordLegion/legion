@@ -51,7 +51,10 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
 NO_BUILD_RULES=1
 include $(LG_RT_DIR)/runtime.mk
 
-TESTS := serializing test_profiling
+TESTS := serializing test_profiling ctxswitch
+
+# can set arguments to be passed to a test when running
+TESTARGS_ctxswitch := -ll:io 1 -t 20
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
@@ -67,7 +70,7 @@ REALM_LIB := librealm.a
 run_all : $(TESTS:%=run_%)
 
 run_% : %
-	./$*
+	./$* $(TESTARGS_$*)
 
 build : $(TESTS)
 
