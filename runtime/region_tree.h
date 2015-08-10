@@ -3487,6 +3487,7 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       static void handle_view_remote_registration(RegionTreeForest *forest,
                                                   Deserializer &derez,
@@ -3550,6 +3551,7 @@ namespace LegionRuntime {
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual Memory get_location(void) const = 0;
+      virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -3652,6 +3654,7 @@ namespace LegionRuntime {
       virtual bool is_reduction_view(void) const;
       virtual MaterializedView* as_materialized_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+      virtual bool has_space(const FieldMask &space_mask) const;
     public:
       MaterializedView* get_materialized_subview(const ColorPoint &c);
       MaterializedView* get_materialized_parent_view(void) const;
@@ -3914,6 +3917,8 @@ namespace LegionRuntime {
         { assert(false); return NULL; } 
       virtual LogicalView* get_subview(const ColorPoint &c);
       virtual Memory get_location(void) const;
+      virtual bool has_space(const FieldMask &space_mask) const
+        { return false; }
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -4009,6 +4014,8 @@ namespace LegionRuntime {
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual bool has_space(const FieldMask &space_mask) const
+        { return false; }
     public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;

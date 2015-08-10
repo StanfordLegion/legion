@@ -12926,7 +12926,7 @@ namespace LegionRuntime {
               it != valid_views.end(); it++)
         {
           FieldMask overlap = it->second & update_mask;
-          if (!overlap)
+          if (!overlap && !it->first->has_space(update_mask))
             continue;
           LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
             iterator finder = state->valid_views.find(it->first);
@@ -12967,7 +12967,7 @@ namespace LegionRuntime {
               it != valid_views.end(); it++)
         {
           FieldMask overlap = it->second & update_mask;
-          if (!overlap)
+          if (!overlap && !it->first->has_space(update_mask))
             continue;
           LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
             iterator finder = state->valid_views.find(it->first);
@@ -23237,6 +23237,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MaterializedView::has_space(const FieldMask &space_mask) const
+    //--------------------------------------------------------------------------
+    {
+      return !(manager->layout->allocated_fields * space_mask);
     }
 
     //--------------------------------------------------------------------------
