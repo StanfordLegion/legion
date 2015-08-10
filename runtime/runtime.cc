@@ -1864,7 +1864,12 @@ namespace LegionRuntime {
       if (defer_event.exists())
       {
         if (block)
-          continuation.defer(runtime, defer_event);
+        {
+          // Only reacquire lock after the event is ready
+          Event acquire_event = 
+            map_lock.acquire(0, true/*exclusive*/, defer_event);
+          continuation.defer(runtime, acquire_event);
+        }
         else
         {
           log_run.warning("Ignoring mapper deferral request in "
