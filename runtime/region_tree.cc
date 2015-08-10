@@ -14623,8 +14623,8 @@ namespace LegionRuntime {
             }
           }
           for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = current_version_infos.begin(); vit !=
-                current_version_infos.end(); vit++)
+                vit = previous_version_infos.begin(); vit !=
+                previous_version_infos.end(); vit++)
           {
             const VersionStateInfo &info = vit->second;
             for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
