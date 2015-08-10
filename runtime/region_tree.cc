@@ -10727,8 +10727,8 @@ namespace LegionRuntime {
         // If we're not doing a reduction, pull down all the valid views
         // and then record the valid physical instances unless we're
         // doing a reductions in which case it doesn't matter
-        node->pull_valid_instance_views(info.ctx, state, 
-                                        info.traversal_mask, info.version_info);
+        node->pull_valid_instance_views(info.ctx, state, info.traversal_mask, 
+                                        true/*need space*/, info.version_info);
         // Find the memories for all the instances and report
         // which memories have full instances and which ones
         // only have partial instances
@@ -16625,8 +16625,8 @@ namespace LegionRuntime {
         if (!!dirty_fields)
         {
           // Pull down instance views so we don't issue unnecessary copies
-          pull_valid_instance_views(ctx, state, 
-                                    closing_mask, closer.info.version_info);
+          pull_valid_instance_views(ctx, state, closing_mask, 
+                                false/*need space*/, closer.info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!state->valid_views.empty());
 #endif
@@ -17435,6 +17435,7 @@ namespace LegionRuntime {
     void RegionTreeNode::pull_valid_instance_views(ContextID ctx,
                                                    PhysicalState *state,
                                                    const FieldMask &mask,
+                                                   bool needs_space,
                                                    VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
@@ -17446,7 +17447,7 @@ namespace LegionRuntime {
 #endif
       LegionMap<LogicalView*,FieldMask>::aligned new_valid_views;
       find_valid_instance_views(ctx, state, mask, mask, version_info,
-                                false/*needs space*/, new_valid_views);
+                                needs_space, new_valid_views);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             new_valid_views.begin(); it != new_valid_views.end(); it++)
       {
@@ -19713,7 +19714,8 @@ namespace LegionRuntime {
     {
       PhysicalState *state = get_physical_state(ctx, version_info);
       // First pull down any valid instance views
-      pull_valid_instance_views(ctx, state, user_mask, version_info);
+      pull_valid_instance_views(ctx, state, user_mask, 
+                                false/*need space*/, version_info);
       // Now go through the list of valid instances and see if we can find
       // one that satisfies the field that we need.
       DeferredView *deferred_view = NULL;

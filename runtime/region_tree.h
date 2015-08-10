@@ -2335,7 +2335,7 @@ namespace LegionRuntime {
                                       VersionInfo &version_info,
                                       std::set<ReductionView*> &valid_views);
       void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
-                                     const FieldMask &mask, 
+                                     const FieldMask &mask, bool needs_space,
                                      VersionInfo &version_info);
       void find_copy_across_instances(const MappableInfo &info,
                                       MaterializedView *target,
