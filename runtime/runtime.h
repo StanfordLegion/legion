@@ -473,40 +473,10 @@ namespace LegionRuntime {
       void replace_default_mapper(Mapper *m);
       Mapper* find_mapper(MapperID mid) const; 
     public:
-      // 1 argument, no return
-      template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1);
-      // 1 argument with return
-      template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1);
-      // 2 arguments, no return
-      template<typename T1, typename T2, 
-               void (Mapper::*CALL)(T1,T2), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, const T2 &arg2);
-      // 2 arguments with return
-      template<typename T, typename T1, typename T2, 
-               T (Mapper::*CALL)(T1,T2), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, const T2 &args);
-      // 3 arguments, no return
-      template<typename T1, typename T2, 
-               typename T3, void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, 
-                         const T2 &arg2, const T3 &arg3);
-      // 3 arguments with return
-      template<typename T, typename T1, typename T2, 
-               typename T3, T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, 
-                      const T1 &arg1, const T2 &arg2, const T3 &arg3);
-      // 4 arguments, no return
-      template<typename T1, typename T2, typename T3, 
-               typename T4, void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, 
-                         const T2 &arg2, const T3 &arg3, const T4 &arg4);
-      // 4 argument with return
-      template<typename T, typename T1, typename T2, typename T3, 
-               typename T4, T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, 
-                      const T2 &arg2, const T3 &arg3, const T4 &arg4);
+      template<typename MAPPER_CONTINUATION>
+      void invoke_mapper(MapperID map_id, MAPPER_CONTINUATION &continuation,
+                         bool block, bool has_lock);
+      void check_mapper_messages(MapperID map_id, bool need_lock);
     public:
       // Functions that perform mapping calls
       // We really need variadic templates here
@@ -859,7 +829,7 @@ namespace LegionRuntime {
         LegionContinuation *continuation;
       };
     public:
-      Event issue(Runtime *runtime, Event precondition = Event::NO_EVENT);
+      Event defer(Runtime *runtime, Event precondition = Event::NO_EVENT);
     public:
       virtual void execute(void) = 0;
     public:
@@ -2152,6 +2122,10 @@ namespace LegionRuntime {
       static unsigned num_profiling_nodes;
     };
 
+    /**
+     * \class GetAvailableContinuation
+     * Continuation class for obtaining resources from the runtime
+     */
     template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
     class GetAvailableContinuation : public LegionContinuation {
     public:
@@ -2172,7 +2146,7 @@ namespace LegionRuntime {
         }
         // Otherwise we didn't get so issue the deferred task
         // to avoid waiting for a reservation in an application task
-        Event done_event = issue(runtime, acquire_event);
+        Event done_event = defer(runtime, acquire_event);
         done_event.wait();
         return result;
       }
@@ -2190,41 +2164,297 @@ namespace LegionRuntime {
       T result;
     };
 
+    /**
+     * \class RegisterDistributedContinuation
+     * Continuation class for registration of distributed collectables
+     */
     class RegisterDistributedContinuation : public LegionContinuation {
     public:
       RegisterDistributedContinuation(DistributedID id,
                                       DistributedCollectable *d,
-                                      Runtime *rt, Reservation r)
-        : did(id), dc(d), runtime(rt), reservation(r), release(false) { }
-      ~RegisterDistributedContinuation(void)
-      { if (release) reservation.release(); }
+                                      Runtime *rt)
+        : did(id), dc(d), runtime(rt) { }
     public:
-      inline bool perform_now(void)
-      {
-        // Try to take the lock
-        Event acquire_event = reservation.acquire();
-        if (!acquire_event.has_triggered())
-        {
-          // Didn't get it, issue the continuation
-          Event done_event = issue(runtime, acquire_event);
-          done_event.wait();
-          return false;
-        }
-        release = true;
-        return true;
-      }
       virtual void execute(void)
       {
         runtime->register_distributed_collectable(did, dc, false/*need lock*/);
-        // Release the reservation after we are done
-        reservation.release();
       }
     protected:
       const DistributedID did;
       DistributedCollectable *const dc;
       Runtime *const runtime;
-      Reservation reservation;
-      bool release;
+    };
+
+    /**
+     * \class CheckMessagesContinuation
+     * A helper class for doing continuation for checking mapper messages
+     */
+    class CheckMessagesContinuation : public LegionContinuation {
+    public:
+      CheckMessagesContinuation(ProcessorManager *m, MapperID mid)
+        : manager(m), map_id(mid) { }
+    public:
+      virtual void execute(void)
+      {
+        manager->check_mapper_messages(map_id, false/*need lock*/);
+      }
+    protected:
+      ProcessorManager *const manager;
+      MapperID map_id;
+    };
+
+    /**
+     * \class MapperContinuation
+     * A series of templated classes for mapper calls with varying
+     * numbers of arguments. It would be really nice to use 
+     * variadic templates here.
+     */
+    class MapperContinuation : public LegionContinuation {
+    public:
+      MapperContinuation(ProcessorManager *m, MapperID mid)
+        : manager(m), map_id(mid) 
+      { done_event = UserEvent::create_user_event(); }
+    public:
+      inline void complete_mapping(void)
+      {
+        done_event.trigger();
+      }
+      virtual void execute(void) = 0;
+    protected:
+      ProcessorManager *const manager;
+      MapperID map_id;
+      UserEvent done_event;
+    };
+
+    template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
+    class MapperContinuation1NoRet : public MapperContinuation {
+    public:
+      MapperContinuation1NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1)
+        : MapperContinuation(m, mid), arg1(a1) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+    };
+
+    template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
+    class MapperContinuation1Ret : public MapperContinuation {
+    public:
+      MapperContinuation1Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1)
+        : MapperContinuation(m, mid), arg1(a1), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      T result;
+    };
+
+    template<typename T1, typename T2, void (Mapper::*CALL)(T1,T2), bool BLOCK>
+    class MapperContinuation2NoRet : public MapperContinuation {
+    public:
+      MapperContinuation2NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+    };
+
+    template<typename T, typename T1, typename T2, 
+             T (Mapper::*CALL)(T1,T2), bool BLOCK>
+    class MapperContinuation2Ret : public MapperContinuation {
+    public:
+      MapperContinuation2Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1, const T2 &a2)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      T result;
+    };
+
+    template<typename T1, typename T2, typename T3,
+             void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+    class MapperContinuation3NoRet : public MapperContinuation {
+    public:
+      MapperContinuation3NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2, const T3 &a3)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2), arg3(a3) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2, arg3);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+    };
+
+    template<typename T, typename T1, typename T2, typename T3, 
+             T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+    class MapperContinuation3Ret : public MapperContinuation {
+    public:
+      MapperContinuation3Ret(ProcessorManager *m, MapperID mid, T init,
+                             const T1 &a1, const T2 &a2, const T3 &a3)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2, arg3);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      T result;
+    };
+
+    template<typename T1, typename T2, typename T3, typename T4,
+             void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+    class MapperContinuation4NoRet : public MapperContinuation {
+    public:
+      MapperContinuation4NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2, 
+                               const T3 &a3, const T4 &a4)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2, arg3, arg4);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      const T4 &arg4;
+    };
+
+    template<typename T, typename T1, typename T2, 
+             typename T3, typename T4,
+             T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+    class MapperContinuation4Ret : public MapperContinuation {
+    public:
+      MapperContinuation4Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1, const T2 &a2, 
+                             const T3 &a3, const T4 &a4)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2, arg3, arg4);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      const T4 &arg4;
+      T result;
     };
 
     //--------------------------------------------------------------------------

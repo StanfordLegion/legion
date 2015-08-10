@@ -1827,97 +1827,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
-    void ProcessorManager::invoke_mapper(MapperID map_id, const T1 &arg1)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        (mapper->*CALL)(arg1);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
-    T ProcessorManager::invoke_mapper(MapperID map_id, T init, const T1 &arg1)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      T result = init;
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        result = (mapper->*CALL)(arg1);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T1, typename T2, void (Mapper::*CALL)(T1,T2), bool BLOCK>
+    template<typename MAPPER_CONTINUATION>
     void ProcessorManager::invoke_mapper(MapperID map_id, 
-                                         const T1 &arg1, const T2 &arg2)
+                   MAPPER_CONTINUATION &continuation, bool block, bool has_lock)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1925,292 +1837,102 @@ namespace LegionRuntime {
       assert(mapper_objects[map_id] != NULL);
 #endif
       Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      do
+      Reservation map_lock = mapper_locks[map_id];
+      // If we don't have the lock try to get it
+      if (!has_lock)
       {
-        if (BLOCK && wait_on.exists())
+        Event acquire_event = map_lock.acquire();
+        if (!acquire_event.has_triggered())
         {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
+          // Failed to get the lock, defer the mapping
+          continuation.defer(runtime, acquire_event);
+          return;
         }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        (mapper->*CALL)(arg1, arg2);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
+      }
+      // If we make it here we have the lock, go ahead and invoke the mapper
+      inside_mapper_call[map_id] = true;
+      continuation.invoke_mapper(mapper);
+      inside_mapper_call[map_id] = false;
+      // See if we have a deferal event
+      Event defer_event = defer_mapper_event[map_id];
+      // Clear it if necessary
+      if (defer_event.exists())
+        defer_mapper_event[map_id] = Event::NO_EVENT;
+      // Now we can release our lock
+      map_lock.release();
+      // If we have to defer mapping, do that now, otherwise mark complete
+      if (defer_event.exists())
+      {
+        if (block)
+          continuation.defer(runtime, defer_event);
+        else
         {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
+          log_run.warning("Ignoring mapper deferral request in "
+                          "non-blocking mapper call!");
+          continuation.complete_mapping();
         }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
+      }
+      else
+        continuation.complete_mapping();
+      // Now send any messages
+      check_mapper_messages(map_id, true/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, typename T1, typename T2, 
-             T (Mapper::*CALL)(T1,T2), bool BLOCK>
-    T ProcessorManager::invoke_mapper(MapperID map_id, T init, 
-                                      const T1 &arg1, const T2 &arg2)
+    void ProcessorManager::check_mapper_messages(MapperID map_id,bool need_lock)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      T result = init;
-      do
+      if (need_lock)
       {
-        if (BLOCK && wait_on.exists())
+        Event acquire_event = message_lock.acquire(); 
+        // If we didn't get it we have to defer this operation
+        if (!acquire_event.has_triggered())
         {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
+          CheckMessagesContinuation continuation(this, map_id);
+          Event done_event = continuation.defer(runtime, acquire_event);
+          done_event.wait();
+          return;
         }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        result = (mapper->*CALL)(arg1, arg2);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
+      }
+      // Once we get here we have the message lock
+      std::vector<MapperMessage> messages;
+      std::vector<MapperMessage> &current = mapper_messages[map_id]; 
+      if (!current.empty())
+      {
+        messages = current;
+        current.clear();
+      }
+      // Release the lock
+      message_lock.release();
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T1, typename T2, 
-             typename T3, void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-    void ProcessorManager::invoke_mapper(MapperID map_id, const T1 &arg1,
-                                         const T2 &arg2, const T3 &arg3)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        (mapper->*CALL)(arg1, arg2, arg3);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, typename T1, typename T2, 
-             typename T3, T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-    T ProcessorManager::invoke_mapper(MapperID map_id, T init, const T1 &arg1,
-                                      const T2 &arg2, const T3 &arg3)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      T result = init;
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        result = (mapper->*CALL)(arg1, arg2, arg3);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T1, typename T2, typename T3, 
-             typename T4, void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-    void ProcessorManager::invoke_mapper(MapperID map_id, const T1 &arg1,
-                                 const T2 &arg2, const T3 &arg3, const T4 &arg4)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        (mapper->*CALL)(arg1, arg2, arg3, arg4);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, typename T1, typename T2, typename T3,
-             typename T4, T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-    T ProcessorManager::invoke_mapper(MapperID map_id, T init, const T1 &arg1,
-                                const T2 &arg2, const T3 &arg3, const T4 &arg4)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      std::vector<MapperMessage> messages;
-      Event wait_on = defer_mapper_event[map_id];
-      T result = init;
-      do
-      {
-        if (BLOCK && wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[map_id]);
-        inside_mapper_call[map_id] = true;
-        result = (mapper->*CALL)(arg1, arg2, arg3, arg4);
-        inside_mapper_call[map_id] = false;
-        if (defer_mapper_event[map_id].exists())
-        {
-          wait_on = defer_mapper_event[map_id];
-          defer_mapper_event[map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[map_id].empty())
-        {
-          messages = mapper_messages[map_id];
-          mapper_messages[map_id].clear();
-        }
-      } while (BLOCK && wait_on.exists());
-      if (!BLOCK && wait_on.exists())
-        log_run.warning("Ignoring wait request in scheduling mapper call!");
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-      return result;
     }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_set_task_options(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<Task*,&Mapper::select_task_options,
-                    true/*block*/>(task->map_id, task);
+      MapperContinuation1NoRet<Task*,&Mapper::select_task_options,true/*block*/>
+                                         continuation(this, task->map_id, task);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     bool ProcessorManager::invoke_mapper_pre_map_task(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<bool,Task*,&Mapper::pre_map_task,
-                           true/*block*/>(task->map_id, false/*init*/, task);
+      MapperContinuation1Ret<bool,Task*,&Mapper::pre_map_task,true/*block*/>
+                          continuation(this, task->map_id, false/*init*/, task);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_select_variant(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<Task*,&Mapper::select_task_variant,
-                    true/*block*/>(task->map_id, task);
+      MapperContinuation1NoRet<Task*,&Mapper::select_task_variant,true/*block*/>
+                                         continuation(this, task->map_id, task);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2278,16 +2000,18 @@ namespace LegionRuntime {
     void ProcessorManager::invoke_mapper_failed_mapping(Mappable *mappable)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const Mappable*,&Mapper::notify_mapping_failed,
-                    true/*block*/>(mappable->map_id, mappable);
+      MapperContinuation1NoRet<const Mappable*,&Mapper::notify_mapping_failed,
+                  true/*block*/> continuation(this, mappable->map_id, mappable);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_notify_result(Mappable *mappable)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const Mappable*,&Mapper::notify_mapping_result,
-                    true/*block*/>(mappable->map_id, mappable);
+      MapperContinuation1NoRet<const Mappable*,&Mapper::notify_mapping_result,
+                  true/*block*/> continuation(this, mappable->map_id, mappable);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2295,42 +2019,48 @@ namespace LegionRuntime {
                                       std::vector<Mapper::DomainSplit> &splits)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const Task*,const Domain&,std::vector<Mapper::DomainSplit>&,
-                    &Mapper::slice_domain,true/*block*/>(
-                              task->map_id, task, task->index_domain, splits);
+      MapperContinuation3NoRet<const Task*,const Domain&,
+                               std::vector<Mapper::DomainSplit>&,
+                               &Mapper::slice_domain,true/*block*/>
+             continuation(this, task->map_id, task, task->index_domain, splits);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     bool ProcessorManager::invoke_mapper_map_inline(Inline *op)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<bool,Inline*,&Mapper::map_inline,
-                           true/*block*/>(op->map_id, false/*init*/, op);
+      MapperContinuation1Ret<bool,Inline*,&Mapper::map_inline,true/*block*/>
+                              continuation(this, op->map_id, false/*init*/, op);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     bool ProcessorManager::invoke_mapper_map_copy(Copy *op)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<bool,Copy*,&Mapper::map_copy,
-                           true/*block*/>(op->map_id, false/*init*/, op);
+      MapperContinuation1Ret<bool,Copy*,&Mapper::map_copy,true/*block*/>
+                              continuation(this, op->map_id, false/*init*/, op);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     bool ProcessorManager::invoke_mapper_speculate(Mappable *op, bool &value)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<bool,const Mappable*,bool&,
-                           &Mapper::speculate_on_predicate, true/*block*/>(
-                               op->map_id, false/*init*/, op, value);
+      MapperContinuation2Ret<bool,const Mappable*,bool&,
+                             &Mapper::speculate_on_predicate, true/*block*/>
+                     continuation(this, op->map_id, false/*init*/, op, value);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_configure_context(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<Task*,&Mapper::configure_context,
-                    true/*block*/>(task->map_id, task);
+      MapperContinuation1NoRet<Task*,&Mapper::configure_context, true/*block*/>
+                                  continuation(this, task->map_id, task);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2391,17 +2121,21 @@ namespace LegionRuntime {
                                            std::vector<Memory> &order)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const Mappable*,const std::set<Memory>&,Memory,
-            std::vector<Memory>&,&Mapper::rank_copy_sources,true/*block*/>(
-                    mappable->map_id, mappable, memories, destination, order);
+      MapperContinuation4NoRet<const Mappable*, const std::set<Memory>&,
+                               Memory,std::vector<Memory>&,
+                               &Mapper::rank_copy_sources,true/*block*/>
+                                continuation(this, mappable->map_id, mappable, 
+                                             memories, destination, order);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_notify_profiling(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const Task*,&Mapper::notify_profiling_info,true/*block*/>(
-                                                          task->map_id, task);
+      MapperContinuation1NoRet<const Task*,&Mapper::notify_profiling_info,
+                         true/*block*/> continuation(this, task->map_id, task);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2411,10 +2145,12 @@ namespace LegionRuntime {
         MapperID map_id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<bool,const std::vector<Task*>&,
-                const std::vector<Mapper::MappingConstraint>&,MappingTagID,
-                &Mapper::map_must_epoch,true/*block*/>(map_id, false/*init*/, 
-                                                      tasks, constraints, tag);
+      MapperContinuation3Ret<bool,const std::vector<Task*>&,
+                             const std::vector<Mapper::MappingConstraint>&,
+                             MappingTagID,&Mapper::map_must_epoch,true/*block*/>
+                               continuation(this, map_id, false/*init*/, 
+                                            tasks, constraints, tag);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2424,9 +2160,10 @@ namespace LegionRuntime {
                                                           MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return invoke_mapper<int,const Task*,TunableID,MappingTagID,
-                &Mapper::get_tunable_value,true/*block*/>(map_id, 0/*init*/, 
-                                                          task, tid, tag);
+      MapperContinuation3Ret<int,const Task*,TunableID,MappingTagID,
+                             &Mapper::get_tunable_value,true/*block*/>
+                         continuation(this, map_id, 0/*init*/, task, tid, tag);
+      return continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2436,9 +2173,10 @@ namespace LegionRuntime {
                                                         size_t length)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<Processor,const void*,size_t,
-                    &Mapper::handle_message,true/*block*/>(
-                                          map_id, source, message, length);
+      MapperContinuation3NoRet<Processor,const void*,size_t,
+                               &Mapper::handle_message,true/*block*/>
+                         continuation(this, map_id, source, message, length);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2448,9 +2186,10 @@ namespace LegionRuntime {
                                                      size_t result_size)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<MapperEvent,const void*,size_t,
-        &Mapper::handle_mapper_task_result,true/*block*/>(map_id, event, 
-                                                          result, result_size);
+      MapperContinuation3NoRet<MapperEvent,const void*,size_t,
+                               &Mapper::handle_mapper_task_result,true/*block*/>
+                         continuation(this, map_id, event, result, result_size);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2459,9 +2198,10 @@ namespace LegionRuntime {
                 std::set<const Task*> &to_steal)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<Processor,const std::vector<const Task*>&,
-            std::set<const Task*>&,&Mapper::permit_task_steal,true/*block*/>(
-                        map_id, thief, stealable, to_steal);
+      MapperContinuation3NoRet<Processor,const std::vector<const Task*>&,
+            std::set<const Task*>&,&Mapper::permit_task_steal,true/*block*/>
+                      continuation(this, map_id, thief, stealable, to_steal);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2470,9 +2210,10 @@ namespace LegionRuntime {
                                          std::set<Processor> &steal_targets)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const std::set<Processor>&,std::set<Processor>&,
-                    &Mapper::target_task_steal,false/*block*/>(map_id,
-                                                    blacklist, steal_targets);
+      MapperContinuation2NoRet<const std::set<Processor>&,std::set<Processor>&,
+                               &Mapper::target_task_steal,false/*block*/>
+                           continuation(this, map_id, blacklist, steal_targets);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -2480,8 +2221,10 @@ namespace LegionRuntime {
                           MapperID map_id, const std::list<Task*> &ready_tasks)
     //--------------------------------------------------------------------------
     {
-      invoke_mapper<const std::list<Task*>&,&Mapper::select_tasks_to_schedule,
-                    false/*block*/>(map_id, ready_tasks);
+      MapperContinuation1NoRet<const std::list<Task*>&,
+                              &Mapper::select_tasks_to_schedule, false/*block*/>
+                               continuation(this, map_id, ready_tasks);
+      continuation.perform_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -12973,24 +12716,21 @@ namespace LegionRuntime {
     {
       if (needs_lock)
       {
-        // Make a continuation just in case we have to defer this
-        RegisterDistributedContinuation 
-          continuation(did, dc, this, distributed_collectable_lock);
-        if (continuation.perform_now())
+        Event acquire_event = distributed_collectable_lock.acquire();
+        if (!acquire_event.has_triggered())
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(dist_collectables.find(did) == dist_collectables.end());
-#endif
-          dist_collectables[did] = dc;
+          RegisterDistributedContinuation continuation(did, dc, this);
+          Event done_event = continuation.defer(this, acquire_event);
+          done_event.wait();
+          return;
         }
       }
-      else
-      {
+      // If we make it here then we have the lock
 #ifdef DEBUG_HIGH_LEVEL
-        assert(dist_collectables.find(did) == dist_collectables.end());
+      assert(dist_collectables.find(did) == dist_collectables.end());
 #endif
-        dist_collectables[did] = dc;
-      }
+      dist_collectables[did] = dc;
+      distributed_collectable_lock.release();
     }
     
     //--------------------------------------------------------------------------
@@ -16162,7 +15902,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event LegionContinuation::issue(Runtime *runtime, Event precondition)
+    Event LegionContinuation::defer(Runtime *runtime, Event precondition)
     //--------------------------------------------------------------------------
     {
       ContinuationArgs args;
