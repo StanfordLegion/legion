@@ -16382,6 +16382,13 @@ namespace LegionRuntime {
       Machine machine = Machine::get_machine();
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
+      // not having any processors at all is a fatal error
+      if (all_procs.empty())
+      {
+	log_run.error("Machine model contains no processors!");
+	assert(false);
+	exit(ERROR_NO_PROCESSORS);
+      }
       Processor::Kind proc_kind = p.kind();
       // Make separate runtime instances if they are requested,
       // otherwise only make a runtime instances for each of the
