@@ -2012,6 +2012,7 @@ namespace LegionRuntime {
                                  bool path_only) const;
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
+      void add_persistent_view(MaterializedView *view);
       void add_persistent_views(const std::set<MaterializedView*> &views);
     public:
       virtual void notify_active(void);

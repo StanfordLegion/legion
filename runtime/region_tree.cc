@@ -13079,6 +13079,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionState::add_persistent_view(MaterializedView *view)
+    //--------------------------------------------------------------------------
+    {
+      bool remove_duplicates = true;;
+      view->add_nested_gc_ref(did);
+      view->add_nested_valid_ref(did);
+      // This one does need the lock since it comes intermitently
+      {
+        AutoLock s_lock(state_lock);
+        if (valid_views.find(view) == valid_views.end())
+        {
+          valid_views[view] = FieldMask(); // empty field mask
+          remove_duplicates = false;
+        }
+      }
+      if (remove_duplicates)
+      {
+        view->remove_nested_valid_ref(did);
+        if (view->remove_nested_gc_ref(did))
+          legion_delete(view);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionState::add_persistent_views(
                                        const std::set<MaterializedView*> &views)
     //--------------------------------------------------------------------------
@@ -14584,9 +14608,35 @@ namespace LegionRuntime {
       {
         AutoLock v_lock(version_lock);
         if (persistent_views.find(view) == persistent_views.end())
+        {
           persistent_views.insert(view);
+          // Also add this to all our previous and current views
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = current_version_infos.begin(); vit !=
+                current_version_infos.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->add_persistent_view(view);
+            }
+          }
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = current_version_infos.begin(); vit !=
+                current_version_infos.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->add_persistent_view(view);
+            }
+          }
+        }
         else
           remove_extra = true;
+        
       }
       if (remove_extra)
         view->remove_base_valid_ref(PERSISTENCE_REF);
