@@ -54,7 +54,7 @@ include $(LG_RT_DIR)/runtime.mk
 TESTS := serializing test_profiling ctxswitch
 
 # can set arguments to be passed to a test when running
-TESTARGS_ctxswitch := -ll:io 1
+TESTARGS_ctxswitch := -ll:io 1 -t 20
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
