@@ -5968,9 +5968,15 @@ namespace LegionRuntime {
           }
         }
         // Now make the index space and save the information
+#ifdef ASSUME_UNALLOCABLE
+        LowLevel::IndexSpace child_space = 
+          LowLevel::IndexSpace::create_index_space(
+              parent_dom.get_index_space(), child_mask, false/*allocable*/);
+#else
         LowLevel::IndexSpace child_space = 
           LowLevel::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask);
+#endif
         new_index_spaces[DomainPoint::from_point<1>(
             Arrays::Point<1>(finder->first))] = Domain(child_space);
       }
@@ -6364,16 +6370,28 @@ namespace LegionRuntime {
           LowLevel::IndexSpace child_space;
           if (finder != child_masks.end())
           {
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              LowLevel::IndexSpace::create_index_space(
+                parent_dom.get_index_space(), finder->second, false);
+#else
             child_space = 
               LowLevel::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), finder->second);
+#endif
           }
           else
           {
             LowLevel::ElementMask empty_mask;
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              LowLevel::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), empty_mask, false);
+#else
             child_space = 
               LowLevel::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask);
+#endif
           }
           new_index_spaces[DomainPoint::from_point<1>(
               Arrays::Point<1>(c))] = Domain(child_space);
