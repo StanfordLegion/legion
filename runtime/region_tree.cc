@@ -10922,26 +10922,35 @@ namespace LegionRuntime {
         Machine machine = Machine::get_machine();
         std::set<Memory> visible_memories;
 	machine.get_visible_memories(target_proc, visible_memories);
-        std::vector<Memory> filtered_memories;
-        filtered_memories.reserve(chosen_order.size());
-        for (std::vector<Memory>::const_iterator it = chosen_order.begin();
-              it != chosen_order.end(); it++)
+        if (visible_memories.empty() && 
+            (target_proc.kind() == Processor::PROC_GROUP))
         {
-          if (visible_memories.find(*it) == visible_memories.end())
-          {
-            log_region.warning("WARNING: Mapper specified memory " IDFMT 
-                                     " which is not visible from processor "
-                                     "" IDFMT " when mapping region %d of "
-                                     "mappable (ID %lld)!  Removing memory "
-                                     "from the chosen ordering!", it->id, 
-                                     target_proc.id, index, 
-                         info.op->get_mappable()->get_unique_mappable_id());
-            continue;
-          }
-          // Otherwise we can add it to the list of filtered memories
-          filtered_memories.push_back(*it);
+          log_run.warning("Comment on github that you've encountered "
+                          "issue #35");
         }
-        chosen_order = filtered_memories;
+        else
+        {
+          std::vector<Memory> filtered_memories;
+          filtered_memories.reserve(chosen_order.size());
+          for (std::vector<Memory>::const_iterator it = chosen_order.begin();
+                it != chosen_order.end(); it++)
+          {
+            if (visible_memories.find(*it) == visible_memories.end())
+            {
+              log_region.warning("WARNING: Mapper specified memory " IDFMT 
+                                       " which is not visible from processor "
+                                       "" IDFMT " when mapping region %d of "
+                                       "mappable (ID %lld)!  Removing memory "
+                                       "from the chosen ordering!", it->id, 
+                                       target_proc.id, index, 
+                           info.op->get_mappable()->get_unique_mappable_id());
+              continue;
+            }
+            // Otherwise we can add it to the list of filtered memories
+            filtered_memories.push_back(*it);
+          }
+          chosen_order = filtered_memories;
+        }
       }
       // Get the set of currently valid instances
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;

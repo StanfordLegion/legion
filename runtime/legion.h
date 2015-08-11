@@ -2407,7 +2407,7 @@ namespace LegionRuntime {
        *                   passed on the command line to the -hl:window flag.
        *                   Setting the value less than or equal to zero will
        *                   disable the maximum.
-       * hystersis_percentage - set the percentage of the maximum task window
+       * hysteresis_percentage - set the percentage of the maximum task window
        *                   that should be outstanding before a context starts
        *                   issuing tasks again. Hysteresis avoids jitter and
        *                   enables a more efficient execution at the potential
