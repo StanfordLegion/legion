@@ -980,7 +980,10 @@ namespace LegionRuntime{
     class CompareXferDes {
     public:
       bool operator() (XferDes* a, XferDes* b) {
-        return (a->priority < b->priority);
+        if(a->priority == b->priority)
+          return (a < b);
+        else 
+          return (a->priority < b->priority);
       }
     };
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;

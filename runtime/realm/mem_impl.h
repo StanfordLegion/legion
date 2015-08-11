@@ -337,9 +337,12 @@ namespace Realm {
         hid_t type_id;
         hid_t file_id;
         std::vector<hid_t> dataset_ids;
+        std::vector<pthread_rwlock_t> dataset_rwlocks; /* used to serialize readers/writers to datasets in HDF5 */
         std::vector<hid_t> datatype_ids;
+        HDFMemory* hdf_memory;
       };
-      std::vector<HDFMetadata*> hdf_metadata;
+      std::vector<HDFMetadata*> hdf_metadata_vec;
+      pthread_rwlock_t rwlock; /* used to deal with concurrency issues in HDF5 */
     };
 #endif
 
