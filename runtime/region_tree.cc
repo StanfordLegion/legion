@@ -9928,10 +9928,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       NodeInfo &info = node_infos[node];
+      VersionManager *manager = node->get_version_manager(ctx);
 #ifdef DEBUG_HIGH_LEVEL
-      info.physical_state = legion_new<PhysicalState>(node);
+      info.physical_state = legion_new<PhysicalState>(manager, node);
 #else
-      info.physical_state = legion_new<PhysicalState>();
+      info.physical_state = legion_new<PhysicalState>(manager);
 #endif
       // Don't need premap
       derez.deserialize(info.path_only);
@@ -12219,9 +12220,10 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(void)
+    PhysicalState::PhysicalState(VersionManager *m)
+      : manager(m)
 #ifdef DEBUG_HIGH_LEVEL
-      : node(NULL)
+        , node(NULL)
 #endif
     //--------------------------------------------------------------------------
     {
@@ -12232,8 +12234,8 @@ namespace LegionRuntime {
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
-    PhysicalState::PhysicalState(RegionTreeNode *n)
-      : node(n)
+    PhysicalState::PhysicalState(VersionManager *m, RegionTreeNode *n)
+      : manager(m), node(n)
     //--------------------------------------------------------------------------
     {
     }
@@ -12241,8 +12243,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(const PhysicalState &rhs)
+      : manager(NULL)
 #ifdef DEBUG_HIGH_LEVEL
-      : node(NULL)
+        , node(NULL)
 #endif
     //--------------------------------------------------------------------------
     {
@@ -12358,14 +12361,36 @@ namespace LegionRuntime {
     void PhysicalState::capture_state(bool path_only)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
-            version_states.begin(); vit != version_states.end(); vit++)
+      if (manager->has_persistent_views())
       {
-        const VersionStateInfo &info = vit->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-              info.states.begin(); it != info.states.end(); it++)
+        // If we have persistent views, keep a field mask for checking
+        // which persistent views we should add
+        FieldMask check_mask;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
         {
-          it->first->update_physical_state(this, it->second, path_only);
+          const VersionStateInfo &info = vit->second;
+          check_mask |= info.valid_fields;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_physical_state(this, it->second, path_only);
+          }
+        }
+        if (!!check_mask)
+          manager->capture_persistent_views(this, check_mask);
+      }
+      else
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_physical_state(this, it->second, path_only);
+          }
         }
       }
     }
@@ -12476,9 +12501,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState *result = legion_new<PhysicalState>(node);
+      PhysicalState *result = legion_new<PhysicalState>(manager, node);
 #else
-      PhysicalState *result = legion_new<PhysicalState>();
+      PhysicalState *result = legion_new<PhysicalState>(manager);
 #endif
       for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
             version_states.begin(); it1 != version_states.end(); it1++)
@@ -12518,9 +12543,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState *result = legion_new<PhysicalState>(node);
+      PhysicalState *result = legion_new<PhysicalState>(manager, node);
 #else
-      PhysicalState *result = legion_new<PhysicalState>();
+      PhysicalState *result = legion_new<PhysicalState>(manager);
 #endif
       for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
             version_states.begin(); it1 != version_states.end(); it1++)
@@ -13075,48 +13100,6 @@ namespace LegionRuntime {
       {
         meta_state = EVENTUAL_VERSION_STATE;
         eventual_nodes.add(local_space);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::add_persistent_view(MaterializedView *view)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_duplicates = true;;
-      view->add_nested_gc_ref(did);
-      view->add_nested_valid_ref(did);
-      // This one does need the lock since it comes intermitently
-      {
-        AutoLock s_lock(state_lock);
-        if (valid_views.find(view) == valid_views.end())
-        {
-          valid_views[view] = FieldMask(); // empty field mask
-          remove_duplicates = false;
-        }
-      }
-      if (remove_duplicates)
-      {
-        view->remove_nested_valid_ref(did);
-        if (view->remove_nested_gc_ref(did))
-          legion_delete(view);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::add_persistent_views(
-                                       const std::set<MaterializedView*> &views)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(valid_views.empty());
-#endif
-      // No need to to hold the lock since we are exlcusive
-      for (std::set<MaterializedView*>::const_iterator it = views.begin();
-            it != views.end(); it++)
-      {
-        (*it)->add_nested_gc_ref(did);
-        (*it)->add_nested_valid_ref(did);
-        valid_views[*it] = FieldMask(); // empty field mask
       }
     }
 
@@ -13708,18 +13691,6 @@ namespace LegionRuntime {
               if (def_view->is_composite_view())
                 composite_views.push_back(def_view->as_composite_view());
             }
-            // Check for persistent views
-            else
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(view->is_instance_view());
-              assert(view->as_instance_view()->is_materialized_view());
-#endif
-              MaterializedView *mat_view = 
-                view->as_instance_view()->as_materialized_view();
-              if (mat_view->is_persistent())
-                manager->add_persistent_view(mat_view);
-            }
             FieldMask &mask = valid_views[view];
             derez.deserialize(mask);
             field_node->transform_field_mask(mask, source);
@@ -13797,18 +13768,6 @@ namespace LegionRuntime {
               DeferredView *def_view = view->as_deferred_view();
               if (def_view->is_composite_view())
                 composite_views.push_back(def_view->as_composite_view());
-            }
-            // Check for persistent views
-            else
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(view->is_instance_view());
-              assert(view->as_instance_view()->is_materialized_view());
-#endif
-              MaterializedView *mat_view = 
-                view->as_instance_view()->as_materialized_view();
-              if (mat_view->is_persistent())
-                manager->add_persistent_view(mat_view);
             }
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
               valid_views.find(view);
@@ -14004,7 +13963,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *own)
-      : owner(own), version_lock(Reservation::create_reservation())
+      : owner(own), version_lock(Reservation::create_reservation()),
+        has_persistent(false), persistent_lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
     } 
@@ -14024,6 +13984,11 @@ namespace LegionRuntime {
     {
       version_lock.destroy_reservation();
       version_lock = Reservation::NO_RESERVATION;
+      if (persistent_lock.exists())
+      {
+        persistent_lock.destroy_reservation();
+        persistent_lock = Reservation::NO_RESERVATION;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14043,9 +14008,9 @@ namespace LegionRuntime {
     {
       // Create the result
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState *state = legion_new<PhysicalState>(node);
+      PhysicalState *state = legion_new<PhysicalState>(this, node);
 #else
-      PhysicalState *state = legion_new<PhysicalState>();
+      PhysicalState *state = legion_new<PhysicalState>(this);
 #endif 
       // There is an important tradeoff that we're making here: we should
       // be able to predict from our versioning number scheme in the logical
@@ -14493,6 +14458,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(current_version_infos.empty());
       assert(previous_version_infos.empty());
+      assert(!has_persistent);
+      assert(!persistent_lock.exists());
+      assert(persistent_views.empty());
 #endif
     }
 
@@ -14546,7 +14514,17 @@ namespace LegionRuntime {
             legion_delete(*it);
         }
         persistent_views.clear();
+        persistent_lock.destroy_reservation();
+        persistent_lock = Reservation::NO_RESERVATION;
+        has_persistent = false;
       }
+#ifdef DEBUG_HIGH_LEVEL
+      else
+      {
+        assert(!has_persistent);
+        assert(!persistent_lock.exists());
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14604,42 +14582,47 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       view->add_base_valid_ref(PERSISTENCE_REF);
+      // First see if we need to make the lock
+      if (!persistent_lock.exists())
+      {
+        // Take the version lock just to be sure
+        AutoLock v_lock(version_lock);
+        if (!persistent_lock.exists())
+          persistent_lock = Reservation::create_reservation();
+      }
       bool remove_extra = false;
       {
-        AutoLock v_lock(version_lock);
+        AutoLock p_lock(persistent_lock);
         if (persistent_views.find(view) == persistent_views.end())
-        {
           persistent_views.insert(view);
-          // Also add this to all our previous and current views
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = current_version_infos.begin(); vit !=
-                current_version_infos.end(); vit++)
-          {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->add_persistent_view(view);
-            }
-          }
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = previous_version_infos.begin(); vit !=
-                previous_version_infos.end(); vit++)
-          {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->add_persistent_view(view);
-            }
-          }
-        }
         else
           remove_extra = true;
-        
+        has_persistent = true;
       }
       if (remove_extra)
         view->remove_base_valid_ref(PERSISTENCE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::capture_persistent_views(PhysicalState *target,
+                                                  const FieldMask &capture_mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask empty_mask;
+      // If we are here then we know the lock exists
+      AutoLock p_lock(persistent_lock,1,false/*exclusive*/);
+      for (std::set<MaterializedView*>::const_iterator it = 
+            persistent_views.begin(); it != persistent_views.end(); it++)
+      {
+        if ((*it)->has_space(capture_mask))
+        {
+          LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
+            target->valid_views.find(*it);
+          // Only need to add it if it is not already there
+          if (finder == target->valid_views.end())
+            target->valid_views[*it] = empty_mask;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14662,12 +14645,8 @@ namespace LegionRuntime {
       DistributedID new_did = 
         owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
-      VersionState *vs = legion_new<VersionState>(vid, owner->context->runtime, 
+      return legion_new<VersionState>(vid, owner->context->runtime, 
                           new_did, local_space, local_space, this, initialize);
-      // Already holding the lock so we are safe 
-      if (!persistent_views.empty())
-        vs->add_persistent_views(persistent_views);
-      return vs;
     }
 
     //--------------------------------------------------------------------------
@@ -14679,11 +14658,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(owner_space != local_space);
 #endif
-      VersionState *vs = legion_new<VersionState>(vid, owner->context->runtime, 
+      return legion_new<VersionState>(vid, owner->context->runtime, 
                               did, owner_space, local_space, this, initialize);
-      if (!persistent_views.empty())
-        vs->add_persistent_views(persistent_views);
-      return vs;
     }
 
     //--------------------------------------------------------------------------
@@ -14728,9 +14704,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState temp_state(node);
+      PhysicalState temp_state(this, node);
 #else
-      PhysicalState temp_state;
+      PhysicalState temp_state(this);
 #endif
       logger->log("Versions:");
       logger->down();

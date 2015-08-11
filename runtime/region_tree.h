@@ -1903,9 +1903,9 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
-      PhysicalState(void);
+      PhysicalState(VersionManager *manager);
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState(RegionTreeNode *node);
+      PhysicalState(VersionManager *manager, RegionTreeNode *node);
 #endif
       PhysicalState(const PhysicalState &rhs);
       ~PhysicalState(void);
@@ -1929,6 +1929,8 @@ namespace LegionRuntime {
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
+    public:
+      VersionManager *const manager;
     public:
       // Fields which were closed and can be ignored when applying
       FieldMask closed_mask;
@@ -2012,8 +2014,6 @@ namespace LegionRuntime {
                                  bool path_only) const;
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask);
-      void add_persistent_view(MaterializedView *view);
-      void add_persistent_views(const std::set<MaterializedView*> &views);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -2103,6 +2103,7 @@ namespace LegionRuntime {
       void check_init(void);
       void clear(void);
       void sanity_check(void);
+      inline bool has_persistent_views(void) const { return has_persistent; }
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -2110,6 +2111,8 @@ namespace LegionRuntime {
                                 TreeStateLogger *logger);
     public:
       void add_persistent_view(MaterializedView *view);
+      void capture_persistent_views(PhysicalState *target,
+                                    const FieldMask &capture_mask);
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
@@ -2140,6 +2143,8 @@ namespace LegionRuntime {
       LegionMap<VersionID,FieldMask>::aligned observed;
 #endif
     protected:
+      bool has_persistent;
+      Reservation persistent_lock;
       std::set<MaterializedView*> persistent_views;
     };
 
@@ -2179,6 +2184,10 @@ namespace LegionRuntime {
         assert(result != NULL);
 #endif
         return result;
+      }
+      inline VersionManager* get_version_manager(ContextID ctx)
+      {
+        return version_managers.lookup_entry(ctx, this);
       }
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
