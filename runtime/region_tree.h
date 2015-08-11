@@ -1918,7 +1918,8 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool path_only);
+      void capture_state(bool path_only,
+          const LegionMap<VersionID,FieldMask>::aligned &field_versions);
       void apply_state(bool advance) const;
       void reset(void);
     public:

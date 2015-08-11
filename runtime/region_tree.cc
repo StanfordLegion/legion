@@ -9549,9 +9549,13 @@ namespace LegionRuntime {
       if ((finder->second.physical_state != NULL) &&
            finder->second.needs_capture)
       { 
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder->second.field_versions != NULL);
+#endif
         // Recapture the state if we had to be reset
-        finder->second.physical_state->capture_state(
-                                        finder->second.premap_only);
+        finder->second.physical_state->capture_state(finder->second.premap_only,
+                           finder->second.field_versions->get_field_versions());
+
         finder->second.needs_capture = false;
       }
       return finder->second.physical_state;
@@ -12358,40 +12362,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::capture_state(bool path_only)
+    void PhysicalState::capture_state(bool path_only,
+                  const LegionMap<VersionID,FieldMask>::aligned &field_versions)
     //--------------------------------------------------------------------------
     {
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+            vit = version_states.begin(); vit != version_states.end(); vit++)
+      {
+        const VersionStateInfo &info = vit->second;
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+              info.states.begin(); it != info.states.end(); it++)
+        {
+          it->first->update_physical_state(this, it->second, path_only);
+        }
+      }
+      // Check to see if we have any persistent views to include
       if (manager->has_persistent_views())
       {
-        // If we have persistent views, keep a field mask for checking
-        // which persistent views we should add
-        FieldMask check_mask;
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-              vit = version_states.begin(); vit != version_states.end(); vit++)
+        // Build this up from the set of version numbers since
+        // the version states might not exist if we've advanced
+        // more than one version number ahead.
+        FieldMask space_mask;
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              field_versions.begin(); it != field_versions.end(); it++)
         {
-          const VersionStateInfo &info = vit->second;
-          check_mask |= info.valid_fields;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
-          {
-            it->first->update_physical_state(this, it->second, path_only);
-          }
+          space_mask |= it->second;
         }
-        if (!!check_mask)
-          manager->capture_persistent_views(this, check_mask);
-      }
-      else
-      {
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-              vit = version_states.begin(); vit != version_states.end(); vit++)
-        {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
-          {
-            it->first->update_physical_state(this, it->second, path_only);
-          }
-        }
+        manager->capture_persistent_views(this, space_mask);
       }
     }
 
@@ -14098,7 +14095,7 @@ namespace LegionRuntime {
       // Now that we've got the set of states, tell the physical state
       // to capture from them
       if (capture)
-        state->capture_state(path_only);
+        state->capture_state(path_only, versions);
       return state;
     } 
 
