@@ -378,6 +378,269 @@ namespace LegionRuntime {
         available_reqs.push(req);
       }
 
+      template<unsigned DIM>
+      GASNetXferDes<DIM>::GASNetXferDes(Channel* _channel, bool has_pre_XferDes,
+                                        Buffer* _src_buf, Buffer* _dst_buf,
+                                        const char *_mem_base,
+                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size, long max_nr,
+                                        XferOrder::Type _order, XferKind _kind)
+      {
+        kind = _kind;
+        channel = _channel;
+        order = _order;
+        bytes_read = bytes_write = 0;
+        pre_XferDes = NULL;
+        next_XferDes = NULL;
+        next_bytes_read = 0;
+        max_req_size = _max_req_size;
+        src_buf = _src_buf;
+        dst_buf = _dst_buf;
+        mem_base = _mem_base;
+        domain = _domain;
+        size_t total_field_size = 0;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
+          oas_vec.push_back(oas);
+        }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
+
+        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf->linearization.get_mapping<DIM>(),
+                                                     dst_buf->linearization.get_mapping<DIM>(), order);
+        offset_idx = 0;
+
+        switch (kind) {
+          case XferDes::XFER_GASNET_READ:
+          {
+            GASNetReadRequest* gasnet_read_reqs = (GASNetReadRequest*) calloc(max_nr, sizeof(GASNetReadRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gasnet_read_reqs[i].xd = this;
+              available_reqs.push(&gasnet_read_reqs[i]);
+            }
+            requests = gasnet_read_reqs;
+            break;
+          }
+          case XferDes::XFER_GASNET_WRITE:
+          {
+            GASNetWriteRequest* gasnet_write_reqs = (GASNetWriteRequest*) calloc(max_nr, sizeof(GASNetWriteRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gasnet_write_reqs[i].xd = this;
+              available_reqs.push(&gasnet_write_reqs[i]);
+            }
+            requests = gasnet_write_reqs;
+            break;
+          }
+          default:
+            assert(false);
+        }
+      }
+
+      template<unsigned DIM>
+      long GASNetXferDes<DIM>::get_requests(Request** requests, long nr)
+      {
+        long idx = 0;
+        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
+          off_t src_start, dst_start;
+          size_t nbytes;
+          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (nbytes == 0)
+            break;
+          while (nbytes > 0) {
+            size_t req_size = nbytes;
+            if (src_buf->is_ib) {
+              src_start = src_start % src_buf->buf_size;
+              req_size = umin(req_size, src_buf->buf_size - src_start);
+            }
+            if (dst_buf->is_ib) {
+              dst_start = dst_start % dst_buf->buf_size;
+              req_size = umin(req_size, dst_buf->buf_size - dst_start);
+            }
+            requests[idx] = available_reqs.front();
+            available_reqs.pop();
+            requests[idx]->is_read_done = false;
+            requests[idx]->is_write_done = false;
+            switch (kind) {
+              case XferDes::XFER_GASNET_READ:
+              {
+                GASNetReadRequest* gasnet_read_req = (GASNetReadRequest*) requests[idx];
+                gasnet_read_req->dst_buf = (uint64_t)(mem_base + dst_start);
+                gasnet_read_req->src_offset = src_start;
+                gasnet_read_req->nbytes = req_size;
+                break;
+              }
+              case XferDes::XFER_GASNET_WRITE:
+              {
+                GASNetWriteRequest* gasnet_write_req = (GASNetWriteRequest*) requests[idx];
+                gasnet_write_req->src_buf = (uint64_t)(mem_base + src_start);
+                gasnet_write_req->dst_offset = dst_start;
+                gasnet_write_req->nbytes = req_size;
+                break;
+              }
+              default:
+           	    assert(false);
+            }
+            src_start += req_size;
+            dst_start += req_size;
+            nbytes -= req_size;
+            idx ++;
+          }
+        }
+        return idx;
+      }
+
+      template<unsigned DIM>
+      void GASNetXferDes<DIM>::notify_request_read_done(Request* req)
+      {
+        req->is_read_done = true;
+        int64_t offset;
+        uint64_t size;
+        switch(kind) {
+          case XferDes::XFER_DISK_READ:
+            offset = ((GASNetReadRequest*)req)->src_offset - src_buf->alloc_offset;
+            size = ((GASNetReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            offset = ((GASNetWriteRequest*)req)->src_buf - (int64_t) mem_base;
+            size = ((GASNetWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+        simple_update_bytes_read(offset, size, segments_read);
+      }
+
+      template<unsigned DIM>
+      void GASNetXferDes<DIM>::notify_request_write_done(Request* req)
+      {
+        req->is_write_done = true;
+        int64_t offset;
+        uint64_t size;
+        switch(kind) {
+          case XferDes::XFER_DISK_READ:
+            offset = ((GASNetReadRequest*)req)->dst_buf - (int64_t) mem_base;
+            size = ((GASNetReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            offset = ((GASNetWriteRequest*)req)->dst_offset - dst_buf->alloc_offset;
+            size = ((GASNetWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+        simple_update_bytes_write(offset, size, segments_write);
+        available_reqs.push(req);
+        //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
+      }
+
+      template<unsigned DIM>
+      RemoteWriteXferDes<DIM>::RemoteWriteXferDes(Channel* _channel, bool has_pre_XferDes,
+                                        Buffer* _src_buf, Buffer* _dst_buf,
+                                        const char *_src_mem_base, const char *_dst_mem_base,
+                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size, long max_nr,
+                                        XferOrder::Type _order)
+      {
+        kind = XferDes::XFER_REMOTE_WRITE;
+        channel = _channel;
+        order = _order;
+        bytes_read = bytes_write = 0;
+        pre_XferDes = NULL;
+        next_XferDes = NULL;
+        next_bytes_read = 0;
+        max_req_size = _max_req_size;
+        src_buf = _src_buf;
+        dst_buf = _dst_buf;
+        src_mem_base = _src_mem_base;
+        dst_mem_base = _dst_mem_base;
+        domain = _domain;
+        size_t total_field_size = 0;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
+          oas_vec.push_back(oas);
+        }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
+
+        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(),
+                                                     src_buf->linearization.get_mapping<DIM>(),
+                                                     dst_buf->linearization.get_mapping<DIM>());
+        offset_idx = 0;
+        requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
+        for (int i = 0; i < max_nr; i++) {
+          requests[i].xd = this;
+          requests[i].dst_mem =
+          available_reqs.push(&requests[i]);
+        }
+	  }
+
+      template<unsigned DIM>
+      long RemoteWriteXferDes<DIM>::get_requests(Request** requests, long nr)
+      {
+        long idx = 0;
+        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
+          off_t src_start, dst_start;
+          size_t nbytes;
+          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (nbytes == 0)
+            break;
+          while (nbytes > 0) {
+            size_t req_size = nbytes;
+            if (src_buf->is_ib) {
+              src_start = src_start % src_buf->buf_size;
+              req_size = umin(req_size, src_buf->buf_size - src_start);
+            }
+            if (dst_buf->is_ib) {
+              dst_start = dst_start % dst_buf->buf_size;
+              req_size = umin(req_size, dst_buf->buf_size - dst_start);
+            }
+            requests[idx] = available_reqs.front();
+            available_reqs.pop();
+            requests[idx]->is_read_done = false;
+            requests[idx]->is_write_done = false;
+            RemoteWriteRequest* req = requests[idx];
+            req->src_buf = src_mem_base + src_start;
+            req->dst_offset =dst_start;
+            req->dst_buf = dst_mem_base + dst_start;
+            req->nbytes = req_size;
+            src_start += req_size; // here we don't have to mod src_buf->buf_size since it will be performed in next loop
+            dst_start += req_size; //
+            nbytes -= req_size;
+            idx ++;
+          }
+        }
+        return idx;
+      }
+
+      template<unsigned DIM>
+      void RemoteWriteXferDes<DIM>::notify_request_read_done(Request* req)
+      {
+        req->is_read_done = true;
+        int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_mem_base;
+        uint64_t size = ((RemoteWriteXferDes*)req)->nbytes;
+        simple_update_bytes_read(offset, size, segments_read);
+      }
+
+      template<unsigned DIM>
+      void RemoteWriteXferDes<DIM>::notify_request_write_done(Request* req)
+      {
+        req->is_write_done = true;
+        int64_t offset = ((RemoteWriteXferDes*)req)->dst_buf - dst_mem_base;
+        uint64_t size = ((RemoteWriteXferDes*)req)->nbytes;
+        simple_update_bytes_write(offset, size, segments_write);
+        available_reqs.push(req);
+      }
+
 #ifdef USE_DISK
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
@@ -1078,7 +1341,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GASNET_READ:
             for (int i = 0; i < nr; i++) {
               GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
-              get_runtime()->global_memory->get_bytes(read_req->offset, read_req->dst_buf, read_req->size);
+              get_runtime()->global_memory->get_bytes(read_req->src_offset, read_req->dst_buf, read_req->nbytes);
               read_req->xd->notify_request_read_done(read_req);
               read_req->xd->notify_request_write_done(read_req);
             }
@@ -1086,7 +1349,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GASNET_WRITE:
             for (int i = 0; i < nr; i++) {
               GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
-              get_runtime()->global_memory->put_bytes(write_req->offset, write_req->src_buf, write_req->size);
+              get_runtime()->global_memory->put_bytes(write_req->dst_offset, write_req->src_buf, write_req->nbytes);
               write_req->xd->notify_request_read_done(write_req);
               write_req->xd->notify_request_write_done(write_req);
             }
@@ -1104,6 +1367,51 @@ namespace LegionRuntime {
       long GASNetChannel::available()
       {
         return capacity;
+      }
+
+      RemoteWriteChannel::RemoteWriteChannel(long max_nr)
+      {
+        capacity = max_nr;
+      }
+
+      long RemoteWriteChannel::submit(Request** requests, long nr)
+      {
+        assert(nr <= capacity - flying_reqs.size());
+        for (int i = 0; i < nr; i ++) {
+          RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
+          req->complete_event = GenEventImpl::create_genevent()->current_event();
+          Realm::RemoteWriteMessage::RequestArgs args;
+          args.mem = req->dst_mem;
+          args.offset = req->dst_offset;
+          args.event = req->complete_event;
+          args.sender = gasnet_mynode();
+          args.sequence_id = 0;
+      	  RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
+                                               req->src_buf, req->nbytes,
+                                               PAYLOAD_KEEP,
+                                               req->dst_buf);
+          flying_reqs.push_back(req);
+        }
+        return nr;
+      }
+
+      void RemoteWriteChannel::pull()
+      {
+        while (!flying_reqs.empty()) {
+          RemoteWriteRequest* req = (RemoteWriteRequest*)flying_reqs.front();
+          if (req->complete_event.has_triggered()) {
+            req->xd->notify_request_read_done(req);
+            req->xd->notify_request_write_done(req);
+            flying_reqs.pop_front();
+          }
+          else
+            break;
+        }
+      }
+
+      long RemoteWriteChannel::available()
+      {
+        return capacity - flying_reqs.size();
       }
 
 #ifdef USE_DISK

@@ -164,17 +164,25 @@ namespace LegionRuntime{
     class GASNetReadRequest : public Request {
     public:
       char *dst_buf;
-      off_t offset;
-      size_t size;
+      off_t src_offset;
+      size_t nbytes;
     };
 
     class GASNetWriteRequest : public Request {
     public:
       char *src_buf;
-      off_t offset;
-      size_t size;
+      off_t dst_offset;
+      size_t nbytes;
     };
 
+    class RemoteWriteRequest : public Request {
+    public:
+      Memory dst_mem;
+      char *src_buf, *dst_buf;
+      off_t dst_offset;
+      size_t nbytes;
+      Event complete_event;
+    };
 
 #ifdef USE_CUDA
     class GPUtoFBRequest : public Request {
@@ -247,6 +255,7 @@ namespace LegionRuntime{
         XFER_MEM_CPY,
         XFER_GASNET_READ,
         XFER_GASNET_WRITE,
+        XFER_REMOTE_WRITE,
         XFER_HDF_READ,
         XFER_HDF_WRITE
       };
@@ -544,6 +553,39 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
+      const char *mem_base;
+    };
+
+    template<unsigned DIM>
+    class RemoteWriteXferDes : public XferDes {
+    public:
+      RemoteWriteXferDes(Channel* _channel, bool has_pre_XferDes,
+                    Buffer* _src_buf, Buffer* _dst_buf,
+                    const char *_src_mem_base, const char *_dst_mem_base,
+                    Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                    uint64_t max_req_size, long max_nr,
+                    XferOrder::Type _order);
+
+      ~RemoteWriteXferDes()
+      {
+        delete src_buf;
+        if (!next_XferDes) {
+          delete dst_buf;
+        }
+        free(requests);
+        get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+
+    private:
+      RemoteWriteRequest* requests;
+      std::map<int64_t, uint64_t> segments_read, segments_write;
+      Layouts::GenericLayoutIterator<DIM>* li;
+      int offset_idx;
+      const char *src_mem_base, *dst_mem_base;
     };
 
 #ifdef USE_DISK
@@ -706,6 +748,18 @@ namespace LegionRuntime{
       long available();
     private:
       long capacity;
+    };
+
+    class RemoteWriteChannel : public Channel {
+    public:
+      RemoteWriteChannel(long max_nr);
+      ~RemoteWriteChannel();
+      long submit(Request** requests, long nr);
+      void pull();
+      long available();
+    private:
+      long capacity;
+      std::deque<RemoteWriteRequest*> flying_reqs;
     };
 
 
@@ -930,7 +984,7 @@ namespace LegionRuntime{
       }
     };
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
-    typedef std::multiset<XferDes*, CompareXferDes> PriorityXferDesQueue;
+    typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
     class XferDesQueue;
     class DMAThread {
