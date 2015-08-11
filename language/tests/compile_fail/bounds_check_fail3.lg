@@ -13,23 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: pointer ptr(int32, $r) is out-of-bounds
+-- assertion failed: array access to int32[5] is out-of-bounds
 
 import "legion"
 
--- This tests the compiler bounds checks for regions.
-
-local c = legionlib.c
-
-local function raw_to_ptr(t)
-  return terra(x : int)
-    return t { __ptr = c.legion_ptr_t { value = x } }
-  end
-end
+-- This tests the compiler bounds checks for Terra arrays.
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = [raw_to_ptr(ptr(int, r))](0)
-  @x = 5
+  var r = region(ispace(ptr, 3), int[5])
+  var x = new(ptr(int[5], r))
+  (@x)[5] = 5
 end
 legionlib.start(main)

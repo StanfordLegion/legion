@@ -549,7 +549,16 @@ end
 
 function value:get_index(cx, index, result_type)
   local value_expr = self:read(cx)
-  local result = expr.just(quote [value_expr.actions]; [index.actions] end,
+  local actions = terralib.newlist({value_expr.actions, index.actions})
+  local value_type = std.as_read(self.value_type)
+  if bounds_checks and value_type:isarray() then
+    actions:insert(
+      quote
+        std.assert([index.value] >= 0 and [index.value] < [value_type.N],
+          ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  end
+  local result = expr.just(quote [actions] end,
                            `([value_expr.value][ [index.value] ]))
   return values.value(result, result_type, std.newtuple())
 end
@@ -919,12 +928,22 @@ function ref:get_field(cx, field_name, field_type, value_type)
 end
 
 function ref:get_index(cx, index, result_type)
-  local actions, value = self:__ref(cx)
+  local value_actions, value = self:__ref(cx)
   -- Arrays are never field-sliced, therefore, an array array access
   -- must be to a single field.
   assert(#value == 1)
   value = value[1]
-  local result = expr.just(quote [actions]; [index.actions] end, `([value][ [index.value] ]))
+
+  local actions = terralib.newlist({value_actions, index.actions})
+  local value_type = self.value_type.points_to_type
+  if bounds_checks and value_type:isarray() then
+    actions:insert(
+      quote
+        std.assert([index.value] >= 0 and [index.value] < [value_type.N],
+          ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  end
+  local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
   return values.rawref(result, &result_type, std.newtuple())
 end
 
@@ -1339,8 +1358,17 @@ end
 
 function rawref:get_index(cx, index, result_type)
   local ref_expr = self:__ref(cx)
+  local actions = terralib.newlist({ref_expr.actions, index.actions})
+  local value_type = self.value_type.type
+  if bounds_checks and value_type:isarray() then
+    actions:insert(
+      quote
+        std.assert([index.value] >= 0 and [index.value] < [value_type.N],
+          ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  end
   local result = expr.just(
-    quote [ref_expr.actions]; [index.actions] end,
+    quote [actions] end,
     `([ref_expr.value][ [index.value] ]))
   return values.rawref(result, &result_type, std.newtuple())
 end
