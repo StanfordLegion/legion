@@ -270,12 +270,14 @@ namespace Realm {
       }
     }
 
-    /*static*/ void LockRequestMessage::send_request(gasnet_node_t target, Reservation lock,
-						   unsigned mode)
+    /*static*/ void LockRequestMessage::send_request(gasnet_node_t target,
+						     gasnet_node_t req_node,
+						     Reservation lock,
+						     unsigned mode)
     {
       RequestArgs args;
 
-      args.node = gasnet_mynode();
+      args.node = req_node; // NOT gasnet_mynode() - may be forwarding a request
       args.lock = lock;
       args.mode = mode;
       Message::request(target, args);
@@ -338,7 +340,8 @@ namespace Realm {
 
       if(req_forward_target != -1)
       {
-	LockRequestMessage::send_request(req_forward_target, args.lock, args.mode);
+	LockRequestMessage::send_request(req_forward_target, args.node,
+					 args.lock, args.mode);
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -548,7 +551,8 @@ namespace Realm {
 
       if(lock_request_target != -1)
       {
-	LockRequestMessage::send_request(lock_request_target, me, new_mode);
+	LockRequestMessage::send_request(lock_request_target, gasnet_mynode(),
+					 me, new_mode);
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();

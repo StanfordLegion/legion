@@ -17,17 +17,18 @@
 local config = {}
 
 local default_options = {
+  ["aligned-instances"] = false,
+  ["bounds-checks"] = false,
+  ["cached-iterators"] = false,
+  ["cuda"] = false,
+  ["no-dynamic-branches"] = true,
+  ["no-dynamic-branches-assert"] = false,
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
   ["leaf"] = true,
   ["vectorize"] = true,
-  ["aligned-instances"] = false,
-  ["no-dynamic-branches"] = true,
-  ["no-dynamic-branches-assert"] = false,
-  ["cached-iterators"] = false,
   ["task-inlines"] = true,
-  ["cuda"] = false,
 }
 
 local option = {

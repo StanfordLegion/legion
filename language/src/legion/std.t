@@ -52,6 +52,14 @@ function std.min(a, b)
   end
 end
 
+function std.max(a, b)
+  if a > b then
+    return a
+  else
+    return b
+  end
+end
+
 function std.any(list)
   for _, elt in ipairs(list) do
     if elt then

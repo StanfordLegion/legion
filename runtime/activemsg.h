@@ -770,8 +770,9 @@ typedef struct {
   size_t size;
 } gasnet_seginfo_t;
 
-static void *fake_gasnet_mem_base = 0;
-static size_t fake_gasnet_mem_size = 0;
+// define these somewhere so you only get one copy...
+extern void *fake_gasnet_mem_base;
+extern size_t fake_gasnet_mem_size;
 
 inline void gasnet_init(int*, char ***) {}
 inline void gasnet_getSegmentInfo(gasnet_seginfo_t *seginfos, gasnet_node_t count)
@@ -849,8 +850,9 @@ inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int registered_mem_size_in_mb,
                            int argc, const char *argv[])
 {
-  // allocate a fake gasnet memory
-  fake_gasnet_mem_size = gasnet_mem_size_in_mb << 20;
+  // just use malloc to obtain "gasnet" and/or "registered" memory
+  fake_gasnet_mem_size = (gasnet_mem_size_in_mb + 
+			  registered_mem_size_in_mb) << 20;
   fake_gasnet_mem_base = malloc(fake_gasnet_mem_size);
 }
 
