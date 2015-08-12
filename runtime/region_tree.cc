@@ -9278,6 +9278,8 @@ namespace LegionRuntime {
     {
       if ((field_versions != NULL) && (field_versions->remove_reference()))
         delete field_versions;
+      if (physical_state != NULL)
+        delete physical_state;
     }
 
     //--------------------------------------------------------------------------
