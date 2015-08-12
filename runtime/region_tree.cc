@@ -9701,8 +9701,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(next.physical_state == NULL);
 #endif
-        next.physical_state = current.physical_state->clone(
-                                                  false/*capture state*/);
+        // Don't capture the physical states, we don't need them
+        // If we do capture them, we'll create a cycle in the 
+        // garbage collection scheme that will hold onto all
+        // version states from the beginning of time
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
         next.premap_only = current.premap_only;
@@ -9741,19 +9743,17 @@ namespace LegionRuntime {
           clone_mask |= it->second;
         }
         // Filter this node from the closer
-        bool changed = closer.filter_capture_mask(nit->first, clone_mask);
+        closer.filter_capture_mask(nit->first, clone_mask);
         if (!clone_mask)
           continue;
         NodeInfo &next = node_infos[nit->first];
 #ifdef DEBUG_HIGH_LEVEL
         assert(next.physical_state == NULL); 
 #endif
-        if (changed)
-          next.physical_state = current.physical_state->clone(clone_mask, 
-                                                  false/*capture_state*/);
-        else
-          next.physical_state = current.physical_state->clone(
-                                                  false/*capture state*/);
+        // Don't capture the physical states, we don't need them
+        // If we do capture them, we'll create a cycle in the 
+        // garbage collection scheme that will hold onto all
+        // version states from the beginning of time
         // Just copy the reference, we'll still have all the necessary
         // version numbers for each fields and maybe a few more
         next.field_versions = current.field_versions;
