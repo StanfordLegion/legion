@@ -83,7 +83,8 @@ namespace Realm {
 
     virtual ~Thread(void);
 
-    enum State { STATE_STARTUP,
+    enum State { STATE_CREATED,
+		 STATE_STARTUP,
 		 STATE_RUNNING,
 		 STATE_BLOCKING,
 		 STATE_BLOCKED,
@@ -101,6 +102,11 @@ namespace Realm {
     // called from within a thread
     static Thread *self(void);
     static void abort(void);
+
+    // perform a user-level thread switch
+    // if called from a kernel thread, that thread becomes the "host" for the user thread
+    // if called by a user thread with 'switch_to'==0, control returns to host
+    static void user_switch(Thread *switch_to);
 
     template <typename CONDTYPE>
     static void wait_for_condition(const CONDTYPE& cond);

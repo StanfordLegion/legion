@@ -77,7 +77,7 @@ namespace Realm {
   // class Thread
 
   inline Thread::Thread(ThreadScheduler *_scheduler)
-    : state(STATE_STARTUP), scheduler(_scheduler)
+    : state(STATE_CREATED), scheduler(_scheduler)
   {
   }
 

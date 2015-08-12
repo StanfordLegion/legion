@@ -19,9 +19,18 @@
 
 #include "logging.h"
 
+#ifdef DEBUG_USWITCH
+#include <stdio.h>
+#endif
+
 #include <pthread.h>
+// for PTHREAD_STACK_MIN
+#include <limits.h>
+
+#include <ucontext.h>
 
 #include <string.h>
+#include <stdlib.h>
 #include <string>
 #include <map>
 
@@ -38,7 +47,7 @@ namespace Realm {
   Logger log_thread("threads");
 
   namespace ThreadLocal {
-    /*extern*/ __thread Thread *current_thread;
+    /*extern*/ __thread Thread *current_thread = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -213,14 +222,25 @@ namespace Realm {
       // make sure it's not too large
       assert((rsrv.params.max_stack_size == rsrv.params.STACK_SIZE_DEFAULT) ||
 	     (params.stack_size <= rsrv.params.max_stack_size));
-      CHECK_PTHREAD( pthread_attr_setstacksize(&attr, params.stack_size) );
+
+      // pthreads also has a limit
+      if(params.stack_size < PTHREAD_STACK_MIN)
+	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN) );
+      else
+	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, params.stack_size) );
     } else {
       // does the entire core reservation have a non-standard stack size?
-      if(rsrv.params.max_stack_size != rsrv.params.STACK_SIZE_DEFAULT)
-	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, rsrv.params.max_stack_size) );
+      if(rsrv.params.max_stack_size != rsrv.params.STACK_SIZE_DEFAULT) {
+	if(rsrv.params.max_stack_size < PTHREAD_STACK_MIN)
+	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN) );
+	else
+	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, rsrv.params.max_stack_size) );
+      }
     }
 
     // TODO: actually use heap size
+
+    update_state(STATE_STARTUP);
 
     // time to actually create the thread
     CHECK_PTHREAD( pthread_create(&thread, &attr, pthread_entry, this) );
@@ -280,12 +300,206 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class UserThread
+
+  class UserThread : public Thread {
+  public:
+    UserThread(void *_target, void (*_entry_wrapper)(void *),
+	       ThreadScheduler *_scheduler);
+
+    virtual ~UserThread(void);
+
+    void start_thread(const ThreadLaunchParameters& params);
+
+    virtual void join(void);
+    virtual void detach(void);
+
+    static void user_switch(UserThread *switch_to);
+
+  protected:
+    static void uthread_entry(void) __attribute__((noreturn));
+
+    static const int MAGIC_VALUE = 0x11223344;
+
+    void *target;
+    void (*entry_wrapper)(void *);
+    int magic;
+    ucontext_t ctx;
+    void *stack_base;
+    size_t stack_size;
+    bool ok_to_delete;
+    bool running;
+  };
+
+  UserThread::UserThread(void *_target, void (*_entry_wrapper)(void *),
+			 ThreadScheduler *_scheduler)
+    : Thread(_scheduler), target(_target), entry_wrapper(_entry_wrapper)
+    , magic(MAGIC_VALUE), stack_base(0), stack_size(0), ok_to_delete(false)
+    , running(false)
+  {
+  }
+
+  UserThread::~UserThread(void)
+  {
+    // cannot delete an active thread...
+    assert(!running);
+
+    if(stack_base != 0)
+      free(stack_base);
+  }
+
+  namespace ThreadLocal {
+    __thread ucontext_t *host_context = 0;
+    // current_user_thread is redundant with current_thread, but kept for debugging
+    //  purposes for now
+    __thread UserThread *current_user_thread = 0;
+    __thread Thread *current_host_thread = 0;
+  };
+
+  /*static*/ void UserThread::uthread_entry(void)
+  {
+    UserThread *thread = ThreadLocal::current_user_thread;
+    assert(thread != 0);
+
+    thread->running = true;
+
+    log_thread.info() << "thread " << thread << " started";
+    thread->update_state(STATE_RUNNING);
+
+    if(thread->scheduler)
+      thread->scheduler->thread_starting(thread);
+    
+    // call the actual thread body
+    (*thread->entry_wrapper)(thread->target);
+
+    if(thread->scheduler)
+      thread->scheduler->thread_terminating(thread);
+    
+    // on return, we update our status and terminate
+    log_thread.info() << "thread " << thread << " finished";
+    thread->update_state(STATE_FINISHED);
+
+    // returning from this call is lethal, so hand control back to the host
+    //  thread and hope for the best
+    while(true) {
+      user_switch(0);
+      log_thread.warning() << "HELP!  switched to a terminated thread " << thread;
+    }
+  }
+
+  void UserThread::start_thread(const ThreadLaunchParameters& params)
+  {
+    // figure out how big the stack should be
+    if(params.stack_size != params.STACK_SIZE_DEFAULT) {
+      stack_size = params.stack_size;
+    } else {
+      stack_size = 2 << 20; // pick something - 2MB ?
+    }
+
+    stack_base = malloc(stack_size);
+    assert(stack_base != 0);
+
+    getcontext(&ctx);
+
+    ctx.uc_link = 0; // we don't expect it to ever fall through
+    ctx.uc_stack.ss_sp = stack_base;
+    ctx.uc_stack.ss_size = stack_size;
+
+    // grr...  entry point takes int's, which might not hold a void *
+    // we'll just fish our UserThread * out of TLS
+    makecontext(&ctx, uthread_entry, 0);
+
+    update_state(STATE_STARTUP);    
+  }
+
+  void UserThread::join(void)
+  {
+    assert(0); // not supported yet
+  }
+
+  void UserThread::detach(void)
+  {
+    assert(0); // not supported yet
+  }
+
+  /*static*/ void UserThread::user_switch(UserThread *switch_to)
+  {
+#ifdef DEBUG_USWITCH
+    printf("uswitch: %p: %p -> %p\n",
+	   ThreadLocal::current_host_thread ? ThreadLocal::current_host_thread : ThreadLocal::current_thread,
+	   ThreadLocal::current_user_thread,
+	   switch_to);
+#endif
+
+    if(ThreadLocal::current_user_thread == 0) {
+      // called from a kernel thread, which will be used as the host
+
+      assert(switch_to != 0);
+      assert(switch_to->magic == MAGIC_VALUE);
+      assert(ThreadLocal::host_context == 0);
+
+      // this holds the host's state
+      ucontext_t host_ctx;
+
+      ThreadLocal::host_context = &host_ctx;
+      ThreadLocal::current_user_thread = switch_to;
+      ThreadLocal::current_host_thread = ThreadLocal::current_thread;
+      ThreadLocal::current_thread = switch_to;
+
+      int ret = swapcontext(&host_ctx, &switch_to->ctx);
+
+      // if we return with a value of 0, that means we were (eventually) given control
+      //  back, as we hoped
+      assert(ret == 0);
+
+      assert(ThreadLocal::current_user_thread == 0);
+      assert(ThreadLocal::host_context == &host_ctx);
+      ThreadLocal::host_context = 0;
+    } else {
+      UserThread *switch_from = ThreadLocal::current_user_thread;
+      ThreadLocal::current_user_thread = switch_to;
+
+      assert(switch_from->running == true);
+      switch_from->running = false;
+
+      if(switch_to != 0) {
+	assert(switch_to->magic == MAGIC_VALUE);
+	assert(switch_to->running == false);
+
+	ThreadLocal::current_thread = switch_to;
+
+	// a switch between two user contexts - nice and simple
+	int ret = swapcontext(&switch_from->ctx, &switch_to->ctx);
+	assert(ret == 0);
+
+	assert(switch_from->running == false);
+	switch_from->running = true;
+      } else {
+	// a return of control to the host thread
+	assert(ThreadLocal::host_context != 0);
+
+	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
+	ThreadLocal::current_host_thread = 0;
+
+	int ret = swapcontext(&switch_from->ctx, ThreadLocal::host_context);
+	assert(ret == 0);
+
+	// if we get control back
+	assert(switch_from->running == false);
+	switch_from->running = true;
+      }
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class Thread
 
-  /*static*/ Thread *Realm::Thread::create_kernel_thread_untyped(void *target, void (*entry_wrapper)(void *),
-                                                                 const ThreadLaunchParameters& params,
-						                 CoreReservation& rsrv,
-						                 ThreadScheduler *_scheduler)
+  /*static*/ Thread *Thread::create_kernel_thread_untyped(void *target, void (*entry_wrapper)(void *),
+							  const ThreadLaunchParameters& params,
+							  CoreReservation& rsrv,
+							  ThreadScheduler *_scheduler)
   {
     KernelThread *t = new KernelThread(target, entry_wrapper, _scheduler);
 
@@ -299,5 +513,23 @@ namespace Realm {
     return t;
   }
 
+  /*static*/ Thread *Thread::create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
+							const ThreadLaunchParameters& params,
+							ThreadScheduler *_scheduler)
+  {
+    UserThread *t = new UserThread(target, entry_wrapper, _scheduler);
+
+    // no need to wait on an allocation - the host thread will take care of that
+    t->start_thread(params);
+
+    return t;
+  }
+
+  /*static*/ void Thread::user_switch(Thread *switch_to)
+  {
+    // just cast 'switch_to' to a UserThread - UserThread::user_switch will do a bit
+    //   of sanity-checking
+    UserThread::user_switch((UserThread *)switch_to);
+  }
 
 }; // namespace Realm
