@@ -11591,6 +11591,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // closers always advance
+      leave_open_versions.set_advance();
       force_close_versions.set_advance();
     }
 
