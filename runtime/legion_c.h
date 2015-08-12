@@ -290,6 +290,32 @@ extern "C" {
       legion_context_t /* ctx */,
       legion_runtime_t /* runtime */);
 
+  /**
+   * Interface for a Legion C projection functor (Logical Region
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_region_t)(
+      legion_runtime_t /* runtime */,
+      legion_context_t /* context */,
+      legion_task_t /* task */,
+      unsigned /* index */,
+      legion_logical_region_t /* upper_bound */,
+      legion_domain_point_t /* point */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Partition
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
+      legion_runtime_t /* runtime */,
+      legion_context_t /* context */,
+      legion_task_t /* task */,
+      unsigned /* index */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */);
+
   // -----------------------------------------------------------------------
   // Pointer Operations
   // -----------------------------------------------------------------------
@@ -2111,6 +2137,15 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_uint64_t task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_projection_id_t id,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
 
   // -----------------------------------------------------------------------
   // Timing Operations
