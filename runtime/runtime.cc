@@ -12952,8 +12952,6 @@ namespace LegionRuntime {
       LLRuntime::get_runtime().shutdown();
     }
 
-    
-
     //--------------------------------------------------------------------------
     IndividualTask* Runtime::get_available_individual_task(bool need_cont,
                                                            bool has_lock)

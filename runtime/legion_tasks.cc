@@ -9192,10 +9192,7 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-      {
         complete_mapping();
-        complete_execution();
-      }
       if (trigger_children_completed)
         trigger_children_complete();
       if (trigger_children_commit)
@@ -9206,6 +9203,7 @@ namespace LegionRuntime {
     void IndexTask::return_slice_complete(unsigned points)
     //--------------------------------------------------------------------------
     {
+      bool trigger_execution = false;
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
@@ -9215,13 +9213,18 @@ namespace LegionRuntime {
         assert(complete_points <= total_points);
 #endif
         if (slice_fraction.is_whole() && 
-            (complete_points == total_points) &&
-            !children_complete_invoked)
+            (complete_points == total_points))
         {
-          need_trigger = true;
-          children_complete_invoked = true;
+          trigger_execution = true;
+          if (!children_complete_invoked)
+          {
+            need_trigger = true;
+            children_complete_invoked = true;
+          }
         }
       }
+      if (trigger_execution)
+        complete_execution();
       if (need_trigger)
         trigger_children_complete();
     }
