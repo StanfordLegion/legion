@@ -168,7 +168,7 @@ namespace Realm {
   template <typename T, typename LT>
   inline bool PriorityQueue<T, LT>::empty(priority_t higher_than /*= PRI_NEG_INF*/) const
   {
-    return(highest_priority > higher_than);
+    return(highest_priority <= higher_than);
   }
 
   // adds (or modifies) a subscription - only items above the specified priority will
