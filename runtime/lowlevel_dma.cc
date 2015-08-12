@@ -2955,7 +2955,9 @@ namespace LegionRuntime {
         {
           ID src_id(src_impl->me);
           unsigned src_index = src_id.index_l();
+          pthread_rwlock_rdlock(&((HDFMemory*)get_runtime()->get_memory_impl(src_mem))->rwlock);
           HDFMemory::HDFMetadata* src_hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_mem))->hdf_metadata_vec[src_index];
+          pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(src_mem))->rwlock);
           switch (dst_kind) {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
