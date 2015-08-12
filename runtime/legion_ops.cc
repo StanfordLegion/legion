@@ -4427,7 +4427,8 @@ namespace LegionRuntime {
       // Merge in the two different version informations
       version_info.merge(close_info, close_m);
       version_info.merge(ver_info, close_m);
-      version_info.set_advance(); // always advancing for close operations
+      if (!open) // only advancing for force closes
+        version_info.set_advance();
       restrict_info.merge(res_info, close_m);
       target_children = targets;
       leave_open = open;

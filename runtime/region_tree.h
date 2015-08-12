@@ -1744,13 +1744,15 @@ namespace LegionRuntime {
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
       void record_version_numbers(RegionTreeNode *node, LogicalState &state,
-                                  const FieldMask &local_mask);
+                                  const FieldMask &local_mask, bool leave_open);
+      void advance_and_record(RegionTreeNode *node, LogicalState &state);
       void merge_version_info(VersionInfo &target, const FieldMask &merge_mask);
     protected:
       static void compute_close_sets(
                      const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
                      LegionList<ClosingSet>::aligned &close_sets);
       void create_close_operations(RegionTreeNode *target, Operation *creator,
+                          const VersionInfo &local_info,
                           const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
@@ -1770,14 +1772,15 @@ namespace LegionRuntime {
       const bool capture_users;
       LegionDeque<LogicalUser>::aligned closed_users;
     protected:
-      FieldMask closed_mask;
+      FieldMask closed_mask, leave_open_mask;
       LegionMap<ColorPoint,ClosingInfo>::aligned leave_open_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned force_close_children;
     protected:
       LegionMap<InterCloseOp*,LogicalUser>::aligned leave_open_closes;
       LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
     protected:
-      VersionInfo close_versions;
+      VersionInfo leave_open_versions;
+      VersionInfo force_close_versions;
       FieldMask flush_only_fields;
     }; 
 

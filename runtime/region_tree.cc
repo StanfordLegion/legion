@@ -11579,7 +11579,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // closers always advance
-      close_versions.set_advance();
+      force_close_versions.set_advance();
     }
 
     //--------------------------------------------------------------------------
@@ -11597,7 +11597,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Clear out our version infos
-      close_versions.clear();
+      leave_open_versions.clear();
+      force_close_versions.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -11621,6 +11622,7 @@ namespace LegionRuntime {
       // we still need to do the close operation.
       if (leave_open)
       {
+        leave_open_mask |= mask;
         LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
                                               leave_open_children.find(child);
         if (finder != leave_open_children.end())
@@ -11674,15 +11676,17 @@ namespace LegionRuntime {
       {
         LegionList<ClosingSet>::aligned leave_open;
         compute_close_sets(leave_open_children, leave_open);
-        create_close_operations(target, creator, ver_info, res_info,
-              trace_info, true/*leave open*/, leave_open, leave_open_closes);
+        create_close_operations(target, creator, leave_open_versions, ver_info,
+                                res_info, trace_info, true/*leave open*/, 
+                                leave_open, leave_open_closes);
       }
       if (!force_close_children.empty())
       {
         LegionList<ClosingSet>::aligned force_close;
         compute_close_sets(force_close_children, force_close);
-        create_close_operations(target, creator, ver_info, res_info,
-              trace_info, false/*leave open*/, force_close, force_close_closes);
+        create_close_operations(target, creator, force_close_versions, ver_info,
+                                res_info, trace_info, false/*leave open*/, 
+                                force_close, force_close_closes);
       }
       // Finally if we have any fields which are flush only
       // make a close operation for them and add it to force close
@@ -11693,7 +11697,7 @@ namespace LegionRuntime {
                                                          flush_only_fields,
                                                          false/*leave open*/,
                                                          empty_children,
-                                                         close_versions,
+                                                         force_close_versions,
                                                          ver_info, res_info,
                                                          trace_info);
         force_close_closes[flush_op] = LogicalUser(flush_op, 0/*idx*/,
@@ -11786,7 +11790,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::create_close_operations(RegionTreeNode *target,
-                            Operation *creator,
+                            Operation *creator, const VersionInfo &local_info,
                             const VersionInfo &version_info,
                             const RestrictInfo &restrict_info, 
                             const TraceInfo &trace_info, bool leave_open,
@@ -11800,7 +11804,7 @@ namespace LegionRuntime {
         InterCloseOp *close_op = target->create_close_op(creator, 
                                                        it->closing_mask,
                                                        leave_open, it->children,
-                                                       close_versions,
+                                                       local_info,
                                                        version_info,
                                                        restrict_info, 
                                                        trace_info);
@@ -11953,18 +11957,58 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LogicalCloser::record_version_numbers(RegionTreeNode *node,
                                                LogicalState &state,
-                                               const FieldMask &local_mask)
+                                               const FieldMask &local_mask,
+                                               bool leave_open)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!!local_mask);
+#endif
       // Don't need the previous because writes were already done in the
       // sub-tree we are closing so the version number for the target
       // region has already been advanced.
-      node->record_version_numbers(state, local_mask, 
-                                   close_versions, false/*previous*/, 
-                                   false/*premap*/, false/*path only*/);
-      // We also need to advance the version numbers because the close
-      // operations will be writing a new valid version
-      node->advance_version_numbers(state, local_mask);
+      if (leave_open)
+        node->record_version_numbers(state, local_mask,
+                                     leave_open_versions, false/*previous*/,
+                                     false/*premap*/, false/*path only*/);
+      else
+        node->record_version_numbers(state, local_mask, 
+                                     force_close_versions, false/*previous*/, 
+                                     false/*premap*/, false/*path only*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::advance_and_record(RegionTreeNode *node,
+                                           LogicalState &state)
+    //--------------------------------------------------------------------------
+    {
+      if (!!leave_open_mask)
+      {
+        // We don't need to advance the version numbers because the leave
+        // open close operations are actually going to continue to use
+        // the existing version number.
+        // IMPORTANT NOTE! FAILURE TO FOLLOW THIS WILL RISK DEADLOCK
+        // (just try the mini-aero benchmark)
+        node->record_version_numbers(state, leave_open_mask,
+                                     leave_open_versions, false/*previous*/,
+                                     false/*premap*/, false/*path only*/);
+        FieldMask force_close_mask = closed_mask - leave_open_mask;
+        if (!!force_close_mask)
+        {
+          node->advance_version_numbers(state, force_close_mask);
+          node->record_version_numbers(state, force_close_mask,
+                                       force_close_versions, true/*previous*/,
+                                       false/*premap*/, false/*path only*/);
+        }
+      }
+      else
+      {
+        // Normal case is simple
+        node->advance_version_numbers(state, closed_mask);
+        node->record_version_numbers(state, closed_mask,
+                                     force_close_versions, true/*previous*/,
+                                     false/*premap*/, false/*path only*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11972,7 +12016,8 @@ namespace LegionRuntime {
                                            const FieldMask &merge_mask)
     //--------------------------------------------------------------------------
     {
-      target.merge(close_versions, merge_mask);
+      target.merge(leave_open_versions, merge_mask);
+      target.merge(force_close_versions, merge_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -12079,8 +12124,27 @@ namespace LegionRuntime {
                                            PhysicalState *state)
     //--------------------------------------------------------------------------
     {
-      node->update_valid_views(state, info.traversal_mask,
-                               dirty_mask, upper_targets);
+      // Note that permit leave open means that we don't update
+      // the dirty bits when we update the state
+      if (upper_targets.size() == 1)
+      {
+        MaterializedView *update_view = upper_targets[0];
+        if (permit_leave_open)
+          node->update_valid_views(state, info.traversal_mask,
+                                   false/*dirty*/, update_view);
+        else
+          node->update_valid_views(state, info.traversal_mask,
+                                   true/*dirty*/, update_view);
+      }
+      else
+      {
+        if (permit_leave_open)
+          node->update_valid_views(state, info.traversal_mask,
+                                   FieldMask(), upper_targets);
+        else
+          node->update_valid_views(state, info.traversal_mask,
+                                   dirty_mask, upper_targets);
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -12161,7 +12225,14 @@ namespace LegionRuntime {
         }
       }
       // Now update the state of the node
-      node->update_valid_views(state,closed_mask,true/*dirty*/,composite_view);
+      // Note that if we are permitted to leave the subregions
+      // open then we don't make the view dirty
+      if (permit_leave_open)
+        node->update_valid_views(state, closed_mask, 
+                                 false/*dirty*/, composite_view);
+      else
+        node->update_valid_views(state, closed_mask,
+                                 true/*dirty*/, composite_view);
     }
 
     //--------------------------------------------------------------------------
@@ -14918,7 +14989,7 @@ namespace LegionRuntime {
           // Generate the close operations         
           const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
-          closer.record_version_numbers(this, state, closed_mask);
+          closer.advance_and_record(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
                                              restrict_info, trace_info);
           if (!arrived)
@@ -15231,7 +15302,7 @@ namespace LegionRuntime {
           // Generate the close operations         
           const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
-          closer.record_version_numbers(this, state, closed_mask);
+          closer.advance_and_record(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
                                              restrict_info, trace_info);
           if (!arrived)
@@ -15567,7 +15638,8 @@ namespace LegionRuntime {
       // Merge any new field states
       merge_new_field_states(state, new_states);
       // Record the version numbers that we need
-      closer.record_version_numbers(this, state, closing_mask);
+      closer.record_version_numbers(this, state, 
+                                    closing_mask, permit_leave_open);
       // If we're doing a close operation, that means someone is
       // going to be writing to a region that aliases with this one
       // so we need to advance the field version. However, if we're
@@ -16186,7 +16258,7 @@ namespace LegionRuntime {
       VersionInfo::NodeInfo &node_info = version_info.find_tree_node_info(this);
       node_info.premap_only = premap_only;
       node_info.path_only = path_only;
-      node_info.advance = version_info.will_advance();
+      node_info.advance = capture_previous;
 #ifdef DEBUG_HIGH_LEVEL
       FieldMask unversioned = mask;
 #endif
