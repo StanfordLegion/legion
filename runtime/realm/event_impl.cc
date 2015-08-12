@@ -123,7 +123,6 @@ namespace Realm {
     Thread *thread = Thread::self();
     if(thread) {
       // describe the condition we want the thread to wait on
-      printf("using new-fangled blocking event wait\n");
       thread->wait_for_condition(EventTriggeredCondition(e, gen));
       return;
     }
