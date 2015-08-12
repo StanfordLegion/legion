@@ -2700,6 +2700,7 @@ namespace LegionRuntime {
 
         MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
         MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
+
         std::vector<XferDes*> path;
         // We don't need to care about deallocation of Buffer class
         // This will be handled by XferDes destruction
@@ -2770,16 +2771,18 @@ namespace LegionRuntime {
             log_dma.info("create cpu->gasnet mem XD\n");
             XferDes* xd = new GASNetXferDes<DIM>(channel_manager->get_gasnet_write_channel(), false,
                                            src_buf, dst_buf, src_mem_base,
-                                           domain, oasvec, 100/*max_nr*/,
-                                           XferOrder::DST_FIFO, XferDes::XFER_GASNET_WRITE);
+                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_WRITE);
             path.push_back(xd);
             break;
           }
           case MemoryImpl::MKIND_RDMA:
           case MemoryImpl::MKIND_REMOTE:
-            fprintf(stderr, "[DMA] To be implemented: cpu memory -> remote memory\n");
+          {
+            log_dma.info("create cpu->remote mem XD\n");
             assert(0);
             break;
+          }
           default:
             fprintf(stderr, "Unrecognized destination memory kind!\n");
             assert(0);

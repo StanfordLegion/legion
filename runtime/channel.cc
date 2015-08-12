@@ -469,7 +469,7 @@ namespace LegionRuntime {
               case XferDes::XFER_GASNET_READ:
               {
                 GASNetReadRequest* gasnet_read_req = (GASNetReadRequest*) requests[idx];
-                gasnet_read_req->dst_buf = (uint64_t)(mem_base + dst_start);
+                gasnet_read_req->dst_buf = (char*)(mem_base + dst_start);
                 gasnet_read_req->src_offset = src_start;
                 gasnet_read_req->nbytes = req_size;
                 break;
@@ -477,7 +477,7 @@ namespace LegionRuntime {
               case XferDes::XFER_GASNET_WRITE:
               {
                 GASNetWriteRequest* gasnet_write_req = (GASNetWriteRequest*) requests[idx];
-                gasnet_write_req->src_buf = (uint64_t)(mem_base + src_start);
+                gasnet_write_req->src_buf = (char*)(mem_base + src_start);
                 gasnet_write_req->dst_offset = dst_start;
                 gasnet_write_req->nbytes = req_size;
                 break;
@@ -506,7 +506,7 @@ namespace LegionRuntime {
             size = ((GASNetReadRequest*)req)->nbytes;
             break;
           case XferDes::XFER_DISK_WRITE:
-            offset = ((GASNetWriteRequest*)req)->src_buf - (int64_t) mem_base;
+            offset = ((GASNetWriteRequest*)req)->src_buf - mem_base;
             size = ((GASNetWriteRequest*)req)->nbytes;
             break;
           default:
@@ -523,7 +523,7 @@ namespace LegionRuntime {
         uint64_t size;
         switch(kind) {
           case XferDes::XFER_DISK_READ:
-            offset = ((GASNetReadRequest*)req)->dst_buf - (int64_t) mem_base;
+            offset = ((GASNetReadRequest*)req)->dst_buf - mem_base;
             size = ((GASNetReadRequest*)req)->nbytes;
             break;
           case XferDes::XFER_DISK_WRITE:
@@ -1832,6 +1832,9 @@ namespace LegionRuntime {
       template class MemcpyXferDes<1>;
       template class MemcpyXferDes<2>;
       template class MemcpyXferDes<3>;
+      template class GASNetXferDes<1>;
+      template class GASNetXferDes<2>;
+      template class GASNetXferDes<3>;
 #ifdef USE_DISK
       template class DiskXferDes<1>;
       template class DiskXferDes<2>;
