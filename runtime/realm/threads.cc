@@ -138,10 +138,13 @@ namespace Realm {
     KernelThread(void *_target, void (*_entry_wrapper)(void *),
 		 ThreadScheduler *_scheduler);
 
+    virtual ~KernelThread(void);
+
     void start_thread(const ThreadLaunchParameters& params,
 		      const CoreReservation& rsrv);
 
     virtual void join(void);
+    virtual void detach(void);
 
   protected:
     static void *pthread_entry(void *data);
@@ -149,12 +152,20 @@ namespace Realm {
     void *target;
     void (*entry_wrapper)(void *);
     pthread_t thread;
+    bool ok_to_delete;
   };
 
   KernelThread::KernelThread(void *_target, void (*_entry_wrapper)(void *),
 			     ThreadScheduler *_scheduler)
     : Thread(_scheduler), target(_target), entry_wrapper(_entry_wrapper)
+    , ok_to_delete(false)
   {
+  }
+
+  KernelThread::~KernelThread(void)
+  {
+    // insist that a thread be join()'d or detach()'d before deletion
+    assert(ok_to_delete);
   }
 
   /*static*/ void *KernelThread::pthread_entry(void *data)
@@ -166,10 +177,16 @@ namespace Realm {
 
     log_thread.info() << "thread " << thread << " started";
     thread->update_state(STATE_RUNNING);
+
+    if(thread->scheduler)
+      thread->scheduler->thread_starting(thread);
     
     // call the actual thread body
     (*thread->entry_wrapper)(thread->target);
 
+    if(thread->scheduler)
+      thread->scheduler->thread_terminating(thread);
+    
     // on return, we update our status and terminate
     log_thread.info() << "thread " << thread << " finished";
     thread->update_state(STATE_FINISHED);
@@ -214,6 +231,13 @@ namespace Realm {
   void KernelThread::join(void)
   {
     CHECK_PTHREAD( pthread_join(thread, 0 /* ignore retval */) );
+    ok_to_delete = true;
+  }
+
+  void KernelThread::detach(void)
+  {
+    CHECK_PTHREAD( pthread_detach(thread) );
+    ok_to_delete = true;
   }
 
 

@@ -88,13 +88,15 @@ namespace Realm {
 		 STATE_BLOCKING,
 		 STATE_BLOCKED,
 		 STATE_READY,
-		 STATE_FINISHED };
+		 STATE_FINISHED,
+                 };
 
     State get_state(void);
 
     void signal(int sig, bool asynchronous);
 
     virtual void join(void) = 0; // BLOCKS until the thread completes
+    virtual void detach(void) = 0;
 
     // called from within a thread
     static Thread *self(void);
@@ -142,10 +144,13 @@ namespace Realm {
   public:
     virtual ~ThreadScheduler(void);
 
+    // this can be used for logging or to hold a thread before it starts running
+    virtual void thread_starting(Thread *thread) = 0;
+
     // callbacks from a thread when it wants to sleep (i.e. yielding on a co-routine interaction
     //  or blocking on some condition) or terminate - either will generally result in some other
     //  thread being woken up)
-    virtual void thread_yielding(Thread *thread) = 0;
+    //virtual void thread_yielding(Thread *thread) = 0;
     virtual void thread_blocking(Thread *thread) = 0;
     virtual void thread_terminating(Thread *thread) = 0;
 
@@ -345,6 +350,14 @@ namespace Realm {
     ~ThreadReservation(void) {}
   };
 #endif
+
+  // move this somewhere else
+
+  class DummyLock {
+  public:
+    void lock(void) {}
+    void unlock(void) {}
+  };
 
 } // namespace Realm
 

@@ -19,6 +19,7 @@
 #include "runtime_impl.h"
 #include "logging.h"
 #include "serialize.h"
+#include "profiling.h"
 
 #ifdef USE_CUDA
 #include "lowlevel_gpu.h"
@@ -50,6 +51,11 @@ namespace Realm {
 
     /*static*/ const Processor Processor::NO_PROC = { 0 }; 
 
+  namespace ThreadLocal {
+    __thread Processor current_processor;
+  };
+
+#if 0
     /*static*/ Processor Processor::get_executing_processor(void) 
     { 
       void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
@@ -65,6 +71,7 @@ namespace Realm {
       assert(0);
 #endif
     }
+#endif
 
     Processor::Kind Processor::kind(void) const
     {
@@ -359,6 +366,65 @@ namespace Realm {
       }
     }
 
+  void Task::execute_on_processor(Processor p)
+  {
+    // if the processor isn't specified, use what's in the task object
+    if(!p.exists())
+      p = this->proc;
+
+    Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
+#if 0
+    char argstr[100];
+    argstr[0] = 0;
+    for(size_t i = 0; (i < arglen) && (i < 40); i++)
+      sprintf(argstr+2*i, "%02x", ((unsigned char *)(args))[i]);
+    if(arglen > 40) strcpy(argstr+80, "...");
+    log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+	     "task start: %d (%p) (%s)", func_id, fptr, argstr);
+#endif
+#ifdef EVENT_GRAPH_TRACE
+    start_enclosing(finish_event);
+    unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
+    log_task.info("thread running ready task %p for proc " IDFMT "",
+		  this, p.id);
+
+    // does the profiler want to know where it was run?
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationProcessorUsage>()) {
+      ProfilingMeasurements::OperationProcessorUsage opu;
+      opu.proc = p;
+      measurements.add_measurement(opu);
+    }
+
+    mark_started();
+
+    // make sure the current processor is set during execution of the task
+    ThreadLocal::current_processor = p;
+
+    (*fptr)(args, arglen, p);
+
+    // and clear the TLS when we're done
+    ThreadLocal::current_processor = Processor::NO_PROC;
+
+    mark_completed();
+
+    log_task.info("thread finished running task %p for proc " IDFMT "",
+		  this, proc.id);
+#ifdef EVENT_GRAPH_TRACE
+    unsigned long long stop = TimeStamp::get_current_time_in_micros();
+    finish_enclosing();
+    log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+			  finish_event.id, finish_event.gen,
+			  (stop - start));
+#endif
+#if 0
+    log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+	     "task end: %d (%p) (%s)", func_id, fptr, argstr);
+#endif
+    if(finish_event.exists())
+      get_runtime()->get_genevent_impl(finish_event)->
+	trigger(finish_event.gen, gasnet_mynode());
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -527,6 +593,583 @@ namespace Realm {
     }
 
   
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ThreadedTaskScheduler
+  //
+
+  ThreadedTaskScheduler::ThreadedTaskScheduler(Processor _proc)
+    : proc(_proc), shutdown_flag(false)
+    , active_worker_count(0)
+    , unassigned_worker_count(0)
+    , cfg_reuse_workers(true)
+    , cfg_max_idle_workers(1)
+    , cfg_min_active_workers(1)
+    , cfg_max_active_workers(1)
+  {}
+
+  ThreadedTaskScheduler::~ThreadedTaskScheduler(void)
+  {
+    // make sure everything got cleaned up right
+    assert(active_worker_count == 0);
+    assert(unassigned_worker_count == 0);
+    assert(idle_workers.empty());
+  }
+
+  void ThreadedTaskScheduler::add_task_queue(TaskQueue *queue)
+  {
+    AutoHSLLock al(lock);
+
+    task_queues.push_back(queue);
+  }
+
+  // helper for tracking/sanity-checking worker counts
+  inline void ThreadedTaskScheduler::update_worker_count(int active_delta,
+							 int unassigned_delta,
+							 bool check /*= true*/)
+  {
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("UWC: %p a=%d%+d u=%d%+d\n", Thread::self(),
+	   active_worker_count, active_delta,
+	   unassigned_worker_count, unassigned_delta);
+#endif
+
+    active_worker_count += active_delta;
+    unassigned_worker_count += unassigned_delta;
+
+    if(check) {
+      // active worker count should always be in bounds
+      assert((active_worker_count >= cfg_min_active_workers) &&
+	     (active_worker_count <= cfg_max_active_workers));
+
+      // should always have an unassigned worker if there's room
+      assert((unassigned_worker_count > 0) ||
+	     (active_worker_count == cfg_max_active_workers));
+    }
+  }
+
+  void ThreadedTaskScheduler::thread_blocking(Thread *thread)
+  {
+    // there's a potential race between a thread blocking and being reawakened,
+    //  so take the scheduler lock and THEN try to mark the thread as blocked
+    AutoHSLLock al(lock);
+
+    bool really_blocked = try_update_thread_state(thread,
+						  Thread::STATE_BLOCKING,
+						  Thread::STATE_BLOCKED);
+
+    // TODO: if the thread is already ready again, we might still choose to suspend it if
+    //  higher-priority work is pending
+    if(!really_blocked)
+      return;
+
+    while(true) {
+      // let's try to find something better to do than spin our wheels
+
+      // first choice - is there a resumable worker we can yield to?
+      if(!resumable_workers.empty()) {
+	Thread *yield_to = resumable_workers.get(0); // we don't care about priority
+	// this preserves active and unassigned counts
+	update_worker_count(0, 0);
+	worker_sleep(yield_to);  // returns only when we're ready
+	break;
+      }
+
+      // next choice - if we're above the min active count AND there's at least one
+      //  unassigned worker active, we can just sleep
+      if((active_worker_count > cfg_min_active_workers) &&
+	 (unassigned_worker_count > 0)) {
+	// this reduces the active worker count by one
+	update_worker_count(-1, 0);
+	worker_sleep(0);  // returns only when we're ready
+	break;
+      }
+
+      // next choice - is there an idle worker we can yield to?
+      if(!idle_workers.empty()) {
+	Thread *yield_to = idle_workers.back();
+	idle_workers.pop_back();
+	// this preserves the active count, increased unassigned by 1
+	update_worker_count(0, +1);
+	worker_sleep(yield_to);  // returns only when we're ready
+	break;
+      }
+	
+      // last choice - create a new worker to mind the store
+      // TODO: consider not doing this until we know there's work for it?
+      if(true) {
+	Thread *yield_to = worker_create(false);
+	// this preserves the active count, increased unassigned by 1
+	update_worker_count(0, +1);
+	worker_sleep(yield_to);  // returns only when we're ready
+	break;
+      }
+
+      // TODO: some sort of cpu yield here to at least prevent a tight spin
+    }
+  }
+
+  void ThreadedTaskScheduler::thread_ready(Thread *thread)
+  {
+    // TODO: might be nice to do this in a lock-free way, since this is called by
+    //  some other thread
+    AutoHSLLock al(lock);
+
+    // look up the priority of this thread and then add it to the resumable workers
+    std::map<Thread *, int>::const_iterator it = worker_priorities.find(thread);
+    assert(it != worker_priorities.end());
+    // adding to the priority queue should wake up any sleeping workers if needed
+    resumable_workers.put(thread, it->second);  // TODO: round-robin for now
+  }
+
+  // the main scheduler loop
+  void ThreadedTaskScheduler::scheduler_loop(void)
+  {
+    // the entire body of this method, except for when running an actual task, is
+    //   a critical section
+    {
+      AutoHSLLock al(lock);
+
+      // we're a new, and initially unassigned, worker - counters have already been updated
+
+      while(true) {
+	// first rule - always yield to a resumable worker
+	while(!resumable_workers.empty()) {
+	  Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
+
+	  // this should only happen if we're at the max active worker count (otherwise
+	  //  somebody should have just woken this guy up earlier), and reduces the 
+	  // unassigned worker count by one
+	  update_worker_count(0, -1);
+
+	  idle_workers.push_back(Thread::self());
+	  worker_sleep(yield_to);
+
+	  // we're awake again, but still looking for work...
+	}
+
+	// try to get a new task then
+	// remember where a task has come from in case we want to put it back
+	Task *task = 0;
+	TaskQueue *task_source = 0;
+	int task_priority = TaskQueue::PRI_NEG_INF;
+	for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
+	    it != task_queues.end();
+	    it++) {
+	  int new_priority;
+	  Task *new_task = (*it)->get(&new_priority, task_priority);
+	  if(new_task) {
+	    // if we got something better, put back the old thing (if any)
+	    if(task)
+	      task_source->put(task, task_priority, false); // back on front of list
+	  
+	    task = new_task;
+	    task_source = *it;
+	    task_priority = new_priority;
+	  }
+	}
+
+	// did we find work to do?
+	if(task) {
+	  // we've now got some assigned work, so fire up a new idle worker if we were the last
+	  //  and there's a room for another active worker
+	  if((unassigned_worker_count == 1) && (active_worker_count < cfg_max_active_workers)) {
+	    // create an active worker, net zero change in unassigned workers
+	    update_worker_count(+1, 0);
+	    worker_create(true); // start it running right away
+	  } else {
+	    // one fewer unassigned worker
+	    update_worker_count(0, -1);
+	  }
+
+	  // we'll run the task after letting go of the lock, but update this thread's
+	  //  priority here
+	  worker_priorities[Thread::self()] = task_priority;
+
+	  // release the lock while we run the task
+	  al.release();
+	  task->execute_on_processor(proc);
+	  // TODO: let operation table manage lifetime eventually
+	  delete task;
+	  al.reacquire();
+
+	  worker_priorities.erase(Thread::self());
+
+	  // and we're back to being unassigned
+	  update_worker_count(0, +1);
+
+	  // are we allowed to reuse this worker for another task?
+	  if(!cfg_reuse_workers) break;
+	} else {
+	  // no?  thumb twiddling time
+
+	  // are we shutting down?
+	  if(shutdown_flag) {
+	    // yes, we can terminate - wake up an idler (if any) first though
+	    if(!idle_workers.empty()) {
+	      Thread *to_wake = idle_workers.back();
+	      idle_workers.pop_back();
+	      // no net change in worker counts
+	      worker_terminate(to_wake);
+	      break;
+	    } else {
+	      // nobody to wake, so -1 active/unassigned worker
+	      update_worker_count(-1, -1, false); // ok to drop below mins
+	      worker_terminate(0);
+	      break;
+	    }
+	  }
+
+	  // do we have more unassigned and idle tasks than we need?
+	  int total_idle_count = (unassigned_worker_count +
+				  (int)(idle_workers.size()));
+	  if(total_idle_count > cfg_max_idle_workers) {
+	    // if there are sleeping idlers, terminate in favor of one of those - keeps
+	    //  worker counts constant
+	    if(!idle_workers.empty()) {
+	      Thread *to_wake = idle_workers.back();
+	      idle_workers.pop_back();
+	      // no net change in worker counts
+	      worker_terminate(to_wake);
+	      break;
+	    } else {
+	      // nobody to take our place, but if there's at least one other unassigned worker
+	      //  we can just terminate
+	      if((unassigned_worker_count > 1) &&
+		 (active_worker_count > cfg_min_active_workers)) {
+		update_worker_count(-1, -1, false);
+		worker_terminate(0);
+		break;
+	      } else {
+		// no, stay awake but yield the CPU for a bit
+		idle_thread_yield();
+	      }
+	    }
+	  } else {
+	    // we don't want to terminate, but sleeping is still a possibility
+	    if((unassigned_worker_count > 1) &&
+	       (active_worker_count > cfg_min_active_workers)) {
+	      update_worker_count(-1, -1, false);
+	      idle_workers.push_back(Thread::self());
+	      worker_sleep(0);
+	    } else {
+	      // no, stay awake but yield the CPU for a bit
+	      idle_thread_yield();
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class KernelThreadTaskScheduler
+  //
+
+  KernelThreadTaskScheduler::KernelThreadTaskScheduler(Processor _proc,
+						       CoreReservation& _core_rsrv)
+    : ThreadedTaskScheduler(_proc)
+    , core_rsrv(_core_rsrv)
+    , shutdown_condvar(lock)
+  {
+  }
+
+  KernelThreadTaskScheduler::~KernelThreadTaskScheduler(void)
+  {
+    // cleanup should happen before destruction
+    assert(all_workers.empty());
+  }
+
+  void  KernelThreadTaskScheduler::add_task_queue(TaskQueue *queue)
+  {
+    // call the parent implementation first
+    ThreadedTaskScheduler::add_task_queue(queue);
+  }
+
+  void KernelThreadTaskScheduler::start(void)
+  {
+    // fire up the minimum number of workers
+    {
+      AutoHSLLock al(lock);
+
+      update_worker_count(cfg_min_active_workers, cfg_min_active_workers);
+
+      for(int i = 0; i < cfg_min_active_workers; i++)
+	worker_create(true);
+    }
+  }
+
+  void KernelThreadTaskScheduler::shutdown(void)
+  {
+    shutdown_flag = true;
+
+    // wait for all workers to finish
+    {
+      AutoHSLLock al(lock);
+
+      while(!all_workers.empty())
+	shutdown_condvar.wait();
+    }
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("sched shutdown complete\n");
+#endif
+  }
+
+  void KernelThreadTaskScheduler::thread_starting(Thread *thread)
+  {
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("worker starting: %p\n", thread);
+#endif
+
+    // see if we're supposed to be active yet
+    {
+      AutoHSLLock al(lock);
+
+      if(active_workers.count(thread) == 0) {
+	// nope, sleep on a CV until we are
+	GASNetCondVar my_cv(lock);
+	sleeping_threads[thread] = &my_cv;
+
+	while(active_workers.count(thread) == 0)
+	  my_cv.wait();
+    
+	sleeping_threads.erase(thread);
+      }
+    }
+  }
+
+  void KernelThreadTaskScheduler::thread_terminating(Thread *thread)
+  {
+    AutoHSLLock al(lock);
+
+    // if the thread is still in our all_workers list, this was unexpected
+    if(all_workers.count(thread) > 0) {
+      printf("unexpected worker termination: %p\n", thread);
+
+      // if this was our last worker, and we're not shutting down,
+      //  something bad probably happened - fire up a new worker and
+      //  hope things work themselves out
+      if((all_workers.size() == 1) && !shutdown_flag) {
+	printf("HELP!  Lost last worker for proc " IDFMT "!", proc.id);
+	worker_terminate(worker_create(false));
+      } else {
+	// just let it die
+	worker_terminate(0);
+      }
+    }
+  }
+
+  Thread *KernelThreadTaskScheduler::worker_create(bool make_active)
+  {
+    // lock is held by caller
+    ThreadLaunchParameters tlp;
+    Thread *t = Thread::create_kernel_thread<ThreadedTaskScheduler,
+					     &ThreadedTaskScheduler::scheduler_loop>(this,
+											 tlp,
+											 core_rsrv,
+											 this);
+    all_workers.insert(t);
+    if(make_active)
+      active_workers.insert(t);
+    return t;
+  }
+
+  void KernelThreadTaskScheduler::worker_sleep(Thread *switch_to)
+  {
+    // lock is held by caller
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("switch: %p -> %p\n", Thread::self(), switch_to);
+#endif
+
+    // take ourself off the active list
+    size_t count = active_workers.erase(Thread::self());
+    assert(count == 1);
+
+    GASNetCondVar my_cv(lock);
+    sleeping_threads[Thread::self()] = &my_cv;
+
+    // with kernel threads, sleeping and waking are separable actions
+    if(switch_to)
+      worker_wake(switch_to);
+
+    // now sleep until we're active again
+    while(active_workers.count(Thread::self()) == 0)
+      my_cv.wait();
+    
+    // awake again, unregister our (stack-allocated) CV
+    sleeping_threads.erase(Thread::self());
+  }
+
+  void KernelThreadTaskScheduler::worker_wake(Thread *to_wake)
+  {
+    // make sure target is actually asleep and mark active
+    assert(active_workers.count(to_wake) == 0);
+    active_workers.insert(to_wake);
+
+    // if they have a CV (they might not yet), poke that
+    std::map<Thread *, GASNetCondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    if(it != sleeping_threads.end())
+      it->second->signal();
+  }
+
+  void KernelThreadTaskScheduler::worker_terminate(Thread *switch_to)
+  {
+    // caller holds lock
+
+    Thread *me = Thread::self();
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("terminate: %p -> %p\n", me, switch_to);
+#endif
+
+    // take ourselves off the active list (FOREVER...)
+    size_t count = active_workers.erase(me);
+    assert(count == 1);
+
+    // also off the all workers list
+    all_workers.erase(me);
+
+    // and wake up whoever we're switching to (if any)
+    if(switch_to)
+      worker_wake(switch_to);
+
+    // detach and delete the worker thread
+    me->detach();
+    delete me;
+    
+    // if this was the last thread, we'd better be in shutdown...
+    if(all_workers.empty()) {
+      assert(shutdown_flag);
+      shutdown_condvar.signal();
+    }
+  }
+  
+  void KernelThreadTaskScheduler::idle_thread_yield(void)
+  {
+    // don't sleep, but let go of lock and other threads run
+    lock.unlock();
+    pthread_yield();
+    lock.lock();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class NewLocalProcessor
+  //
+
+  NewLocalProcessor::NewLocalProcessor(Processor _me, Processor::Kind _kind, 
+				       size_t stack_size, const char *name,
+				       int core_id /*= -1*/)
+    : ProcessorImpl(_me, _kind)
+    , core_rsrv(name, CoreReservationParameters(/*FIXME*/))
+  {
+    sched = new KernelThreadTaskScheduler(me, core_rsrv);
+    // add our task queue to the scheduler
+    sched->add_task_queue(&task_queue);
+    //sched->cfg_max_active_workers = 2;
+    //sched->cfg_max_idle_workers = 10;
+
+    // if we have an init task, queue that up (with highest priority)
+    Processor::TaskIDTable::iterator it = 
+      get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+    if(it != get_runtime()->task_table.end()) {
+      Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_INIT,
+			 0, 0,
+			 Event::NO_EVENT, 0, 1);
+      task_queue.put(t, task_queue.PRI_MAX_FINITE);
+    } else {
+      log_task.info("no processor init task: proc=" IDFMT "", me.id);
+    }
+
+    // finally, fire up the scheduler
+    sched->start();
+  }
+
+  NewLocalProcessor::~NewLocalProcessor(void)
+  {
+    delete sched;
+  }
+
+  void NewLocalProcessor::start_processor(void)
+  {
+    printf("NLP start\n");
+  }
+
+  void NewLocalProcessor::shutdown_processor(void)
+  {
+    printf("NLP shutdown\n");
+
+    // enqueue a shutdown task, if it exists
+    Processor::TaskIDTable::iterator it = 
+      get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+    if(it != get_runtime()->task_table.end()) {
+      Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+			 0, 0,
+			 Event::NO_EVENT, 0, 1);
+      task_queue.put(t, task_queue.PRI_MIN_FINITE);
+    } else {
+      log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);
+    }
+
+    sched->shutdown();
+    printf("NLP shutdown done\n");
+  }
+  
+  void NewLocalProcessor::initialize_processor(void)
+  {
+    printf("NLP init\n");
+  }
+    
+  void NewLocalProcessor::finalize_processor(void)
+  {
+    printf("NLP shutdown\n");
+  }
+
+  void NewLocalProcessor::enqueue_task(Task *task)
+  {
+    // just jam it into the task queue
+    task_queue.put(task, task->priority);
+  }
+
+  void NewLocalProcessor::spawn_task(Processor::TaskFuncID func_id,
+				     const void *args, size_t arglen,
+				     //std::set<RegionInstance> instances_needed,
+				     Event start_event, Event finish_event,
+				     int priority)
+  {
+    spawn_task(func_id, args, arglen, ProfilingRequestSet(),
+	       start_event, finish_event, priority);
+  }
+
+  void NewLocalProcessor::spawn_task(Processor::TaskFuncID func_id,
+				     const void *args, size_t arglen,
+				     const ProfilingRequestSet &reqs,
+				     Event start_event, Event finish_event,
+				     int priority)
+  {
+    assert(func_id != 0);
+    // create a task object for this
+    Task *task = new Task(me, func_id, args, arglen, reqs, finish_event, priority, 1);
+
+    // if the start event has already triggered, we can enqueue right away
+    if(start_event.has_triggered()) {
+      log_task.info("new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
+		    func_id, start_event.id, start_event.gen,
+		    finish_event.id, finish_event.gen);
+      enqueue_task(task);
+    } else {
+      log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
+		     func_id, start_event.id, start_event.gen);
+      EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+    }
+  }
+
+
   ///////////////////////////////////////////////////////////////////////////
     //
     // SPAGHETTI CODE BELOW THIS POINT

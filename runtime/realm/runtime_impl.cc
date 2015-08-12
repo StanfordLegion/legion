@@ -59,6 +59,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
+  extern Logger log_task; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -181,7 +182,8 @@ namespace Realm {
       : machine(0), nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
-	local_proc_group_free_list(0), background_pthread(0)
+	local_proc_group_free_list(0), background_pthread(0),
+	shutdown_requested(false), shutdown_condvar(shutdown_mutex)
     {
       machine = new MachineImpl;
     }
@@ -601,6 +603,7 @@ namespace Realm {
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
         ProcessorImpl *lp;
+#if OLDPROCS
         if (use_greenlet_procs)
           lp = new GreenletProcessor(p, Processor::LOC_PROC,
                                      stack_size_in_mb << 20, init_stack_count,
@@ -609,6 +612,11 @@ namespace Realm {
 	  lp = new LocalProcessor(p, Processor::LOC_PROC,
                                   stack_size_in_mb << 20,
                                   "local worker", i);
+#else
+	lp = new NewLocalProcessor(p, Processor::LOC_PROC,
+				   stack_size_in_mb << 20,
+				   "local worker", i);
+#endif
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
       }
@@ -1065,6 +1073,18 @@ namespace Realm {
             it++)
         (*it)->start_processor();
 
+      if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
+	log_task.info("spawning processor init task on local cpus");
+	for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
+	    it != local_cpus.end();
+	    it++)
+	  (*it)->me.spawn(Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+			  Event::NO_EVENT,
+			  INT_MAX); // runs with max priority
+      } else {
+	log_task.info("no processor init task");
+      }
+
       for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
@@ -1089,11 +1109,12 @@ namespace Realm {
 	}
       }
 
-      // wait for idle-ness somehow?
-      int timeout = -1;
 #ifdef TRACE_RESOURCES
       RuntimeImpl *rt = get_runtime();
 #endif
+#ifdef OLD_WAIT_LOOP
+      // wait for idle-ness somehow?
+      int timeout = -1;
       while(running_proc_count.get() > 0) {
 	if(timeout >= 0) {
 	  timeout--;
@@ -1104,6 +1125,7 @@ namespace Realm {
 	}
 	fflush(stdout);
 	sleep(1);
+
 #ifdef TRACE_RESOURCES
         log_runtime.info("total events: %d", rt->local_event_free_list->next_alloc);
         log_runtime.info("total reservations: %d", rt->local_reservation_free_list->next_alloc);
@@ -1112,6 +1134,15 @@ namespace Realm {
 #endif
       }
       log_runtime.info("running proc count is now zero - terminating\n");
+#endif
+      // sleep until shutdown has been requested by somebody
+      {
+	AutoHSLLock al(shutdown_mutex);
+	while(!shutdown_requested)
+	  shutdown_condvar.wait();
+	log_runtime.info("shutdown request received - terminating\n");
+      }
+
 #ifdef REPORT_REALM_RESOURCE_USAGE
       {
         RuntimeImpl *rt = get_runtime();
@@ -1134,12 +1165,18 @@ namespace Realm {
       for(std::vector<ProcessorImpl*>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
+      {
+	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
 	(*it)->shutdown_processor();
+      }
 
       for(std::vector<ProcessorImpl*>::iterator it = local_io_procs.begin();
           it != local_io_procs.end();
           it++)
-        (*it)->shutdown_processor();
+      {
+	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
+	(*it)->shutdown_processor();
+      }
 
       for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
@@ -1150,7 +1187,10 @@ namespace Realm {
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
 	  it != local_gpus.end();
 	  it++)
-	(*it)->shutdown_processor(); 
+      {
+	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
+	(*it)->shutdown_processor();
+      }
 #endif
 
 
@@ -1197,14 +1237,22 @@ namespace Realm {
 
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
+      if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+	log_task.info("spawning processor shutdown task on local cpus");
+	for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
+	    it != local_cpus.end();
+	    it++)
+	  (*it)->me.spawn(Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
+			  Event::NO_EVENT,
+			  INT_MIN); // runs with lowest priority
+      } else {
+	log_task.info("no processor shutdown task");
+      }
+
       {
-        Event e = GenEventImpl::create_genevent()->current_event();
-	(*it)->spawn_task(0 /* shutdown task id */, 0, 0,
-			  Event::NO_EVENT, e, 0/*priority*/);
+	AutoHSLLock al(shutdown_mutex);
+	shutdown_requested = true;
+	shutdown_condvar.broadcast();
       }
     }
 

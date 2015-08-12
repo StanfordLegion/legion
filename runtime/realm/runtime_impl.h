@@ -193,6 +193,9 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
+      volatile bool shutdown_requested;
+      GASNetHSL shutdown_mutex;
+      GASNetCondVar shutdown_condvar;
     };
 
     extern RuntimeImpl *runtime_singleton;

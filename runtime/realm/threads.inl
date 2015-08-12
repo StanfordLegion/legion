@@ -83,8 +83,6 @@ namespace Realm {
 
   inline Thread::~Thread(void)
   {
-    // a Thread object should never be destroyed unless it's known to be finished
-    assert(state == STATE_FINISHED);
   }    
 
   inline Thread::State Thread::get_state(void)
@@ -228,6 +226,29 @@ namespace Realm {
     return yield_value;
   }
 #endif
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ThreadScheduler
+
+  inline ThreadScheduler::~ThreadScheduler(void)
+  {
+  }
+
+  inline Thread::State ThreadScheduler::update_thread_state(Thread *thread, 
+							    Thread::State new_state)
+  {
+    return thread->update_state(new_state);
+  }
+
+  inline bool ThreadScheduler::try_update_thread_state(Thread *thread,
+						       Thread::State old_state,
+						       Thread::State new_state)
+  {
+    return thread->try_update_state(old_state, new_state);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
