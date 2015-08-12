@@ -2765,9 +2765,16 @@ namespace LegionRuntime {
           }
 #endif
           case MemoryImpl::MKIND_GLOBAL:
-            fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
-            assert(0);
+          {
+            // cpu mem -> gasnet mem
+            log_dma.info("create cpu->gasnet mem XD\n");
+            XferDes* xd = new GASNetXferDes<DIM>(channel_manager->get_gasnet_write_channel(), false,
+                                           src_buf, dst_buf, src_mem_base,
+                                           domain, oasvec, 100/*max_nr*/,
+                                           XferOrder::DST_FIFO, XferDes::XFER_GASNET_WRITE);
+            path.push_back(xd);
             break;
+          }
           case MemoryImpl::MKIND_RDMA:
           case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "[DMA] To be implemented: cpu memory -> remote memory\n");

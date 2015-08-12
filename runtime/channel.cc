@@ -1372,9 +1372,11 @@ namespace LegionRuntime {
         capacity = max_nr;
       }
 
+      RemoteWriteChannel::~RemoteWriteChannel() {}
+
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
-        assert(nr <= capacity - flying_reqs.size());
+        assert((size_t)nr <= capacity - flying_reqs.size());
         for (int i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
@@ -1384,10 +1386,10 @@ namespace LegionRuntime {
           args.event = req->complete_event;
           args.sender = gasnet_mynode();
           args.sequence_id = 0;
-      	  RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
-                                               req->src_buf, req->nbytes,
-                                               PAYLOAD_KEEP,
-                                               req->dst_buf);
+          Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
+                                                      req->src_buf, req->nbytes,
+                                                      PAYLOAD_KEEP,
+                                                      req->dst_buf);
           flying_reqs.push_back(req);
         }
         return nr;
