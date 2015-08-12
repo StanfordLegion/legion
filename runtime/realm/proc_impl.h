@@ -150,10 +150,12 @@ namespace Realm {
       virtual void thread_blocking(Thread *thread);
       virtual void thread_ready(Thread *thread);
 
-    protected:
-      // the main scheduler loop
     public:
+      // the main scheduler loop - lock should be held before calling
       void scheduler_loop(void);
+      // an entry point that takes the scheduler lock explicitly
+      void scheduler_loop_wlock(void);
+
     protected:
 
       virtual Thread *worker_create(bool make_active) = 0;
@@ -215,6 +217,46 @@ namespace Realm {
       GASNetCondVar shutdown_condvar;
     };
 
+    // an implementation of ThreadedTaskScheduler that uses user threads
+    //  for workers (and one or more kernel threads for hosts
+    class UserThreadTaskScheduler : public ThreadedTaskScheduler {
+    public:
+      UserThreadTaskScheduler(Processor _proc, CoreReservation& _core_rsrv);
+
+      virtual ~UserThreadTaskScheduler(void);
+
+      virtual void add_task_queue(TaskQueue *queue);
+
+      void start(void);
+      void shutdown(void);
+
+      virtual void thread_starting(Thread *thread);
+
+      virtual void thread_terminating(Thread *thread);
+
+    protected:
+      void host_thread(void);
+      
+      // you can't delete a user thread until you've switched off of it, so
+      //  use TLS to mark when that should happen
+      void request_user_thread_cleanup(Thread *thread);
+      void do_user_thread_cleanup(void);
+      
+      virtual Thread *worker_create(bool make_active);
+      virtual void worker_sleep(Thread *switch_to);
+      virtual void worker_wake(Thread *to_wake);
+      virtual void worker_terminate(Thread *switch_to);
+      virtual void idle_thread_yield(void);
+
+      CoreReservation &core_rsrv;
+
+      std::set<Thread *> all_hosts;
+      std::set<Thread *> all_workers;
+
+    public:
+      int cfg_num_host_threads;
+    };
+
     class NewLocalProcessor : public ProcessorImpl {
     public:
       NewLocalProcessor(Processor _me, Processor::Kind _kind, 
@@ -241,7 +283,7 @@ namespace Realm {
                               int priority);
     protected:
       CoreReservation core_rsrv;
-      KernelThreadTaskScheduler *sched;
+      UserThreadTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
     };
 

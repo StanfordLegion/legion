@@ -628,6 +628,7 @@ namespace Realm {
 							 int unassigned_delta,
 							 bool check /*= true*/)
   {
+    //define DEBUG_THREAD_SCHEDULER
 #ifdef DEBUG_THREAD_SCHEDULER
     printf("UWC: %p a=%d%+d u=%d%+d\n", Thread::self(),
 	   active_worker_count, active_delta,
@@ -726,9 +727,9 @@ namespace Realm {
   void ThreadedTaskScheduler::scheduler_loop(void)
   {
     // the entire body of this method, except for when running an actual task, is
-    //   a critical section
+    //   a critical section - lock should be taken by caller
     {
-      AutoHSLLock al(lock);
+      //AutoHSLLock al(lock);
 
       // we're a new, and initially unassigned, worker - counters have already been updated
 
@@ -787,11 +788,11 @@ namespace Realm {
 	  worker_priorities[Thread::self()] = task_priority;
 
 	  // release the lock while we run the task
-	  al.release();
+	  lock.unlock();
 	  task->execute_on_processor(proc);
 	  // TODO: let operation table manage lifetime eventually
 	  delete task;
-	  al.reacquire();
+	  lock.lock();
 
 	  worker_priorities.erase(Thread::self());
 
@@ -860,6 +861,13 @@ namespace Realm {
 	}
       }
     }
+  }
+
+  // an entry point that takes the scheduler lock explicitly
+  void ThreadedTaskScheduler::scheduler_loop_wlock(void)
+  {
+    AutoHSLLock al(lock);
+    scheduler_loop();
   }
 
 
@@ -967,7 +975,7 @@ namespace Realm {
     // lock is held by caller
     ThreadLaunchParameters tlp;
     Thread *t = Thread::create_kernel_thread<ThreadedTaskScheduler,
-					     &ThreadedTaskScheduler::scheduler_loop>(this,
+					     &ThreadedTaskScheduler::scheduler_loop_wlock>(this,
 											 tlp,
 											 core_rsrv,
 											 this);
@@ -1059,6 +1067,211 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class UserThreadTaskScheduler
+  //
+
+  UserThreadTaskScheduler::UserThreadTaskScheduler(Processor _proc,
+						   CoreReservation& _core_rsrv)
+    : ThreadedTaskScheduler(_proc)
+    , core_rsrv(_core_rsrv)
+    , cfg_num_host_threads(1)
+  {
+  }
+
+  UserThreadTaskScheduler::~UserThreadTaskScheduler(void)
+  {
+    // cleanup should happen before destruction
+    assert(all_workers.empty());
+    assert(all_hosts.empty());
+  }
+
+  void  UserThreadTaskScheduler::add_task_queue(TaskQueue *queue)
+  {
+    // call the parent implementation first
+    ThreadedTaskScheduler::add_task_queue(queue);
+  }
+
+  void UserThreadTaskScheduler::start(void)
+  {
+    // with user threading, active must always match the number of host threads
+    cfg_min_active_workers = cfg_num_host_threads;
+    cfg_max_active_workers = cfg_num_host_threads;
+
+    // fire up the host threads (which will fire up initial workers)
+    {
+      AutoHSLLock al(lock);
+
+      update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
+
+      ThreadLaunchParameters tlp;
+      tlp.set_stack_size(4096);  // really small stack is fine here
+
+      for(int i = 0; i < cfg_num_host_threads; i++) {
+	Thread *t = Thread::create_kernel_thread<UserThreadTaskScheduler,
+						 &UserThreadTaskScheduler::host_thread>(this,
+											tlp,
+											core_rsrv,
+											0);
+	all_hosts.insert(t);
+      }
+    }
+  }
+
+  void UserThreadTaskScheduler::shutdown(void)
+  {
+    // set the shutdown flag and wait for all the host threads to exit
+    AutoHSLLock al(lock);
+
+    shutdown_flag = true;
+
+    while(!all_hosts.empty()) {
+      // pick an arbitrary host and join on it
+      Thread *t = *all_hosts.begin();
+      al.release();
+      t->join();  // can't hold lock while waiting
+      al.reacquire();
+      all_hosts.erase(t);
+      delete t;
+    }
+  }
+
+  namespace ThreadLocal {
+    // you can't delete a user thread until you've switched off of it, so
+    //  use TLS to mark when that should happen
+    static __thread Thread *terminated_user_thread = 0;
+  };
+
+  inline void UserThreadTaskScheduler::request_user_thread_cleanup(Thread *thread)
+  {
+    // make sure we haven't forgotten some other thread
+    assert(ThreadLocal::terminated_user_thread == 0);
+    ThreadLocal::terminated_user_thread = thread;
+  }
+
+  inline void UserThreadTaskScheduler::do_user_thread_cleanup(void)
+  {
+    if(ThreadLocal::terminated_user_thread != 0) {
+      delete ThreadLocal::terminated_user_thread;
+      ThreadLocal::terminated_user_thread = 0;
+    }
+  }
+
+  void UserThreadTaskScheduler::host_thread(void)
+  {
+    AutoHSLLock al(lock);
+
+    while(!shutdown_flag) {
+      // create a user worker thread - it won't start right away
+      Thread *worker = worker_create(false);
+
+      // for user ctx switching, lock is HELD during thread switches
+      Thread::user_switch(worker);
+      do_user_thread_cleanup();
+
+      if(!shutdown_flag) {
+	printf("HELP!  Lost a user worker thread - making a new one...\n");
+	update_worker_count(+1, +1);
+      }
+    }
+  }
+
+  void UserThreadTaskScheduler::thread_starting(Thread *thread)
+  {
+    // nothing to do here
+  }
+
+  void UserThreadTaskScheduler::thread_terminating(Thread *thread)
+  {
+    // these threads aren't supposed to terminate
+    assert(0);
+  }
+
+  Thread *UserThreadTaskScheduler::worker_create(bool make_active)
+  {
+    // lock held by caller
+
+    // user threads can never start active
+    assert(!make_active);
+
+    ThreadLaunchParameters tlp;
+    Thread *t = Thread::create_user_thread<ThreadedTaskScheduler,
+					   &ThreadedTaskScheduler::scheduler_loop>(this,
+										   tlp,
+										   this);
+    all_workers.insert(t);
+    //if(make_active)
+    //  active_workers.insert(t);
+    return t;
+  }
+    
+  void UserThreadTaskScheduler::worker_sleep(Thread *switch_to)
+  {
+    // lock is held by caller
+
+    // a user thread may not sleep without transferring control to somebody else
+    assert(switch_to != 0);
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("switch: %p -> %p\n", Thread::self(), switch_to);
+#endif
+
+    // take ourself off the active list
+    //size_t count = active_workers.erase(Thread::self());
+    //assert(count == 1);
+
+    Thread::user_switch(switch_to);
+
+    do_user_thread_cleanup();
+
+    // put ourselves back on the active list
+    //active_workers.insert(Thread::self());
+  }
+
+  void UserThreadTaskScheduler::worker_wake(Thread *to_wake)
+  {
+    // in a user-threading environment, can't just wake a thread up out of nowhere
+    assert(0);
+  }
+
+  void UserThreadTaskScheduler::worker_terminate(Thread *switch_to)
+  {
+    // lock is held by caller
+
+    // terminating is like sleeping, except you are allowed to terminate to "nobody" when
+    //  shutting down
+    assert((switch_to != 0) || shutdown_flag);
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    printf("terminate: %p -> %p\n", Thread::self(), switch_to);
+#endif
+
+    // take ourself off the active and all worker lists
+    //size_t count = active_workers.erase(Thread::self());
+    //assert(count == 1);
+
+    size_t count = all_workers.erase(Thread::self());
+    assert(count == 1);
+
+    // whoever we switch to should delete us
+    request_user_thread_cleanup(Thread::self());
+
+    Thread::user_switch(switch_to);
+
+    // we don't expect to ever get control back
+    assert(0);
+  }
+
+  void UserThreadTaskScheduler::idle_thread_yield(void)
+  {
+    // don't sleep, but let go of lock and other threads run
+    lock.unlock();
+    pthread_yield();
+    lock.lock();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class NewLocalProcessor
   //
 
@@ -1068,7 +1281,9 @@ namespace Realm {
     : ProcessorImpl(_me, _kind)
     , core_rsrv(name, CoreReservationParameters(/*FIXME*/))
   {
-    sched = new KernelThreadTaskScheduler(me, core_rsrv);
+    //sched = new KernelThreadTaskScheduler(me, core_rsrv);
+    sched = new UserThreadTaskScheduler(me, core_rsrv);
+    //sched->cfg_num_host_threads = 2;
     // add our task queue to the scheduler
     sched->add_task_queue(&task_queue);
     //sched->cfg_max_active_workers = 2;
