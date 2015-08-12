@@ -2091,6 +2091,8 @@ namespace LegionRuntime {
      */
     class VersionManager { 
     public:
+      static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
+    public:
       VersionManager(RegionTreeNode *owner);
       VersionManager(const VersionManager &rhs);
       ~VersionManager(void);

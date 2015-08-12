@@ -4463,11 +4463,6 @@ namespace LegionRuntime {
       if (logging_region_tree_state)
 	delete tree_state_logger;
 #endif
-#ifdef TRACE_ALLOCATION
-      allocation_lock.destroy_reservation();
-      allocation_lock = Reservation::NO_RESERVATION;
-      allocation_manager.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14277,6 +14272,8 @@ namespace LegionRuntime {
           return "Physical State";
         case VERSION_STATE_ALLOC:
           return "Version State";
+        case VERSION_MANAGER_ALLOC:
+          return "Version Manager";
         default:
           assert(false); // should never get here
       }

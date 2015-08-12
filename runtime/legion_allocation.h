@@ -131,6 +131,7 @@ namespace LegionRuntime {
       LOGICAL_STATE_ALLOC,
       PHYSICAL_STATE_ALLOC,
       VERSION_STATE_ALLOC,
+      VERSION_MANAGER_ALLOC,
       LAST_ALLOC, // must be last
     };
 

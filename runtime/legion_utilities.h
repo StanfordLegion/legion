@@ -1150,11 +1150,40 @@ namespace LegionRuntime {
         for (size_t i = 0; i < SIZE; i++)
         {
           if (elems[i] != 0)
-            legion_delete(elems[i]);
+            delete elems[i];
         }
       }
     public:
       DynamicTableNode& operator=(const DynamicTableNode &rhs)
+        { assert(false); return *this; }
+    public:
+      ET *elems[SIZE];
+    };
+
+    template<typename ET, size_t _SIZE, typename IT>
+    struct LeafTableNode : public DynamicTableNodeBase<IT> {
+    public:
+      static const size_t SIZE = _SIZE;
+    public:
+      LeafTableNode(int _level, IT _first_index, IT _last_index)
+        : DynamicTableNodeBase<IT>(_level, _first_index, _last_index) 
+      { 
+        for (size_t i = 0; i < SIZE; i++)
+          elems[i] = 0;
+      }
+      LeafTableNode(const LeafTableNode &rhs) { assert(false); }
+      virtual ~LeafTableNode(void)
+      {
+        for (size_t i = 0; i < SIZE; i++)
+        {
+          if (elems[i] != 0)
+          {
+            legion_delete(elems[i]);
+          }
+        }
+      }
+    public:
+      LeafTableNode& operator=(const LeafTableNode &rhs)
         { assert(false); return *this; }
     public:
       ET *elems[SIZE];
@@ -1199,7 +1228,7 @@ namespace LegionRuntime {
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<IT>,
                                1 << INNER_BITS, IT> INNER_TYPE;
-      typedef DynamicTableNode<ET, 1 << LEAF_BITS, IT> LEAF_TYPE;
+      typedef LeafTableNode<ET, 1 << LEAF_BITS, IT> LEAF_TYPE;
 
       static LEAF_TYPE* new_leaf_node(IT first_index, IT last_index)
       {
