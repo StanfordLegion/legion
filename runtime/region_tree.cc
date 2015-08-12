@@ -9290,7 +9290,11 @@ namespace LegionRuntime {
       assert(physical_state == NULL);
 #endif
       if (rhs.physical_state != NULL)
+      {
+        if (physical_state != NULL)
+          delete physical_state;
         physical_state = rhs.physical_state->clone(!rhs.needs_capture);
+      }
       if ((field_versions != NULL) && (field_versions->remove_reference()))
         delete field_versions;
       field_versions = rhs.field_versions;
@@ -9694,6 +9698,9 @@ namespace LegionRuntime {
         assert(current.field_versions != NULL);
 #endif
         NodeInfo &next = node_infos[nit->first];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(next.physical_state == NULL);
+#endif
         next.physical_state = current.physical_state->clone(
                                                   false/*capture state*/);
         next.field_versions = current.field_versions;
@@ -9738,6 +9745,9 @@ namespace LegionRuntime {
         if (!clone_mask)
           continue;
         NodeInfo &next = node_infos[nit->first];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(next.physical_state == NULL); 
+#endif
         if (changed)
           next.physical_state = current.physical_state->clone(clone_mask, 
                                                   false/*capture_state*/);
