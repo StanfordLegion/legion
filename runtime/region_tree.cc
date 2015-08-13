@@ -11591,7 +11591,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // closers always advance
-      leave_open_versions.set_advance();
       force_close_versions.set_advance();
     }
 
@@ -12003,7 +12002,7 @@ namespace LegionRuntime {
         // IMPORTANT NOTE! FAILURE TO FOLLOW THIS WILL RISK DEADLOCK
         // (just try the mini-aero benchmark)
         node->record_version_numbers(state, leave_open_mask,
-                                     leave_open_versions, true/*previous*/,
+                                     leave_open_versions, false/*previous*/,
                                      false/*premap*/, false/*path only*/);
         FieldMask force_close_mask = closed_mask - leave_open_mask;
         if (!!force_close_mask)
