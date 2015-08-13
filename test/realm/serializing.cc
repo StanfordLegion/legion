@@ -140,7 +140,10 @@ size_t test_dynamic(const char *name, const T& input, size_t exp_size = 0)
     for(size_t i = 0; i < act_size; i++)
       std::cout << ' ' << std::setfill('0') << std::setw(2) << (int)((unsigned char *)buffer)[i];
     std::cout << std::dec << std::endl;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
     std::cout << "Output: " << output << std::endl;
+#pragma GCC diagnostic pop
     error_count++;
   }
 
@@ -221,7 +224,10 @@ void test_fixed(const char *name, const T& input, size_t exp_size)
     for(size_t i = 0; i < exp_size; i++)
       std::cout << ' ' << std::setfill('0') << std::setw(2) << (int)((unsigned char *)buffer)[i];
     std::cout << std::dec << std::endl;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
     std::cout << "Output: " << output << std::endl;
+#pragma GCC diagnostic pop
     error_count++;
   }
 
