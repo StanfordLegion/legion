@@ -18,8 +18,12 @@
 #ifndef REALM_THREADS_H
 #define REALM_THREADS_H
 
+#define REALM_USE_USER_THREADS
+
+#ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
 #define _XOPEN_SOURCE
+#endif
 #endif
 
 #include <stddef.h>
@@ -63,9 +67,11 @@ namespace Realm {
 						CoreReservation& rsrv,
 						ThreadScheduler *_scheduler);
    
+#ifdef REALM_USE_USER_THREADS
     static Thread *create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
 					      const ThreadLaunchParameters& params,
 					      ThreadScheduler *_scheduler);
+#endif
    
   public:
     // for kernel threads, the scheduler is optional - however, a thread with no scheduler
@@ -78,12 +84,14 @@ namespace Realm {
 					CoreReservation& rsrv,
 					ThreadScheduler *_scheduler = 0);
 
+#ifdef REALM_USE_USER_THREADS
     // user threads must specify a scheduler - the whole point is that the OS isn't
     //  controlling them...
     template <typename T, void (T::*START_MTHD)(void)>
     static Thread *create_user_thread(T *target,
 				      const ThreadLaunchParameters& params,
 				      ThreadScheduler *_scheduler);
+#endif
 
     virtual ~Thread(void);
 
@@ -108,10 +116,12 @@ namespace Realm {
     static void abort(void);
     static void yield(void);
 
+#ifdef REALM_USE_USER_THREADS
     // perform a user-level thread switch
     // if called from a kernel thread, that thread becomes the "host" for the user thread
     // if called by a user thread with 'switch_to'==0, control returns to host
     static void user_switch(Thread *switch_to);
+#endif
 
     template <typename CONDTYPE>
     static void wait_for_condition(const CONDTYPE& cond);

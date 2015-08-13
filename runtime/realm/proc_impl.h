@@ -217,6 +217,7 @@ namespace Realm {
       GASNetCondVar shutdown_condvar;
     };
 
+#ifdef REALM_USE_USER_THREADS
     // an implementation of ThreadedTaskScheduler that uses user threads
     //  for workers (and one or more kernel threads for hosts
     class UserThreadTaskScheduler : public ThreadedTaskScheduler {
@@ -256,6 +257,7 @@ namespace Realm {
     public:
       int cfg_num_host_threads;
     };
+#endif
 
     class NewLocalProcessor : public ProcessorImpl {
     public:
@@ -283,7 +285,11 @@ namespace Realm {
                               int priority);
     protected:
       CoreReservation core_rsrv;
+#ifdef REALM_USE_USER_THREADS
       UserThreadTaskScheduler *sched;
+#else
+      KernelThreadTaskScheduler *sched;
+#endif
       PriorityQueue<Task *, GASNetHSL> task_queue;
     };
 

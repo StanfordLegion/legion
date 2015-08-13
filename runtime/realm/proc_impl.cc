@@ -1070,6 +1070,7 @@ namespace Realm {
   // class UserThreadTaskScheduler
   //
 
+#ifdef REALM_USE_USER_THREADS
   UserThreadTaskScheduler::UserThreadTaskScheduler(Processor _proc,
 						   CoreReservation& _core_rsrv)
     : ThreadedTaskScheduler(_proc)
@@ -1268,6 +1269,7 @@ namespace Realm {
     Thread::yield();
     lock.lock();
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -1281,13 +1283,16 @@ namespace Realm {
     : ProcessorImpl(_me, _kind)
     , core_rsrv(name, CoreReservationParameters(/*FIXME*/))
   {
-    //sched = new KernelThreadTaskScheduler(me, core_rsrv);
+#ifdef REALM_USE_USER_THREADS
     sched = new UserThreadTaskScheduler(me, core_rsrv);
     //sched->cfg_num_host_threads = 2;
-    // add our task queue to the scheduler
-    sched->add_task_queue(&task_queue);
+#else
+    sched = new KernelThreadTaskScheduler(me, core_rsrv);
     //sched->cfg_max_active_workers = 2;
     //sched->cfg_max_idle_workers = 10;
+#endif
+    // add our task queue to the scheduler
+    sched->add_task_queue(&task_queue);
 
     // if we have an init task, queue that up (with highest priority)
     Processor::TaskIDTable::iterator it = 

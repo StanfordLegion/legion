@@ -31,6 +31,7 @@
 #include <sched.h>
 #endif
 
+#ifdef REALM_USE_USER_THREADS
 #include <ucontext.h>
 #ifdef __MACH__
 // MacOS has (loudly) deprecated set/get/make/swapcontext,
@@ -46,6 +47,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #define getcontext getcontext_wrap
 #define swapcontext swapcontext_wrap
 #define makecontext makecontext_wrap
+#endif
 #endif
 
 #include <string.h>
@@ -325,6 +327,7 @@ namespace Realm {
   //
   // class UserThread
 
+#ifdef REALM_USE_USER_THREADS
   class UserThread : public Thread {
   public:
     UserThread(void *_target, void (*_entry_wrapper)(void *),
@@ -518,6 +521,7 @@ namespace Realm {
       }
     }
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -541,6 +545,16 @@ namespace Realm {
     return t;
   }
 
+  /*static*/ void Thread::yield(void)
+  {
+#ifdef __MACH__
+    sched_yield();
+#else
+    pthread_yield();
+#endif
+  }
+
+#ifdef REALM_USE_USER_THREADS
   /*static*/ Thread *Thread::create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
 							const ThreadLaunchParameters& params,
 							ThreadScheduler *_scheduler)
@@ -553,20 +567,12 @@ namespace Realm {
     return t;
   }
 
-  /*static*/ void Thread::yield(void)
-  {
-#ifdef __MACH__
-    sched_yield();
-#else
-    pthread_yield();
-#endif
-  }
-
   /*static*/ void Thread::user_switch(Thread *switch_to)
   {
     // just cast 'switch_to' to a UserThread - UserThread::user_switch will do a bit
     //   of sanity-checking
     UserThread::user_switch((UserThread *)switch_to);
   }
+#endif
 
 }; // namespace Realm

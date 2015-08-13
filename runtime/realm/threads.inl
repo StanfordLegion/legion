@@ -139,6 +139,7 @@ namespace Realm {
 					params, rsrv, _scheduler);
   }
 
+#ifdef REALM_USE_USER_THREADS
   // user threads must specify a scheduler - the whole point is that the OS isn't
   //  controlling them...
   template <typename T, void (T::*START_MTHD)(void)>
@@ -149,6 +150,7 @@ namespace Realm {
     return create_user_thread_untyped(target, thread_entry_wrapper<T, START_MTHD>,
 				      params, _scheduler);
   }
+#endif
 
   template <typename CONDTYPE>
   class ThreadWaker : public CONDTYPE::Callback {
