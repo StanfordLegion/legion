@@ -415,6 +415,10 @@ namespace Realm {
     // figure out how big the stack should be
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       stack_size = params.stack_size;
+      // it turns out MacOS behaves REALLY strangely with a stack < 32KB, and there
+      //  make be some lower limit in Linux-land too, so clamp to 64KB to be safe
+      if(stack_size < (64 << 10))
+	stack_size = 64 << 10;
     } else {
       stack_size = 2 << 20; // pick something - 2MB ?
     }
