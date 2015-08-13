@@ -541,11 +541,13 @@ namespace LegionRuntime {
       template<unsigned DIM>
       RemoteWriteXferDes<DIM>::RemoteWriteXferDes(Channel* _channel, bool has_pre_XferDes,
                                         Buffer* _src_buf, Buffer* _dst_buf,
-                                        const char *_src_mem_base, const char *_dst_mem_base,
+                                        const char *_src_mem_base, Memory _dst_mem,
                                         Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                         uint64_t _max_req_size, long max_nr,
                                         XferOrder::Type _order)
       {
+        // make sure dst buffer is registered memory
+        assert(get_runtime()->get_memory_impl(_dst_mem)->kind == MemoryImpl::MKIND_RDMA);
         kind = XferDes::XFER_REMOTE_WRITE;
         channel = _channel;
         order = _order;
@@ -556,8 +558,9 @@ namespace LegionRuntime {
         max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
+        dst_mem_impl = get_runtime()->get_memory_impl(_dst_mem);
         src_mem_base = _src_mem_base;
-        dst_mem_base = _dst_mem_base;
+        dst_mem_base = ((const char*)((Realm::RemoteMemory*)dst_mem_impl)->regbase) + dst_buf->alloc_offset;
         domain = _domain;
         size_t total_field_size = 0;
         for (int i = 0; i < _oas_vec.size(); i++) {
@@ -574,12 +577,13 @@ namespace LegionRuntime {
 
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(),
                                                      src_buf->linearization.get_mapping<DIM>(),
-                                                     dst_buf->linearization.get_mapping<DIM>());
+                                                     dst_buf->linearization.get_mapping<DIM>(),
+                                                     order);
         offset_idx = 0;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_mem =
+          requests[i].dst_mem = _dst_mem;
           available_reqs.push(&requests[i]);
         }
 	  }
@@ -608,10 +612,11 @@ namespace LegionRuntime {
             available_reqs.pop();
             requests[idx]->is_read_done = false;
             requests[idx]->is_write_done = false;
-            RemoteWriteRequest* req = requests[idx];
-            req->src_buf = src_mem_base + src_start;
-            req->dst_offset =dst_start;
-            req->dst_buf = dst_mem_base + dst_start;
+            RemoteWriteRequest* req = (RemoteWriteRequest*) requests[idx];
+            req->src_buf = (char*)(src_mem_base + src_start);
+            // dst_offset count from the beginning of registered memory
+            req->dst_offset = dst_buf->alloc_offset + dst_start;
+            req->dst_buf = (char*)(dst_mem_base + dst_start);
             req->nbytes = req_size;
             src_start += req_size; // here we don't have to mod src_buf->buf_size since it will be performed in next loop
             dst_start += req_size; //
@@ -627,7 +632,7 @@ namespace LegionRuntime {
       {
         req->is_read_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_mem_base;
-        uint64_t size = ((RemoteWriteXferDes*)req)->nbytes;
+        uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_read(offset, size, segments_read);
       }
 
@@ -635,8 +640,8 @@ namespace LegionRuntime {
       void RemoteWriteXferDes<DIM>::notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
-        int64_t offset = ((RemoteWriteXferDes*)req)->dst_buf - dst_mem_base;
-        uint64_t size = ((RemoteWriteXferDes*)req)->nbytes;
+        int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_mem_base;
+        uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_write(offset, size, segments_write);
         available_reqs.push(req);
       }
@@ -1835,6 +1840,9 @@ namespace LegionRuntime {
       template class GASNetXferDes<1>;
       template class GASNetXferDes<2>;
       template class GASNetXferDes<3>;
+      template class RemoteWriteXferDes<1>;
+      template class RemoteWriteXferDes<2>;
+      template class RemoteWriteXferDes<3>;
 #ifdef USE_DISK
       template class DiskXferDes<1>;
       template class DiskXferDes<2>;

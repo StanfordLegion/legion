@@ -561,7 +561,7 @@ namespace LegionRuntime{
     public:
       RemoteWriteXferDes(Channel* _channel, bool has_pre_XferDes,
                     Buffer* _src_buf, Buffer* _dst_buf,
-                    const char *_src_mem_base, const char *_dst_mem_base,
+                    const char *_src_mem_base, Memory _dst_mem,
                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                     uint64_t max_req_size, long max_nr,
                     XferOrder::Type _order);
@@ -586,6 +586,7 @@ namespace LegionRuntime{
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       const char *src_mem_base, *dst_mem_base;
+      MemoryImpl *dst_mem_impl;
     };
 
 #ifdef USE_DISK
