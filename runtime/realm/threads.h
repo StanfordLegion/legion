@@ -18,6 +18,10 @@
 #ifndef REALM_THREADS_H
 #define REALM_THREADS_H
 
+#ifdef __MACH__
+#define _XOPEN_SOURCE
+#endif
+
 #include <stddef.h>
 
 #include <string>
@@ -102,6 +106,7 @@ namespace Realm {
     // called from within a thread
     static Thread *self(void);
     static void abort(void);
+    static void yield(void);
 
     // perform a user-level thread switch
     // if called from a kernel thread, that thread becomes the "host" for the user thread

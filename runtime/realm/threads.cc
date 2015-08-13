@@ -26,6 +26,10 @@
 #include <pthread.h>
 // for PTHREAD_STACK_MIN
 #include <limits.h>
+#ifdef __MACH__
+// for sched_yield
+#include <sched.h>
+#endif
 
 #include <ucontext.h>
 
@@ -88,7 +92,9 @@ namespace Realm {
 	continue;
 
       CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
+#ifndef __MACH__
       alloc->restrict_cpus = false;
+#endif
 
       it->second = alloc;
       it->first->allocation = alloc;
@@ -213,10 +219,12 @@ namespace Realm {
     // allocation better exist...
     assert(rsrv.allocation);
 
+#ifndef __MACH__
     if(rsrv.allocation->restrict_cpus)
       CHECK_PTHREAD( pthread_attr_setaffinity_np(&attr, 
 						 sizeof(rsrv.allocation->allowed_cpus),
 						 &(rsrv.allocation->allowed_cpus)) );
+#endif
 
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       // make sure it's not too large
@@ -404,6 +412,7 @@ namespace Realm {
     ctx.uc_link = 0; // we don't expect it to ever fall through
     ctx.uc_stack.ss_sp = stack_base;
     ctx.uc_stack.ss_size = stack_size;
+    ctx.uc_stack.ss_flags = 0;
 
     // grr...  entry point takes int's, which might not hold a void *
     // we'll just fish our UserThread * out of TLS
@@ -523,6 +532,15 @@ namespace Realm {
     t->start_thread(params);
 
     return t;
+  }
+
+  /*static*/ void Thread::yield(void)
+  {
+#ifdef __MACH__
+    sched_yield();
+#else
+    pthread_yield();
+#endif
   }
 
   /*static*/ void Thread::user_switch(Thread *switch_to)

@@ -245,6 +245,9 @@ CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Werror
+ifeq ($(shell uname -s),Darwin)
+CC_FLAGS        += -Wno-deprecated
+endif
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 

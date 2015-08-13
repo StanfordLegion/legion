@@ -1060,7 +1060,7 @@ namespace Realm {
   {
     // don't sleep, but let go of lock and other threads run
     lock.unlock();
-    pthread_yield();
+    Thread::yield();
     lock.lock();
   }
 
@@ -1265,7 +1265,7 @@ namespace Realm {
   {
     // don't sleep, but let go of lock and other threads run
     lock.unlock();
-    pthread_yield();
+    Thread::yield();
     lock.lock();
   }
 
