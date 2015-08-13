@@ -32,6 +32,21 @@
 #endif
 
 #include <ucontext.h>
+#ifdef __MACH__
+// MacOS has (loudly) deprecated set/get/make/swapcontext,
+//  despite there being no POSIX replacement for them...
+// this check is on the use, not the declaration, so we wrap them here
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
+inline int getcontext_wrap(ucontext_t *u) { return getcontext(u); }
+inline int swapcontext_wrap(ucontext_t *u1, const ucontext_t *u2) { return swapcontext(u1, u2); }
+inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makecontext(u, fn, 0); }
+#pragma GCC diagnostic pop
+#define getcontext getcontext_wrap
+#define swapcontext swapcontext_wrap
+#define makecontext makecontext_wrap
+#endif
 
 #include <string.h>
 #include <stdlib.h>
