@@ -502,13 +502,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   --     and therefore can be split out from the index launch.)
   --
   --  1. Determine whether the argument is provably loop-invariant or
-  --     provably loop-variant (i.e., NOT loop-invariant). This is
-  --     important because index space task launches are restricted in
-  --     the forms of region (and index space) requirements they can
-  --     accept. All regions (and index spaces) must be one of:
+  --     provably "loop-variant" (i.e., a simple function of the loop
+  --     index). This is important because index space task launches
+  --     are restricted in the forms of region (and index space)
+  --     requirements they can accept. All regions (and index spaces)
+  --     must be one of:
   --
   --      a. Provably loop-invariant.
-  --      b. Provably loop-variant, with indexing which can be
+  --      b. Provably loop-variant, with simple indexing which can be
   --         analyzed by the optimizer.
   --      c. (Not yet implemented.) Neither, but (i) the region has no
   --         privileges, and (ii) it is provably a subregion of one of
