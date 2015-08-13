@@ -28,41 +28,12 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
+#include "tasks.h"
 #include "threads.h"
-#include "pri_queue.h"
 
 #include <greenlet>
 
 namespace Realm {
-
-    // information for a task launch
-    class Task : public Operation {
-    public:
-      Task(Processor _proc,
-	   Processor::TaskFuncID _func_id,
-	   const void *_args, size_t _arglen,
-	   Event _finish_event, int _priority,
-           int expected_count);
-      Task(Processor _proc,
-	   Processor::TaskFuncID _func_id,
-	   const void *_args, size_t _arglen,
-           const ProfilingRequestSet &reqs,
-	   Event _finish_event, int _priority,
-           int expected_count);
-
-      virtual ~Task(void);
-
-      void execute_on_processor(Processor p);
-
-      Processor proc;
-      Processor::TaskFuncID func_id;
-      void *args;
-      size_t arglen;
-      Event finish_event;
-      int priority;
-      int run_count, finish_count;
-      bool capture_proc;
-    };
 
     // TODO: get rid of this class
     template <class T>
@@ -129,135 +100,6 @@ namespace Realm {
       Processor::Kind kind;
       Atomic<int> *run_counter;
     }; 
-
-    // a task scheduler in which one or more worker threads execute tasks from one
-    //  or more task queues
-    // once given a task, a worker must complete it before taking on new work
-    // if a worker needs to suspend, a new worker may be spun up to start a new task
-    // this parent version tries to be agnostic to whether the threads are
-    //  user or kernel threads
-    class ThreadedTaskScheduler : public ThreadScheduler {
-    public:
-      ThreadedTaskScheduler(Processor _proc);
-
-      virtual ~ThreadedTaskScheduler(void);
-
-      typedef PriorityQueue<Task *, GASNetHSL> TaskQueue;
-
-      virtual void add_task_queue(TaskQueue *queue);
-
-      // called when thread status changes
-      virtual void thread_blocking(Thread *thread);
-      virtual void thread_ready(Thread *thread);
-
-    public:
-      // the main scheduler loop - lock should be held before calling
-      void scheduler_loop(void);
-      // an entry point that takes the scheduler lock explicitly
-      void scheduler_loop_wlock(void);
-
-    protected:
-
-      virtual Thread *worker_create(bool make_active) = 0;
-      virtual void worker_sleep(Thread *switch_to) = 0;
-      virtual void worker_wake(Thread *to_wake) = 0;
-      virtual void worker_terminate(Thread *switch_to) = 0;
-      virtual void idle_thread_yield(void) = 0;
-
-      Processor proc;
-      GASNetHSL lock;
-      std::vector<TaskQueue *> task_queues;
-      std::vector<Thread *> idle_workers;
-      PriorityQueue<Thread *, DummyLock> resumable_workers;
-      std::map<Thread *, int> worker_priorities;
-      bool shutdown_flag;
-      int active_worker_count;  // workers that are awake (i.e. using a core)
-      int unassigned_worker_count;  // awake but unassigned workers
-
-      // helper for tracking/sanity-checking worker counts
-      void update_worker_count(int active_delta, int unassigned_delta, bool check = true);
-
-    public:
-      // various configurable settings
-      bool cfg_reuse_workers;
-      int cfg_max_idle_workers;
-      int cfg_min_active_workers;
-      int cfg_max_active_workers;
-    };
-
-    // an implementation of ThreadedTaskScheduler that uses kernel threads
-    //  for workers
-    class KernelThreadTaskScheduler : public ThreadedTaskScheduler {
-    public:
-      KernelThreadTaskScheduler(Processor _proc, CoreReservation& _core_rsrv);
-
-      virtual ~KernelThreadTaskScheduler(void);
-
-      virtual void add_task_queue(TaskQueue *queue);
-
-      void start(void);
-      void shutdown(void);
-
-      virtual void thread_starting(Thread *thread);
-
-      virtual void thread_terminating(Thread *thread);
-
-    protected:
-      virtual Thread *worker_create(bool make_active);
-      virtual void worker_sleep(Thread *switch_to);
-      virtual void worker_wake(Thread *to_wake);
-      virtual void worker_terminate(Thread *switch_to);
-      virtual void idle_thread_yield(void);
-
-      CoreReservation &core_rsrv;
-
-      std::set<Thread *> all_workers;
-      std::set<Thread *> active_workers;
-      std::map<Thread *, GASNetCondVar *> sleeping_threads;
-      GASNetCondVar shutdown_condvar;
-    };
-
-#ifdef REALM_USE_USER_THREADS
-    // an implementation of ThreadedTaskScheduler that uses user threads
-    //  for workers (and one or more kernel threads for hosts
-    class UserThreadTaskScheduler : public ThreadedTaskScheduler {
-    public:
-      UserThreadTaskScheduler(Processor _proc, CoreReservation& _core_rsrv);
-
-      virtual ~UserThreadTaskScheduler(void);
-
-      virtual void add_task_queue(TaskQueue *queue);
-
-      void start(void);
-      void shutdown(void);
-
-      virtual void thread_starting(Thread *thread);
-
-      virtual void thread_terminating(Thread *thread);
-
-    protected:
-      void host_thread(void);
-      
-      // you can't delete a user thread until you've switched off of it, so
-      //  use TLS to mark when that should happen
-      void request_user_thread_cleanup(Thread *thread);
-      void do_user_thread_cleanup(void);
-      
-      virtual Thread *worker_create(bool make_active);
-      virtual void worker_sleep(Thread *switch_to);
-      virtual void worker_wake(Thread *to_wake);
-      virtual void worker_terminate(Thread *switch_to);
-      virtual void idle_thread_yield(void);
-
-      CoreReservation &core_rsrv;
-
-      std::set<Thread *> all_hosts;
-      std::set<Thread *> all_workers;
-
-    public:
-      int cfg_num_host_threads;
-    };
-#endif
 
     class NewLocalProcessor : public ProcessorImpl {
     public:

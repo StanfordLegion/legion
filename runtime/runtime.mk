@@ -265,6 +265,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
+	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
 		   $(LG_RT_DIR)/realm/event_impl.cc \
 		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
