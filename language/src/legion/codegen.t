@@ -647,18 +647,32 @@ local function get_element_pointer(cx, region_types, index_type, field_type,
       end
       return pointer
     end
+
+    local pointer_value
+    if not index_type.fields then
+      -- Currently unchecked.
+    elseif #index_type.fields == 1 then
+      local field = index_type.fields[1]
+      pointer_value = `(c.legion_ptr_t { value = [index].__ptr.[field] })
+    else
+      -- Currently unchecked.
+    end
+
     local pointer_index = 1
     if #region_types > 1 then
       pointer_index = `([index].__index)
     end
-    for region_index, region_type in ipairs(region_types) do
-      assert(cx:has_region(region_type))
-      local lr = cx:region(region_type).logical_region
-      index = `([index_type] {
-          __ptr = check(
-            [cx.runtime], [cx.context],
-            [index].__ptr, [pointer_index],
-            [lr].impl, [region_index])})
+
+    if pointer_value then
+      for region_index, region_type in ipairs(region_types) do
+        assert(cx:has_region(region_type))
+        local lr = cx:region(region_type).logical_region
+        index = `([index_type] {
+            __ptr = check(
+              [cx.runtime], [cx.context],
+              [pointer_value], [pointer_index],
+              [lr].impl, [region_index])})
+      end
     end
   end
 
