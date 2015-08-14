@@ -30,6 +30,8 @@
 
 #include <string>
 #include <list>
+#include <set>
+#include <map>
 #include <iostream>
 
 namespace Realm {
@@ -286,6 +288,42 @@ namespace Realm {
   protected:
     std::list<NotificationListener *> listeners;
   };    
+
+  // a description of the actual (host, for now) processor cores available in the system
+  // we are most interested in the enumeration of them and the ways in which the cores
+  //   share datapaths, which will impact how we assign reservations to cores
+  class CoreMap {
+  public:
+    CoreMap(void);
+    ~CoreMap(void);
+
+    void clear(void);
+
+    friend std::ostream& operator<<(std::ostream& os, const CoreMap& cm);
+
+    // in general, you'll want to discover the core map rather than set it up yourself
+    static CoreMap *discover_core_map(void);
+
+    // creates a simple synthetic core map - it is symmetric and hierarchical:
+    //   numa domains -> cores -> fp clusters (shared fpu) -> hyperthreads (shared alu/ldst)
+    static CoreMap *create_synthetic(int num_domains, int cores_per_domain,
+				     int hyperthreads = 1, int fp_cluster_size = 1);
+
+    struct Proc {
+      int id;      // a unique integer id
+      int domain;  // which (NUMA) domain is it in
+      std::set<int> kernel_proc_ids;  // set of kernel processor IDs (might be empty)
+      std::set<Proc *> shares_alu;    // which other procs does this share an ALU with
+      std::set<Proc *> shares_fpu;    // which other procs does this share an FPU with
+      std::set<Proc *> shares_ldst;   // which other procs does this share an LD/ST path with
+    };
+
+    typedef std::map<int, Proc *> ProcMap;
+    typedef std::map<int, ProcMap> DomainMap;
+
+    ProcMap all_procs;
+    DomainMap by_domain;
+  };
 
 #if 0
   class ThreadScheduler;
