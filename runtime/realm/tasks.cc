@@ -279,8 +279,17 @@ namespace Realm {
     // look up the priority of this thread and then add it to the resumable workers
     std::map<Thread *, int>::const_iterator it = worker_priorities.find(thread);
     assert(it != worker_priorities.end());
-    // adding to the priority queue should wake up any sleeping workers if needed
-    resumable_workers.put(thread, it->second);  // TODO: round-robin for now
+    int priority = it->second;
+
+    // if this worker is higher priority than any other resiumable workers and we're
+    //  not at the max active thread count, we can immediately wake up the thread
+    if((active_worker_count < cfg_max_active_workers) &&
+       resumable_workers.empty(priority-1)) {
+      update_worker_count(+1, 0);
+      worker_wake(thread);
+    } else {
+      resumable_workers.put(thread, priority);  // TODO: round-robin for now
+    }
   }
 
   // the main scheduler loop
