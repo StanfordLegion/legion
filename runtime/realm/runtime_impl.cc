@@ -249,6 +249,8 @@ namespace Realm {
       bool bind_localproc_threads = true;
       bool use_greenlet_procs = true;
       bool disable_greenlets = false;
+      bool dummy_reservation_ok = true;
+      bool show_reservations = true; // TODO: switch to false eventually
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname)                       \
@@ -282,6 +284,8 @@ namespace Realm {
 	INT_ARG("-ll:bind", bind_localproc_threads);
         BOOL_ARG("-ll:greenlet", use_greenlet_procs);
         BOOL_ARG("-ll:gdb", disable_greenlets);
+	INT_ARG("-ll:dummy_rsrv_ok", dummy_reservation_ok);
+	INT_ARG("-ll:show_rsrv", show_reservations);
 #ifdef USE_CUDA
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
@@ -749,9 +753,14 @@ namespace Realm {
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = Realm::CoreReservation::satisfy_reservations();
+      bool ok = Realm::CoreReservation::satisfy_reservations(dummy_reservation_ok);
       if(ok) {
-	Realm::CoreReservation::report_reservations(std::cout);
+	if(show_reservations) {
+	  CoreMap *cm = CoreMap::discover_core_map();
+	  std::cout << *cm << std::endl;
+	  delete cm;
+	  CoreReservation::report_reservations(std::cout);
+	}
       } else {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);

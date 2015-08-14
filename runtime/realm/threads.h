@@ -264,7 +264,9 @@ namespace Realm {
   public:
     CoreReservation(const std::string& _name, const CoreReservationParameters& _params);
 
-    static bool satisfy_reservations(void);
+    // if 'dummy_reservation_ok' is set, a failed reservation will be "satisfied" with
+    //  one that uses dummy (i.e. no assign cores) reservations
+    static bool satisfy_reservations(bool dummy_reservation_ok = false);
     static void report_reservations(std::ostream& os);
 
     // eventually we'll get an Allocation, which is an opaque type because it's OS-dependent :(

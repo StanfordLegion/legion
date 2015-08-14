@@ -96,41 +96,314 @@ namespace Realm {
 
   // with pthreads on Linux, an allocation is the cpu_set used for affinity
   struct CoreReservation::Allocation {
+    bool exclusive_ownership;
+    std::set<int> proc_ids;
 #ifndef __MACH__
     bool restrict_cpus;  // if true, thread is confined to set below
     cpu_set_t allowed_cpus;
 #endif
   };
 
-  /*static*/ bool CoreReservation::satisfy_reservations(void)
+  static bool can_add_usage(CoreReservationParameters::CoreUsage current,
+			    CoreReservationParameters::CoreUsage reqd)
   {
-    std::list<CoreReservation *> satisfied;
+    switch(current) {
+    case CoreReservationParameters::CORE_USAGE_EXCLUSIVE:
+      {
+	// exclusive cannot coexist with exclusive or shared
+	if(reqd == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) return false;
+	if(reqd == CoreReservationParameters::CORE_USAGE_SHARED) return false;
+	return true;
+      }
 
-    //CoreMap *cm = CoreMap::create_synthetic(2, 4, 2, 2);
-    CoreMap *cm = CoreMap::discover_core_map();
-    std::cout << *cm << std::endl;
+    case CoreReservationParameters::CORE_USAGE_SHARED:
+      {
+	// shared cannot coexist with exclusive
+	if(reqd == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) return false;
+	return true;
+      }
 
-    // satisfy everybody with a dummy version for now
-    for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocations.begin();
-	it != allocations.end();
-	it++) {
-      // already satisfied?
-      if(it->second)
-	continue;
+    default:
+      {
+	// NONE and MINIMAL are fine
+	return true;
+      }
+    }
+  }
 
-      CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
-#ifndef __MACH__
-      alloc->restrict_cpus = false;
-#endif
+  static void add_usage(CoreReservationParameters::CoreUsage& current,
+			CoreReservationParameters::CoreUsage reqd)
+  {
+    // this ends up being a simple max
+    if(reqd > current)
+      current = reqd;
+  }		
 
-      it->second = alloc;
-      it->first->allocation = alloc;
-      satisfied.push_back(it->first);
+  // versions of the above that understand shared cores
+  static bool can_add_usage(const std::map<const CoreMap::Proc *,
+			                   CoreReservationParameters::CoreUsage>& current,
+			    CoreReservationParameters::CoreUsage reqd,
+			    const CoreMap::Proc *p,
+			    const std::set<CoreMap::Proc *>& shared)
+  {
+    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage>::const_iterator it;
+    it = current.find(p);
+    if((it != current.end()) && !can_add_usage(it->second, reqd)) return false;
+
+    for(std::set<CoreMap::Proc *>::const_iterator it2 = shared.begin();
+	it2 != shared.end();
+	it2++) {
+      it = current.find(*it2);
+      if((it != current.end()) && !can_add_usage(it->second, reqd)) return false;
     }
 
-    // for all the threads we've satisfied, notify any registered listeners
-    for(std::list<CoreReservation *>::iterator it = satisfied.begin();
-	it != satisfied.end();
+    return true;
+  }
+
+  static void add_usage(std::map<const CoreMap::Proc *,
+			         CoreReservationParameters::CoreUsage>& current,
+			CoreReservationParameters::CoreUsage reqd,
+			const CoreMap::Proc *p,
+			const std::set<CoreMap::Proc *>& shared)
+  {
+    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage>::iterator it;
+    it = current.find(p);
+    if(it != current.end())
+      add_usage(it->second, reqd);
+    else
+      current.insert(std::make_pair(p, reqd));
+
+    for(std::set<CoreMap::Proc *>::const_iterator it2 = shared.begin();
+	it2 != shared.end();
+	it2++) {
+      it = current.find(*it2);
+      if(it != current.end())
+	add_usage(it->second, reqd);
+      else
+	current.insert(std::make_pair(*it2, reqd));
+    }
+  }
+
+  // attempts to find an allocation satisfying all the reservation requests in 'allocs' -
+  //  if any allocations are already present, those are preserved (possibly causing the
+  //  allocation attempt to fail)
+  static bool attempt_allocation(const CoreMap& cm,
+				 std::map<CoreReservation *, CoreReservation::Allocation *>& allocs)
+  {
+    // we'll need to keep track of the usage level of each core
+    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage> alu_usage, fpu_usage, ldst_usage;
+    std::map<const CoreMap::Proc *, int> user_count;
+
+    // iterate through the requests and sort them by whether or not they have any exclusivity
+    //  demands and whether they're limited to a particular numa domain
+    // also record pre-allocated reservations and their usage
+    std::map<std::pair<bool, int>, std::set<CoreReservation *> > to_satisfy;
+    for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocs.begin();
+	it != allocs.end();
+	it++) {
+      CoreReservation *rsrv = it->first;
+      CoreReservation::Allocation *alloc = it->second;
+      if(alloc) {
+	for(std::set<int>::const_iterator it = alloc->proc_ids.begin();
+	    it != alloc->proc_ids.end();
+	    it++) {
+	  // get the corresponding CoreMap::Proc
+	  CoreMap::ProcMap::const_iterator it2 = cm.all_procs.find(*it);
+	  if(it2 == cm.all_procs.end()) {
+	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has an unknown proc id (" << *it << ")";
+	    return false; // no way to fix this
+	  }
+	  const CoreMap::Proc *p = it2->second;
+
+	  // update/check user_count
+	  if(alloc->exclusive_ownership && (user_count.count(p) > 0)) {
+	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has unsatisfiable exclusivity on proc id (" << p->id << ")";
+	    return false; // no way to fix this
+	  }
+	  user_count[p]++;
+
+	  // update/check usage
+	  if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu) &&
+	       can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu) &&
+	       can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst))) {
+	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has unsatisfiable usage on proc id (" << p->id << ")";
+	    return false; // no way to fix this
+	  }
+	  add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu);
+	  add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu);
+	  add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst);
+	}
+      } else {
+	std::pair<bool, int> key = std::make_pair(((rsrv->params.alu_usage == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) ||
+						   (rsrv->params.fpu_usage == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) ||
+						   (rsrv->params.ldst_usage == CoreReservationParameters::CORE_USAGE_EXCLUSIVE)),
+						  rsrv->params.numa_domain);
+	to_satisfy[key].insert(rsrv);
+      }
+    }
+
+    // ok, now attempt to satisfy all the requests
+    // by _reverse_ iterating over to_satisfy, we consider exclusive requests before shared
+    //  and those that want a particular numa domain before those that don't care
+    std::map<CoreReservation *, std::set<const CoreMap::Proc *> > assigned_procs;
+    for(std::map<std::pair<bool, int>, std::set<CoreReservation *> >::reverse_iterator it = to_satisfy.rbegin();
+	it != to_satisfy.rend();
+	it++) {
+      bool has_exclusive = it->first.first;
+      int req_domain = it->first.second;
+
+      std::vector<const CoreMap::Proc *> pm;
+      if(req_domain >= 0) {
+	CoreMap::DomainMap::const_iterator it2 = cm.by_domain.find(req_domain);
+	if(it2 == cm.by_domain.end()) {
+	  log_thread.error() << "one or more reservations requiring unknown domain (" << req_domain << ")";
+	  return false;
+	}
+	for(CoreMap::ProcMap::const_iterator it3 = it2->second.begin(); it3 != it2->second.end(); it3++)
+	  pm.push_back(it3->second);
+      } else {
+	// shuffle the procs from the different domains to get a roughly-even distribution
+	std::list<std::pair<const CoreMap::ProcMap *, CoreMap::ProcMap::const_iterator> > rr;
+	for(CoreMap::DomainMap::const_iterator it2 = cm.by_domain.begin();
+	    it2 != cm.by_domain.end();
+	    it2++)
+	  if(!(it2->second.empty()))
+	    rr.push_back(std::make_pair(&(it2->second), it2->second.begin()));
+	while(!(rr.empty())) {
+	  std::pair<const CoreMap::ProcMap *, CoreMap::ProcMap::const_iterator> x = rr.front();
+	  rr.pop_front();
+	  pm.push_back(x.second->second);
+	  if(++x.second != x.first->end())
+	    rr.push_back(x);
+	}
+      }
+
+      for(std::set<CoreReservation *>::iterator it2 = it->second.begin();
+	  it2 != it->second.end();
+	  it2++) {
+	CoreReservation *rsrv = *it2;
+	std::set<const CoreMap::Proc *>& procs = assigned_procs[rsrv];
+
+	// iterate over all the possibly available processors and see if any fit
+	for(std::vector<const CoreMap::Proc *>::iterator it3 = pm.begin();
+	    it3 != pm.end();
+	    it3++)
+	{
+	  const CoreMap::Proc *p = *it3;
+
+	  // is there already conflicting usage?
+	  if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu) &&
+	       can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu) &&
+	       can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst)))
+	    continue;
+
+	  // yes, do so and add this to the assigned procs
+	  add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu);
+	  add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu);
+	  add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst);
+	  procs.insert(p);
+
+	  // an exclusive reservation request stops as soon as we have enough, while
+	  //  a shared reservation will use any/all compatible processors
+	  if(has_exclusive && ((int)(procs.size()) >= rsrv->params.num_cores))
+	    break;
+	}
+
+	// if we didn't get enough, we've failed this allocation
+	if((int)(procs.size()) < rsrv->params.num_cores) {
+	  log_thread.warning() << "reservation ('" << rsrv->name << "') cannot be satisfied";
+	  return false;
+	}
+      }
+    }
+
+    // if we got all the way through, we're successful and can now fill in the new allocations
+    for(std::map<CoreReservation *, std::set<const CoreMap::Proc *> >::iterator it = assigned_procs.begin();
+	it != assigned_procs.end();
+	it++) {
+      CoreReservation *rsrv = it->first;
+      CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
+
+      alloc->exclusive_ownership = true;  // unless we set it false below
+#ifndef __MACH__
+      alloc->restrict_cpus = false; // unless we set it to true below
+      CPU_ZERO(&alloc->allowed_cpus);
+#endif
+
+      for(std::set<const CoreMap::Proc *>::iterator it2 = it->second.begin();
+	  it2 != it->second.end();
+	  it2++) {
+	const CoreMap::Proc *p = *it2;
+
+	alloc->proc_ids.insert(p->id);
+	if(user_count[p] > 1)
+	  alloc->exclusive_ownership = false;
+#ifndef __MACH__
+	if(!(p->kernel_proc_ids.empty())) {
+	  alloc->restrict_cpus = true;
+	  for(std::set<int>::const_iterator it3 = p->kernel_proc_ids.begin();
+	      it3 != p->kernel_proc_ids.end();
+	      it3++)
+	    CPU_SET(*it3, &alloc->allowed_cpus);
+	}
+#endif
+      }
+
+      if(rsrv->allocation) {
+	log_thread.info() << "replacing allocation for reservation '" << rsrv->name << "'";
+	CoreReservation::Allocation *old_alloc = rsrv->allocation;
+	rsrv->allocation = alloc;
+	delete old_alloc; // TODO: reference count once we allow updates
+      } else
+	rsrv->allocation = alloc;
+
+      allocs[rsrv] = alloc;
+    }
+
+    return true;
+  }
+
+  /*static*/ bool CoreReservation::satisfy_reservations(bool dummy_reservation_ok /*= false*/)
+  {
+    CoreMap *cm = CoreMap::discover_core_map();
+
+    // remember who is missing an allocation - we'll need to notify them
+    std::set<CoreReservation *> missing;
+    for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocations.begin();
+	it != allocations.end();
+	it++)
+      if(!it->second)
+	missing.insert(it->first);
+
+    // one shot for now - eventually allow a reservation to say it's willing to be
+    //  adjusted if needed
+    bool ok = attempt_allocation(*cm,
+				 allocations);
+    if(!ok) {
+      if(!dummy_reservation_ok)
+	return false;
+
+      // dummy allocations for everyone!
+      for(std::set<CoreReservation *>::iterator it = missing.begin();
+	  it != missing.end();
+	  it++) {
+	CoreReservation *rsrv = *it;
+
+	CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
+
+	alloc->exclusive_ownership = true;  // unless we set it false below
+#ifndef __MACH__
+	alloc->restrict_cpus = false; // unless we set it to true below
+	CPU_ZERO(&alloc->allowed_cpus);
+#endif
+	rsrv->allocation = alloc;
+	allocations[rsrv] = alloc;
+      }
+    }      
+
+    // for all the reservations that were missing allocations, notify any registered listeners
+    for(std::set<CoreReservation *>::iterator it = missing.begin();
+	it != missing.end();
 	it++) {
       CoreReservation *rsrv = *it;
       for(std::list<CoreReservation::NotificationListener *>::iterator it = rsrv->listeners.begin();
@@ -140,6 +413,22 @@ namespace Realm {
     }
 
     return true;
+  }
+
+  template <typename T>
+  static std::ostream& operator<<(std::ostream &os, const std::set<T>& s)
+  {
+    os << '<';
+    if(!(s.empty())) {
+      typename std::set<T>::const_iterator it = s.begin();
+      while(true) {
+	os << *it;
+	if(++it == s.end()) break;
+	os << ',';
+      }
+    }
+    os << '>';
+    return os;
   }
 
   /*static*/ void CoreReservation::report_reservations(std::ostream& os)
@@ -152,7 +441,7 @@ namespace Realm {
       const CoreReservation::Allocation *alloc = it->second;
       os << rsrv->name << ": ";
       if(alloc) {
-	os << "allocated";
+	os << "allocated " << alloc->proc_ids;
       } else {
 	os << "not allocated";
       }
