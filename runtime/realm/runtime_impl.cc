@@ -168,9 +168,9 @@ namespace Realm {
     RuntimeImpl *runtime_singleton = 0;
 
   // these should probably be member variables of RuntimeImpl?
-    static std::vector<ProcessorImpl*> local_cpus;
-    static std::vector<ProcessorImpl*> local_util_procs;
-    static std::vector<ProcessorImpl*> local_io_procs;
+    static std::vector<LocalTaskProcessor *> local_cpus;
+    static std::vector<LocalTaskProcessor *> local_util_procs;
+    static std::vector<LocalTaskProcessor *> local_io_procs;
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
@@ -218,7 +218,9 @@ namespace Realm {
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
+#ifdef OLDPROCS
       unsigned init_stack_count = 1;
+#endif
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
       unsigned num_io_procs = 0;
@@ -266,7 +268,9 @@ namespace Realm {
 	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
         INT_ARG("-ll:dsize", disk_mem_size_in_mb);
         INT_ARG("-ll:stacksize", stack_size_in_mb);
+#ifdef OLDPROCS
         INT_ARG("-ll:stacks", init_stack_count);
+#endif
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
         INT_ARG("-ll:io", num_io_procs);
@@ -529,17 +533,10 @@ namespace Realm {
       if (num_util_procs > 0)
       {
         for(unsigned i = 0; i < num_util_procs; i++) {
-          ProcessorImpl *up;
-          if (use_greenlet_procs)
-            up = new GreenletProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
-                                    n->processors.size()).convert<Processor>(),
-                                    Processor::UTIL_PROC, stack_size_in_mb << 20, 
-                                    init_stack_count, "utility worker");
-          else
-            up = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
-                                    n->processors.size()).convert<Processor>(),
-                                    Processor::UTIL_PROC, 
-                                    stack_size_in_mb << 20, "utility worker");
+	  Processor p = ID(ID::ID_PROCESSOR, 
+			   gasnet_mynode(), 
+			   n->processors.size()).convert<Processor>();
+          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, stack_size_in_mb << 20);
           n->processors.push_back(up);
           local_util_procs.push_back(up);
         }
@@ -548,10 +545,10 @@ namespace Realm {
       if (num_io_procs > 0)
       {
         for (unsigned i = 0; i < num_io_procs; i++) {
-          LocalProcessor *io = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
-                                            n->processors.size()).convert<Processor>(),
-                                            Processor::IO_PROC,
-                                            stack_size_in_mb << 20, "io worker");
+	  Processor p = ID(ID::ID_PROCESSOR, 
+			   gasnet_mynode(), 
+			   n->processors.size()).convert<Processor>();
+	  LocalIOProcessor *io = new LocalIOProcessor(p, stack_size_in_mb << 20);
           n->processors.push_back(io);
           local_io_procs.push_back(io);
         }
@@ -602,7 +599,7 @@ namespace Realm {
 	Processor p = ID(ID::ID_PROCESSOR, 
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
-        ProcessorImpl *lp;
+        LocalTaskProcessor *lp;
 #if OLDPROCS
         if (use_greenlet_procs)
           lp = new GreenletProcessor(p, Processor::LOC_PROC,
@@ -613,9 +610,7 @@ namespace Realm {
                                   stack_size_in_mb << 20,
                                   "local worker", i);
 #else
-	lp = new NewLocalProcessor(p, Processor::LOC_PROC,
-				   stack_size_in_mb << 20,
-				   "local worker", i);
+	lp = new LocalCPUProcessor(p, stack_size_in_mb << 20);
 #endif
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
@@ -770,7 +765,7 @@ namespace Realm {
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_util_procs.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_util_procs.begin();
 	    it != local_util_procs.end();
 	    it++) {
 	  num_procs++;
@@ -779,7 +774,7 @@ namespace Realm {
           adata[apos++] = Processor::UTIL_PROC;
 	}
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_io_procs.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_io_procs.begin();
 	    it != local_io_procs.end();
 	    it++) {
 	  num_procs++;
@@ -788,7 +783,7 @@ namespace Realm {
           adata[apos++] = Processor::IO_PROC;
 	}
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_cpus.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_cpus.begin();
 	    it != local_cpus.end();
 	    it++) {
 	  num_procs++;
@@ -952,7 +947,7 @@ namespace Realm {
 	    adata[apos++] = 200;
 
 	    // ZC also accessible to all the local CPUs
-	    for(std::vector<ProcessorImpl*>::iterator it2 = local_cpus.begin();
+	    for(std::vector<LocalTaskProcessor *>::iterator it2 = local_cpus.begin();
 		it2 != local_cpus.end();
 		it2++) {
 	      adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -1014,6 +1009,19 @@ namespace Realm {
 
     static bool running_as_background_thread = false;
 
+  template <typename T>
+  void spawn_on_all(const T& container_of_procs,
+		    Processor::TaskFuncID func_id,
+		    const void *args, size_t arglen,
+		    Event start_event = Event::NO_EVENT,
+		    int priority = 0)
+  {
+    for(typename T::const_iterator it = container_of_procs.begin();
+	it != container_of_procs.end();
+	it++)
+      (*it)->me.spawn(func_id, args, arglen, start_event, priority);
+  }
+
     static void *background_run_thread(void *data)
     {
       MachineRunArgs *args = (MachineRunArgs *)data;
@@ -1063,32 +1071,23 @@ namespace Realm {
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      for(std::vector<ProcessorImpl*>::iterator it = local_util_procs.begin();
-	  it != local_util_procs.end();
-	  it++)
-	(*it)->start_processor();
-
-      for (std::vector<ProcessorImpl*>::iterator it = local_io_procs.begin();
-            it != local_io_procs.end();
-            it++)
-        (*it)->start_processor();
-
       if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
 	log_task.info("spawning processor init task on local cpus");
-	for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
-	    it != local_cpus.end();
-	    it++)
-	  (*it)->me.spawn(Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-			  Event::NO_EVENT,
-			  INT_MAX); // runs with max priority
+
+	spawn_on_all(local_util_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
+
+	spawn_on_all(local_cpus,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
+
+	spawn_on_all(local_io_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
       } else {
 	log_task.info("no processor init task");
       }
-
-      for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
-	  it != local_cpus.end();
-	  it++)
-	(*it)->start_processor();
 
 #ifdef USE_CUDA
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
@@ -1162,26 +1161,20 @@ namespace Realm {
 #endif
 
       // Shutdown all the threads
-      for(std::vector<ProcessorImpl*>::iterator it = local_util_procs.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
-      {
-	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
-	(*it)->shutdown_processor();
-      }
+	(*it)->shutdown();
 
-      for(std::vector<ProcessorImpl*>::iterator it = local_io_procs.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_io_procs.begin();
           it != local_io_procs.end();
           it++)
-      {
-	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
-	(*it)->shutdown_processor();
-      }
+	(*it)->shutdown();
 
-      for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
-	(*it)->shutdown_processor();
+	(*it)->shutdown();
 
 #ifdef USE_CUDA
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
@@ -1239,12 +1232,9 @@ namespace Realm {
 
       if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
 	log_task.info("spawning processor shutdown task on local cpus");
-	for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
-	    it != local_cpus.end();
-	    it++)
-	  (*it)->me.spawn(Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-			  Event::NO_EVENT,
-			  INT_MIN); // runs with lowest priority
+	spawn_on_all(local_cpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MIN); // runs with lowest priority
       } else {
 	log_task.info("no processor shutdown task");
       }

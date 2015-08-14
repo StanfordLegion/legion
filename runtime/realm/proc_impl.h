@@ -101,18 +101,12 @@ namespace Realm {
       Atomic<int> *run_counter;
     }; 
 
-    class NewLocalProcessor : public ProcessorImpl {
+    // generic local task processor - subclasses must create and configure a task
+    // scheduler and pass in with the set_scheduler() method
+    class LocalTaskProcessor : public ProcessorImpl {
     public:
-      NewLocalProcessor(Processor _me, Processor::Kind _kind, 
-                     size_t stack_size, const char *name,
-                     int core_id = -1);
-      virtual ~NewLocalProcessor(void);
-    public:
-      // Make these virtual so they can be modified if necessary
-      virtual void start_processor(void);
-      virtual void shutdown_processor(void);
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
+      LocalTaskProcessor(Processor _me, Processor::Kind _kind);
+      virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
       virtual void spawn_task(Processor::TaskFuncID func_id,
@@ -125,14 +119,56 @@ namespace Realm {
                               const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
+
+      // blocks until things are cleaned up
+      virtual void shutdown(void);
+
     protected:
-      CoreReservation core_rsrv;
-#ifdef REALM_USE_USER_THREADS
-      UserThreadTaskScheduler *sched;
-#else
-      KernelThreadTaskScheduler *sched;
-#endif
+      void set_scheduler(ThreadedTaskScheduler *_sched);
+
+      // old methods to delete
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+
+      ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
+    };
+
+    // three simple subclasses for:
+    // a) "CPU" processors, which request a dedicated core and use user threads
+    //      when possible
+    // b) "utility" processors, which also use user threads but share cores with
+    //      other runtime threads
+    // c) "IO" processors, which use kernel threads so that blocking IO calls
+    //      are permitted
+    //
+    // each of these is implemented just by supplying the right kind of scheduler to
+    //  LocalTaskProcessor in the constructor
+
+    class LocalCPUProcessor : public LocalTaskProcessor {
+    public:
+      LocalCPUProcessor(Processor _me, size_t _stack_size);
+      virtual ~LocalCPUProcessor(void);
+    protected:
+      CoreReservation *core_rsrv;
+    };
+
+    class LocalUtilityProcessor : public LocalTaskProcessor {
+    public:
+      LocalUtilityProcessor(Processor _me, size_t _stack_size);
+      virtual ~LocalUtilityProcessor(void);
+    protected:
+      CoreReservation *core_rsrv;
+    };
+
+    class LocalIOProcessor : public LocalTaskProcessor {
+    public:
+      LocalIOProcessor(Processor _me, size_t _stack_size);
+      virtual ~LocalIOProcessor(void);
+    protected:
+      CoreReservation *core_rsrv;
     };
 
     class RemoteProcessor : public ProcessorImpl {

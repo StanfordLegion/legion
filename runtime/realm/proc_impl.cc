@@ -489,26 +489,29 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
-  // class NewLocalProcessor
+  // class LocalTaskProcessor
   //
 
-  NewLocalProcessor::NewLocalProcessor(Processor _me, Processor::Kind _kind, 
-				       size_t stack_size, const char *name,
-				       int core_id /*= -1*/)
-    : ProcessorImpl(_me, _kind)
-    , core_rsrv(name, CoreReservationParameters(/*FIXME*/))
+  LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind)
+    : ProcessorImpl(_me, _kind), sched(0)
   {
-#ifdef REALM_USE_USER_THREADS
-    sched = new UserThreadTaskScheduler(me, core_rsrv);
-    //sched->cfg_num_host_threads = 2;
-#else
-    sched = new KernelThreadTaskScheduler(me, core_rsrv);
-    //sched->cfg_max_active_workers = 2;
-    //sched->cfg_max_idle_workers = 10;
-#endif
+    // nothing really happens until we get a scheduler
+  }
+
+  LocalTaskProcessor::~LocalTaskProcessor(void)
+  {
+    delete sched;
+  }
+
+  void LocalTaskProcessor::set_scheduler(ThreadedTaskScheduler *_sched)
+  {
+    sched = _sched;
+
     // add our task queue to the scheduler
     sched->add_task_queue(&task_queue);
 
+    // this should be requested from outside now
+#if 0
     // if we have an init task, queue that up (with highest priority)
     Processor::TaskIDTable::iterator it = 
       get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
@@ -520,58 +523,25 @@ namespace Realm {
     } else {
       log_task.info("no processor init task: proc=" IDFMT "", me.id);
     }
+#endif
 
     // finally, fire up the scheduler
     sched->start();
   }
 
-  NewLocalProcessor::~NewLocalProcessor(void)
-  {
-    delete sched;
-  }
+  // old methods to delete
+  void LocalTaskProcessor::start_processor(void) { assert(0); }
+  void LocalTaskProcessor::shutdown_processor(void) { assert(0); }
+  void LocalTaskProcessor::initialize_processor(void) { assert(0); }
+  void LocalTaskProcessor::finalize_processor(void) { assert(0); }
 
-  void NewLocalProcessor::start_processor(void)
-  {
-    printf("NLP start\n");
-  }
-
-  void NewLocalProcessor::shutdown_processor(void)
-  {
-    printf("NLP shutdown\n");
-
-    // enqueue a shutdown task, if it exists
-    Processor::TaskIDTable::iterator it = 
-      get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
-    if(it != get_runtime()->task_table.end()) {
-      Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-			 0, 0,
-			 Event::NO_EVENT, 0, 1);
-      task_queue.put(t, task_queue.PRI_MIN_FINITE);
-    } else {
-      log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);
-    }
-
-    sched->shutdown();
-    printf("NLP shutdown done\n");
-  }
-  
-  void NewLocalProcessor::initialize_processor(void)
-  {
-    printf("NLP init\n");
-  }
-    
-  void NewLocalProcessor::finalize_processor(void)
-  {
-    printf("NLP shutdown\n");
-  }
-
-  void NewLocalProcessor::enqueue_task(Task *task)
+  void LocalTaskProcessor::enqueue_task(Task *task)
   {
     // just jam it into the task queue
     task_queue.put(task, task->priority);
   }
 
-  void NewLocalProcessor::spawn_task(Processor::TaskFuncID func_id,
+  void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
 				     //std::set<RegionInstance> instances_needed,
 				     Event start_event, Event finish_event,
@@ -581,7 +551,7 @@ namespace Realm {
 	       start_event, finish_event, priority);
   }
 
-  void NewLocalProcessor::spawn_task(Processor::TaskFuncID func_id,
+  void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
 				     const ProfilingRequestSet &reqs,
 				     Event start_event, Event finish_event,
@@ -602,6 +572,139 @@ namespace Realm {
 		     func_id, start_event.id, start_event.gen);
       EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
+  }
+
+  // blocks until things are cleaned up
+  void LocalTaskProcessor::shutdown(void)
+  {
+    // this should be requested from outside now
+#if 0
+    // enqueue a shutdown task, if it exists
+    Processor::TaskIDTable::iterator it = 
+      get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+    if(it != get_runtime()->task_table.end()) {
+      Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+			 0, 0,
+			 Event::NO_EVENT, 0, 1);
+      task_queue.put(t, task_queue.PRI_MIN_FINITE);
+    } else {
+      log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);
+    }
+#endif
+
+    sched->shutdown();
+  }
+  
+
+  class stringbuilder {
+  public:
+    operator std::string(void) const { return ss.str(); }
+    template <typename T>
+    stringbuilder& operator<<(T data) { ss << data; return *this; }
+  protected:
+    std::stringstream ss;
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalCPUProcessor
+  //
+
+  LocalCPUProcessor::LocalCPUProcessor(Processor _me, size_t _stack_size)
+    : LocalTaskProcessor(_me, Processor::LOC_PROC)
+  {
+    CoreReservationParameters params;
+    params.set_num_cores(1);
+    params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
+    params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
+    params.set_ldst_usage(params.CORE_USAGE_SHARED);
+    params.set_max_stack_size(_stack_size);
+
+    std::string name = stringbuilder() << "CPU proc " << _me;
+
+    core_rsrv = new CoreReservation(name, params);
+
+#ifdef REALM_USE_USER_THREADS
+    UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+    // no config settings we want to tweak yet
+#else
+    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+    sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+#endif
+    set_scheduler(sched);
+  }
+
+  LocalCPUProcessor::~LocalCPUProcessor(void)
+  {
+    delete core_rsrv;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalUtilityProcessor
+  //
+
+  LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, size_t _stack_size)
+    : LocalTaskProcessor(_me, Processor::UTIL_PROC)
+  {
+    CoreReservationParameters params;
+    params.set_num_cores(1);
+    params.set_alu_usage(params.CORE_USAGE_SHARED);
+    params.set_fpu_usage(params.CORE_USAGE_MINIMAL);
+    params.set_ldst_usage(params.CORE_USAGE_SHARED);
+    params.set_max_stack_size(_stack_size);
+
+    std::string name = stringbuilder() << "utility proc " << _me;
+
+    core_rsrv = new CoreReservation(name, params);
+
+#ifdef REALM_USE_USER_THREADS
+    UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+    // no config settings we want to tweak yet
+#else
+    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+    // no config settings we want to tweak yet
+#endif
+    set_scheduler(sched);
+  }
+
+  LocalUtilityProcessor::~LocalUtilityProcessor(void)
+  {
+    delete core_rsrv;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalIOProcessor
+  //
+
+  LocalIOProcessor::LocalIOProcessor(Processor _me, size_t _stack_size)
+    : LocalTaskProcessor(_me, Processor::IO_PROC)
+  {
+    CoreReservationParameters params;
+    params.set_alu_usage(params.CORE_USAGE_SHARED);
+    params.set_fpu_usage(params.CORE_USAGE_MINIMAL);
+    params.set_ldst_usage(params.CORE_USAGE_SHARED);
+    params.set_max_stack_size(_stack_size);
+
+    std::string name = stringbuilder() << "IO proc " << _me;
+
+    core_rsrv = new CoreReservation(name, params);
+
+    // IO processors always use kernel threads
+    ThreadedTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+
+    // TODO: turn this on once HLR can deal with it
+    // sched->cfg_max_active_workers = 5;  // allow concurrent IO threads
+
+    set_scheduler(sched);
+  }
+
+  LocalIOProcessor::~LocalIOProcessor(void)
+  {
+    delete core_rsrv;
   }
 
 

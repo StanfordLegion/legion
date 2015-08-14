@@ -74,6 +74,9 @@ namespace Realm {
 
       virtual void add_task_queue(TaskQueue *queue);
 
+      virtual void start(void) = 0;
+      virtual void shutdown(void) = 0;
+
       // called when thread status changes
       virtual void thread_blocking(Thread *thread);
       virtual void thread_ready(Thread *thread);
@@ -125,8 +128,8 @@ namespace Realm {
 
       virtual void add_task_queue(TaskQueue *queue);
 
-      void start(void);
-      void shutdown(void);
+      virtual void start(void);
+      virtual void shutdown(void);
 
       virtual void thread_starting(Thread *thread);
 
@@ -161,8 +164,8 @@ namespace Realm {
 
       virtual void add_task_queue(TaskQueue *queue);
 
-      void start(void);
-      void shutdown(void);
+      virtual void start(void);
+      virtual void shutdown(void);
 
       virtual void thread_starting(Thread *thread);
 
