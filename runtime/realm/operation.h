@@ -29,8 +29,6 @@ namespace Realm {
     virtual void mark_ready(void);
     virtual void mark_started(void);
     virtual void mark_completed(void);
-  public:
-    inline bool perform_capture(void) const { return capture_timeline; }
   protected:
     void clear_profiling(void);
     void reconstruct_measurements();
@@ -38,7 +36,6 @@ namespace Realm {
     ProfilingMeasurements::OperationTimeline timeline;
     ProfilingRequestSet requests; 
     ProfilingMeasurementCollection measurements;
-    bool capture_timeline;
   };
 
 };

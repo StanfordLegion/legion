@@ -538,6 +538,7 @@ namespace Realm {
   void LocalTaskProcessor::enqueue_task(Task *task)
   {
     // just jam it into the task queue
+    task->mark_ready();
     task_queue.put(task, task->priority);
   }
 
