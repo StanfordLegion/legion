@@ -96,12 +96,13 @@ namespace Realm {
       virtual void worker_sleep(Thread *switch_to) = 0;
       virtual void worker_wake(Thread *to_wake) = 0;
       virtual void worker_terminate(Thread *switch_to) = 0;
-      virtual void idle_thread_yield(void) = 0;
 
       GASNetHSL lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
-      PriorityQueue<Thread *, DummyLock> resumable_workers;
+
+      typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
+      ResumableQueue resumable_workers;
       std::map<Thread *, int> worker_priorities;
       bool shutdown_flag;
       int active_worker_count;  // workers that are awake (i.e. using a core)
@@ -109,6 +110,39 @@ namespace Realm {
 
       // helper for tracking/sanity-checking worker counts
       void update_worker_count(int active_delta, int unassigned_delta, bool check = true);
+
+      // workers that are unassigned and cannot find any work would often (but not
+      //  always) like to suspend until work is available - this is done via a "work counter"
+      //  that monotonically increments whenever any kind of new work is available and a 
+      //  "suspended on" value that indicates if any threads are suspended on a particular
+      //  count and need to be signalled
+      // this model allows the provided of new work to update the counter in a lock-free way
+      //  and only do the condition variable broadcast if somebody is probably sleeping
+      //
+      // 64-bit counters are used to avoid dealing with wrap-around cases
+      volatile long long work_counter, work_counter_wait_value;
+      GASNetCondVar work_counter_condvar;
+
+      void increment_work_counter(void);
+      virtual void wait_for_work(long long old_work_counter);
+
+      // most of our work counter updates are going to come from priority queues, so a little
+      //  template-fu here...
+      template <typename PQ>
+      class WorkCounterUpdater : public PQ::NotificationCallback {
+      public:
+        WorkCounterUpdater(ThreadedTaskScheduler *_sched) : sched(_sched) {}
+	virtual bool item_available(typename PQ::ITEMTYPE, typename PQ::priority_t) 
+	{ 
+	  sched->increment_work_counter();
+	  return false;  // never consumes the work
+	}
+      protected:
+	ThreadedTaskScheduler *sched;
+      };
+
+      WorkCounterUpdater<TaskQueue> wcu_task_queues;
+      WorkCounterUpdater<ResumableQueue> wcu_resume_queue;
 
     public:
       // various configurable settings
@@ -142,7 +176,8 @@ namespace Realm {
       virtual void worker_sleep(Thread *switch_to);
       virtual void worker_wake(Thread *to_wake);
       virtual void worker_terminate(Thread *switch_to);
-      virtual void idle_thread_yield(void);
+
+      virtual void wait_for_work(long long old_work_counter);
 
       Processor proc;
       CoreReservation &core_rsrv;
@@ -185,7 +220,8 @@ namespace Realm {
       virtual void worker_sleep(Thread *switch_to);
       virtual void worker_wake(Thread *to_wake);
       virtual void worker_terminate(Thread *switch_to);
-      virtual void idle_thread_yield(void);
+
+      virtual void wait_for_work(long long old_work_counter);
 
       Processor proc;
       CoreReservation &core_rsrv;

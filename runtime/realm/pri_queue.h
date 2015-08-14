@@ -32,6 +32,8 @@ namespace Realm {
     PriorityQueue(void);
     ~PriorityQueue(void);
 
+    typedef T ITEMTYPE;
+
     // we used most of the signed integer range for priorities - we do borrow a 
     //  few of the extreme values to make sure we have "infinity" and "negative infinity"
     //  and that we don't run into problems with -INT_MIN

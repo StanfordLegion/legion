@@ -140,11 +140,19 @@ namespace Realm {
     : shutdown_flag(false)
     , active_worker_count(0)
     , unassigned_worker_count(0)
+    , work_counter(0)
+    , work_counter_wait_value(-1)
+    , work_counter_condvar(lock)
+    , wcu_task_queues(this)
+    , wcu_resume_queue(this)
     , cfg_reuse_workers(true)
     , cfg_max_idle_workers(1)
     , cfg_min_active_workers(1)
     , cfg_max_active_workers(1)
-  {}
+  {
+    // hook up the work counter updates for the resumable worker queue
+    resumable_workers.add_subscription(&wcu_resume_queue);
+  }
 
   ThreadedTaskScheduler::~ThreadedTaskScheduler(void)
   {
@@ -159,6 +167,9 @@ namespace Realm {
     AutoHSLLock al(lock);
 
     task_queues.push_back(queue);
+
+    // hook up the work counter updates for this queue
+    queue->add_subscription(&wcu_task_queues);
   }
 
   // helper for tracking/sanity-checking worker counts
@@ -205,9 +216,18 @@ namespace Realm {
     while(true) {
       // let's try to find something better to do than spin our wheels
 
+      // remember the work counter value before we start so that we don't iterate
+      //   unnecessarily
+      long long old_work_counter = work_counter;
+
       // first choice - is there a resumable worker we can yield to?
       if(!resumable_workers.empty()) {
 	Thread *yield_to = resumable_workers.get(0); // we don't care about priority
+	// first check - is this US?  if so, we're done
+	if(yield_to == thread) {
+	  printf("resuming ourselves!\n");
+	  return;
+	}
 	// this preserves active and unassigned counts
 	update_worker_count(0, 0);
 	worker_sleep(yield_to);  // returns only when we're ready
@@ -244,7 +264,9 @@ namespace Realm {
 	break;
       }
 
-      // TODO: some sort of cpu yield here to at least prevent a tight spin
+      // wait at least until some new work shows up (even if we don't end up getting it,
+      //  it's better than a tight spin)
+      wait_for_work(old_work_counter);
     }
   }
 
@@ -272,6 +294,10 @@ namespace Realm {
       // we're a new, and initially unassigned, worker - counters have already been updated
 
       while(true) {
+	// remember the work counter value before we start so that we don't iterate
+	//   unnecessarily
+	long long old_work_counter = work_counter;
+
 	// first rule - always yield to a resumable worker
 	while(!resumable_workers.empty()) {
 	  Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
@@ -383,8 +409,9 @@ namespace Realm {
 		worker_terminate(0);
 		break;
 	      } else {
-		// no, stay awake but yield the CPU for a bit
-		idle_thread_yield();
+		// no, stay awake but suspend until there's a chance that the next iteration
+		//  of this loop would turn out different
+		wait_for_work(old_work_counter);
 	      }
 	    }
 	  } else {
@@ -395,8 +422,9 @@ namespace Realm {
 	      idle_workers.push_back(Thread::self());
 	      worker_sleep(0);
 	    } else {
-	      // no, stay awake but yield the CPU for a bit
-	      idle_thread_yield();
+	      // no, stay awake but suspend until there's a chance that the next iteration
+	      //  of this loop would turn out different
+	      wait_for_work(old_work_counter);
 	    }
 	  }
 	}
@@ -409,6 +437,84 @@ namespace Realm {
   {
     AutoHSLLock al(lock);
     scheduler_loop();
+  }
+
+  // workers that are unassigned and cannot find any work would often (but not
+  //  always) like to suspend until work is available - this is done via a "work counter"
+  //  that monotonically increments whenever any kind of new work is available and a 
+  //  "suspended on" value that indicates if any threads are suspended on a particular
+  //  count and need to be signalled
+  // this model allows the provided of new work to update the counter in a lock-free way
+  //  and only do the condition variable broadcast if somebody is probably sleeping
+  //
+  // 64-bit counters are used to avoid dealing with wrap-around cases
+
+  inline void ThreadedTaskScheduler::increment_work_counter(void)
+  {
+    // step 1: do an atomic increment of the work counter, get the old value
+    long long old_value = __sync_fetch_and_add(&work_counter, 1);
+
+    // step 2: see if there are threads suspended on the old value changing
+    if(work_counter_wait_value != old_value) return;
+
+    // step 3: broadcast on the condition variable WITHOUT taking the lock
+    //
+    // there are two kinds of race conditions that can result from not taking the lock:
+    //  a) the broadcast occurs after a would-be waiter has set the wait value but before
+    //      they manage to call cond_wait(), and the broadcast comes too early - this will
+    //      be avoided by having the waiter re-check the work counter itself after setting
+    //      the wait value - it will detect us in this case, because we set/test in the other
+    //      order here
+    //  b) somebody else has already woken up the waiters we're trying to wake up and now the
+    //      wait_value is set to something else and threads are sleeping on that - this may
+    //      result in waking up threads that aren't satisfied yet, but they can detect that
+    //      and go back to sleep (conveniently using the same test that fixes (a) above)
+#ifdef DEBUG_WORK_COUNTER
+    printf("WC(%p) broadcast(1) %lld\n", this, old_value);
+#endif
+    work_counter_condvar.broadcast();
+  }
+
+  void ThreadedTaskScheduler::wait_for_work(long long old_work_counter)
+  {
+    // the scheduler lock is held by the caller
+
+    // early out - if the counter has already changed, we're done
+    if(work_counter != old_work_counter) return;
+
+    // now set the wait value, but first check it - if it's not -1, then threads
+    //  are sleeping on an older value - that signal may be on the way, or it may
+    //  not happen if we change the wait value fast enough, so we take care of
+    //  broadcasting here
+    if(work_counter_wait_value != -1) {
+      // should never be newer, because that would require the work_counter to also 
+      //   be newer)
+      assert(work_counter_wait_value <= old_work_counter);
+      if(work_counter_wait_value != old_work_counter) {
+#ifdef DEBUG_WORK_COUNTER
+	printf("WC(%p) broadcast(2) %lld\n", this, work_counter_wait_value);
+#endif
+	work_counter_condvar.broadcast();
+      }
+    }
+    work_counter_wait_value = old_work_counter;
+
+    // because of the two possible race conditions with the lock-free broadcast in 
+    //  increment_work_counter, the sleep is wrapped in a while loop that re-checks the 
+    //  work counter before and after sleeping to make sure we only sleep if we're
+    //  going to be woken and that we ignore spurious wakeups
+    while(work_counter == old_work_counter) {
+#ifdef DEBUG_WORK_COUNTER
+      printf("WC(%p) wait %lld\n", this, old_work_counter);
+#endif
+      work_counter_condvar.wait();
+    }
+
+    // ok, now we're awake again and the work counter has moved on - one last step is to
+    //  clear the wait value to avoid a call to broadcast by increment_work_counter() in
+    //  some timing cases - only do this if the wait value is what we waited on though
+    if(work_counter_wait_value == old_work_counter)
+      work_counter_wait_value = -1;
   }
 
 
@@ -453,6 +559,8 @@ namespace Realm {
   void KernelThreadTaskScheduler::shutdown(void)
   {
     shutdown_flag = true;
+    // setting the shutdown flag adds "work" to the system
+    increment_work_counter();
 
     // wait for all workers to finish
     {
@@ -603,12 +711,22 @@ namespace Realm {
     }
   }
   
-  void KernelThreadTaskScheduler::idle_thread_yield(void)
+  void KernelThreadTaskScheduler::wait_for_work(long long old_work_counter)
   {
-    // don't sleep, but let go of lock and other threads run
-    lock.unlock();
-    Thread::yield();
-    lock.lock();
+    // if we have a dedicated core and we don't care about power, we can spin-wait here
+    bool spin_wait = false;
+    if(spin_wait) {
+      while(work_counter == old_work_counter) {
+	// don't sleep, but let go of lock and other threads run
+	lock.unlock();
+	Thread::yield();
+	lock.lock();
+      }
+      return;
+    }
+
+    // otherwise fall back to the base (sleeping) implementation
+    ThreadedTaskScheduler::wait_for_work(old_work_counter);
   }
 
 
@@ -671,6 +789,8 @@ namespace Realm {
     AutoHSLLock al(lock);
 
     shutdown_flag = true;
+    // setting the shutdown flag adds "work" to the system
+    increment_work_counter();
 
     while(!all_hosts.empty()) {
       // pick an arbitrary host and join on it
@@ -815,12 +935,22 @@ namespace Realm {
     assert(0);
   }
 
-  void UserThreadTaskScheduler::idle_thread_yield(void)
+  void UserThreadTaskScheduler::wait_for_work(long long old_work_counter)
   {
-    // don't sleep, but let go of lock and other threads run
-    lock.unlock();
-    Thread::yield();
-    lock.lock();
+    // if we have a dedicated core and we don't care about power, we can spin-wait here
+    bool spin_wait = false;
+    if(spin_wait) {
+      while(work_counter == old_work_counter) {
+	// don't sleep, but let go of lock and other threads run
+	lock.unlock();
+	Thread::yield();
+	lock.lock();
+      }
+      return;
+    }
+
+    // otherwise fall back to the base (sleeping) implementation
+    ThreadedTaskScheduler::wait_for_work(old_work_counter);
   }
 #endif
 
