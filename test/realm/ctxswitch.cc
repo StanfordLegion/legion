@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstring>
 #include <csignal>
+#include <cmath>
 
 #include <time.h>
 #include <unistd.h>
@@ -64,7 +65,7 @@ void switch_task(const void *args, size_t arglen, Processor p)
 }
 
 struct SleepTestArgs {
-  int sleep_seconds;
+  int sleep_useconds;
 };
 
 void sleep_task(const void *args, size_t arglen, Processor p)
@@ -76,7 +77,7 @@ void sleep_task(const void *args, size_t arglen, Processor p)
   printf("starting sleep task on processor " IDFMT "\n", p.id);
 #endif
   
-  sleep(c_args.sleep_seconds);
+  usleep(c_args.sleep_useconds);
 
 #ifdef DEBUG_CHILDREN
   printf("ending sleep task on processor " IDFMT "\n", p.id);
@@ -86,10 +87,13 @@ void sleep_task(const void *args, size_t arglen, Processor p)
 static int num_children = 4;
 static int num_iterations = 100000;
 static int timeout_seconds = 10;
-static int sleep_seconds = 2;
+static int sleep_useconds = 500000;
+static int concurrent_io = 1;
 
 void top_level_task(const void *args, size_t arglen, Processor p)
 {
+  int errors = 0;
+
   printf("Realm context switching test - %d children, %d iterations, %ds timeout\n",
 	 num_children, num_iterations, timeout_seconds);
 
@@ -151,19 +155,21 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       }
 
       // now the sleep (i.e. kernel-level switching, if possible) test
-      if(sleep_seconds > 0) {
-        int exp_time = sleep_seconds;
+      if(sleep_useconds > 0) {
+        double exp_time = 1e-6 * sleep_useconds;
 	if(k != Processor::IO_PROC)
 	  exp_time *= num_children;  // no overlapping of tasks
+	else
+	  exp_time *= (num_children + concurrent_io - 1) / concurrent_io;
 
         // set the watchdog timeout before we do anything that could get stuck
-        alarm(sleep_seconds * num_children * 2);
+        alarm((int)ceil(1e-6 * sleep_useconds * num_children) * 2);
 
         // create the child tasks
         std::set<Event> finish_events;
 	for(int i = 0; i < num_children; i++) {
 	  SleepTestArgs c_args;
-	  c_args.sleep_seconds = sleep_seconds;
+	  c_args.sleep_useconds = sleep_useconds;
 
 	  finish_events.insert(pp.spawn(SLEEP_TEST_TASK, &c_args, sizeof(c_args)));
         }
@@ -178,10 +184,23 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 	alarm(0);
 
 	double elapsed = t_end - t_start;
-	printf("sleep: proc " IDFMT " (kind=%d) finished: elapsed=%5.2fs expected=%3ds\n",
+	printf("sleep: proc " IDFMT " (kind=%d) finished: elapsed=%5.2fs expected=%5.2fs\n",
                pp.id, k, elapsed, exp_time);
+	if(elapsed < (0.75 * exp_time)) {
+	  printf("TOO FAST!\n");
+	  errors++;
+	}
+	if(elapsed > (1.25 * exp_time)) {
+	  printf("TOO SLOW!\n");
+	  errors++;
+	}
       }
     }
+  }
+
+  if(errors > 0) {
+    printf("Exiting with errors\n");
+    exit(1);
   }
 
   printf("all done!\n");
@@ -213,7 +232,13 @@ int main(int argc, char **argv)
     }
 
     if(!strcmp(argv[i], "-s")) {
-      sleep_seconds = atoi(argv[++i]);
+      sleep_useconds = atoi(argv[++i]);
+      continue;
+    }
+
+    // peek at Realm configuration here...
+    if(!strcmp(argv[i], "-ll:concurrent_io")) {
+      concurrent_io = atoi(argv[++i]);
       continue;
     }
   }
