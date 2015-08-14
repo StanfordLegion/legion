@@ -165,7 +165,8 @@ namespace Realm {
 
     class LocalIOProcessor : public LocalTaskProcessor {
     public:
-      LocalIOProcessor(Processor _me, size_t _stack_size);
+      LocalIOProcessor(Processor _me, size_t _stack_size,
+		       int _concurrent_io_threads);
       virtual ~LocalIOProcessor(void);
     protected:
       CoreReservation *core_rsrv;

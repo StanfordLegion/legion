@@ -681,7 +681,8 @@ namespace Realm {
   // class LocalIOProcessor
   //
 
-  LocalIOProcessor::LocalIOProcessor(Processor _me, size_t _stack_size)
+  LocalIOProcessor::LocalIOProcessor(Processor _me, size_t _stack_size,
+                                     int _concurrent_io_threads)
     : LocalTaskProcessor(_me, Processor::IO_PROC)
   {
     CoreReservationParameters params;
@@ -697,8 +698,8 @@ namespace Realm {
     // IO processors always use kernel threads
     ThreadedTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
 
-    // TODO: turn this on once HLR can deal with it
-    // sched->cfg_max_active_workers = 5;  // allow concurrent IO threads
+    // allow concurrent IO threads
+    sched->cfg_max_active_workers = _concurrent_io_threads;
 
     set_scheduler(sched);
   }

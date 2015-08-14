@@ -224,6 +224,7 @@ namespace Realm {
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
       unsigned num_io_procs = 0;
+      unsigned concurrent_io_threads = 1; // Legion does not support values > 1 right now
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -276,6 +277,7 @@ namespace Realm {
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
         INT_ARG("-ll:io", num_io_procs);
+	INT_ARG("-ll:concurrent_io", concurrent_io_threads);
 	//INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
@@ -552,7 +554,8 @@ namespace Realm {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
-	  LocalIOProcessor *io = new LocalIOProcessor(p, stack_size_in_mb << 20);
+	  LocalIOProcessor *io = new LocalIOProcessor(p, stack_size_in_mb << 20,
+						      concurrent_io_threads);
           n->processors.push_back(io);
           local_io_procs.push_back(io);
         }
