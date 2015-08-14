@@ -27,6 +27,7 @@ namespace Realm {
   //
   // class Processor
 
+#ifndef SHARED_LOWLEVEL
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
@@ -37,5 +38,6 @@ namespace Realm {
   { 
     return ThreadLocal::current_processor;
   }
+#endif
 
 }; // namespace Realm  
