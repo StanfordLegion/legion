@@ -28,7 +28,9 @@ ALT_MAPPERS     ?= 0		# Compile the alternative mappers
 OUTFILE		?= ckt_sim
 # List all the application source files here
 GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
+ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
+endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
