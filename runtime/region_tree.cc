@@ -1428,9 +1428,6 @@ namespace LegionRuntime {
       {
         restrict_info.set_check();
       }
-      // If we are a write, mark that we are advancing
-      if (IS_WRITE(user.usage))
-        version_info.set_advance();
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
@@ -9262,10 +9259,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionInfo::NodeInfo::NodeInfo(const NodeInfo &rhs)
       : physical_state((rhs.physical_state == NULL) ? NULL : 
-                        rhs.physical_state->clone(!rhs.needs_capture)),
-        field_versions(rhs.field_versions),
-        premap_only(rhs.premap_only), path_only(rhs.path_only),
-        advance(rhs.advance), needs_capture(rhs.needs_capture)
+                        rhs.physical_state->clone(!rhs.needs_capture())),
+        field_versions(rhs.field_versions), 
+        pre_close_fields(rhs.pre_close_fields), bit_mask(rhs.bit_mask) 
     //--------------------------------------------------------------------------
     {
       if (field_versions != NULL)
@@ -9293,23 +9289,20 @@ namespace LegionRuntime {
       {
         if (physical_state != NULL)
           delete physical_state;
-        physical_state = rhs.physical_state->clone(!rhs.needs_capture);
+        physical_state = rhs.physical_state->clone(!rhs.needs_capture());
       }
       if ((field_versions != NULL) && (field_versions->remove_reference()))
         delete field_versions;
       field_versions = rhs.field_versions;
       if (field_versions != NULL)
         field_versions->add_reference();
-      premap_only = rhs.premap_only;
-      path_only = rhs.path_only;
-      advance = rhs.advance;
-      needs_capture = rhs.needs_capture;
+      bit_mask = rhs.bit_mask;
       return *this;
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : upper_bound_node(NULL), advance(false),
+      : upper_bound_node(NULL),
         packed(false), packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
@@ -9318,12 +9311,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
       : node_infos(rhs.node_infos), upper_bound_node(rhs.upper_bound_node), 
-        advance(rhs.advance), packed(false), packed_buffer(NULL), packed_size(0)
+        packed(false), packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!rhs.packed); // This shouldn't be called when packed
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         assert(it->second.physical_state == NULL);
@@ -9336,7 +9329,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         assert(it->second.physical_state == NULL);
@@ -9352,7 +9345,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         assert(it->second.physical_state == NULL);
@@ -9362,7 +9355,6 @@ namespace LegionRuntime {
 #endif
       node_infos = rhs.node_infos;
       upper_bound_node = rhs.upper_bound_node;
-      advance = rhs.advance;
       return *this;
     }
 
@@ -9385,7 +9377,7 @@ namespace LegionRuntime {
       assert(!packed);
       assert(!rhs.packed);
 #endif
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator vit = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator vit = 
             rhs.node_infos.begin(); vit != 
             rhs.node_infos.end(); vit++)
       {
@@ -9406,7 +9398,19 @@ namespace LegionRuntime {
           entry->add_field_version(it->first, it->second);
         }
         if (entry != NULL)
-          node_infos[vit->first].advance = vit->second.advance;
+        {
+          NodeInfo &next = node_infos[vit->first];
+          if (vit->second.premap_only())
+            next.set_premap_only();
+          if (vit->second.path_only())
+            next.set_path_only();
+          if (vit->second.needs_complete())
+            next.set_needs_complete();
+          if (vit->second.advance())
+            next.set_advance();
+          if (vit->second.close_top())
+            next.set_close_top();
+        }
       }
       if (upper_bound_node == NULL)
         upper_bound_node = rhs.upper_bound_node;
@@ -9426,7 +9430,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         // Apply the update, but don't delete it yet because 
@@ -9435,8 +9439,7 @@ namespace LegionRuntime {
         // been done for the other nodes yet.
         if (it->second.physical_state != NULL)
         {
-          it->second.physical_state->apply_state(it->second.advance && 
-                                                 it->second.premap_only);
+          it->second.physical_state->apply_state(it->second.premap_only());
         }
       }
     }
@@ -9448,18 +9451,61 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         // Skip anything that was premapping only
-        if (it->second.premap_only)
+        if (it->second.premap_only())
           continue;
         if (it->second.physical_state != NULL)
         {
-          it->second.physical_state->apply_state(it->second.advance);
+          it->second.physical_state->apply_state(true/*apply advance*/);
           // Don't delete it because we need to hold onto the 
           // version manager references in case this operation
           // fails to complete
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open,
+                                  RegionTreeNode *top)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!packed);
+#endif
+      if (permit_leave_open)
+      {
+        for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
+              node_infos.begin(); it != node_infos.end(); it++)
+        {
+          // Skip anything that was premapping only
+          if (it->second.premap_only())
+            continue;
+          if (it->second.physical_state != NULL)
+          {
+            it->second.physical_state->filter_and_apply((top == it->first),
+                                                 false/*filter children*/);
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
+              node_infos.begin(); it != node_infos.end(); it++)
+        {
+          // Skip anything that was premapping only
+          if (it->second.premap_only())
+            continue;
+          // We can also skip anything that isn't the top node
+          if (it->first != top)
+            continue;
+          if (it->second.physical_state != NULL)
+          {
+            it->second.physical_state->filter_and_apply(true/*top*/,
+                                           true/*filter children*/);
+          }
         }
       }
     }
@@ -9471,14 +9517,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it =
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it =
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (it->second.physical_state != NULL)
         {
           // First reset the physical state
           it->second.physical_state->reset();
-          it->second.needs_capture = true;
+          it->second.set_needs_capture();
         }
       }
     }
@@ -9490,7 +9536,7 @@ namespace LegionRuntime {
       // Might be called when packed, in which case this is a no-op
       // Now it is safe to go through and delete all the physical states
       // which will free up all the references on all the version managers
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (it->second.physical_state != NULL)
@@ -9506,7 +9552,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         assert(it->second.physical_state == NULL);
@@ -9515,7 +9561,6 @@ namespace LegionRuntime {
 #endif
       node_infos.clear();
       upper_bound_node = NULL;
-      advance = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9523,7 +9568,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       assert(!packed);
-      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
         node_infos.find(node);
       if (finder == node_infos.end())
         return;
@@ -9546,36 +9591,37 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != node_infos.end());
 #endif
       // Check to see if we need a reset
       if ((finder->second.physical_state != NULL) &&
-           finder->second.needs_capture)
+           finder->second.needs_capture())
       { 
 #ifdef DEBUG_HIGH_LEVEL
         assert(finder->second.field_versions != NULL);
 #endif
         // Recapture the state if we had to be reset
-        finder->second.physical_state->capture_state(finder->second.premap_only,
+        finder->second.physical_state->capture_state(
+                           finder->second.premap_only(),
+                           finder->second.close_top(),
                            finder->second.field_versions->get_field_versions());
-
-        finder->second.needs_capture = false;
+        finder->second.unset_needs_capture();
       }
       return finder->second.physical_state;
     }
 
     //--------------------------------------------------------------------------
     PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node, 
-                         VersionManager *manager, bool initialize, bool capture)
+                                          VersionManager *manager, bool capture)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      std::map<RegionTreeNode*,NodeInfo>::iterator finder = 
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != node_infos.end());
@@ -9586,12 +9632,13 @@ namespace LegionRuntime {
         finder->second.field_versions->get_field_versions();
       // Ask the manager to make the physical state
       PhysicalState *result = manager->construct_state(node, field_versions, 
-                                                       finder->second.path_only,
-                                                       finder->second.advance,
-                                                       initialize, capture);
+                                                     finder->second.path_only(),
+                                                     finder->second.close_top(),
+                                                     finder->second.advance(),
+                                                     capture);
       // Save the resulting physical state
       finder->second.physical_state = result;
-      finder->second.needs_capture = false;
+      finder->second.unset_needs_capture();
       return result;
     } 
 
@@ -9599,7 +9646,7 @@ namespace LegionRuntime {
     FieldVersions* VersionInfo::get_versions(RegionTreeNode *node) const
     //--------------------------------------------------------------------------
     {
-      std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != node_infos.end());
@@ -9647,7 +9694,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionInfo::make_local(std::set<Event> &preconditions, 
-                                 RegionTreeForest *forest,
+                                 bool is_close, RegionTreeForest *forest,
                                  ContextID ctx, bool path_only)
     //--------------------------------------------------------------------------
     {
@@ -9660,22 +9707,22 @@ namespace LegionRuntime {
       }
       // Iterate over all version state infos and build physical states
       // without actually capturing any data
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         NodeInfo &info = it->second;
         // Skip any unnecessary entries if we are doing path only
-        if (path_only && !info.path_only)
+        if (path_only && !info.path_only())
           continue;
         if (info.physical_state == NULL)
         {
           info.physical_state = it->first->get_physical_state(ctx, *this,
-                                                       false/*initialize*/,
                                                        false/*capture*/);
-          info.needs_capture = true;                                                 
+          info.set_needs_capture();
         }
         // Now get the preconditions for the state
-        info.physical_state->make_local(preconditions, info.advance);
+        info.physical_state->make_local(preconditions, info.pre_close_fields,
+                                        info.needs_complete(), is_close);
       }
     } 
 
@@ -9687,14 +9734,12 @@ namespace LegionRuntime {
       assert(!packed);
       assert(!rhs.packed);
 #endif
-      advance = rhs.advance;
       upper_bound_node = rhs.upper_bound_node;
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator nit = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator nit = 
             rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
       {
         const NodeInfo &current = nit->second;
 #ifdef DEBUG_HIGH_LEVEL
-        assert(current.physical_state != NULL);
         assert(current.field_versions != NULL);
 #endif
         NodeInfo &next = node_infos[nit->first];
@@ -9707,9 +9752,7 @@ namespace LegionRuntime {
         // version states from the beginning of time
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.premap_only = current.premap_only;
-        next.path_only = current.path_only;
-        next.advance = current.advance;
+        next.bit_mask = current.bit_mask & 15;
         // Needs capture is already set
       }
     }
@@ -9722,16 +9765,14 @@ namespace LegionRuntime {
       assert(!packed);
       assert(!rhs.packed);
 #endif
-      advance = rhs.advance;
       upper_bound_node = rhs.upper_bound_node;
       // Capture all region tree nodes that have not already been
       // captured by the closer
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator nit = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator nit = 
             rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
       {
         const NodeInfo &current = nit->second;
 #ifdef DEBUG_HIGH_LEVEL
-        assert(current.physical_state != NULL);
         assert(current.field_versions != NULL);
 #endif
         FieldMask clone_mask;         
@@ -9758,9 +9799,7 @@ namespace LegionRuntime {
         // version numbers for each fields and maybe a few more
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.premap_only = current.premap_only;
-        next.path_only = current.path_only;
-        next.advance = current.advance;
+        next.bit_mask = current.bit_mask & 15;
         // Needs capture is already set
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -9777,7 +9816,6 @@ namespace LegionRuntime {
       assert(!packed);
       assert(upper_bound_node != NULL);
 #endif
-      rez.serialize(advance);
       if (upper_bound_node->is_region())
       {
         rez.serialize<bool>(true);
@@ -9790,14 +9828,14 @@ namespace LegionRuntime {
       }
       rez.serialize(local_space);
       size_t total_regions = 0;
-      for (std::map<RegionTreeNode*,NodeInfo>::const_iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (it->first->is_region())
           total_regions++;
       }
       rez.serialize(total_regions);
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (it->first->is_region())
@@ -9808,7 +9846,7 @@ namespace LegionRuntime {
       }
       size_t total_partitions = node_infos.size() - total_regions;
       rez.serialize(total_partitions);
-      for (std::map<RegionTreeNode*,NodeInfo>::iterator it = 
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         if (!it->first->is_region())
@@ -9828,8 +9866,6 @@ namespace LegionRuntime {
       assert(packed_buffer != NULL);
 #endif
       Deserializer derez(packed_buffer, packed_size);
-      // Unpack the advanced bit
-      derez.deserialize(advance); 
       // Unpack the upper bound node
       {
         bool is_region;
@@ -9879,14 +9915,13 @@ namespace LegionRuntime {
                                      RegionTreeNode *node, ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(info.path_only);
-      rez.serialize(info.advance);
+      rez.serialize(info.bit_mask);
       if (info.physical_state == NULL)
         info.physical_state = node->get_physical_state(ctx, *this,
-                                        false/*initialize*/, false/*capture*/);
+                                                       false/*capture*/);
       PhysicalState *state = info.physical_state;
 #ifdef DEBUG_HIGH_LEVEL
-      if (!info.advance)
+      if (!info.advance())
         assert(state->advance_states.empty());
 #endif
       size_t total_version_states = 0;
@@ -9911,9 +9946,9 @@ namespace LegionRuntime {
           rez.serialize(it->second);
         }
       }
-      if (info.advance)
+      size_t total_advance_states = 0;
+      if (!state->advance_states.empty())
       {
-        size_t total_advance_states = 0;
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
               it1 = state->advance_states.begin(); it1 != 
               state->advance_states.end(); it1++)
@@ -9936,6 +9971,8 @@ namespace LegionRuntime {
           }
         }
       }
+      else
+        rez.serialize(total_advance_states);
     }
 
     //--------------------------------------------------------------------------
@@ -9951,9 +9988,8 @@ namespace LegionRuntime {
       info.physical_state = legion_new<PhysicalState>(manager);
 #endif
       // Don't need premap
-      derez.deserialize(info.path_only);
-      derez.deserialize(info.advance);
-      info.needs_capture = true;
+      derez.deserialize(info.bit_mask);
+      info.set_needs_capture();
       // Unpack the version states
       size_t num_states;
       derez.deserialize(num_states);
@@ -9973,8 +10009,7 @@ namespace LegionRuntime {
         DistributedID did;
         derez.deserialize(did);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                      did, source, false/*initialize*/, 
-                                      !info.advance, info.advance);
+                                                          did, source);
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
@@ -9984,27 +10019,23 @@ namespace LegionRuntime {
         // Only need to do this for the non-advance states
         info.field_versions->add_field_version(vid, mask);
       }
-      if (info.advance)
+      // Unpack the advance states
+      derez.deserialize(num_states);
+      for (unsigned idx = 0; idx < num_states; idx++)
       {
-        // Unpack the advance states
-        derez.deserialize(num_states);
-        for (unsigned idx = 0; idx < num_states; idx++)
-        {
-          VersionID vid;
-          derez.deserialize(vid);
-          DistributedID did;
-          derez.deserialize(did);
-          VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                         did, source, true/*initialize*/, 
-                     false/*requestl initial*/, false/*requestl final*/);
-          FieldMask mask;
-          derez.deserialize(mask);
-          // Transform the field mask
-          field_node->transform_field_mask(mask, source);
-          // No point in adding this to the version state infos
-          // since we already know we just use that to build the PhysicalState
-          info.physical_state->add_advance_state(state, mask);
-        }
+        VersionID vid;
+        derez.deserialize(vid);
+        DistributedID did;
+        derez.deserialize(did);
+        VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                                          did, source);
+        FieldMask mask;
+        derez.deserialize(mask);
+        // Transform the field mask
+        field_node->transform_field_mask(mask, source);
+        // No point in adding this to the version state infos
+        // since we already know we just use that to build the PhysicalState
+        info.physical_state->add_advance_state(state, mask);
       }
     }
     
@@ -11590,8 +11621,6 @@ namespace LegionRuntime {
       : ctx(c), user(u), validates(val), capture_users(capture)
     //--------------------------------------------------------------------------
     {
-      // closers always advance
-      force_close_versions.set_advance();
     }
 
     //--------------------------------------------------------------------------
@@ -11980,46 +12009,52 @@ namespace LegionRuntime {
       // sub-tree we are closing so the version number for the target
       // region has already been advanced.
       if (leave_open)
-        node->record_version_numbers(state, local_mask,
-                                     leave_open_versions, false/*previous*/,
-                                     false/*premap*/, false/*path only*/);
+        node->record_version_numbers(state, local_mask, leave_open_versions, 
+                                     false/*previous*/, false/*premap*/, 
+                                     false/*path only*/, true/*complete*/,
+                                     false/*close top*/);
       else
-        node->record_version_numbers(state, local_mask, 
-                                     force_close_versions, false/*previous*/, 
-                                     false/*premap*/, false/*path only*/);
+        node->record_version_numbers(state, local_mask, force_close_versions, 
+                                     false/*previous*/, false/*premap*/, 
+                                     false/*path only*/, true/*complete*/,
+                                     false/*close top*/);
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::advance_and_record(RegionTreeNode *node,
-                                           LogicalState &state)
+    void LogicalCloser::record_top_version_numbers(RegionTreeNode *node,
+                                                   LogicalState &state)
     //--------------------------------------------------------------------------
     {
+      // If we have any flush only fields, see if we need to bump their
+      // version numbers before generating our close operations
+      if (!!flush_only_fields)
+      {
+        FieldMask update_mask = flush_only_fields - state.dirty_below;
+        if (!!update_mask)
+          node->advance_version_numbers(state, update_mask);
+      }
+      // We don't need to advance the version numbers because we know
+      // that was already done when we 
       if (!!leave_open_mask)
       {
-        // We don't need to advance the version numbers because the leave
-        // open close operations are actually going to continue to use
-        // the existing version number.
-        // IMPORTANT NOTE! FAILURE TO FOLLOW THIS WILL RISK DEADLOCK
-        // (just try the mini-aero benchmark)
-        node->record_version_numbers(state, leave_open_mask,
-                                     leave_open_versions, false/*previous*/,
-                                     false/*premap*/, false/*path only*/);
+        node->record_version_numbers(state, leave_open_mask,leave_open_versions,
+                                     true/*previous*/, false/*premap*/, 
+                                     false/*path only*/, true/*complete*/,
+                                     true/*close top*/);
         FieldMask force_close_mask = closed_mask - leave_open_mask;
         if (!!force_close_mask)
-        {
-          node->advance_version_numbers(state, force_close_mask);
           node->record_version_numbers(state, force_close_mask,
                                        force_close_versions, true/*previous*/,
-                                       false/*premap*/, false/*path only*/);
-        }
+                                       false/*premap*/, false/*path only*/,
+                                       true/*complete*/, true/*close top*/);
       }
       else
       {
         // Normal case is simple
-        node->advance_version_numbers(state, closed_mask);
-        node->record_version_numbers(state, closed_mask,
-                                     force_close_versions, true/*previous*/,
-                                     false/*premap*/, false/*path only*/);
+        node->record_version_numbers(state, closed_mask, force_close_versions, 
+                                     true/*previous*/, false/*premap*/, 
+                                     false/*path only*/, true/*complete*/,
+                                     true/*close top*/);
       }
     }
 
@@ -12138,25 +12173,8 @@ namespace LegionRuntime {
     {
       // Note that permit leave open means that we don't update
       // the dirty bits when we update the state
-      if (upper_targets.size() == 1)
-      {
-        MaterializedView *update_view = upper_targets[0];
-        if (permit_leave_open)
-          node->update_valid_views(state, info.traversal_mask,
-                                   false/*dirty*/, update_view);
-        else
-          node->update_valid_views(state, info.traversal_mask,
-                                   true/*dirty*/, update_view);
-      }
-      else
-      {
-        if (permit_leave_open)
-          node->update_valid_views(state, info.traversal_mask,
-                                   FieldMask(), upper_targets);
-        else
-          node->update_valid_views(state, info.traversal_mask,
-                                   dirty_mask, upper_targets);
-      }
+      node->update_valid_views(state, info.traversal_mask,
+                               dirty_mask, upper_targets);
     } 
 
     //--------------------------------------------------------------------------
@@ -12239,12 +12257,8 @@ namespace LegionRuntime {
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
-      if (permit_leave_open)
-        node->update_valid_views(state, closed_mask, 
-                                 false/*dirty*/, composite_view);
-      else
-        node->update_valid_views(state, closed_mask,
-                                 true/*dirty*/, composite_view);
+      node->update_valid_views(state, closed_mask,
+                               true/*dirty*/, composite_view);
     }
 
     //--------------------------------------------------------------------------
@@ -12454,18 +12468,64 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::capture_state(bool path_only,
+    void PhysicalState::capture_state(bool path_only, bool close_top,
                   const LegionMap<VersionID,FieldMask>::aligned &field_versions)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-            vit = version_states.begin(); vit != version_states.end(); vit++)
+      if (close_top)
       {
-        const VersionStateInfo &info = vit->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-              info.states.begin(); it != info.states.end(); it++)
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!path_only);
+#endif
+        // Capture everything but the open children below from the
+        // normal version states, but get the open children from the
+        // advance states since that's where the sub-operations have
+        // been writing to.
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
         {
-          it->first->update_physical_state(this, it->second, path_only);
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_close_top_state(this, it->second);
+          }
+        }
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+              vit = advance_states.begin(); vit != advance_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_open_children_state(this, it->second);
+          }
+        }
+      }
+      else if (path_only)
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_path_only_state(this, it->second);
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_physical_state(this, it->second);
+          }
         }
       }
       // Check to see if we have any persistent views to include
@@ -12488,84 +12548,73 @@ namespace LegionRuntime {
     void PhysicalState::apply_state(bool advance) const
     //--------------------------------------------------------------------------
     {
-      // We can skip any state that was closed
-      if (!!closed_mask)
+      if (advance && !advance_states.empty())
       {
-        if (!advance)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = advance_states.begin(); vit != 
+              advance_states.end(); vit++)
         {
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = version_states.begin(); vit != 
-                version_states.end(); vit++)
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
           {
-            // Skip anything for which all the fields are already closed
-            if (!(vit->second.valid_fields - closed_mask))
-              continue;
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              FieldMask non_closed = it->second - closed_mask;
-              if (!non_closed)
-                continue;
-              it->first->merge_physical_state(this, non_closed); 
-            }
-          }
-        }
-        else
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!advance_states.empty());
-#endif
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = advance_states.begin(); vit != 
-                advance_states.end(); vit++)
-          {
-            // Skip anything for which all the fields are already closed
-            if (!(vit->second.valid_fields - closed_mask))
-              continue;
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              FieldMask non_closed = it->second - closed_mask;
-              if (!non_closed)
-                continue;
-              it->first->merge_physical_state(this, non_closed);
-            }
+            it->first->merge_physical_state(this, it->second);
           }
         }
       }
       else
       {
-        if (!advance)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != 
+              version_states.end(); vit++)
         {
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-                vit = version_states.begin(); vit != 
-                version_states.end(); vit++)
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
           {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                  info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->merge_physical_state(this, it->second); 
-            }
+            it->first->merge_physical_state(this, it->second); 
           }
         }
-        else
-        {
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::filter_and_apply(bool top, bool filter_children) const
+    //--------------------------------------------------------------------------
+    {
+      if (top)
+      {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!advance_states.empty());
+        assert(!advance_states.empty());
 #endif
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-                vit = advance_states.begin(); vit != 
-                advance_states.end(); vit++)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = advance_states.begin(); vit != 
+              advance_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
           {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                  info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->merge_physical_state(this, it->second);
-            }
+            it->first->filter_and_merge_physical_state(this, it->second, 
+                                                       true, filter_children);
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(advance_states.empty());
+#endif
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != 
+              version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->filter_and_merge_physical_state(this, it->second, 
+                                                       false, filter_children);
           }
         }
       }
@@ -12575,7 +12624,6 @@ namespace LegionRuntime {
     void PhysicalState::reset(void)
     //--------------------------------------------------------------------------
     {
-      closed_mask.clear();
       dirty_mask.clear();
       reduction_mask.clear();
       children.valid_fields.clear();
@@ -12708,39 +12756,82 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::make_local(std::set<Event> &preconditions, bool advance)
+    void PhysicalState::make_local(std::set<Event> &preconditions, 
+                                   const FieldMask &pre_close_fields,
+                                   bool needs_complete, bool is_close)
     //--------------------------------------------------------------------------
     {
-      if (advance)
+      if (needs_complete)
       {
-        // Request all the version states in final mode meaning they
-        // have up to date data from all instances
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1
-              = version_states.begin(); it1 != version_states.end(); it1++)
+        if (is_close)
         {
-          const VersionStateInfo &info = it1->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          // Request close versions for everyone
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+               vit = version_states.begin(); vit != version_states.end(); vit++)
           {
-            Event ready = it->first->request_merged_version_state();
-            if (ready.exists() && !ready.has_triggered())
-              preconditions.insert(ready);
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->request_close_version_state(it->second, preconditions);
+            }
+          }
+        }
+        else
+        {
+          // Request final versions for everyone
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+               vit = version_states.begin(); vit != version_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->request_final_version_state(it->second, preconditions);
+            }
           }
         }
       }
       else
       {
-        // Request an up-to-date version of the data from any instance
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1
-              = version_states.begin(); it1 != version_states.end(); it1++)
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!is_close);
+#endif
+        // See if we have any pre_close_fields
+        if (!!pre_close_fields)
         {
-          const VersionStateInfo &info = it1->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          // Request post-closed versions for all versions whose fields
+          // are not pre-closed
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+               vit = version_states.begin(); vit != version_states.end(); vit++)
           {
-            Event ready = it->first->request_eventual_version_state();
-            if (ready.exists() && !ready.has_triggered())
-              preconditions.insert(ready);
+            const VersionStateInfo &info = vit->second;
+            FieldMask intersect_mask = info.valid_fields - pre_close_fields; 
+            if (!intersect_mask)
+              continue;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              FieldMask request_mask = it->second & intersect_mask;
+              if (!!request_mask)
+                it->first->request_post_closed_version_state(request_mask,
+                                                             preconditions);
+            }
+          }
+        }
+        else
+        {
+          // Request post-closed versions for all versions 
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+               vit = version_states.begin(); vit != version_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->request_post_closed_version_state(it->second, 
+                                                           preconditions);
+            }
           }
         }
       }
@@ -12881,13 +12972,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
-                               VersionManager *man, bool initialize)
+                               VersionManager *man)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
         manager(man), state_lock(Reservation::create_reservation()),
 #ifdef DEBUG_HIGH_LEVEL
         currently_active(true), currently_valid(true),
 #endif
-        meta_state(initialize ? EVENTUAL_VERSION_STATE : INVALID_VERSION_STATE),
+        meta_state(INVALID_VERSION_STATE),
         eventual_ready(Event::NO_EVENT), merged_ready(Event::NO_EVENT),
         eventual_index(0), merged_index(0)
     //--------------------------------------------------------------------------
@@ -13019,9 +13110,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::update_physical_state(PhysicalState *state,
-                                             const FieldMask &update_mask,
-                                             bool path_only) const
+    void VersionState::update_close_top_state(PhysicalState *state,
+                                             const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13029,95 +13119,185 @@ namespace LegionRuntime {
 #endif
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      if (path_only)
+      if (!!dirty_mask)
+        state->dirty_mask |= (dirty_mask & update_mask);
+      FieldMask reduction_update = reduction_mask & update_mask;
+      if (!!reduction_update)
+        state->reduction_mask |= reduction_update;
+      for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
       {
-        // If we are premapping, we only need to update the dirty bits
-        // and the valid instance views 
-        if (!!dirty_mask)
-          state->dirty_mask |= (dirty_mask & update_mask);
-        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::const_iterator it = valid_views.begin();
-              it != valid_views.end(); it++)
+        FieldMask overlap = it->second & update_mask;
+        if (!overlap && !it->first->has_space(update_mask))
+          continue;
+        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+          iterator finder = state->valid_views.find(it->first);
+        if (finder == state->valid_views.end())
+          state->valid_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+      if (!!reduction_update)
+      {
+        for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::const_iterator it = reduction_views.begin();
+              it != reduction_views.end(); it++)
         {
-          FieldMask overlap = it->second & update_mask;
-          if (!overlap && !it->first->has_space(update_mask))
+          FieldMask overlap = it->second & update_mask; 
+          if (!overlap)
             continue;
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
-            iterator finder = state->valid_views.find(it->first);
-          if (finder == state->valid_views.end())
-            state->valid_views[it->first] = overlap;
+          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+            track_aligned::iterator finder = 
+              state->reduction_views.find(it->first);
+          if (finder == state->reduction_views.end())
+            state->reduction_views[it->first] = overlap;
           else
             finder->second |= overlap;
         }
       }
-      else
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::update_open_children_state(PhysicalState *state,
+                                             const FieldMask &update_mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      // We're reading so we only the need the lock in read-only mode
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      if (!(update_mask * children.valid_fields))
       {
-        if (!!dirty_mask)
-          state->dirty_mask |= (dirty_mask & update_mask);
-        FieldMask reduction_update = reduction_mask & update_mask;
-        if (!!reduction_update)
-          state->reduction_mask |= reduction_update;
-        FieldMask child_overlap = children.valid_fields & update_mask;
-        if (!!child_overlap)
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              children.open_children.begin(); it != 
+              children.open_children.end(); it++)
         {
-          state->children.valid_fields |= child_overlap;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-                children.open_children.begin(); it != 
-                children.open_children.end(); it++)
-          {
-            FieldMask overlap = it->second & update_mask;
-            if (!overlap)
-              continue;
-            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder =
-              state->children.open_children.find(it->first);
-            if (finder == state->children.open_children.end())
-              state->children.open_children[it->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
+          FieldMask overlap = update_mask & it->second;
+          if (!overlap)
+            continue;
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            state->children.open_children.find(it->first);
+          if (finder == state->children.open_children.end())
+            state->children.open_children[it->first] = overlap;
+          else
+            finder->second |= overlap;
+          state->children.valid_fields |= overlap;
         }
-        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::const_iterator it = valid_views.begin();
-              it != valid_views.end(); it++)
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::update_path_only_state(PhysicalState *state,
+                                             const FieldMask &update_mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      // We're reading so we only the need the lock in read-only mode
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      // If we are premapping, we only need to update the dirty bits
+      // and the valid instance views 
+      if (!!dirty_mask)
+        state->dirty_mask |= (dirty_mask & update_mask);
+      for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & update_mask;
+        if (!overlap && !it->first->has_space(update_mask))
+          continue;
+        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+          iterator finder = state->valid_views.find(it->first);
+        if (finder == state->valid_views.end())
+          state->valid_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::update_physical_state(PhysicalState *state,
+                                             const FieldMask &update_mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      // We're reading so we only the need the lock in read-only mode
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      if (!!dirty_mask)
+        state->dirty_mask |= (dirty_mask & update_mask);
+      FieldMask reduction_update = reduction_mask & update_mask;
+      if (!!reduction_update)
+        state->reduction_mask |= reduction_update;
+      FieldMask child_overlap = children.valid_fields & update_mask;
+      if (!!child_overlap)
+      {
+        state->children.valid_fields |= child_overlap;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+              children.open_children.begin(); it != 
+              children.open_children.end(); it++)
         {
           FieldMask overlap = it->second & update_mask;
-          if (!overlap && !it->first->has_space(update_mask))
+          if (!overlap)
             continue;
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
-            iterator finder = state->valid_views.find(it->first);
-          if (finder == state->valid_views.end())
-            state->valid_views[it->first] = overlap;
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder =
+            state->children.open_children.find(it->first);
+          if (finder == state->children.open_children.end())
+            state->children.open_children[it->first] = overlap;
           else
             finder->second |= overlap;
         }
-        if (!!reduction_update)
+      }
+      for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & update_mask;
+        if (!overlap && !it->first->has_space(update_mask))
+          continue;
+        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+          iterator finder = state->valid_views.find(it->first);
+        if (finder == state->valid_views.end())
+          state->valid_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+      if (!!reduction_update)
+      {
+        for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::const_iterator it = reduction_views.begin();
+              it != reduction_views.end(); it++)
         {
-          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-                track_aligned::const_iterator it = reduction_views.begin();
-                it != reduction_views.end(); it++)
-          {
-            FieldMask overlap = it->second & update_mask; 
-            if (!overlap)
-              continue;
-            LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-              track_aligned::iterator finder = 
-                state->reduction_views.find(it->first);
-            if (finder == state->reduction_views.end())
-              state->reduction_views[it->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
+          FieldMask overlap = it->second & update_mask; 
+          if (!overlap)
+            continue;
+          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+            track_aligned::iterator finder = 
+              state->reduction_views.find(it->first);
+          if (finder == state->reduction_views.end())
+            state->reduction_views[it->first] = overlap;
+          else
+            finder->second |= overlap;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionState::merge_physical_state(const PhysicalState *state,
-                                            const FieldMask &merge_mask)
+                                            const FieldMask &merge_mask,
+                                            bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
     {
-      // We're writing so we need the lock in exclusive mode
-      AutoLock s_lock(state_lock);
+      if (need_lock)
+      {
+        // We're writing so we need the lock in exclusive mode
+        Event acquire_event = state_lock.acquire();
+        acquire_event.wait();
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(currently_valid);
 #endif
@@ -13190,6 +13370,104 @@ namespace LegionRuntime {
         meta_state = EVENTUAL_VERSION_STATE;
         eventual_nodes.add(local_space);
       }
+      if (need_lock)
+        state_lock.release();
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::filter_and_merge_physical_state(
+                        const PhysicalState *state, const FieldMask &merge_mask,
+                        bool top, bool filter_children)
+    //--------------------------------------------------------------------------
+    {
+      // We're writing so we need the lock in exclusive mode
+      AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      // Do the filtering first
+      if (!top)
+      {
+        dirty_mask -= merge_mask;
+        reduction_mask -= merge_mask;
+        // When filtering these views make sure that they aren't also
+        // still in the state before removing references which is necessary
+        // for the correctness of the garbage collection scheme
+        if (!valid_views.empty())
+        {
+          std::vector<LogicalView*> to_delete;
+          for (LegionMap<LogicalView*,FieldMask>::aligned::iterator it =
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            it->second -= merge_mask;
+            if (!it->second && (state->valid_views.find(it->first) == 
+                                state->valid_views.end()))
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<LogicalView*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              valid_views.erase(*it);
+              (*it)->remove_nested_valid_ref(did);
+              if ((*it)->remove_nested_gc_ref(did))
+                legion_delete(*it);
+            }
+          }
+        }
+        if (!reduction_views.empty())
+        {
+          std::vector<ReductionView*> to_delete;
+          for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it = 
+                reduction_views.begin(); it != reduction_views.end(); it++)
+          {
+            it->second -= merge_mask;
+            if (!it->second && (state->reduction_views.find(it->first) ==
+                                state->reduction_views.end()))
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<ReductionView*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              reduction_views.erase(*it);
+              (*it)->remove_nested_valid_ref(did);
+              if ((*it)->remove_nested_gc_ref(did))
+                legion_delete(*it);
+            }
+          }
+        }
+      }
+      if (filter_children)
+      {
+        children.valid_fields -= merge_mask;  
+        if (!children.valid_fields)
+          children.open_children.clear();
+        else
+        {
+          std::vector<ColorPoint> to_delete;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
+                children.open_children.begin(); it != 
+                children.open_children.end(); it++)
+          {
+            it->second -= merge_mask;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<ColorPoint>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              children.open_children.erase(*it);
+            }
+          }
+        }
+      }
+      // Now we can do the merge
+      merge_physical_state(state, merge_mask, false/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13261,6 +13539,31 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void VersionState::request_close_version_state(const FieldMask &mask,
+                                                 std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::request_post_closed_version_state(
+                  const FieldMask &request_mask, std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::request_final_version_state(const FieldMask &mask,
+                                                 std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     Event VersionState::request_eventual_version_state(void)
     //--------------------------------------------------------------------------
@@ -13382,6 +13685,7 @@ namespace LegionRuntime {
       }
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state(AddressSpaceID target,
@@ -14092,7 +14396,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
-                    bool path_only, bool advance, bool initialize, bool capture)
+                     bool path_only, bool close_top, bool advance, bool capture)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -14137,8 +14441,7 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = 
-                create_new_version_state(it->first+1, initialize);
+              VersionState *new_state = create_new_version_state(it->first+1);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
@@ -14170,8 +14473,7 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = 
-                create_new_version_state(it->first, initialize);
+              VersionState *new_state = create_new_version_state(it->first);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
@@ -14187,7 +14489,7 @@ namespace LegionRuntime {
       // Now that we've got the set of states, tell the physical state
       // to capture from them
       if (capture)
-        state->capture_state(path_only, versions);
+        state->capture_state(path_only, close_top, versions);
       return state;
     } 
 
@@ -14512,8 +14814,7 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = 
-          create_new_version_state(0, true/*initialize*/);
+        VersionState *init_state = create_new_version_state(0);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, term_event, usage, user_mask);
         current_version_infos[0].valid_fields = user_mask;
@@ -14727,20 +15028,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionManager::create_new_version_state(VersionID vid, 
-                                                           bool initialize)
+    VersionState* VersionManager::create_new_version_state(VersionID vid) 
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = 
         owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                          new_did, local_space, local_space, this, initialize);
+                                new_did, local_space, local_space, this);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::create_remote_version_state(VersionID vid,
-                 DistributedID did, AddressSpaceID owner_space, bool initialize) 
+                                  DistributedID did, AddressSpaceID owner_space) 
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
@@ -14748,13 +15048,12 @@ namespace LegionRuntime {
       assert(owner_space != local_space);
 #endif
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                              did, owner_space, local_space, this, initialize);
+                                      did, owner_space, local_space, this);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::find_remote_version_state(VersionID vid,
-                DistributedID did, AddressSpaceID source, bool initialize,
-                bool request_eventual, bool request_merged)
+                                       DistributedID did, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Use the lock on the version manager to ensure that we don't
@@ -14774,14 +15073,8 @@ namespace LegionRuntime {
 #endif
         }
         else // Otherwise make it
-          result = create_remote_version_state(vid, did, source, initialize);
+          result = create_remote_version_state(vid, did, source);
       }
-      // Make sure we get our requests outstanding, they will
-      // automatically deduplicate if necessary
-      if (request_eventual)
-        result->request_eventual_version_state();
-      if (request_merged)
-        result->request_merged_version_state();
       return result;
     }
 
@@ -14813,7 +15106,7 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           version_fields |= overlap;
-          it->first->update_physical_state(&temp_state, overlap, false);
+          it->first->update_physical_state(&temp_state, overlap);
         }
         assert(!!version_fields);
         char *version_buffer = version_fields.to_string();
@@ -15001,7 +15294,7 @@ namespace LegionRuntime {
           // Generate the close operations         
           const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
-          closer.advance_and_record(this, state);
+          closer.record_top_version_numbers(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
                                              restrict_info, trace_info);
           if (!arrived)
@@ -15045,7 +15338,7 @@ namespace LegionRuntime {
                               open_below, arrived/*validates*/ && !projecting);
         }
       }
-
+      const bool is_write = IS_WRITE(user.usage); // only writes
       if (arrived)
       { 
         // If we dominated and this is our final destination then we 
@@ -15064,7 +15357,7 @@ namespace LegionRuntime {
           // We only advance version numbers for fields which are being
           // written and dominated the previous epoch because multiple 
           // writes for atomic and simultaneous go in the same generation.
-          if (version_info.will_advance())
+          if (is_write)
             advance_version_numbers(state, dominator_mask);
         }
         // Now that we've arrived, check to see if we are a projection 
@@ -15086,7 +15379,7 @@ namespace LegionRuntime {
           // If we have arrived and we are doing read-write access, then we
           // need to capture any versions in sub-trees for which we will 
           // be issuing a close when we actually map.
-          if (IS_WRITE(user.usage))
+          if (is_write)
           {
             LogicalCloser closer(ctx,user,true/*validates*/,false/*captures*/);
             // There's no point in siphoning, we know we need to close
@@ -15105,9 +15398,9 @@ namespace LegionRuntime {
           // If this is a projection requirement, we also need to record any
           // version numbers from farther down in the tree as well. 
           // Do this before the version numbers can be updated.
-          record_version_numbers(state, user.field_mask,
-                                 version_info, version_info.will_advance(), 
-                                 false/*premap*/, false/*path only*/);
+          record_version_numbers(state, user.field_mask, version_info, 
+                                 is_write, false/*premap*/, false/*path only*/,
+                                 is_write, false/*close top*/);
           
           // If this is a reduction, record that we have an outstanding 
           // reduction at this node in the region tree
@@ -15137,10 +15430,11 @@ namespace LegionRuntime {
       }
       else // We're still not there, so keep going
       {
+        const bool has_write = HAS_WRITE(user.usage); // write or reduce
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
-        if (version_info.will_advance())
+        if (has_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -15151,9 +15445,9 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, 
-                               version_info, version_info.will_advance(), 
-                               true/*premap*/, true/*path only*/);
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, true/*premap*/, true/*path only*/,
+                               false/*complete*/, false/*close top*/);
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
@@ -15181,11 +15475,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
-      const unsigned depth = get_depth();
+      const unsigned depth = get_depth(); 
+      const bool is_write = IS_WRITE(user.usage);
       if (!path.has_child(depth))
       {
         // If this is a write, then update our version numbers
-        if (version_info.will_advance())
+        if (is_write)
           advance_version_numbers(state, user.field_mask);
         // If this is a projection then we do need to capture any 
         // child version information because it might change
@@ -15201,9 +15496,9 @@ namespace LegionRuntime {
         else
         {
           // First record any version information that we need
-          record_version_numbers(state, user.field_mask, 
-                                 version_info, version_info.will_advance(), 
-                                 false/*premap*/, false/*path only*/);
+          record_version_numbers(state, user.field_mask, version_info, 
+                                 is_write, false/*premap*/, false/*path only*/, 
+                                 is_write, false/*close top*/);
           // If this is a reduction, record that we have an outstanding 
           // reduction at this node in the region tree
           if (user.usage.redop > 0)
@@ -15230,10 +15525,11 @@ namespace LegionRuntime {
       }
       else
       {
+        const bool has_write = HAS_WRITE(user.usage);
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
-        if (version_info.will_advance())
+        if (has_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -15244,9 +15540,9 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, 
-                               version_info, version_info.will_advance(), 
-                               true/*premap*/, true/*path only*/);
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, true/*premap*/, true/*path only*/, 
+                               false/*complete*/, false/*close top*/);
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -15314,7 +15610,7 @@ namespace LegionRuntime {
           // Generate the close operations         
           const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
-          closer.advance_and_record(this, state);
+          closer.record_top_version_numbers(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
                                              restrict_info, trace_info);
           if (!arrived)
@@ -15375,7 +15671,7 @@ namespace LegionRuntime {
         // them from the list of current epoch users.
         filter_curr_epoch_users(state, dominator_mask);
       }
-
+      const bool is_write = IS_WRITE(user.usage);
       if (arrived)
       {
         // If we dominated and this is our final destination then we 
@@ -15383,12 +15679,12 @@ namespace LegionRuntime {
         // We only advance version numbers for fields which are being
         // written and dominated the previous epoch because multiple 
         // writes for atomic and simultaneous go in the same generation.
-        if (!!dominator_mask && version_info.will_advance())
+        if (!!dominator_mask && is_write)
             advance_version_numbers(state, dominator_mask);
         // If we have arrived and we are doing read-write access, then we
         // need to capture any versions in sub-trees for which we will 
         // be issuing a close when we actually map.
-        if (IS_WRITE(user.usage))
+        if (is_write)
         {
           LogicalCloser closer(ctx, user, true/*validates*/, false/*captures*/);
           // There's no point in siphoning, we know we need to close
@@ -15400,10 +15696,9 @@ namespace LegionRuntime {
           closer.merge_version_info(version_info, user.field_mask);
         }
         // No need to register ourselves as a user 
-        record_version_numbers(state, user.field_mask,
-                               version_info, version_info.will_advance(), 
-                               false/*premap*/, false/*path only*/);
-          
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, false/*premap*/, false/*path only*/, 
+                               is_write, false/*close top*/);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
         if (user.usage.redop > 0)
@@ -15421,10 +15716,11 @@ namespace LegionRuntime {
       }
       else
       {
+        const bool has_write = HAS_WRITE(user.usage);
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
-        if (version_info.will_advance())
+        if (has_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -15435,9 +15731,9 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, 
-                               version_info, version_info.will_advance(), 
-                               false/*premap*/, true/*path only*/);
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, false/*premap*/, true/*path only*/, 
+                               false/*complete*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -15470,14 +15766,15 @@ namespace LegionRuntime {
       const std::map<ColorPoint,FatTreePath*> &children = 
                                                 fat_path->get_children();
       const bool arrived = children.empty();
+      const bool is_write = IS_WRITE(user.usage);
       if (arrived)
       {
-        if (version_info.will_advance())
+        if (is_write)
           advance_version_numbers(state, user.field_mask);
         // First record any version information that we need
-        record_version_numbers(state, user.field_mask, 
-                               version_info, version_info.will_advance(), 
-                               false/*premap*/, false/*path only*/);
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, false/*premap*/, false/*path only*/, 
+                               is_write, false/*close top*/);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
         if (user.usage.redop > 0)
@@ -15495,10 +15792,11 @@ namespace LegionRuntime {
       }
       else
       {
+        const bool has_write = HAS_WRITE(user.usage);
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
-        if (version_info.will_advance())
+        if (has_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -15509,9 +15807,9 @@ namespace LegionRuntime {
         }
         // Record version numbers of the fields which we are contributing
         // to from this node.
-        record_version_numbers(state, user.field_mask, 
-                               version_info, version_info.will_advance(), 
-                               false/*premap*/, true/*path only*/);
+        record_version_numbers(state, user.field_mask, version_info, 
+                               is_write, false/*premap*/, true/*path only*/, 
+                               false/*complete*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -15551,7 +15849,8 @@ namespace LegionRuntime {
                                      state.prev_epoch_users, user.field_mask);
       record_version_numbers(state, user.field_mask, version_info,
                              false/*advance*/, false/*premap only*/,
-                             false/*path only*/);
+                             false/*path only*/, true/*complete*/, 
+                             false/*close top*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16260,7 +16559,9 @@ namespace LegionRuntime {
                                                 VersionInfo &version_info,
                                                 bool capture_previous,
                                                 bool premap_only,
-                                                bool path_only)
+                                                bool path_only,
+                                                bool needs_complete,
+                                                bool close_top)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -16268,9 +16569,17 @@ namespace LegionRuntime {
 #endif
       // Capture the version information for this logical region  
       VersionInfo::NodeInfo &node_info = version_info.find_tree_node_info(this);
-      node_info.premap_only = premap_only;
-      node_info.path_only = path_only;
-      node_info.advance = capture_previous;
+      node_info.pre_close_fields = state.dirty_below & mask;
+      if (premap_only)
+        node_info.set_premap_only();
+      if (path_only)
+        node_info.set_path_only();
+      if (needs_complete)
+        node_info.set_needs_complete();
+      if (capture_previous)
+        node_info.set_advance();
+      if (close_top)
+        node_info.set_close_top();
 #ifdef DEBUG_HIGH_LEVEL
       FieldMask unversioned = mask;
 #endif
@@ -16741,23 +17050,21 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!closer.needs_targets());
 #endif
-      {
-        PhysicalCloser next_closer(closer);
-        bool create_composite = false;
-        std::set<ColorPoint> empty_next_children;
+      PhysicalCloser next_closer(closer);
+      bool create_composite = false;
+      std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
-        bool result = 
+      bool result = 
 #endif
-        siphon_physical_children(next_closer, state, closing_mask,
-                                 empty_next_children, create_composite);
+      siphon_physical_children(next_closer, state, closing_mask,
+                               empty_next_children, create_composite);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(result); // should always succeed since targets already exist
-        assert(!create_composite);
+      assert(result); // should always succeed since targets already exist
+      assert(!create_composite);
 #endif
-        // Update the closer's dirty mask
-        const FieldMask &dirty_below = next_closer.get_dirty_mask();
-        closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
-      }
+      // Update the closer's dirty mask
+      const FieldMask &dirty_below = next_closer.get_dirty_mask();
+      closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
       // Apply any reductions that we might have for the closing
       // fields back to the target instances
       // Again this only needs to be done for region nodes but
@@ -16774,9 +17081,17 @@ namespace LegionRuntime {
                                   valid_reductions, closer.info.op, &closer);
         }
       }
-      // We no longer need to invalidate anything, 
-      // we can just mark this state closed
-      state->closed_mask |= closing_mask;
+      // If we are leaving this state open, we have to do some clean-up
+      // so that it can remain valid, otherwise, if we're not leaving it
+      // open then it doesn't matter anyway.
+      if (closer.permit_leave_open)
+      {
+        if (!!dirty_below)
+          invalidate_instance_views(state, dirty_below);
+        state->dirty_mask -= closing_mask;
+        if (!!reduc_fields)
+          invalidate_reduction_views(state, reduc_fields); 
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -17194,8 +17509,18 @@ namespace LegionRuntime {
                                       capture_mask, dirty_mask);
       dirty_mask |= dirty_below;
       complete_mask |= complete_below;
-      // Mark that we closed these fields on this instance
-      state->closed_mask |= closing_mask;
+      // If we are leaving this state open, we have to do some clean-up
+      // so that it can remain valid, otherwise, if we're not leaving it
+      // open then it doesn't matter anyway.
+      if (closer.permit_leave_open)
+      {
+        if (!!dirty_below)
+          invalidate_instance_views(state, dirty_below);
+        state->dirty_mask -= closing_mask;
+        FieldMask reduc_fields = state->reduction_mask & closing_mask;
+        if (!!reduc_fields)
+          invalidate_reduction_views(state, reduc_fields); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18549,13 +18874,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
-                  VersionID vid, DistributedID did, AddressSpaceID source,
-                  bool initialize, bool request_eventual, bool request_merged)
+                  VersionID vid, DistributedID did, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       VersionManager *manager = version_managers.lookup_entry(ctx, this);
-      return manager->find_remote_version_state(vid, did, source, initialize,
-                                              request_eventual, request_merged);
+      return manager->find_remote_version_state(vid, did, source);
     }
 
     //--------------------------------------------------------------------------
@@ -26356,7 +26679,7 @@ namespace LegionRuntime {
         // If we are getting this call, we know we are on a remote node
         // so we know the physical states are already unpacked and therefore
         // we can pass in a dummy context ID
-        info.make_local(preconditions, context, 0/*dummy ctx*/);
+        info.make_local(preconditions, true/*close*/, context, 0/*dummy ctx*/);
         // Now check the sub-tree for recursive composite views
         std::set<DistributedID> checked_views;
         it->first->make_local(preconditions, checked_views);
@@ -26987,7 +27310,8 @@ namespace LegionRuntime {
       dirty_mask |= local_dirty;
       LegionMap<CompositeView*,FieldMask>::aligned to_flatten;
       FieldMask need_flatten = capture_mask;
-      if (state != NULL)
+      // Only need to pull down valid views if we are at the top
+      if ((state != NULL) && (parent == NULL))
       {
         LegionMap<LogicalView*,FieldMask>::aligned instances;
         tree_node->find_valid_instance_views(closer.ctx, state, capture_mask,

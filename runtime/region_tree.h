@@ -1404,20 +1404,34 @@ namespace LegionRuntime {
     public:
       struct NodeInfo {
       public:
-        NodeInfo(void)
-          : physical_state(NULL), field_versions(NULL), premap_only(false), 
-            path_only(false), advance(false), needs_capture(true) { }
+        NodeInfo(void) : physical_state(NULL), field_versions(NULL), 
+          bit_mask(0) { set_needs_capture(); } 
         // Always make deep copies of the physical state
         NodeInfo(const NodeInfo &rhs);
         ~NodeInfo(void);
         NodeInfo& operator=(const NodeInfo &rhs);
       public:
+        inline void set_premap_only(void) { bit_mask |= 1; }
+        inline void set_path_only(void) { bit_mask |= 2; }
+        inline void set_needs_complete(void) { bit_mask |= 4; }
+        inline void set_advance(void) { bit_mask |= 8; }
+        inline void set_close_top(void) { bit_mask |= 16; }
+        inline void set_needs_capture(void) { bit_mask |= 32; }
+        inline void unset_needs_capture(void)
+        { if (needs_capture()) bit_mask -= 32; }
+      public:
+        inline bool premap_only(void) const { return (1 & bit_mask); }
+        inline bool path_only(void) const { return (2 & bit_mask); }
+        inline bool needs_complete(void) const { return (4 & bit_mask); }
+        inline bool advance(void) const { return (8 & bit_mask); }
+        inline bool close_top(void) const { return (16 & bit_mask); }
+        inline bool needs_capture(void) const { return (32 & bit_mask); }
+      public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
-        bool premap_only; // state needed for premapping only
-        bool path_only; // state needed for intermediate path
-        bool advance;
-        bool needs_capture;
+        FieldMask    pre_close_fields;
+      public:
+        unsigned bit_mask;
       };
     public:
       VersionInfo(void);
@@ -1428,8 +1442,6 @@ namespace LegionRuntime {
     public:
       inline NodeInfo& find_tree_node_info(RegionTreeNode *node)
         { return node_infos[node]; }
-      inline void set_advance(void) { advance = true; }
-      inline bool will_advance(void) { return advance; }
     public:
       void set_upper_bound_node(RegionTreeNode *node);
       inline bool is_upper_bound_node(RegionTreeNode *node) const
@@ -1438,6 +1450,8 @@ namespace LegionRuntime {
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_premapping(ContextID ctx);
       void apply_mapping(ContextID ctx);
+      void apply_close(ContextID ctx, bool permit_leave_open, 
+                       RegionTreeNode *top);
       void reset(void);
       void release(void);
       void clear(void);
@@ -1446,13 +1460,14 @@ namespace LegionRuntime {
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       PhysicalState* create_physical_state(RegionTreeNode *node,
                                            VersionManager *manager,
-                                           bool initialize, bool capture);
+                                           bool capture);
       FieldVersions* get_versions(RegionTreeNode *node) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);
       void unpack_version_info(Deserializer &derez);
-      void make_local(std::set<Event> &preconditions, RegionTreeForest *forest,
+      void make_local(std::set<Event> &preconditions, bool is_close,
+                      RegionTreeForest *forest,
                       ContextID ctx, bool path_only = false);
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
@@ -1465,9 +1480,8 @@ namespace LegionRuntime {
       void unpack_node_info(RegionTreeNode *node, ContextID ctx,
                             Deserializer &derez, AddressSpaceID source);
     protected:
-      std::map<RegionTreeNode*,NodeInfo> node_infos;
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
       RegionTreeNode *upper_bound_node;
-      bool advance;
     protected:
       bool packed;
       void *packed_buffer;
@@ -1745,7 +1759,7 @@ namespace LegionRuntime {
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
       void record_version_numbers(RegionTreeNode *node, LogicalState &state,
                                   const FieldMask &local_mask, bool leave_open);
-      void advance_and_record(RegionTreeNode *node, LogicalState &state);
+      void record_top_version_numbers(RegionTreeNode *node, LogicalState &state);
       void merge_version_info(VersionInfo &target, const FieldMask &merge_mask);
     protected:
       static void compute_close_sets(
@@ -1921,14 +1935,17 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool path_only,
+      void capture_state(bool path_only, bool close_top,
           const LegionMap<VersionID,FieldMask>::aligned &field_versions);
       void apply_state(bool advance) const;
+      void filter_and_apply(bool top, bool filter_children) const;
       void reset(void);
     public:
       PhysicalState* clone(bool clone_state) const;
       PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
-      void make_local(std::set<Event> &preconditions, bool advance);
+      void make_local(std::set<Event> &preconditions, 
+                      const FieldMask &pre_close_fields,
+                      bool needs_complete, bool is_close);
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -1936,8 +1953,6 @@ namespace LegionRuntime {
     public:
       VersionManager *const manager;
     public:
-      // Fields which were closed and can be ignored when applying
-      FieldMask closed_mask;
       // Fields which have dirty data
       FieldMask dirty_mask;
       // Fields with outstanding reductions
@@ -2000,7 +2015,7 @@ namespace LegionRuntime {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   VersionManager *manager, bool initialize);
+                   VersionManager *manager);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2013,19 +2028,32 @@ namespace LegionRuntime {
       void initialize(LogicalView *view, Event term_event,
                       const RegionUsage &usage,
                       const FieldMask &user_mask);
+      void update_close_top_state(PhysicalState *state,
+                                  const FieldMask &update_mask) const;
+      void update_open_children_state(PhysicalState *state,
+                                      const FieldMask &update_mask) const;
+      void update_path_only_state(PhysicalState *state,
+                                  const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
-                                 const FieldMask &update_mask, 
-                                 bool path_only) const;
+                                 const FieldMask &update_mask) const; 
       void merge_physical_state(const PhysicalState *state, 
-                                const FieldMask &merge_mask);
+                                const FieldMask &merge_mask,
+                                bool need_lock = true);
+      void filter_and_merge_physical_state(const PhysicalState *state,
+         const FieldMask &merge_mask, bool top, bool filter_children);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      Event request_eventual_version_state(void);
-      Event request_merged_version_state(void);
+      void request_close_version_state(const FieldMask &mask, 
+                                       std::set<Event> &preconditions);
+      void request_post_closed_version_state(const FieldMask &request_mask,
+                                             std::set<Event> &preconditions);
+      void request_final_version_state(const FieldMask &mask,
+                                       std::set<Event> &preconditions);
+    public:
       void send_version_state(AddressSpaceID target, UserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
                            UserEvent to_trigger, bool merged_req, bool upgrade);
@@ -2101,7 +2129,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-          bool path_only, bool advance, bool initialize, bool capture);
+          bool path_only, bool close_top, bool initialize, bool capture);
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask);
@@ -2131,13 +2159,12 @@ namespace LegionRuntime {
                                   PhysicalState *state, FieldMask &to_create,
                                   bool advance);
     protected:
-      VersionState* create_new_version_state(VersionID vid, bool initialize);
+      VersionState* create_new_version_state(VersionID vid);
       VersionState* create_remote_version_state(VersionID vid, 
-              DistributedID did, AddressSpaceID owner_space, bool initialize);
+                              DistributedID did, AddressSpaceID owner_space);
     public:
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
-                                      AddressSpaceID source, bool initialize,
-                                    bool request_eventual, bool request_merged);
+                                              AddressSpaceID source);
     public:
       RegionTreeNode *const owner;
     protected:
@@ -2172,7 +2199,6 @@ namespace LegionRuntime {
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
-                                               bool initialize = true,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state
@@ -2185,7 +2211,7 @@ namespace LegionRuntime {
         assert(manager != NULL);
 #endif
         // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager, initialize, capture);
+        result = info.create_physical_state(this, manager, capture);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -2262,7 +2288,8 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info, bool capture_previous,
-                                  bool premap_only, bool path_only);
+                                  bool premap_only, bool path_only, 
+                                  bool needs_complete, bool close_top);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
@@ -2429,9 +2456,7 @@ namespace LegionRuntime {
       void unregister_logical_view(LogicalView *view);
       LogicalView* find_view(DistributedID did);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
-                                  DistributedID did, AddressSpaceID source, 
-                                  bool initialize, bool request_eventual, 
-                                  bool request_merged);
+                                  DistributedID did, AddressSpaceID source); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
