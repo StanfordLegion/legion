@@ -1277,6 +1277,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
+        available_reqs.push(req);
       }
 #endif
 
