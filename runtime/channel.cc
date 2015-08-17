@@ -1780,9 +1780,10 @@ namespace LegionRuntime {
                 break;
             }
             while(!finish_xferdes.empty()) {
-              delete finish_xferdes.back();
-              it->second->erase(finish_xferdes.back());
+              XferDes *xd = finish_xferdes.back();
               finish_xferdes.pop_back();
+              it->second->erase(xd);
+              delete xd;
             }
           }
         }
