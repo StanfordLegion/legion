@@ -1450,8 +1450,7 @@ namespace LegionRuntime {
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_premapping(ContextID ctx);
       void apply_mapping(ContextID ctx);
-      void apply_close(ContextID ctx, bool permit_leave_open, 
-                       RegionTreeNode *top);
+      void apply_close(ContextID ctx, bool permit_leave_open); 
       void reset(void);
       void release(void);
       void clear(void);
@@ -1938,9 +1937,10 @@ namespace LegionRuntime {
       void capture_state(bool path_only, bool close_top,
           const LegionMap<VersionID,FieldMask>::aligned &field_versions);
       void apply_premapping_state(bool advance) const;
-      void apply_state(bool advance) const;
-      void filter_and_apply(bool top, bool filter_children) const;
+      void apply_state(bool advance);
+      void filter_and_apply(bool top, bool filter_children);
       void reset(void);
+      void record_created_instance(InstanceView *view);
     public:
       PhysicalState* clone(bool clone_state) const;
       PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
@@ -1966,6 +1966,10 @@ namespace LegionRuntime {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
+      // Any instance views which we created and are therefore holding
+      // additional valid references that will need to be removed
+      // after our updates have been applied
+      std::deque<InstanceView*> created_instances;
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
@@ -2314,6 +2318,7 @@ namespace LegionRuntime {
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
+                                PhysicalState *state,
                                 const FieldMask &closing_mask,
                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                   LegionMap<MaterializedView*,FieldMask>::aligned &update_views,

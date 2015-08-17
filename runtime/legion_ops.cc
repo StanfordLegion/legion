@@ -4585,14 +4585,7 @@ namespace LegionRuntime {
         return false;
       }
       else
-      {
-        RegionTreeNode *target;
-        if (requirement.handle_type == PART_PROJECTION)
-          target = runtime->forest->get_node(requirement.partition);
-        else
-          target = runtime->forest->get_node(requirement.region);
-        version_info.apply_close(physical_ctx.get_id(), leave_open, target);
-      }
+        version_info.apply_close(physical_ctx.get_id(), leave_open);
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);

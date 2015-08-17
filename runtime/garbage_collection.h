@@ -33,6 +33,7 @@ namespace LegionRuntime {
       MEMORY_MANAGER_REF,
       COMPOSITE_NODE_REF,
       PERSISTENCE_REF,
+      INITIAL_CREATION_REF,
       LAST_SOURCE_REF,
     };
 
@@ -51,8 +52,10 @@ namespace LegionRuntime {
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
-      "Composite Node Reference",                   \
       "Memory Manager Reference"                    \
+      "Composite Node Reference",                   \
+      "Persistent Reference",                       \
+      "Initial Creation Reference",                 \
     }
 
     extern Logger::Category log_garbage;

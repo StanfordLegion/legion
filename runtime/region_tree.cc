@@ -9472,8 +9472,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open,
-                                  RegionTreeNode *top)
+    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9489,7 +9488,7 @@ namespace LegionRuntime {
             continue;
           if (it->second.physical_state != NULL)
           {
-            it->second.physical_state->filter_and_apply((top == it->first),
+            it->second.physical_state->filter_and_apply(it->second.close_top(),
                                                  false/*filter children*/);
           }
         }
@@ -9503,7 +9502,7 @@ namespace LegionRuntime {
           if (it->second.premap_only())
             continue;
           // We can also skip anything that isn't the top node
-          if (it->first != top)
+          if (!it->second.close_top())
             continue;
           if (it->second.physical_state != NULL)
           {
@@ -11005,25 +11004,23 @@ namespace LegionRuntime {
       // instance.  If it did, then re-run the computation to get the list
       // of valid instances with the right set of fields
       std::set<FieldID> new_fields = info.req.privilege_fields;
+      PhysicalState *state = node->get_physical_state(info.ctx,
+                                                      info.version_info);
+      if (!additional_fields.empty())
       {
-        PhysicalState *state = node->get_physical_state(info.ctx,
-                                                        info.version_info);
-        if (!additional_fields.empty())
-        {
-          new_fields.insert(additional_fields.begin(),
-                               additional_fields.end());
-          FieldMask additional_mask = 
-            node->column_source->get_field_mask(new_fields);
-          node->find_valid_instance_views(info.ctx, state, additional_mask,
-                                          additional_mask, info.version_info,
-                                          true/*space*/, valid_instances);
-        }
-        else
-        {
-          node->find_valid_instance_views(info.ctx, state, user_mask,
-                                          user_mask, info.version_info,
-                                          true/*space*/, valid_instances);
-        }
+        new_fields.insert(additional_fields.begin(),
+                             additional_fields.end());
+        FieldMask additional_mask = 
+          node->column_source->get_field_mask(new_fields);
+        node->find_valid_instance_views(info.ctx, state, additional_mask,
+                                        additional_mask, info.version_info,
+                                        true/*space*/, valid_instances);
+      }
+      else
+      {
+        node->find_valid_instance_views(info.ctx, state, user_mask,
+                                        user_mask, info.version_info,
+                                        true/*space*/, valid_instances);
       }
       // Compute the set of valid memories and filter out instance which
       // do not have the proper blocking factor in the process
@@ -11177,6 +11174,8 @@ namespace LegionRuntime {
         {
           // We successfully made an instance
           needed_fields = user_mask;
+          // Make sure to tell our physical state
+          state->record_created_instance(chosen_inst);
           break;
         }
       }
@@ -11226,12 +11225,10 @@ namespace LegionRuntime {
       }
 
       std::set<ReductionView*> valid_views;
-      {
-        PhysicalState *state = node->get_physical_state(info.ctx,
-                                                        info.version_info);
-        node->find_valid_reduction_views(info.ctx, state, usage.redop, 
-                                user_mask, info.version_info, valid_views);
-      }
+      PhysicalState *state = node->get_physical_state(info.ctx,
+                                                      info.version_info);
+      node->find_valid_reduction_views(info.ctx, state, usage.redop, 
+                              user_mask, info.version_info, valid_views);
 
       // Compute the set of valid memories
       std::set<Memory> valid_memories;
@@ -11277,7 +11274,10 @@ namespace LegionRuntime {
                                                info.req.redop,
                                                info.op);
           if (chosen_inst != NULL)
+          {
+            state->record_created_instance(chosen_inst);
             break;
+          }
         }
       }
       if (chosen_inst != NULL)
@@ -12371,6 +12371,9 @@ namespace LegionRuntime {
     PhysicalState::~PhysicalState(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(created_instances.empty());
+#endif
       // Remove references to our version states and delete them if necessary
       for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
             version_states.begin(); vit != version_states.end(); vit++)
@@ -12552,6 +12555,9 @@ namespace LegionRuntime {
     void PhysicalState::apply_premapping_state(bool advance) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(created_instances.empty());
+#endif
       if (advance && !advance_states.empty())
       {
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
@@ -12583,7 +12589,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_state(bool advance) const
+    void PhysicalState::apply_state(bool advance)
     //--------------------------------------------------------------------------
     {
       if (advance && !advance_states.empty())
@@ -12614,10 +12620,22 @@ namespace LegionRuntime {
           }
         }
       }
+      // If we have any created instances, we can now remove our
+      // valid references on them because we've applied all our updates
+      if (!created_instances.empty())
+      {
+        for (std::deque<InstanceView*>::const_iterator it = 
+              created_instances.begin(); it != created_instances.end(); it++)
+        {
+          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
+            LogicalView::delete_logical_view(*it);
+        }
+        created_instances.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::filter_and_apply(bool top, bool filter_children) const
+    void PhysicalState::filter_and_apply(bool top, bool filter_children)
     //--------------------------------------------------------------------------
     {
       if (top)
@@ -12656,6 +12674,18 @@ namespace LegionRuntime {
           }
         }
       }
+      // If we have any created instances, we can now remove our
+      // valid references on them because we've applied all our updates
+      if (!created_instances.empty())
+      {
+        for (std::deque<InstanceView*>::const_iterator it = 
+              created_instances.begin(); it != created_instances.end(); it++)
+        {
+          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
+            LogicalView::delete_logical_view(*it);
+        }
+        created_instances.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12669,6 +12699,14 @@ namespace LegionRuntime {
       valid_views.clear();
       reduction_views.clear();
       // Don't clear version states or advance states, we need those
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::record_created_instance(InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      view->add_base_valid_ref(INITIAL_CREATION_REF); 
+      created_instances.push_back(view);
     }
 
     //--------------------------------------------------------------------------
@@ -17166,6 +17204,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool RegionTreeNode::select_close_targets(PhysicalCloser &closer,
+                                              PhysicalState *state,
                                               const FieldMask &closing_mask,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                   LegionMap<MaterializedView*,FieldMask>::aligned &update_views,
@@ -17315,6 +17354,8 @@ namespace LegionRuntime {
             // Update all the fields
             update_views[new_view] = closing_mask;
             closer.add_target(new_view);
+            // Make sure to tell our state we created a new instance
+            state->record_created_instance(new_view);
             // If we only needed to make one, then we are done
             if (create_one)
               break;
@@ -17434,7 +17475,7 @@ namespace LegionRuntime {
                                   closer.info.version_info,
                                   true/*needs space*/, space_views);
         // This doesn't matter so always mark it false for now
-        if (!select_close_targets(closer, closer.info.traversal_mask, 
+        if (!select_close_targets(closer, state, closer.info.traversal_mask, 
                           space_views, update_views, create_composite))
         {
           // We failed to close, time to return
