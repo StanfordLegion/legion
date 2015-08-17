@@ -110,6 +110,7 @@ namespace LegionRuntime {
         PENDING_INACTIVE_STATE,
         PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
+        DELETED_STATE,
       };
     public:
       template<ReferenceKind REF_KIND, bool ADD>
@@ -200,7 +201,7 @@ namespace LegionRuntime {
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
                         bool &do_deletion);
-      bool can_delete(void) const;
+      bool can_delete(void);
     public:
       Runtime *const runtime;
       const DistributedID did;

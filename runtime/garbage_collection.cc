@@ -61,7 +61,7 @@ namespace LegionRuntime {
       assert(gc_references == 0);
       assert(valid_references == 0);
       assert(resource_references == 0);
-      assert(current_state == INACTIVE_STATE);
+      assert(current_state == DELETED_STATE);
 #endif
       destruction_event.trigger(Event::merge_events(recycle_events));
       if (registered_with_runtime)
@@ -85,6 +85,9 @@ namespace LegionRuntime {
     void DistributedCollectable::add_gc_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -124,6 +127,9 @@ namespace LegionRuntime {
     bool DistributedCollectable::remove_gc_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -160,6 +166,9 @@ namespace LegionRuntime {
     void DistributedCollectable::add_valid_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -198,6 +207,9 @@ namespace LegionRuntime {
     bool DistributedCollectable::remove_valid_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -234,6 +246,9 @@ namespace LegionRuntime {
     void DistributedCollectable::add_resource_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       AutoLock gc(gc_lock);
       resource_references += cnt;
     }
@@ -242,6 +257,9 @@ namespace LegionRuntime {
     bool DistributedCollectable::remove_resource_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state != DELETED_STATE);
+#endif
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(resource_references >= cnt);
@@ -656,12 +674,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::can_delete(void) const
+    bool DistributedCollectable::can_delete(void)
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
-      return ((resource_references == 0) && (gc_references == 0) &&
+      bool result = ((resource_references == 0) && (gc_references == 0) &&
               (valid_references == 0) && (current_state == INACTIVE_STATE));
+      if (result)
+        current_state = DELETED_STATE;
+      return result;
     }
 
   }; // namespace HighLevel
