@@ -9439,7 +9439,11 @@ namespace LegionRuntime {
         // been done for the other nodes yet.
         if (it->second.physical_state != NULL)
         {
-          it->second.physical_state->apply_state(it->second.premap_only());
+          if (it->second.path_only())
+            it->second.physical_state->apply_premapping_state(
+                                                it->second.advance());
+          else
+            it->second.physical_state->apply_state(false/*advance*/);
         }
       }
     }
@@ -12545,6 +12549,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalState::apply_premapping_state(bool advance) const
+    //--------------------------------------------------------------------------
+    {
+      if (advance && !advance_states.empty())
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = advance_states.begin(); vit != 
+              advance_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->merge_premap_state(this, it->second);
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != 
+              version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->merge_premap_state(this, it->second); 
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalState::apply_state(bool advance) const
     //--------------------------------------------------------------------------
     {
@@ -13280,6 +13318,38 @@ namespace LegionRuntime {
               state->reduction_views.find(it->first);
           if (finder == state->reduction_views.end())
             state->reduction_views[it->first] = overlap;
+          else
+            finder->second |= overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::merge_premap_state(const PhysicalState *state,
+                                          const FieldMask &merge_mask)
+    //--------------------------------------------------------------------------
+    {
+      // We're writing so we need the lock in exclusive mode
+      AutoLock s_lock(state_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(currently_valid);
+#endif
+      // For premapping, all we need to merge is the open children
+      FieldMask child_overlap = state->children.valid_fields & merge_mask;
+      if (!!child_overlap)
+      {
+        children.valid_fields |= child_overlap;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
+        {
+          FieldMask overlap = it->second & merge_mask;
+          if (!overlap)
+            continue;
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            children.open_children.find(it->first);
+          if (finder == children.open_children.end())
+            children.open_children[it->first] = overlap;
           else
             finder->second |= overlap;
         }

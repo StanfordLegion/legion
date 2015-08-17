@@ -1937,6 +1937,7 @@ namespace LegionRuntime {
       void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool path_only, bool close_top,
           const LegionMap<VersionID,FieldMask>::aligned &field_versions);
+      void apply_premapping_state(bool advance) const;
       void apply_state(bool advance) const;
       void filter_and_apply(bool top, bool filter_children) const;
       void reset(void);
@@ -2036,6 +2037,8 @@ namespace LegionRuntime {
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
+      void merge_premap_state(const PhysicalState *state,
+                              const FieldMask &merge_mask);
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
                                 bool need_lock = true);
