@@ -59,26 +59,38 @@ namespace LegionRuntime{
         MKIND_DISK
       };
 
-      Buffer(RegionInstanceImpl::Metadata* metadata)
+      Buffer(void)
+            : alloc_offset(0), is_ib(false), block_size(0), elmt_size(0),
+              buf_size(0), linearization(), memory(Memory::NO_MEMORY) {}
+
+      Buffer(RegionInstanceImpl::Metadata* metadata, Memory _memory)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
               buf_size(metadata->size), linearization(metadata->linearization),
-              memory(Memory::NO_MEMORY), ib_offset(0) {}
+              memory(_memory){}
 
       Buffer(off_t _alloc_offset, bool _is_ib,
              int _block_size, int _elmt_size, size_t _buf_size,
-             DomainLinearization _linearization, Memory _memory, off_t _ib_offset)
+             DomainLinearization _linearization, Memory _memory)
             : alloc_offset(_alloc_offset),
               is_ib(_is_ib), block_size(_block_size), elmt_size(_elmt_size),
               buf_size(_buf_size), linearization(_linearization),
-              memory(_memory), ib_offset(_ib_offset) {}
+              memory(_memory){}
+
+      Buffer& operator=(const Buffer& other)
+      {
+        alloc_offset = other.alloc_offset;
+        is_ib = other.is_ib;
+        block_size = other.block_size;
+        elmt_size = other.elmt_size;
+        buf_size = other.buf_size;
+        linearization = other.linearization;
+        memory = other.memory;
+        return *this;
+      }
+
 
       ~Buffer() {
-        // If this is intermediate buffer,
-        // we need to free the buffer
-    	if (is_ib) {
-          get_runtime()->get_memory_impl(memory)->free_bytes(ib_offset, buf_size);
-        }
       }
 
       enum DimensionKind {
@@ -116,13 +128,8 @@ namespace LegionRuntime{
 
       DomainLinearization linearization;
 
-      // Only useful when this is an intermediate buffer
-      // memory that contains the ib
+      // The memory instance on which this buffer relies
       Memory memory;
-
-      // Only useful when this is an intermediate buffer
-      // offset of the starting address of the ib
-      off_t ib_offset;
     };
 
     class Request {
@@ -241,6 +248,7 @@ namespace LegionRuntime{
 #endif
 
     typedef class Layouts::XferOrder XferOrder;
+    typedef uint64_t XferDesID;
     class XferDes {
     public:
       enum XferKind {
@@ -266,7 +274,7 @@ namespace LegionRuntime{
       // Domain that is to be copied
       Domain domain;
       // source and destination buffer
-      Buffer *src_buf, *dst_buf;
+      Buffer src_buf, dst_buf;
       // map from unique id to request class, this map only keeps
       // std::map<int64_t, uint64_t> segments_read, segments_written;
       // queue that contains all available free requests
@@ -277,10 +285,14 @@ namespace LegionRuntime{
       std::vector<OffsetsAndSize> oas_vec;
       // minimum and maximum size for a single request
       uint64_t min_req_size, max_req_size;
-      // previous and next XferDes in the chain, NULL is this XferDes is
-      // the first one.
-      XferDes *pre_XferDes, *next_XferDes;
+      enum {
+        XFERDES_NO_GUID = 0
+      };
+      // previous and next XferDes in the chain, XFERDES_NO_GUID
+      // means this XferDes is the first/last one.
+      XferDesID pre_xd_guid, next_xd_guid;
     public:
+      XferDesID guid;
       // XferKind of the Xfer Descriptor
       XferKind kind;
       // XferOrder of the Xfer Descriptor
@@ -366,12 +378,12 @@ namespace LegionRuntime{
         return bytes_write == bytes_total;
       }
 
-      void update_pre_XferDes(XferDes* _pre_XferDes) {
-        pre_XferDes = _pre_XferDes;
+      void update_pre_XferDes(XferDesID _pre_xd_guid) {
+        pre_xd_guid = _pre_xd_guid;
       }
 
-      void update_next_XferDes(XferDes* _next_XferDes) {
-        next_XferDes = _next_XferDes;
+      void update_next_XferDes(XferDesID _next_xd_guid) {
+        next_xd_guid = _next_xd_guid;
       }
 
       void update_pre_bytes_write(size_t new_val) {
@@ -380,6 +392,11 @@ namespace LegionRuntime{
 
       void update_next_bytes_read(size_t new_val) {
         next_bytes_read = new_val;
+      }
+
+      gasnet_node_t find_execution_node() {
+        // For now, we think the node that contains the src_buf is the execution node
+        return ID(src_buf.memory).node();
       }
 
       virtual void notify_request_read_done(Request* req) = 0;
@@ -494,21 +511,20 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class MemcpyXferDes : public XferDes {
     public:
-      MemcpyXferDes(Channel* _channel, bool has_pre_XferDes,
-                    Buffer* _src_buf, Buffer* _dst_buf,
-                    const char *_src_mem_base, const char *_dst_mem_base,
+      MemcpyXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                     uint64_t max_req_size, long max_nr, XferOrder::Type _order);
 
       ~MemcpyXferDes()
       {
-        // deallocate buffers
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -520,28 +536,27 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
-      const char *src_mem_base;
-      const char *dst_mem_base;
+      const char *src_buf_base, *dst_buf_base;
     };
 
     template<unsigned DIM>
     class GASNetXferDes : public XferDes {
     public:
-      GASNetXferDes(Channel* _channel, bool has_pre_XferDes,
-                    Buffer* _src_buf, Buffer* _dst_buf,
-                    const char *_mem_base,
+      GASNetXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                     uint64_t _max_req_size, long max_nr,
                     XferOrder::Type _order, XferKind _kind);
 
       ~GASNetXferDes()
       {
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
         free(requests);
         // trigger completion event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -553,27 +568,26 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
-      const char *mem_base;
+      const char *buf_base;
     };
 
     template<unsigned DIM>
     class RemoteWriteXferDes : public XferDes {
     public:
-      RemoteWriteXferDes(Channel* _channel, bool has_pre_XferDes,
-                    Buffer* _src_buf, Buffer* _dst_buf,
-                    const char *_src_mem_base, Memory _dst_mem,
-                    Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                    uint64_t max_req_size, long max_nr,
-                    XferOrder::Type _order);
+      RemoteWriteXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
+                         Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                         uint64_t max_req_size, long max_nr,
+                         XferOrder::Type _order);
 
       ~RemoteWriteXferDes()
       {
-        delete src_buf;
-        if (!next_XferDes) {
-          delete dst_buf;
-        }
         free(requests);
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -585,7 +599,7 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
-      const char *src_mem_base, *dst_mem_base;
+      const char *src_buf_base, *dst_buf_base;
       MemoryImpl *dst_mem_impl;
     };
 
@@ -593,21 +607,20 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class DiskXferDes : public XferDes {
     public:
-      DiskXferDes(Channel* _channel, bool has_pre_XferDes,
-                  Buffer* _src_buf, Buffer* _dst_buf,
-                  const char *_mem_base, int _fd,
+      DiskXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
                   Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                   uint64_t _max_req_size, long max_nr,
                   XferOrder::Type _order, XferKind _kind);
 
       ~DiskXferDes() {
-        // deallocate buffers
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -620,29 +633,27 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
-      const char *mem_base;
+      const char *buf_base;
     };
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
     template<unsigned DIM>
     class GPUXferDes : public XferDes {
     public:
-      GPUXferDes(Channel* _channel, bool has_pre_XferDes,
-                 Buffer* _src_buf, Buffer* _dst_buf,
-                 char* _src_mem_base, char* _dst_mem_base,
+      GPUXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                  uint64_t _max_req_size, long max_nr,
-                 XferOrder::Type _order, XferKind _kind,
-                 GPUProcessor* _dst_gpu = NULL);
+                 XferOrder::Type _order, XferKind _kind);
       ~GPUXferDes()
       {
-        // deallocate buffers
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -654,9 +665,9 @@ namespace LegionRuntime{
       std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
-      char *src_mem_base;
-      char *dst_mem_base;
-      GPUProcessor* dst_gpu;
+      char *src_buf_base;
+      char *dst_buf_base;
+      GPUProcessor *dst_gpu, *src_gpu;
     };
 #endif
 
@@ -664,17 +675,12 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class HDFXferDes : public XferDes {
     public:
-      HDFXferDes(Channel* _channel, bool has_pre_XferDes,
-                 Buffer* src_buf, Buffer* _dst_buf,
-                 char* _mem_base, HDFMemory::HDFMetadata* hdf_metadata,
+      HDFXferDes(RegionInstance inst, bool has_pre_XferDes,
+                 Buffer& src_buf, Buffer& _dst_buf,
                  Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
                  long max_nr, XferOrder::Type _order, XferKind _kind);
       ~HDFXferDes()
       {
-        //deallocate buffers
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
         free(requests);
         delete pir;
         delete lsi;
@@ -688,7 +694,7 @@ namespace LegionRuntime{
 
     private:
       Request* requests;
-      char *mem_base;
+      char *buf_base;
       HDFMemory::HDFMetadata *hdf_metadata;
       std::vector<OffsetsAndSize>::iterator fit;
       GenericPointInRectIterator<DIM>* pir;
@@ -818,6 +824,7 @@ namespace LegionRuntime{
       ChannelManager(void) {
         memcpy_channel = NULL;
         gasnet_read_channel = gasnet_write_channel = NULL;
+        remote_write_channel = NULL;
 #ifdef USE_DISK
         disk_read_channel = NULL;
         disk_write_channel = NULL;
@@ -834,6 +841,8 @@ namespace LegionRuntime{
           delete gasnet_read_channel;
         if (gasnet_write_channel)
           delete gasnet_write_channel;
+        if (remote_write_channel)
+          delete remote_write_channel;
 #ifdef USE_DISK
         if (disk_read_channel)
           delete disk_read_channel;
@@ -870,6 +879,11 @@ namespace LegionRuntime{
         assert(gasnet_write_channel == NULL);
         gasnet_write_channel = new GASNetChannel(max_nr, XferDes::XFER_GASNET_WRITE);
         return gasnet_write_channel;
+      }
+      RemoteWriteChannel* create_remote_write_channel(long max_nr) {
+        assert(remote_write_channel == NULL);
+        remote_write_channel = new RemoteWriteChannel(max_nr);
+        return remote_write_channel;
       }
 #ifdef USE_DISK
       DiskChannel* create_disk_read_channel(long max_nr) {
@@ -922,6 +936,9 @@ namespace LegionRuntime{
       GASNetChannel* get_gasnet_write_channel() {
         return gasnet_write_channel;
       }
+      RemoteWriteChannel* get_remote_write_channel() {
+        return remote_write_channel;
+      }
 #ifdef USE_DISK
       DiskChannel* get_disk_read_channel() {
         return disk_read_channel;
@@ -967,6 +984,7 @@ namespace LegionRuntime{
     public:
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
+      RemoteWriteChannel* remote_write_channel;
 #ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
 #endif /*USE_DISK*/
@@ -1054,8 +1072,15 @@ namespace LegionRuntime{
 
     class XferDesQueue {
     public:
+      enum {
+        NODE_BITS = 16,
+        INDEX_BITS = 32
+      };
       XferDesQueue() {
         pthread_mutex_init(&queues_lock, NULL);
+        pthread_rwlock_init(&guid_lock, NULL);
+        // reserve the first several guid
+        next_to_assign_idx = 10;
       }
 
       ~XferDesQueue() {
@@ -1067,6 +1092,51 @@ namespace LegionRuntime{
         }
         pthread_mutex_unlock(&queues_lock);
         pthread_mutex_destroy(&queues_lock);
+        pthread_rwlock_destroy(&guid_lock);
+      }
+
+      XferDesID get_guid(gasnet_node_t execution_node)
+      {
+        // GUID rules:
+        // First NODE_BITS indicates which node will execute this xd
+        // Next NODE_BITS indicates on which node this xd is generated
+        // Last INDEX_BITS means a unique idx, which is used to resolve conflicts
+        XferDesID idx = __sync_fetch_and_add(&next_to_assign_idx, 1);
+        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)gasnet_mynode() << INDEX_BITS) | idx);
+      }
+
+      void update_pre_bytes_write(XferDesID xd_guid, uint64_t bytes_write)
+      {
+        gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == gasnet_mynode()) {
+          pthread_rwlock_rdlock(&guid_lock);
+          std::map<XferDesID, XferDes*>::const_iterator it = guid_to_xd.find(xd_guid);
+          if (it != guid_to_xd.end()) {
+            it->second->update_pre_bytes_write(bytes_write);
+          }
+          pthread_rwlock_unlock(&guid_lock);
+        }
+        else {
+          // TODO: send a active message to remote node
+          assert(0);
+        }
+      }
+
+      void update_next_bytes_read(XferDesID xd_guid, uint64_t bytes_read)
+      {
+        gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == gasnet_mynode()) {
+          pthread_rwlock_rdlock(&guid_lock);
+          std::map<XferDesID, XferDes*>::const_iterator it = guid_to_xd.find(xd_guid);
+          if (it != guid_to_xd.end()) {
+            it->second->update_next_bytes_read(bytes_read);
+          }
+          pthread_rwlock_unlock(&guid_lock);
+        }
+        else {
+          // TODO: send a active message to remote node
+          assert(0);
+        }
       }
 
       void register_dma_thread(DMAThread* dma_thread)
@@ -1080,7 +1150,10 @@ namespace LegionRuntime{
         pthread_mutex_unlock(&queues_lock);
       }
 
-      void enqueue_xferDes(XferDes* xd) {
+      void enqueue_xferDes_local(XferDes* xd) {
+        pthread_rwlock_wrlock(&guid_lock);
+        guid_to_xd[xd->guid] = xd;
+        pthread_rwlock_unlock(&guid_lock);
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
         assert(it != channel_to_dma_thread.end());
@@ -1100,19 +1173,30 @@ namespace LegionRuntime{
         pthread_mutex_unlock(&dma_thread->enqueue_lock);
       }
 
+      void enqueue_xferDes_remote(XferDes* xd) {
+        // TODO
+        assert(0);
+      }
+
       void enqueue_xferDes_path(std::vector<XferDes*>& path) {
         XferDes* pre = NULL;
         for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
           if (pre == NULL)
             pre = *it;
           else {
-            pre->update_next_XferDes(*it);
-            (*it)->update_pre_XferDes(pre);
+            pre->update_next_XferDes((*it)->guid);
+            (*it)->update_pre_XferDes(pre->guid);
             pre = *it;
           }
         }
-        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
-          enqueue_xferDes(*it);
+        // We enqueue xd in reverse order to make sure no pre_bytes_write/next_bytes_read
+        // update get lost
+        for (std::vector<XferDes*>::reverse_iterator it = path.rbegin(); it != path.rend(); it++) {
+          if ((*it)->find_execution_node() == gasnet_mynode()) {
+            enqueue_xferDes_local(*it);
+          } else {
+            enqueue_xferDes_remote(*it);
+          }
         }
       }
 
@@ -1152,9 +1236,33 @@ namespace LegionRuntime{
     protected:
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
+      std::map<XferDesID, XferDes*> guid_to_xd;
       pthread_mutex_t queues_lock;
+      pthread_rwlock_t guid_lock;
+      XferDesID next_to_assign_idx;
     };
 
+    int start_channel_manager(int max_nr, DMAThread** &dma_threads
+#ifdef USE_CUDA
+                              ,std::vector<GPUProcessor*> &local_gpus
+#endif
+                             );
+    void stop_channel_manager(DMAThread** dma_threads);
+
+    bool enqueue_xferDes_path(std::vector<XferDes*>& path);
+
+    template<unsigned DIM>
+    XferDes* create_xfer_des(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
+                             Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                             uint64_t _max_req_size, long max_nr,
+                             XferOrder::Type _order, XferDes::XferKind _kind);
+#ifdef USE_HDF
+    template<unsigned DIM>
+    XferDes* create_hdf_xfer_des(RegionInstance inst, bool has_pre_XferDes,
+                                 Buffer& src_buf, Buffer& _dst_buf,
+                                 Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
+                                 long max_nr, XferOrder::Type _order, XferDes::XferKind _kind);
+#endif
   }  // namespace LowLevel
 } // namespace LegionRuntime
 #endif
