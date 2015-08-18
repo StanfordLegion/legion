@@ -608,7 +608,7 @@ namespace LegionRuntime {
             available_reqs.pop();
             requests[idx]->is_read_done = false;
             requests[idx]->is_write_done = false;
-            RemoteWriteRequest* req = requests[idx];
+            RemoteWriteRequest* req = (RemoteWriteRequest*)requests[idx];
             req->src_buf = src_mem_base + src_start;
             req->dst_offset =dst_start;
             req->dst_buf = dst_mem_base + dst_start;
@@ -1277,6 +1277,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
+        available_reqs.push(req);
       }
 #endif
 
@@ -1779,9 +1780,10 @@ namespace LegionRuntime {
                 break;
             }
             while(!finish_xferdes.empty()) {
-              delete finish_xferdes.back();
-              it->second->erase(finish_xferdes.back());
+              XferDes *xd = finish_xferdes.back();
               finish_xferdes.pop_back();
+              it->second->erase(xd);
+              delete xd;
             }
           }
         }
