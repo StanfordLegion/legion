@@ -1413,7 +1413,7 @@ namespace LegionRuntime {
       public:
         inline void set_premap_only(void) { bit_mask |= 1; }
         inline void set_path_only(void) { bit_mask |= 2; }
-        inline void set_needs_complete(void) { bit_mask |= 4; }
+        inline void set_needs_final(void) { bit_mask |= 4; }
         inline void set_advance(void) { bit_mask |= 8; }
         inline void set_close_top(void) { bit_mask |= 16; }
         inline void set_needs_capture(void) { bit_mask |= 32; }
@@ -1422,14 +1422,13 @@ namespace LegionRuntime {
       public:
         inline bool premap_only(void) const { return (1 & bit_mask); }
         inline bool path_only(void) const { return (2 & bit_mask); }
-        inline bool needs_complete(void) const { return (4 & bit_mask); }
+        inline bool needs_final(void) const { return (4 & bit_mask); }
         inline bool advance(void) const { return (8 & bit_mask); }
         inline bool close_top(void) const { return (16 & bit_mask); }
         inline bool needs_capture(void) const { return (32 & bit_mask); }
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
-        FieldMask    pre_close_fields;
       public:
         unsigned bit_mask;
       };
@@ -1465,7 +1464,7 @@ namespace LegionRuntime {
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);
       void unpack_version_info(Deserializer &derez);
-      void make_local(std::set<Event> &preconditions, bool is_close,
+      void make_local(std::set<Event> &preconditions,
                       RegionTreeForest *forest,
                       ContextID ctx, bool path_only = false);
       void clone_from(const VersionInfo &rhs);
@@ -1944,9 +1943,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* clone(bool clone_state) const;
       PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
-      void make_local(std::set<Event> &preconditions, 
-                      const FieldMask &pre_close_fields,
-                      bool needs_complete, bool is_close);
+      void make_local(std::set<Event> &preconditions, bool needs_final); 
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -1988,12 +1985,6 @@ namespace LegionRuntime {
     class VersionState : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
-    public:
-      enum VersionMetaState {
-        INVALID_VERSION_STATE,
-        EVENTUAL_VERSION_STATE, // eventually consistent state
-        MERGED_VERSION_STATE, // merged consistent state
-      };
     public:
       class BroadcastFunctor {
       public:
@@ -2054,11 +2045,9 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      void request_close_version_state(const FieldMask &mask, 
-                                       std::set<Event> &preconditions);
-      void request_post_closed_version_state(const FieldMask &request_mask,
-                                             std::set<Event> &preconditions);
-      void request_final_version_state(const FieldMask &mask,
+      void request_initial_version_state(const FieldMask &request_mask,
+                                         std::set<Event> &preconditions);
+      void request_final_version_state(const FieldMask &request_mask,
                                        std::set<Event> &preconditions);
     public:
       void send_version_state(AddressSpaceID target, UserEvent to_trigger);
@@ -2107,8 +2096,13 @@ namespace LegionRuntime {
       bool currently_valid;
 #endif
     protected:
-      VersionMetaState meta_state;
-      Event eventual_ready, merged_ready;
+      // Fields which are in the initial state
+      FieldMask initial_fields;
+      // Fields which are in the final state
+      FieldMask final_fields;
+      // Initial ready events
+      LegionMap<Event,FieldMask>::aligned initial_events;
+      LegionMap<Event,FieldMask>::aligned final_events;
       // These are valid on the owner node only
       NodeSet eventual_nodes, merged_nodes;
       unsigned eventual_index, merged_index;
@@ -2296,7 +2290,7 @@ namespace LegionRuntime {
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info, bool capture_previous,
                                   bool premap_only, bool path_only, 
-                                  bool needs_complete, bool close_top);
+                                  bool needs_final, bool close_top);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);

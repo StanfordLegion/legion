@@ -5579,8 +5579,7 @@ namespace LegionRuntime {
       // we are going to be mapping here and request all the state now.
       std::set<Event> preconditions;
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].make_local(preconditions, false/*close*/,
-                                      runtime->forest, 
+        version_infos[idx].make_local(preconditions, runtime->forest, 
             enclosing_physical_contexts[idx].get_id(), !is_remote());
       if (preconditions.empty())
         ready_event.trigger();
@@ -6202,8 +6201,7 @@ namespace LegionRuntime {
       // we are going to be mapping here and request all the state now.
       std::set<Event> preconditions; 
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].make_local(preconditions, false/*close*/, 
-                                      runtime->forest, 
+        version_infos[idx].make_local(preconditions, runtime->forest, 
             enclosing_physical_contexts[idx].get_id(), !is_remote());
       if (preconditions.empty())
         ready_event.trigger();
@@ -6379,8 +6377,7 @@ namespace LegionRuntime {
 #endif
         std::set<Event> preconditions;
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, false/*close*/,
-                                        runtime->forest,
+          version_infos[idx].make_local(preconditions, runtime->forest,
               enclosing_physical_contexts[idx].get_id());
         if (!preconditions.empty())
         {
@@ -9946,8 +9943,7 @@ namespace LegionRuntime {
 #endif
         std::set<Event> preconditions;
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, false/*close*/,
-                                        runtime->forest,
+          version_infos[idx].make_local(preconditions, runtime->forest,
               enclosing_physical_contexts[idx].get_id());
         if (!preconditions.empty())
         {

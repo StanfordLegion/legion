@@ -9260,8 +9260,7 @@ namespace LegionRuntime {
     VersionInfo::NodeInfo::NodeInfo(const NodeInfo &rhs)
       : physical_state((rhs.physical_state == NULL) ? NULL : 
                         rhs.physical_state->clone(!rhs.needs_capture())),
-        field_versions(rhs.field_versions), 
-        pre_close_fields(rhs.pre_close_fields), bit_mask(rhs.bit_mask) 
+        field_versions(rhs.field_versions), bit_mask(rhs.bit_mask) 
     //--------------------------------------------------------------------------
     {
       if (field_versions != NULL)
@@ -9404,8 +9403,8 @@ namespace LegionRuntime {
             next.set_premap_only();
           if (vit->second.path_only())
             next.set_path_only();
-          if (vit->second.needs_complete())
-            next.set_needs_complete();
+          if (vit->second.needs_final())
+            next.set_needs_final();
           if (vit->second.advance())
             next.set_advance();
           if (vit->second.close_top())
@@ -9697,7 +9696,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionInfo::make_local(std::set<Event> &preconditions, 
-                                 bool is_close, RegionTreeForest *forest,
+                                 RegionTreeForest *forest,
                                  ContextID ctx, bool path_only)
     //--------------------------------------------------------------------------
     {
@@ -9724,8 +9723,7 @@ namespace LegionRuntime {
           info.set_needs_capture();
         }
         // Now get the preconditions for the state
-        info.physical_state->make_local(preconditions, info.pre_close_fields,
-                                        info.needs_complete(), is_close);
+        info.physical_state->make_local(preconditions, info.needs_final());
       }
     } 
 
@@ -12015,12 +12013,12 @@ namespace LegionRuntime {
       if (leave_open)
         node->record_version_numbers(state, local_mask, leave_open_versions, 
                                      false/*previous*/, false/*premap*/, 
-                                     false/*path only*/, true/*complete*/,
+                                     false/*path only*/, true/*final*/,
                                      false/*close top*/);
       else
         node->record_version_numbers(state, local_mask, force_close_versions, 
                                      false/*previous*/, false/*premap*/, 
-                                     false/*path only*/, true/*complete*/,
+                                     false/*path only*/, true/*final*/,
                                      false/*close top*/);
     }
 
@@ -12043,21 +12041,21 @@ namespace LegionRuntime {
       {
         node->record_version_numbers(state, leave_open_mask,leave_open_versions,
                                      true/*previous*/, false/*premap*/, 
-                                     false/*path only*/, true/*complete*/,
+                                     false/*path only*/, true/*final*/,
                                      true/*close top*/);
         FieldMask force_close_mask = closed_mask - leave_open_mask;
         if (!!force_close_mask)
           node->record_version_numbers(state, force_close_mask,
                                        force_close_versions, true/*previous*/,
                                        false/*premap*/, false/*path only*/,
-                                       true/*complete*/, true/*close top*/);
+                                       true/*final*/, true/*close top*/);
       }
       else
       {
         // Normal case is simple
         node->record_version_numbers(state, closed_mask, force_close_versions, 
                                      true/*previous*/, false/*premap*/, 
-                                     false/*path only*/, true/*complete*/,
+                                     false/*path only*/, true/*final*/,
                                      true/*close top*/);
       }
     }
@@ -12833,81 +12831,35 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PhysicalState::make_local(std::set<Event> &preconditions, 
-                                   const FieldMask &pre_close_fields,
-                                   bool needs_complete, bool is_close)
+                                   bool needs_final)
     //--------------------------------------------------------------------------
     {
-      if (needs_complete)
+      if (needs_final)
       {
-        if (is_close)
+        // If we are either advancing or closing, then we need the final
+        // version states for all the field versions
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+             vit = version_states.begin(); vit != version_states.end(); vit++)
         {
-          // Request close versions for everyone
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-               vit = version_states.begin(); vit != version_states.end(); vit++)
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
           {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->request_close_version_state(it->second, preconditions);
-            }
-          }
-        }
-        else
-        {
-          // Request final versions for everyone
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-               vit = version_states.begin(); vit != version_states.end(); vit++)
-          {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->request_final_version_state(it->second, preconditions);
-            }
+            it->first->request_final_version_state(it->second, preconditions);
           }
         }
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!is_close);
-#endif
-        // See if we have any pre_close_fields
-        if (!!pre_close_fields)
+        // Otherwise, we just need one instance of the initial version state
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+             vit = version_states.begin(); vit != version_states.end(); vit++)
         {
-          // Request post-closed versions for all versions whose fields
-          // are not pre-closed
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-               vit = version_states.begin(); vit != version_states.end(); vit++)
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
           {
-            const VersionStateInfo &info = vit->second;
-            FieldMask intersect_mask = info.valid_fields - pre_close_fields; 
-            if (!intersect_mask)
-              continue;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              FieldMask request_mask = it->second & intersect_mask;
-              if (!!request_mask)
-                it->first->request_post_closed_version_state(request_mask,
-                                                             preconditions);
-            }
-          }
-        }
-        else
-        {
-          // Request post-closed versions for all versions 
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-               vit = version_states.begin(); vit != version_states.end(); vit++)
-          {
-            const VersionStateInfo &info = vit->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
-            {
-              it->first->request_post_closed_version_state(it->second, 
-                                                           preconditions);
-            }
+            it->first->request_initial_version_state(it->second, preconditions);
           }
         }
       }
@@ -13054,8 +13006,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         currently_active(true), currently_valid(true),
 #endif
-        meta_state(INVALID_VERSION_STATE),
-        eventual_ready(Event::NO_EVENT), merged_ready(Event::NO_EVENT),
         eventual_index(0), merged_index(0)
     //--------------------------------------------------------------------------
     {
@@ -13065,6 +13015,7 @@ namespace LegionRuntime {
         add_base_valid_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
         // If we are remote and we are now initialized send our notification
+#ifdef UNIMPLEMENTED_VERSIONING
         if (meta_state == EVENTUAL_VERSION_STATE)
         {
           Serializer rez;
@@ -13074,10 +13025,13 @@ namespace LegionRuntime {
           }
           runtime->send_version_state_initialization(owner_space, rez);
         }
+#endif
       }
+#ifdef UNIMPLEMENTED_VERSIONING
       // If we're the owner and we are in eventual state, add ourselves
       else if (meta_state == EVENTUAL_VERSION_STATE)
         eventual_nodes.add(local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13472,12 +13426,14 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
+#ifdef UNIMPLEMENTED_VERSIONING
       // Finally update our state if we are the owner
       if (is_owner() && (meta_state == INVALID_VERSION_STATE))
       {
         meta_state = EVENTUAL_VERSION_STATE;
         eventual_nodes.add(local_space);
       }
+#endif
       if (need_lock)
         state_lock.release();
     }
@@ -13648,19 +13604,61 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_close_version_state(const FieldMask &mask,
-                                                 std::set<Event> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::request_post_closed_version_state(
+    void VersionState::request_initial_version_state(
                   const FieldMask &request_mask, std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
+#if 0
+      UserEvent result;
+      AddressSpaceID target = owner_space;
+      FieldMask remaining_mask = request_mask;
+      {
+        AutoLock s_lock(state_lock);
+        // Check to see which fields we already have initial events for
+        if (!initial_events.empty() && !(request_mask * initial_fields))
+        {
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                initial_events.begin(); it != initial_events.end(); it++)
+          {
+            if (remaining_mask * it->second)
+              continue;
+            preconditions.insert(it->first);
+          }
+          remaining_mask -= initial_fields;
+          if (!remaining_mask)
+            return;
+        }
+        // Also check to see which fields we already have final events for
+        if (!final_events.empty() && !(request_mask * final_fields))
+        {
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                final_events.begin(); it != final_events.end(); it++)
+          {
+            if (remaining_mask * it->second)
+              continue;
+            preconditions.insert(it->first);
+          }
+          remaining_mask -= final_fields;
+          if (!remaining_mask)
+            return;
+        }
+        // At this point we can update the initial fields mask
+        initial_fields |= remaining_mask;
+        // If we are the owner and there are no existing versions, we can
+        // immediately make ourselves a local_version
+        if (is_owner() && eventual_nodes.empty())
+        {
+          eventual_nodes.add(local_space);
+          return; // we're done
+        }
+        // Otherwise make an event and save it
+        result = UserEvent::create_user_event();
+        initial_events[result] = remaining_mask;
+        // If we 
+      }
+#else
       assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13932,11 +13930,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
 #endif
+#ifdef UNIMPLEMENTED_VERSIONING
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(meta_state != MERGED_VERSION_STATE);
 #endif
       eventual_nodes.add(source);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13944,6 +13946,7 @@ namespace LegionRuntime {
                         UserEvent to_trigger, bool merged_request, bool upgrade)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // If we are not the owner, we should definitely be able to handle this
       if (!is_owner())
       {
@@ -14139,6 +14142,9 @@ namespace LegionRuntime {
           runtime->send_version_state_broadcast_response(source, rez);
         }
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14146,6 +14152,7 @@ namespace LegionRuntime {
                                       UserEvent to_trigger, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       // Keep track of any composite veiws we need to check 
       // for having recursive version states at here
       std::vector<CompositeView*> composite_views;
@@ -14341,6 +14348,9 @@ namespace LegionRuntime {
         // Finally trigger the event saying we have the data
         to_trigger.trigger();
       }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14348,6 +14358,7 @@ namespace LegionRuntime {
                                       UserEvent to_trigger, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef UNIMPLEMENTED_VERSIONING
       size_t target_count;
       derez.deserialize(target_count);
 #ifdef DEBUG_HIGH_LEVEL
@@ -14371,6 +14382,9 @@ namespace LegionRuntime {
         preconditions.insert(precondition);
       }
       to_trigger.trigger(Event::merge_events(preconditions)); 
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15555,7 +15569,7 @@ namespace LegionRuntime {
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
                                is_write, true/*premap*/, true/*path only*/,
-                               false/*complete*/, false/*close top*/);
+                               false/*final*/, false/*close top*/);
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
@@ -15650,7 +15664,7 @@ namespace LegionRuntime {
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
                                is_write, true/*premap*/, true/*path only*/, 
-                               false/*complete*/, false/*close top*/);
+                               false/*final*/, false/*close top*/);
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -15841,7 +15855,7 @@ namespace LegionRuntime {
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
                                is_write, false/*premap*/, true/*path only*/, 
-                               false/*complete*/, false/*close top*/);
+                               false/*final*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -15917,7 +15931,7 @@ namespace LegionRuntime {
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
                                is_write, false/*premap*/, true/*path only*/, 
-                               false/*complete*/, false/*close top*/);
+                               false/*final*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -15957,7 +15971,7 @@ namespace LegionRuntime {
                                      state.prev_epoch_users, user.field_mask);
       record_version_numbers(state, user.field_mask, version_info,
                              false/*advance*/, false/*premap only*/,
-                             false/*path only*/, true/*complete*/, 
+                             false/*path only*/, true/*final*/, 
                              false/*close top*/);
     }
 
@@ -16668,7 +16682,7 @@ namespace LegionRuntime {
                                                 bool capture_previous,
                                                 bool premap_only,
                                                 bool path_only,
-                                                bool needs_complete,
+                                                bool needs_final,
                                                 bool close_top)
     //--------------------------------------------------------------------------
     {
@@ -16677,13 +16691,12 @@ namespace LegionRuntime {
 #endif
       // Capture the version information for this logical region  
       VersionInfo::NodeInfo &node_info = version_info.find_tree_node_info(this);
-      node_info.pre_close_fields = state.dirty_below & mask;
       if (premap_only)
         node_info.set_premap_only();
       if (path_only)
         node_info.set_path_only();
-      if (needs_complete)
-        node_info.set_needs_complete();
+      if (needs_final)
+        node_info.set_needs_final();
       if (capture_previous)
         node_info.set_advance();
       if (close_top)
@@ -26790,7 +26803,7 @@ namespace LegionRuntime {
         // If we are getting this call, we know we are on a remote node
         // so we know the physical states are already unpacked and therefore
         // we can pass in a dummy context ID
-        info.make_local(preconditions, true/*close*/, context, 0/*dummy ctx*/);
+        info.make_local(preconditions, context, 0/*dummy ctx*/);
         // Now check the sub-tree for recursive composite views
         std::set<DistributedID> checked_views;
         it->first->make_local(preconditions, checked_views);
