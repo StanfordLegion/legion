@@ -38,20 +38,32 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024;
   int sub_regions = 64;
-  int option_char;
+//  int option_char;
   volatile int debug_flag = 0;
   
   const InputArgs &command_args = HighLevelRuntime::get_input_args();
-  while ((option_char = getopt(command_args.argc, command_args.argv, ":dn:s:")) != -1) {
-    switch (option_char)
-    {
-    case 'd': debug_flag = 1; break;
-    case 'n': num_elements = atoi (optarg); break;
-    case 's': sub_regions = atoi (optarg); break;
-    case '?': fprintf (stderr,
-                       "usage: %s [dn<size>s<size>]\n", command_args.argv[0]);
-    }
+  for (int i = 1; i < command_args.argc; i++)
+  {
+    if (!strcmp(command_args.argv[i],"-n"))
+      num_elements = atoi(command_args.argv[++i]);
+    if (!strcmp(command_args.argv[i],"-s"))
+      sub_regions = atoi(command_args.argv[++i]);
+    if (!strcmp(command_args.argv[i],"-d"))
+      debug_flag = 1;
+                
   }
+  
+  // while ((option_char = getopt(command_args.argc, command_args.argv, ":dn:s:l:")) != -1) {
+  //   switch (option_char)
+  //   {
+  //   case 'd': debug_flag = 1; break;
+  //   case 'n': num_elements = atoi (optarg); break;
+  //   case 's': sub_regions = atoi (optarg); break;
+  //   case 'l': break; /* pass through for -ll (low level runtime) */ 
+  //   case '?': fprintf (stderr,
+  //                      "usage: %s [dn<size>s<size>]\n", command_args.argv[0]);
+  //   }
+  // }
   
   
   while(debug_flag == 1) {
@@ -131,10 +143,12 @@ void top_level_task(const Task *task,
   // init_launcher.region_requirements[0].add_field(FID_SAL);
   // runtime->execute_index_space(ctx, init_launcher);
 
-  std::map<FieldID, const char*> field_map;
-  field_map.insert(std::make_pair(FID_TEMP, "bam/baz"));
+  
+  std::map<FieldID, std::string> field_string_map;
+  field_string_map.insert(std::make_pair(FID_TEMP, "bam/baz"));
+  
   PersistentRegion ocean_pr = PersistentRegion(runtime);
-  ocean_pr.create_persistent_subregions(ctx, "ocean_pr.hdf5", persistent_lr, persistent_lp, color_domain, field_map);
+  ocean_pr.create_persistent_subregions(ctx, "ocean_pr.hdf5", persistent_lr, persistent_lp, color_domain, field_string_map);
   
 
   ocean_pr.write_persistent_subregions(ctx, ocean_lr, ocean_lp);
