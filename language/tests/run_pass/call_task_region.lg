@@ -19,14 +19,23 @@ where reads(s) do
   return @y
 end
 
+task h(s : region(int), y : ptr(int, s)) : int
+where reads(s), writes(s) do
+  @y += 100
+  return @y
+end
+
 task g() : int
   var r = region(ispace(ptr, 5), int)
   var x = new(ptr(int, r))
   @x = 5
+  f(r, x)
+  h(r, x)
+  f(r, x)
   return f(r, x)
 end
 
 task main()
-  legionlib.assert(g() == 5, "test failed")
+  legionlib.assert(g() == 105, "test failed")
 end
 legionlib.start(main)
