@@ -1818,6 +1818,9 @@ namespace Realm {
     // binds a thread to the right set of cores based (-1 = not a local proc)
     void ProcessorAssignment::bind_thread(int core_id, pthread_attr_t *attr, const char *debug_name /*= 0*/)
     {
+      printf("ignoring old binding code! (core_id = %d)\n", core_id);
+      return;
+
       if(!valid) {
 	//printf("no processor assignment for %s %d (%p)\n", debug_name ? debug_name : "unknown", core_id, attr);
 	return;
