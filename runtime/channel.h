@@ -276,7 +276,7 @@ namespace LegionRuntime{
       // source and destination buffer
       Buffer src_buf, dst_buf;
       // map from unique id to request class, this map only keeps
-      // std::map<int64_t, uint64_t> segments_read, segments_written;
+       std::map<int64_t, uint64_t> segments_read, segments_write;
       // queue that contains all available free requests
       std::queue<Request*> available_reqs;
       // vector that contains the set of fields that needs
@@ -321,8 +321,8 @@ namespace LegionRuntime{
                               Rect<1> &irect, Rect<1> &orect,
                               int &done, int &offset_idx, int &block_start, int &total, int available_slots,
                               bool disable_batch = false);
-      void simple_update_bytes_read(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_read);
-      void simple_update_bytes_write(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_write);
+      void simple_update_bytes_read(int64_t offset, uint64_t size);
+      void simple_update_bytes_write(int64_t offset, uint64_t size);
 
 #ifdef USE_XFERDES_ITER
       virtual bool has_next_request() {
@@ -517,6 +517,10 @@ namespace LegionRuntime{
 
       ~MemcpyXferDes()
       {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -533,7 +537,7 @@ namespace LegionRuntime{
 
     private:
       MemcpyRequest* requests;
-      std::map<int64_t, uint64_t> segments_read, segments_write;
+      //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       const char *src_buf_base, *dst_buf_base;
@@ -549,6 +553,10 @@ namespace LegionRuntime{
 
       ~GASNetXferDes()
       {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         // trigger completion event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -565,7 +573,7 @@ namespace LegionRuntime{
 
     private:
       Request* requests;
-      std::map<int64_t, uint64_t> segments_read, segments_write;
+      //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       const char *buf_base;
@@ -581,6 +589,10 @@ namespace LegionRuntime{
 
       ~RemoteWriteXferDes()
       {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
         // If src_buf is intermediate buffer,
@@ -596,7 +608,7 @@ namespace LegionRuntime{
 
     private:
       RemoteWriteRequest* requests;
-      std::map<int64_t, uint64_t> segments_read, segments_write;
+      //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       const char *src_buf_base, *dst_buf_base;
@@ -613,6 +625,10 @@ namespace LegionRuntime{
                   XferOrder::Type _order, XferKind _kind);
 
       ~DiskXferDes() {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -630,7 +646,7 @@ namespace LegionRuntime{
     private:
       int fd;
       Request* requests;
-      std::map<int64_t, uint64_t> segments_read, segments_write;
+      //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       const char *buf_base;
@@ -646,6 +662,10 @@ namespace LegionRuntime{
                  XferOrder::Type _order, XferKind _kind);
       ~GPUXferDes()
       {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -662,7 +682,7 @@ namespace LegionRuntime{
 
     private:
       Request* requests;
-      std::map<int64_t, uint64_t> segments_read, segments_write;
+      //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
       char *src_buf_base;
@@ -681,6 +701,10 @@ namespace LegionRuntime{
                  long max_nr, XferOrder::Type _order, XferKind _kind);
       ~HDFXferDes()
       {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         delete pir;
         delete lsi;
@@ -1148,6 +1172,16 @@ namespace LegionRuntime{
           queues[it->first] = new PriorityXferDesQueue;
         }
         pthread_mutex_unlock(&queues_lock);
+      }
+
+      void destory_xferDes(XferDes* xd) {
+        pthread_rwlock_wrlock(&guid_lock);
+        std::map<XferDesID, XferDes*>::iterator it = guid_to_xd.find(xd->guid);
+        if (it != guid_to_xd.end()) {
+          guid_to_xd.erase(it);
+        }
+        delete xd;
+        pthread_rwlock_unlock(&guid_lock);
       }
 
       void enqueue_xferDes_local(XferDes* xd) {

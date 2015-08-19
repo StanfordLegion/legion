@@ -236,19 +236,27 @@ namespace LegionRuntime {
         return (nbytes > 0);
       }
 
-      void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_read)
+      inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
       {
         //printf("update_read: offset = %ld, size = %lu, pre = %ld, next = %ld\n", offset, size, pre_xd_guid, next_xd_guid);
         if (pre_xd_guid != XFERDES_NO_GUID) {
-          segments_read.insert(std::pair<int64_t, uint64_t>(offset, size));
-          std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
+          if ((int64_t)(bytes_read % src_buf.buf_size) == offset) {
+            bytes_read += size;
+            update = true;
+          }
+          else {
+            printf("[%llx] insert: key = %ld, value = %lu\n", (long long) this, offset, size);
+            segments_read[offset] = size;
+          }
+          std::map<int64_t, uint64_t>::iterator it;
           while (true) {
             it = segments_read.find(bytes_read % src_buf.buf_size);
             if (it == segments_read.end())
               break;
             bytes_read += it->second;
             update = true;
+            printf("[%llx] erase: key = %ld, value = %lu\n", (long long) this, it->first, it->second);
             segments_read.erase(it);
           }
           if (update) {
@@ -260,14 +268,19 @@ namespace LegionRuntime {
         }
       }
 
-      void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_write)
+      inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
         //printf("update_write: offset = %ld, size = %lu, pre = %ld, next = %ld\n", offset, size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
-          assert(dst_buf.is_ib);
-          segments_write.insert(std::pair<int64_t, uint64_t>(offset, size));
-          std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
+          if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
+            bytes_write += size;
+            update = true;
+          }
+          else {
+            segments_write[offset] = size;
+          }
+          std::map<int64_t, uint64_t>::iterator it;
           while (true) {
             it = segments_write.find(bytes_write % dst_buf.buf_size);
             if (it == segments_write.end())
@@ -320,7 +333,6 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        order = _order;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(), order);
         offset_idx = 0;
@@ -376,7 +388,7 @@ namespace LegionRuntime {
       {
         req->is_read_done = true;
         MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        simple_update_bytes_read(mc_req->src_buf - src_buf_base, mc_req->nbytes, segments_read);
+        simple_update_bytes_read(mc_req->src_buf - src_buf_base, mc_req->nbytes);
       }
 
       template<unsigned DIM>
@@ -384,7 +396,7 @@ namespace LegionRuntime {
       {
         req->is_write_done = true;
         MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        simple_update_bytes_write(mc_req->dst_buf - dst_buf_base, mc_req->nbytes, segments_write);
+        simple_update_bytes_write(mc_req->dst_buf - dst_buf_base, mc_req->nbytes);
         available_reqs.push(req);
       }
 
@@ -465,6 +477,7 @@ namespace LegionRuntime {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -485,8 +498,8 @@ namespace LegionRuntime {
               case XferDes::XFER_GASNET_READ:
               {
                 GASNetReadRequest* gasnet_read_req = (GASNetReadRequest*) requests[idx];
+                gasnet_read_req->src_offset = src_buf.alloc_offset + src_start;
                 gasnet_read_req->dst_buf = (char*)(buf_base + dst_start);
-                gasnet_read_req->src_offset = src_start;
                 gasnet_read_req->nbytes = req_size;
                 break;
               }
@@ -494,12 +507,12 @@ namespace LegionRuntime {
               {
                 GASNetWriteRequest* gasnet_write_req = (GASNetWriteRequest*) requests[idx];
                 gasnet_write_req->src_buf = (char*)(buf_base + src_start);
-                gasnet_write_req->dst_offset = dst_start;
+                gasnet_write_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gasnet_write_req->nbytes = req_size;
                 break;
               }
               default:
-           	    assert(false);
+                assert(0);
             }
             src_start += req_size;
             dst_start += req_size;
@@ -528,7 +541,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_read(offset, size, segments_read);
+        simple_update_bytes_read(offset, size);
       }
 
       template<unsigned DIM>
@@ -549,7 +562,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_write(offset, size, segments_write);
+        simple_update_bytes_write(offset, size);
         available_reqs.push(req);
         //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
@@ -651,7 +664,7 @@ namespace LegionRuntime {
         req->is_read_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
-        simple_update_bytes_read(offset, size, segments_read);
+        simple_update_bytes_read(offset, size);
       }
 
       template<unsigned DIM>
@@ -660,7 +673,7 @@ namespace LegionRuntime {
         req->is_write_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
-        simple_update_bytes_write(offset, size, segments_write);
+        simple_update_bytes_write(offset, size);
         available_reqs.push(req);
       }
 
@@ -813,7 +826,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_read(offset, size, segments_read);
+        simple_update_bytes_read(offset, size);
       }
 
       template<unsigned DIM>
@@ -834,7 +847,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_write(offset, size, segments_write);
+        simple_update_bytes_write(offset, size);
         available_reqs.push(req);
         //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
@@ -1045,7 +1058,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_read(offset, size, segments_read);
+        simple_update_bytes_read(offset, size);
       }
 
       template<unsigned DIM>
@@ -1074,7 +1087,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-        simple_update_bytes_write(offset, size, segments_write);
+        simple_update_bytes_write(offset, size);
         available_reqs.push(req);
       }
 #endif
@@ -1126,7 +1139,7 @@ namespace LegionRuntime {
             hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_buf.memory))->hdf_metadata_vec[src_index];
             pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(src_buf.memory))->rwlock);
             channel = channel_manager->get_hdf_read_channel();
-            buf_base = dst_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
+            buf_base = (char*) dst_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_impl->kind == MemoryImpl::MKIND_HDF);
             assert(dst_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             HDFReadRequest* hdf_read_reqs = (HDFReadRequest*) calloc(max_nr, sizeof(HDFReadRequest));
@@ -1165,7 +1178,7 @@ namespace LegionRuntime {
             hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->hdf_metadata_vec[index];
             pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->rwlock);
             channel = channel_manager->get_hdf_write_channel();
-            buf_base = src_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
+            buf_base = (char*) src_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
             assert(src_impl->kind == MemoryImpl::MKIND_SYSMEM || src_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             assert(dst_impl->kind == MemoryImpl::MKIND_HDF);
             HDFWriteRequest* hdf_write_reqs = (HDFWriteRequest*) calloc(max_nr, sizeof(HDFWriteRequest));
@@ -1852,7 +1865,7 @@ namespace LegionRuntime {
               XferDes *xd = finish_xferdes.back();
               finish_xferdes.pop_back();
               it->second->erase(xd);
-              delete xd;
+              xferDes_queue->destory_xferDes(xd);
             }
           }
         }

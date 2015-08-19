@@ -2682,6 +2682,37 @@ namespace LegionRuntime {
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
+    Buffer simple_create_intermediate_buffer(Memory::Kind kind, Domain domain, OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst, DomainLinearization linearization)
+    {
+      Machine machine = Machine::get_machine();
+      std::set<Memory> mem;
+      Memory tgt_mem = Memory::NO_MEMORY;
+      machine.get_all_memories(mem);
+      for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
+        if (it->kind() == kind) {
+          tgt_mem = *it;
+        }
+      assert(tgt_mem != Memory::NO_MEMORY);
+      size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+      std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+      off_t ib_elmnt_size = 0;
+      for (unsigned i = 0; i < oasvec.size(); i++) {
+        OffsetsAndSize oas_src, oas_dst;
+        oas_src.src_offset = oasvec[i].src_offset;
+        oas_src.dst_offset = ib_elmnt_size;
+        oas_src.size = oasvec[i].size;
+        oas_dst.src_offset = ib_elmnt_size;
+        oas_dst.dst_offset = oasvec[i].dst_offset;
+        oas_dst.size = oasvec[i].size;
+        ib_elmnt_size += oasvec[i].size;
+        oasvec_src.push_back(oas_src);
+        oasvec_dst.push_back(oas_dst);
+      }
+      Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, linearization, tgt_mem);
+      return ib_buf;
+    }
+
     template <unsigned DIM>
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
@@ -2887,33 +2918,8 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_GPUFB:
           {
             /* need to find a cpu memory as intermediate buffer*/
-            Machine machine = Machine::get_machine();
-            std::set<Memory> mem;
-            Memory cpu_mem = Memory::NO_MEMORY;
-            machine.get_all_memories(mem);
-            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-              if (it->kind() == Memory::SYSTEM_MEM) {
-                cpu_mem = *it;
-              }
-            assert(cpu_mem != Memory::NO_MEMORY);
-            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
             OASVec oasvec_src, oasvec_dst;
-            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
-            off_t ib_elmnt_size = 0;
-            for (int i = 0; i < oasvec.size(); i++) {
-              OffsetsAndSize oas_src, oas_dst;
-              oas_src.src_offset = oasvec[i].src_offset;
-              oas_src.dst_offset = ib_elmnt_size;
-              oas_src.size = oasvec[i].size;
-              oas_dst.src_offset = ib_elmnt_size;
-              oas_dst.dst_offset = oasvec[i].dst_offset;
-              oas_dst.size = oasvec[i].size;
-              ib_elmnt_size += oasvec[i].size;
-              oasvec_src.push_back(oas_src);
-              oasvec_dst.push_back(oas_dst);
-            }
-            Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, dst_buf.linearization, cpu_mem);
+            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
             XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
                                            100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
@@ -2928,33 +2934,8 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_DISK:
           {
             /* need to find a cpu memory as intermediate buffer*/
-            Machine machine = Machine::get_machine();
-            std::set<Memory> mem;
-            Memory cpu_mem = Memory::NO_MEMORY;
-            machine.get_all_memories(mem);
-            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-              if (it->kind() == Memory::SYSTEM_MEM) {
-                cpu_mem = *it;
-              }
-            assert(cpu_mem != Memory::NO_MEMORY);
-            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
             OASVec oasvec_src, oasvec_dst;
-            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
-            off_t ib_elmnt_size = 0;
-            for (int i = 0; i < oasvec.size(); i++) {
-              OffsetsAndSize oas_src, oas_dst;
-              oas_src.src_offset = oasvec[i].src_offset;
-              oas_src.dst_offset = ib_elmnt_size;
-              oas_src.size = oasvec[i].size;
-              oas_dst.src_offset = ib_elmnt_size;
-              oas_dst.dst_offset = oasvec[i].dst_offset;
-              oas_dst.size = oasvec[i].size;
-              ib_elmnt_size += oasvec[i].size;
-              oasvec_src.push_back(oas_src);
-              oasvec_dst.push_back(oas_dst);
-            }
-            Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, dst_buf.linearization, cpu_mem);
+            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
             XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
                                            100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
@@ -2972,9 +2953,20 @@ namespace LegionRuntime {
             break;
 #endif
           case MemoryImpl::MKIND_GLOBAL:
-            fprintf(stderr, "[DMA] To be implemented: disk memory -> gasnet memory\n");
-            assert(0);
+          {
+            log_dma.info("create disk mem->gasnet mem XD\n");
+            OASVec oasvec_src, oasvec_dst;
+            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
+                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
+            XferDes* xd2 = new GASNetXferDes<DIM>(true, ib_buf, dst_buf,
+                                             domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                             100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GASNET_WRITE);
+            path.push_back(xd1);
+            path.push_back(xd2);
             break;
+          }
           case MemoryImpl::MKIND_RDMA:
           case MemoryImpl::MKIND_REMOTE:
             fprintf(stderr, "[DMA] To be implemented: disk memory -> remote memory\n");
@@ -2995,9 +2987,9 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_ZEROCOPY:
           {
             printf("hdf->cpu XferDes\n");
-            XferDes* xd = create_hdf_xfer_des<DIM>(src_inst, false, src_buf, dst_buf,
-                                                   domain, oasvec,
-                                                   100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
+            XferDes* xd = new HDFXferDes<DIM>(src_inst, false, src_buf, dst_buf,
+                                              domain, oasvec, 100/*max_nr*/,
+                                              Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
             path.push_back(xd);
             break;
           }
@@ -3034,7 +3026,7 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
           {
-            log_dma.info("create gasnet->cpu xd\n");
+            log_dma.info("create gasnet->cpu XD\n");
             XferDes* xd = new GASNetXferDes<DIM>(false, src_buf, dst_buf,
                                                  domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
                                                  100/*max_nr*/, Layouts::XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
@@ -3046,40 +3038,27 @@ namespace LegionRuntime {
 #endif
           case MemoryImpl::MKIND_DISK:
           {
-            assert(0);
+            log_dma.info("create gasnet->disk mem XD\n");
+            /* need to find a cpu memory as intermediate buffer*/
+            OASVec oasvec_src, oasvec_dst;
+            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            XferDes* xd1 = new GASNetXferDes<DIM>(false, src_buf, ib_buf,
+                                             domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                             100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
+            XferDes* xd2 = new DiskXferDes<DIM>(true, ib_buf, dst_buf,
+                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE);
+            path.push_back(xd1);
+            path.push_back(xd2);
+
             break;
           }
           case MemoryImpl::MKIND_GLOBAL:
           {
             log_dma.info("create gasnet->gasnet xd\n");
             /* need to find a cpu memory as intermediate buffer*/
-            Machine machine = Machine::get_machine();
-            std::set<Memory> mem;
-            Memory cpu_mem = Memory::NO_MEMORY;
-            machine.get_all_memories(mem);
-            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-              if (it->kind() == Memory::SYSTEM_MEM) {
-                cpu_mem = *it;
-              }
-            assert(cpu_mem != Memory::NO_MEMORY);
-            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-            off_t ib_offset = get_runtime()->get_memory_impl(cpu_mem)->alloc_bytes(ib_size);
             OASVec oasvec_src, oasvec_dst;
-            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
-            off_t ib_elmnt_size = 0;
-            for (int i = 0; i < oasvec.size(); i++) {
-              OffsetsAndSize oas_src, oas_dst;
-              oas_src.src_offset = oasvec[i].src_offset;
-              oas_src.dst_offset = ib_elmnt_size;
-              oas_src.size = oasvec[i].size;
-              oas_dst.src_offset = ib_elmnt_size;
-              oas_dst.dst_offset = oasvec[i].dst_offset;
-              oas_dst.size = oasvec[i].size;
-              ib_elmnt_size += oasvec[i].size;
-              oasvec_src.push_back(oas_src);
-              oasvec_dst.push_back(oas_dst);
-            }
-            Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, dst_buf.linearization, cpu_mem);
+            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
             XferDes* xd1 = new GASNetXferDes<DIM>(false, src_buf, ib_buf,
                                              domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
                                              100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
