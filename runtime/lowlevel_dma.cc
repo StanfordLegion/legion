@@ -297,6 +297,15 @@ namespace LegionRuntime {
 
       queue_condvar.broadcast();
       queue_mutex.unlock();
+
+      // reap all the threads
+      for(std::vector<Thread *>::iterator it = worker_threads.begin();
+	  it != worker_threads.end();
+	  it++) {
+	(*it)->join();
+	delete (*it);
+      }
+      worker_threads.clear();
     }
 
     void DmaRequestQueue::enqueue_request(DmaRequest *r)
