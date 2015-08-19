@@ -562,8 +562,6 @@ namespace Realm {
       }
 
 #ifdef USE_CUDA
-      // Initialize the driver API
-      CHECK_CU( cuInit(0) );
       // Keep track of the local system memories so we can pin them
       // after we've initialized the GPU
       std::vector<LocalCPUMemory*> local_mems;
@@ -571,34 +569,39 @@ namespace Realm {
       // and prioritize them so they are used first
       std::vector<int> peer_gpus;
       std::vector<int> dumb_gpus;
-      {
-        int num_devices;
-        CHECK_CU( cuDeviceGetCount(&num_devices) );
-        for (int i = 0; i < num_devices; i++)
-        {
-          CUdevice device;
-          CHECK_CU( cuDeviceGet(&device, i) );
-          bool has_peer = false;
-          // Go through all the other devices and see
-          // if we have peer access to them
-          for (int j = 0; j < num_devices; j++)
-          {
-            if (i == j) continue;
-            CUdevice peer;
-            CHECK_CU( cuDeviceGet(&peer, j) );
-            int can_access;
-            CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-            if (can_access)
+      // only do this if gpus have been requested
+      if(num_local_gpus > 0) {
+	// Initialize the driver API
+	CHECK_CU( cuInit(0) );
+	{
+	  int num_devices;
+	  CHECK_CU( cuDeviceGetCount(&num_devices) );
+	  for (int i = 0; i < num_devices; i++)
+	  {
+	    CUdevice device;
+	    CHECK_CU( cuDeviceGet(&device, i) );
+	    bool has_peer = false;
+	    // Go through all the other devices and see
+	    // if we have peer access to them
+	    for (int j = 0; j < num_devices; j++)
             {
-              has_peer = true;
-              break;
-            }
-          }
-          if (has_peer)
-            peer_gpus.push_back(i);
-          else
-            dumb_gpus.push_back(i);
-        }
+	      if (i == j) continue;
+	      CUdevice peer;
+	      CHECK_CU( cuDeviceGet(&peer, j) );
+	      int can_access;
+	      CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
+	      if (can_access)
+	      {
+		has_peer = true;
+		break;
+	      }
+	    }
+	    if (has_peer)
+	      peer_gpus.push_back(i);
+	    else
+	      dumb_gpus.push_back(i);
+	  }
+	}
       }
 #endif
       // create local processors
