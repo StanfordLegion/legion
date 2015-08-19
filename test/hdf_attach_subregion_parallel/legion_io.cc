@@ -1,6 +1,12 @@
 #include "legion_io.h"
 #include "hdf5.h"
 
+struct task_args_t{
+  bool copy_write;
+  size_t field_map_size; 
+  char field_map_serial[4096];
+};
+
 
 
 void copy_values_task(const Task *task,
@@ -25,16 +31,35 @@ void copy_values_task(const Task *task,
                       Context ctx, HighLevelRuntime *runtime) {
   
   Piece piece = * ((Piece*) task->local_args);
-
-  bool write = *(bool*) task->args;
+  struct task_args_t task_args = *(struct task_args_t*) task->args;
   
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
   assert(piece.child_lr == regions[0].get_logical_region()); 
 
-  std::map<FieldID, const char*> field_map;
-  field_map.insert(std::make_pair(FID_TEMP, "bam/baz"));
+  std::map<FieldID, std::string> field_string_map;
+  Realm::Serialization::FixedBufferDeserializer fdb(task_args.field_map_serial,
+                                                    task_args.field_map_size);
+  bool ok  = fdb >> field_string_map;
+  if(!ok) {
+    std::cout << "ERROR in copy_values_task, can't deserialize " << std::endl;
+  }
+#ifdef IOTESTER_VERBOSE
+  std::cout << "field_map_size is : " <<task_args.field_map_size << std::endl;
+  std::cout << "field_string_map.size is : " << field_string_map.size() << std::endl;
+#endif
 
+  std::map<FieldID, const char*> field_map;
+  for (std::map<FieldID, std::string>::const_iterator it = field_string_map.begin();
+       it != field_string_map.end(); it++)
+  {
+#ifdef IOTESTER_VERBOSE
+    std::cout << "inserting field from args into local field_map: " <<
+      it->first << " : " << it->second << std::endl;
+#endif
+    field_map.insert(std::make_pair(it->first, it->second.c_str()));
+  }
+  
   Domain dom = runtime->get_index_space_domain(ctx,
                                                piece.child_lr.get_index_space());
 
@@ -58,16 +83,10 @@ void copy_values_task(const Task *task,
 #endif
 
   runtime->unmap_region(ctx, regions[0]);
-    
-  std::vector<size_t> field_sizes;
-  field_sizes.push_back(sizeof(double));
-  std::vector<const char*> path_names;
-  path_names.push_back("bam/baz");
-
-  
+      
   PhysicalRegion pr = runtime->attach_hdf5(ctx, piece.shard_name,
                                            piece.child_lr, piece.child_lr,
-                                           field_map, write ? LEGION_FILE_READ_WRITE: LEGION_FILE_READ_ONLY);
+                                           field_map, task_args.copy_write ? LEGION_FILE_READ_WRITE: LEGION_FILE_READ_ONLY);
   
   
   
@@ -82,7 +101,7 @@ void copy_values_task(const Task *task,
 
   CopyLauncher copy_launcher;
 
-  if(write) { 
+  if(task_args.copy_write) { 
     copy_launcher.add_copy_requirements(
       RegionRequirement(regions[1].get_logical_region(),
                         READ_ONLY, EXCLUSIVE,
@@ -109,10 +128,13 @@ void copy_values_task(const Task *task,
 void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion src_lr, LogicalPartition src_lp){
   
   ArgumentMap arg_map;
+  struct task_args_t task_args;
+  task_args.copy_write = true;
+  task_args.field_map_size = this->field_map_size;
+  memcpy(task_args.field_map_serial, this->field_map_serial, this->field_map_size);
 
-  bool copy_write = true;
   IndexLauncher write_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&copy_write, sizeof(bool)), arg_map);
+           		       TaskArgument(&task_args, sizeof(task_args)-4096+task_args.field_map_size), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -132,7 +154,7 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
 		      READ_WRITE, EXCLUSIVE, src_lr));
   
   /* setup region requirements using field map */ 
-  for(std::map<FieldID, const char*>::iterator iterator = this->field_map.begin(); iterator != this->field_map.end(); iterator++) {
+  for(std::map<FieldID, std::string>::iterator iterator = this->field_map.begin(); iterator != this->field_map.end(); iterator++) {
     FieldID fid = iterator->first;
     write_launcher.region_requirements[0].add_field(fid, false /* no instance required */);
     write_launcher.region_requirements[1].add_field(fid);
@@ -146,9 +168,15 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
   
   ArgumentMap arg_map;
 
-  bool copy_write = false;
+  struct task_args_t task_args;
+  task_args.copy_write = false;
+  task_args.field_map_size = this->field_map_size;
+//  std::cout << "write_persistent_subregions: setting field_map_size to: " << this->field_map_size << std::endl;
+  memcpy(task_args.field_map_serial, this->field_map_serial, this->field_map_size);
+  //std::cout << "task_args size is: " << sizeof(task_args) << std::endl;
+  
   IndexLauncher read_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&copy_write, sizeof(bool)), arg_map);
+           		       TaskArgument(&task_args, sizeof(task_args)-4096+task_args.field_map_size), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -168,7 +196,7 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
 		      READ_WRITE, EXCLUSIVE, src_lr));
   
   /* setup region requirements using field map */ 
-  for(std::map<FieldID, const char*>::iterator iterator = this->field_map.begin(); iterator != this->field_map.end(); iterator++) {
+  for(std::map<FieldID, std::string>::iterator iterator = this->field_map.begin(); iterator != this->field_map.end(); iterator++) {
     FieldID fid = iterator->first;
     read_launcher.region_requirements[0].add_field(fid, false /* no instance required */);
     read_launcher.region_requirements[1].add_field(fid);
@@ -181,7 +209,7 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
 void PersistentRegion::create_persistent_subregions(Context ctx, const char *name,
 						    LogicalRegion parent_lr,
 						    LogicalPartition lp,
-						    Domain dom, std::map<FieldID, const char*> &field_map){
+						    Domain dom, std::map<FieldID, std::string> &field_map){
 
 
   hid_t link_file_id, shard_group_id, shard_ds_id, dataspace_id, dtype_id, shard_file_id, attr_ds_id, link_group_id, link_group_2_id;
@@ -193,7 +221,21 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
   this->parent_lr = parent_lr;
   this->field_map = field_map;
   this->dom = dom; 
-    
+
+  std::map<FieldID, std::string> field_map_des;
+
+  Realm::Serialization::DynamicBufferSerializer dbs(0);
+  dbs << field_map;
+  this->field_map_size = dbs.bytes_used();
+  this->field_map_serial = dbs.detach_buffer();
+//  Realm::Serialization::FixedBufferDeserializer fbd(this->field_map_serial, this->field_map_size);
+//  bool ok = fbd >> field_map_des;
+//  if(ok) { 
+//    std::cout << " In create_persistent_subregions and I deserialized!: " <<
+//      ok << std::endl;
+//  }
+
+  
     int i = 0;
     for(LegionRuntime::LowLevel::Domain::DomainPointIterator itr(dom); itr; itr++) {
       pieces.push_back(Piece());
@@ -269,12 +311,12 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
     default:
         assert(false);
     }
-      typedef std::map<FieldID, const char*>::iterator it_type;
+      typedef std::map<FieldID, std::string>::iterator it_type;
       for(it_type iterator = field_map.begin(); iterator != field_map.end(); iterator++) {
       FieldID fid = iterator->first;
       char* ds;
       char* gp;
-      split_path_file(&gp, &ds, iterator->second);
+      split_path_file(&gp, &ds, iterator->second.c_str());
         size_t field_size = runtime->get_field_size(ctx, fs, fid);
         status = H5Tset_size(dtype_id, field_size);
         if(H5Lexists(shard_file_id, gp, H5P_DEFAULT)) { 
@@ -290,8 +332,8 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
                                    H5P_DEFAULT);
         }
         
-        if(H5Lexists(link_file_id, gp, H5P_DEFAULT) && H5Lexists(link_file_id, iterator->second, H5P_DEFAULT)) {
-          link_group_2_id = H5Gopen2(link_file_id, iterator->second, H5P_DEFAULT);
+        if(H5Lexists(link_file_id, gp, H5P_DEFAULT) && H5Lexists(link_file_id, iterator->second.c_str(), H5P_DEFAULT)) {
+          link_group_2_id = H5Gopen2(link_file_id, iterator->second.c_str(), H5P_DEFAULT);
         } else {
           link_group_id = H5Gcreate2(link_file_id, gp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
           link_group_2_id = H5Gcreate2(link_group_id, ds, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -313,7 +355,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx, const char *nam
         H5Fclose(shard_file_id);
 
         
-        status = H5Lcreate_external(pieces[i].shard_name, iterator->second,
+        status = H5Lcreate_external(pieces[i].shard_name, iterator->second.c_str(),
                                     link_group_2_id, ds_name_stream.str().c_str(),
                                     H5P_DEFAULT, H5P_DEFAULT);
         

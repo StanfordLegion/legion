@@ -33,8 +33,7 @@ public:
   PhysicalRegion pr;
   DomainPoint dp;
   char shard_name[40];
-  FieldID field_ids[10];
-  char field_names [2][10];
+
 private:
   
 }; 
@@ -48,7 +47,7 @@ class PersistentRegion {
     
     void create_persistent_subregions(Context ctx, const char *name, LogicalRegion parent_lr,
                                       LogicalPartition lp,
-                                      Domain dom, std::map<FieldID, const char*> &field_map); 
+                                      Domain dom, std::map<FieldID, std::string> &field_map); 
 
     void write_persistent_subregions(Context ctx, LogicalRegion src_lr, LogicalPartition src_lp);
     
@@ -65,7 +64,9 @@ class PersistentRegion {
     LogicalPartition  lp;
     LogicalRegion parent_lr;
     Domain dom;
-    std::map<FieldID, const char*> field_map; 
+  std::map<FieldID, std::string> field_map;
+  void * field_map_serial;
+  size_t field_map_size; 
     
 };
 
