@@ -972,7 +972,8 @@ namespace Realm {
     }
 
     CoreMap *cm = new CoreMap;
-    std::map<int, std::set<CoreMap::Proc *> > ht_sets;
+    // hyperthreading sets are cores with the same node ID and physical core ID
+    std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
 
     // look for entries named /sys/devices/system/node/node<N>
     for(struct dirent *ne = readdir(nd); ne; ne = readdir(nd)) {
@@ -1028,14 +1029,14 @@ namespace Realm {
 	cm->by_domain[node_id][cpu_id] = p;
 
 	// add to HT sets to deal with in a bit
-	ht_sets[core_id].insert(p);
+	ht_sets[std::make_pair(node_id, core_id)].insert(p);
       }
       closedir(cd);
     }
     closedir(nd);
 
     // proc with the same physical core share everything (ALU,FPU,LDST)
-    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
+    for(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
 	it != ht_sets.end();
 	it++) {
       const std::set<CoreMap::Proc *>& ht = it->second;
