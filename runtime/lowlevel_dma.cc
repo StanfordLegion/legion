@@ -18,6 +18,7 @@
 #include "lowlevel_gpu.h"
 #endif
 #include "accessor.h"
+#include "realm/threads.h"
 #include <errno.h>
 #include <aio.h>
 
@@ -53,6 +54,10 @@ namespace LegionRuntime {
 
     typedef Realm::GASNetMemory GASNetMemory;
     typedef Realm::DiskMemory DiskMemory;
+    typedef Realm::Thread Thread;
+    typedef Realm::ThreadLaunchParameters ThreadLaunchParameters;
+    typedef Realm::CoreReservation CoreReservation;
+    typedef Realm::CoreReservationParameters CoreReservationParameters;
 
     Logger::Category log_dma("dma");
 #ifdef EVENT_GRAPH_TRACE
@@ -84,12 +89,18 @@ namespace LegionRuntime {
 
       void shutdown_queue(void);
 
+      void start_workers(int count);
+
+      void worker_thread_loop(void);
+
     protected:
       GASNetHSL queue_mutex;
       GASNetCondVar queue_condvar;
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
+      CoreReservation core_rsrv;
+      std::vector<Thread *> worker_threads;
     };
 
     class DmaRequest : public Realm::Operation {
@@ -269,6 +280,7 @@ namespace LegionRuntime {
 
     DmaRequestQueue::DmaRequestQueue(void)
       : queue_condvar(queue_mutex)
+      , core_rsrv("DMA request queue", CoreReservationParameters())
     {
       queue_sleepers = 0;
       shutdown_flag = false;
@@ -4112,22 +4124,22 @@ namespace LegionRuntime {
       return fill_size;
     }
 
+#ifdef OLDTHREADS
     static volatile bool terminate_flag = false;
     static int num_threads = 0;
     static pthread_t *worker_threads = 0;
+#endif
 
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
-    static void *dma_worker_thread_loop(void *arg)
+    void DmaRequestQueue::worker_thread_loop(void)
     {
-      DmaRequestQueue *rq = (DmaRequestQueue *)arg;
-
       log_dma.info("dma worker thread created");
 
-      while(!terminate_flag) {
+      while(!shutdown_flag) {
 	// get a request, sleeping as necessary
-	DmaRequest *r = rq->dequeue_request(true);
+	DmaRequest *r = dequeue_request(true);
 
 	if(r) {
           r->mark_started();
@@ -4138,8 +4150,20 @@ namespace LegionRuntime {
       }
 
       log_dma.info("dma worker thread terminating");
+    }
 
-      return 0;
+    void DmaRequestQueue::start_workers(int count)
+    {
+      ThreadLaunchParameters tlp;
+
+      for(int i = 0; i < count; i++) {
+	Thread *t = Thread::create_kernel_thread<DmaRequestQueue,
+						 &DmaRequestQueue::worker_thread_loop>(this,
+										       tlp,
+										       core_rsrv,
+										       0 /* default scheduler*/);
+	worker_threads.push_back(t);
+      }
     }
     
     void start_dma_worker_threads(int count)
@@ -4148,6 +4172,7 @@ namespace LegionRuntime {
       CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
 #endif
       dma_queue = new DmaRequestQueue;
+#ifdef OLDTHREADS
       num_threads = count;
 
       worker_threads = new pthread_t[count];
@@ -4163,13 +4188,19 @@ namespace LegionRuntime {
         get_runtime()->add_thread(&worker_threads[i]);
 #endif
       }
+#else
+      dma_queue->start_workers(count);
+#endif
     }
 
     void stop_dma_worker_threads(void)
     {
+#ifdef OLDTHREADS
       terminate_flag = true;
+#endif
       dma_queue->shutdown_queue();
 
+#ifdef OLDTHREADS
       if(worker_threads) {
 	for(int i = 0; i < num_threads; i++) {
 	  void *dummy;
@@ -4182,6 +4213,7 @@ namespace LegionRuntime {
       delete dma_queue;
       dma_queue = 0;
       terminate_flag = false;
+#endif
     }
 
   };
