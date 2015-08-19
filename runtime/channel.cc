@@ -1829,6 +1829,17 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
+
+      /*static*/ void UpdateBytesWriteMessage::handle_request(RequestArgs args)
+      {
+        xferDes_queue->update_pre_bytes_write(args.guid, args.bytes_write);
+      }
+
+      /*static*/ void UpdateBytesReadMessage::handle_request(RequestArgs args)
+      {
+        xferDes_queue->update_next_bytes_read(args.guid, args.bytes_read);
+      }
+
       void DMAThread::dma_thread_loop()
       {
         while (!is_stopped) {

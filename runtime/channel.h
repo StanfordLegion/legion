@@ -59,6 +59,10 @@ namespace LegionRuntime{
         MKIND_DISK
       };
 
+      enum {
+        MAX_SERIALIZATION_LEN = 5 + RegionInstanceImpl::MAX_LINEARIZATION_LEN
+      };
+
       Buffer(void)
             : alloc_offset(0), is_ib(false), block_size(0), elmt_size(0),
               buf_size(0), linearization(), memory(Memory::NO_MEMORY) {}
@@ -91,6 +95,26 @@ namespace LegionRuntime{
 
 
       ~Buffer() {
+      }
+
+      void serialize(int* data)
+      {
+        *data = alloc_offset; data++;
+        *data = is_ib; data++;
+        *data = block_size; data++;
+        *data = elmt_size; data++;
+        *data = buf_size; data++;
+        linearization.serialize(data);
+      }
+
+      void deserialize(int* data)
+      {
+        alloc_offset = *data; data++;
+        is_ib = *data; data ++;
+        block_size = *data; data++;
+        elmt_size = *data; data++;
+        buf_size = *data; data++;
+        linearization.deserialize(data);
       }
 
       enum DimensionKind {
@@ -1094,6 +1118,95 @@ namespace LegionRuntime{
       XferDesQueue* xd_queue;
     };
 
+    struct XferDesCreateMessage {
+      struct RequestArgs : public BaseMedium {
+        RegionInstance inst;
+        void *resp_ptr;
+      };
+
+      struct ResponseArgs {
+        bool success;
+      };
+
+      // TODO: replace with new serialization stuff
+      struct Payload {
+        bool has_pre_XferDes;
+        size_t bytes_needed;
+        size_t block_size;
+        size_t element_size;
+        //off_t adjust;
+        off_t list_size;
+        ReductionOpID redopid;
+        int linearization_bits[16]; //RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+        size_t num_fields; // as long as it needs to be
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+      static void handle_response(ResponseArgs args);
+
+      typedef ActiveMessageMediumNoReply<XFERDES_CREATE_MSGID,
+                                         RequestArgs,
+                                         handle_request> Request;
+
+      typedef ActiveMessageShortNoReply<XFERDES_CREATE_RPLID,
+                                        ResponseArgs,
+                                        handle_response> Response;
+
+      struct Result {
+        RegionInstance i;
+        off_t inst_offset;
+        off_t count_offset;
+      };
+
+      static void send_request(Result *result,
+    	                       gasnet_node_t target, Memory memory, IndexSpace ispace,
+                               RegionInstance parent_inst, size_t bytes_needed,
+                               size_t block_size, size_t element_size,
+                               off_t list_size, ReductionOpID redopid);
+    };
+
+    struct UpdateBytesWriteMessage {
+      struct RequestArgs {
+        XferDesID guid;
+        uint64_t bytes_write;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_WRITE_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, XferDesID guid, uint64_t bytes_write)
+      {
+        RequestArgs args;
+        args.guid = guid;
+        args.bytes_write = bytes_write;
+        Message::request(target, args);
+      }
+    };
+
+    struct UpdateBytesReadMessage {
+      struct RequestArgs {
+        XferDesID guid;
+        uint64_t bytes_read;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_READ_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, XferDesID guid, uint64_t bytes_read)
+      {
+        RequestArgs args;
+        args.guid = guid;
+        args.bytes_read = bytes_read;
+        Message::request(target, args);
+      }
+    };
+
     class XferDesQueue {
     public:
       enum {
@@ -1141,8 +1254,8 @@ namespace LegionRuntime{
           pthread_rwlock_unlock(&guid_lock);
         }
         else {
-          // TODO: send a active message to remote node
-          assert(0);
+          // send a active message to remote node
+          UpdateBytesWriteMessage::send_request(execution_node, xd_guid, bytes_write);
         }
       }
 
@@ -1158,8 +1271,8 @@ namespace LegionRuntime{
           pthread_rwlock_unlock(&guid_lock);
         }
         else {
-          // TODO: send a active message to remote node
-          assert(0);
+          // send a active message to remote node
+          UpdateBytesReadMessage::send_request(execution_node, xd_guid, bytes_read);
         }
       }
 

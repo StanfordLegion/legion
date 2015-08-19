@@ -45,6 +45,14 @@ namespace Realm {
 };
 #endif
 
+// create xd message and update bytes read/write messages
+#include "channel.h"
+namespace Realm {
+  typedef LegionRuntime::LowLevel::XferDesCreateMessage XferDesCreateMessage;
+  typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
+  typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
+}
+
 #include <unistd.h>
 #include <signal.h>
 
@@ -445,6 +453,10 @@ namespace Realm {
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
       hcount += MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
+      //hcount += XferDesCreateMessage::Request::add_handler_entries(&handlers[hcount], "Create XferDes Request AM");
+      //hcount += XferDesCreateMessage::Response::add_handler_entries(&handlers[hcount], "Create XferDes Response AM");
+      hcount += UpdateBytesWriteMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Write AM");
+      hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 
