@@ -3803,10 +3803,13 @@ function codegen.stat_assignment(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr_list(cx, node.lhs)
   local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = std.zip(rhs, node.lhs, node.rhs):map(
+  rhs = std.zip(rhs, node.rhs):map(
     function(pair)
-      local rh_value, lh_node, rh_node = unpack(pair)
+      local rh_value, rh_node = unpack(pair)
       local rh_expr = rh_value:read(cx, rh_node.expr_type)
+      -- Capture the rhs value in a temporary so that it doesn't get
+      -- overridden on assignment to the lhs (if lhs and rhs alias).
+      rh_expr = expr.once_only(rh_expr.actions, rh_expr.value)
       actions:insert(rh_expr.actions)
       return values.value(
         expr.just(quote end, rh_expr.value),
