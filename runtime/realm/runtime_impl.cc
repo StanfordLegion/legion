@@ -699,7 +699,7 @@ namespace Realm {
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
 	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p, Processor::TOC_PROC, "gpu worker",
+ 	  GPUProcessor *gp = new GPUProcessor(p,
                                               (i < peer_gpus.size() ?
                                                 peer_gpus[i] : 
                                                 dumb_gpus[i-peer_gpus.size()]), 
@@ -1100,16 +1100,15 @@ namespace Realm {
 	spawn_on_all(local_io_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
+
+#ifdef USE_CUDA
+	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
+#endif
       } else {
 	log_task.info("no processor init task");
       }
-
-#ifdef USE_CUDA
-      for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
-	  it != local_gpus.end();
-	  it++)
-	(*it)->start_processor();
-#endif
 
       if(task_id != 0 && 
 	 ((style != Runtime::ONE_TASK_ONLY) || 
@@ -1195,10 +1194,7 @@ namespace Realm {
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
 	  it != local_gpus.end();
 	  it++)
-      {
-	(*it)->me.spawn(0 /* shutdown task id */, 0, 0);
-	(*it)->shutdown_processor();
-      }
+	(*it)->shutdown();
 #endif
 
 

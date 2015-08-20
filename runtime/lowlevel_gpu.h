@@ -21,6 +21,7 @@
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
 #include "cuda_runtime.h"
+#include "realm/threads.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -32,7 +33,7 @@
 } while(0)
 
 // Need CUDA 6.5 or later for good error reporting
-#if __CUDA_API_VERSION >= 6050
+#if CUDA_VERSION >= 6050
 #define CHECK_CU(cmd) do { \
   CUresult ret = (cmd); \
   if(ret != CUDA_SUCCESS) { \
@@ -174,9 +175,9 @@ namespace LegionRuntime {
       size_t bytes, lines;
     };
 
-    class GPUWorker : public PreemptableThread {
+    class GPUWorker {
     public:
-      GPUWorker(void);
+      GPUWorker(size_t stack_size);
       virtual ~GPUWorker(void);
     public:
       void shutdown(void);
@@ -184,14 +185,10 @@ namespace LegionRuntime {
       void enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy);
       void handle_complete_job(GPUProcessor *proc, GPUJob *job);
     public:
-      virtual Processor get_processor(void) const;
-      virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for);
+      void thread_main(void);
     public:
       static GPUWorker* start_gpu_worker_thread(size_t stack_size);
       static void stop_gpu_worker_thread(void);
-    private:
-      static GPUWorker*& get_worker(void);
     protected:
       // Keep these sorted by processors
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
@@ -200,27 +197,25 @@ namespace LegionRuntime {
       GASNetHSL worker_lock;
       GASNetCondVar worker_cond;
       bool worker_shutdown_requested;
+      Realm::CoreReservation core_rsrv;
+      Realm::Thread *worker_thread;
+      static GPUWorker *worker_singleton;
     };
 
-    class GPUThread : public LocalThread {
+    class GPUProcessor : public Realm::LocalTaskProcessor {
     public:
-      GPUThread(GPUProcessor *proc);
-      virtual ~GPUThread(void);
-    public:
-      virtual void thread_main(void);
-    public:
-      GPUProcessor *const gpu_proc;
-    };
-
-    class GPUProcessor : public LocalProcessor {
-    public:
-      GPUProcessor(Processor _me, Processor::Kind _kind, 
-                   const char *name, int _gpu_index, 
+      GPUProcessor(Processor _me, int _gpu_index, 
 		   size_t _zcmem_size, size_t _fbmem_size, 
                    size_t _stack_size, GPUWorker *worker/*can be 0*/,
-                   int _streams, int core_id = -1);
+                   int _streams);
       virtual ~GPUProcessor(void);
+
+    protected:
+      void initialize_cuda_stuff(void);
+
     public:
+      virtual void shutdown(void);
+
       void *get_zcmem_cpu_base(void) const;
       void *get_fbmem_gpu_base(void) const;
       size_t get_zcmem_size(void) const;
@@ -269,9 +264,6 @@ namespace LegionRuntime {
 			  const ElementMask *mask, size_t elmt_size,
 			  Event start_event, Event finish_event);
     public:
-      // Helper method for getting a thread's processor value
-      static Processor get_processor(void); 
-    public:
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);
       void handle_peer_access(CUcontext peer_ctx);
@@ -280,11 +272,15 @@ namespace LegionRuntime {
       CUstream get_current_task_stream(void);
     public:
       void load_context(void);
+#if 0
       bool execute_gpu(GPUThread *thread);
+#endif
     public:
+#if 0
       virtual void initialize_processor(void);
       virtual void finalize_processor(void);
       virtual LocalThread* create_new_thread(void);
+#endif
     public:
       void enqueue_copy(GPUMemcpy *copy);
     public:
@@ -301,6 +297,7 @@ namespace LegionRuntime {
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
+      Realm::CoreReservation *core_rsrv;
     protected:
       std::deque<GPUMemcpy*> copies;
       std::deque<GPUJob*> complete_jobs;
@@ -316,8 +313,10 @@ namespace LegionRuntime {
       CUstream device_to_host_stream;
       CUstream device_to_device_stream;
       CUstream peer_to_peer_stream;
+
+      CUstream switch_to_next_task_stream(void);
     protected:
-      unsigned current_stream;
+      size_t current_stream;
       std::vector<CUstream> task_streams;
     public:
       // Our helper cuda calls

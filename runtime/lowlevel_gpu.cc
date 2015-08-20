@@ -15,6 +15,8 @@
 
 #include "lowlevel_gpu.h"
 
+#include "realm/tasks.h"
+
 #include <stdio.h>
 
 GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
@@ -74,7 +76,8 @@ namespace LegionRuntime {
       start_enclosing(task->finish_event); 
       unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
-      if (task->perform_capture()) {
+      // TODO: profile overhead of these callbacks
+      if (true /*task->perform_capture()*/) {
         CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
                                       (void*)this, 0) );
       }
@@ -132,8 +135,7 @@ namespace LegionRuntime {
     /*static*/ void GPUTask::handle_finish(CUstream stream, CUresult res, void *data)
     {
       GPUTask *task = static_cast<GPUTask*>(data);
-      if (task->task->perform_capture())
-        task->task->mark_completed();
+      task->task->mark_completed();
       task->gpu->handle_complete_job(task);
     }
 
@@ -299,38 +301,94 @@ namespace LegionRuntime {
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
     }
 
-    GPUThread::GPUThread(GPUProcessor *gpu)
-      : LocalThread(gpu), gpu_proc(gpu)
+  class stringbuilder {
+  public:
+    operator std::string(void) const { return ss.str(); }
+    template <typename T>
+    stringbuilder& operator<<(T data) { ss << data; return *this; }
+  protected:
+    std::stringstream ss;
+  };
+
+    // we want to subclass the scheduler to replace the execute_task method, but we also want to
+    //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
+    //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
+    //  have the same prototypes)
+
+    template <typename T>
+    class GPUTaskScheduler : public T {
+    public:
+      GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv, GPUProcessor *_gpu);
+
+      virtual ~GPUTaskScheduler(void);
+
+    protected:
+      virtual bool execute_task(Task *task);
+
+      // might also need to override the thread-switching methods to keep TLS up to date
+
+      GPUProcessor *gpu;
+    };
+
+    template <typename T>
+    GPUTaskScheduler<T>::GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
+					  GPUProcessor *_gpu)
+      : T(_proc, _core_rsrv), gpu(_gpu)
+    {
+      // nothing else
+    }
+
+    template <typename T>
+    GPUTaskScheduler<T>::~GPUTaskScheduler(void)
     {
     }
 
-    GPUThread::~GPUThread(void)
+    namespace ThreadLocal {
+      static __thread GPUProcessor *current_gpu_proc = 0;
+    };
+
+    template <typename T>
+    bool GPUTaskScheduler<T>::execute_task(Task *task)
     {
+      // use TLS to make sure that the task can find the current GPU processor when it makes
+      //  CUDA RT calls
+      // TODO: either eliminate these asserts or do TLS swapping when using user threads
+      assert(ThreadLocal::current_gpu_proc == 0);
+      ThreadLocal::current_gpu_proc = gpu;
+
+      // bump the current stream
+      // TODO: sanity-check whether this even works right when GPU tasks suspend
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CUstream s = 
+#endif
+	gpu->switch_to_next_task_stream();
+
+      // TODO: decide how we want to show deferred execution in profiler
+      //CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
+      //			    (void*)this, 0) );
+
+      bool ok = T::execute_task(task);
+
+      // TODO: decide how we want to show deferred execution in profiler
+      //CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_finish, 
+      //                              (void*)this, 0) );
+
+      // A useful debugging macro
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CHECK_CU( cuStreamSynchronize(s) );
+#endif
+
+      assert(ThreadLocal::current_gpu_proc == gpu);
+      ThreadLocal::current_gpu_proc = 0;
+
+      return ok;
     }
 
-    void GPUThread::thread_main(void)
-    {
-      gasnett_threadkey_set(gpu_thread_ptr, gpu_proc);
-      // Load the context
-      gpu_proc->load_context();
-      if (initialize)
-        proc->initialize_processor();
-      while (true)
-      {
-        assert(state == RUNNING_STATE);
-        bool quit = gpu_proc->execute_gpu(this);
-        if (quit) break;
-      }
-      if (finalize)
-        proc->finalize_processor();
-    }
-
-    GPUProcessor::GPUProcessor(Processor _me, Processor::Kind _kind, 
-                               const char *_name, int _gpu_index, 
+    GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
                                size_t _zcmem_size, size_t _fbmem_size, 
                                size_t _stack_size, GPUWorker *worker/*can be 0*/,
-                               int streams, int _core_id /*= -1*/)
-      : LocalProcessor(_me, _kind, _stack_size, _name, _core_id),
+                               int streams)
+      : LocalTaskProcessor(_me, Processor::TOC_PROC),
         gpu_index(_gpu_index), zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
         zcmem_reserve(16 << 20), fbmem_reserve(32 << 20), gpu_worker(worker),
         current_stream(0)
@@ -359,11 +417,34 @@ namespace LegionRuntime {
       kernel_arg_size = 0;
       CHECK_CU( cuMemAllocHost((void**)&kernel_arg_buffer, kernel_buffer_size) );
       
+      initialize_cuda_stuff();
+
       CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+
+      Realm::CoreReservationParameters params;
+      params.set_num_cores(1);
+      params.set_alu_usage(params.CORE_USAGE_SHARED);
+      params.set_fpu_usage(params.CORE_USAGE_SHARED);
+      params.set_ldst_usage(params.CORE_USAGE_SHARED);
+      params.set_max_stack_size(_stack_size);
+
+      std::string name = stringbuilder() << "GPU proc " << _me;
+
+      core_rsrv = new Realm::CoreReservation(name, params);
+
+#ifdef REALM_USE_USER_THREADS_FOR_GPU
+      Realm::UserThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::UserThreadTaskScheduler>(me, *core_rsrv, this);
+      // no config settings we want to tweak yet
+#else
+      Realm::KernelThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::KernelThreadTaskScheduler>(me, *core_rsrv, this);
+      // no config settings we want to tweak yet
+#endif
+      set_scheduler(sched);
     }
 
     GPUProcessor::~GPUProcessor(void)
     {
+      delete core_rsrv;
     }
 
     void* GPUProcessor::get_zcmem_cpu_base(void) const
@@ -505,18 +586,9 @@ namespace LegionRuntime {
                         GPU_MEMCPY_PEER_TO_PEER))->run_or_wait(start_event);
     }
 
-    /*static*/ Processor GPUProcessor::get_processor(void)
-    {
-      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
-      // If this happens there is a case we're not handling
-      assert(tls_val != NULL);
-      GPUProcessor *gpu = (GPUProcessor*)tls_val;
-      return gpu->me;
-    }
-
     void GPUProcessor::register_host_memory(void *base, size_t size)
     {
-      if (!shutdown)
+      if (true /*SJT: why this? !shutdown*/)
       {
         CHECK_CU( cuCtxPushCurrent(proc_ctx) );
         CHECK_CU( cuMemHostRegister(base, size, CU_MEMHOSTREGISTER_PORTABLE) ); 
@@ -549,6 +621,8 @@ namespace LegionRuntime {
       if (gpu_worker) {
         gpu_worker->handle_complete_job(this, job);
       } else {
+	assert(0);
+#if 0
         // Otherwise see if we need to wake up a thread
         LocalThread *to_wake = 0;
         LocalThread *to_start = 0;
@@ -571,11 +645,20 @@ namespace LegionRuntime {
           to_wake->awake();
         if (to_start)
           to_start->start_thread(stack_size, core_id, processor_name);
+#endif
       }
     }
 
     CUstream GPUProcessor::get_current_task_stream(void)
     {
+      return task_streams[current_stream];
+    }
+
+    CUstream GPUProcessor::switch_to_next_task_stream(void)
+    {
+      current_stream++;
+      if(current_stream >= task_streams.size())
+	current_stream = 0;
       return task_streams[current_stream];
     }
 
@@ -585,6 +668,7 @@ namespace LegionRuntime {
       CHECK_CU( cuCtxPushCurrent(proc_ctx) );
     }
 
+#if 0
     bool GPUProcessor::execute_gpu(GPUThread *thread)
     {
       mutex.lock();
@@ -712,8 +796,9 @@ namespace LegionRuntime {
       }
       return shutdown;
     }
+#endif
 
-    void GPUProcessor::initialize_processor(void)
+    void GPUProcessor::initialize_cuda_stuff(void)
     {
       // load any modules, functions, and variables that we deferred
       const std::map<void*,void**> &deferred_modules = get_deferred_modules();
@@ -770,23 +855,19 @@ namespace LegionRuntime {
 
       log_gpu.info("gpu initialized: zcmem=%p/%p fbmem=%p",
               zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
-
-      // now do the normal initialization
-      LocalProcessor::initialize_processor();
     }
 
-    void GPUProcessor::finalize_processor(void)
+    void GPUProcessor::shutdown(void)
     {
       log_gpu.info("shutting down");
-      // do the normal finalization 
-      LocalProcessor::finalize_processor();
-      // Synchronize the device so we can flush any printf buffers
-      CHECK_CU( cuCtxSynchronize() );
-    }
 
-    LocalThread* GPUProcessor::create_new_thread(void)
-    {
-      return new GPUThread(this);
+      // Synchronize the device so we can flush any printf buffers
+      CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+      CHECK_CU( cuCtxSynchronize() );
+      CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+
+      // shut down threads/scheduler
+      LocalTaskProcessor::shutdown();
     }
 
     void GPUProcessor::enqueue_copy(GPUMemcpy *copy)
@@ -796,6 +877,8 @@ namespace LegionRuntime {
       if (gpu_worker) {
         gpu_worker->enqueue_copy(this, copy);
       } else {
+	assert(0);
+#if 0
         LocalThread *to_wake = 0;
         LocalThread *to_start = 0;
 	mutex.lock();
@@ -817,6 +900,7 @@ namespace LegionRuntime {
           to_wake->awake();
         if (to_start)
           to_start->start_thread(stack_size, core_id, processor_name);
+#endif
       }
     }
 
@@ -853,22 +937,39 @@ namespace LegionRuntime {
     /*static*/ size_t GPUProcessor::num_node_gpus;
     static std::vector<pthread_t> dma_threads;
 
+    /*static*/ GPUWorker *GPUWorker::worker_singleton = 0;
 
-    GPUWorker::GPUWorker(void)
+    GPUWorker::GPUWorker(size_t stack_size)
       : copies_empty(true), jobs_empty(true),
-	worker_cond(worker_lock), worker_shutdown_requested(false)
+	worker_cond(worker_lock), worker_shutdown_requested(false),
+	core_rsrv("GPU worker thread", Realm::CoreReservationParameters())
     {
+      Realm::ThreadLaunchParameters tlp;
+
+      worker_thread = Realm::Thread::create_kernel_thread<GPUWorker,
+							  &GPUWorker::thread_main>(this,
+										   tlp,
+										   core_rsrv,
+										   0);
     }
 
     GPUWorker::~GPUWorker(void)
     {
+      // shutdown should have already been called
+      assert(worker_thread == 0);
     }
 
     void GPUWorker::shutdown(void)
     {
-      AutoHSLLock a(worker_lock);
-      worker_shutdown_requested = true;
-      worker_cond.signal();
+      {
+	AutoHSLLock a(worker_lock);
+	worker_shutdown_requested = true;
+	worker_cond.signal();
+      }
+
+      worker_thread->join();
+      delete worker_thread;
+      worker_thread = 0;
     }
 
     void GPUWorker::enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy)
@@ -887,13 +988,6 @@ namespace LegionRuntime {
       proc_jobs.push_back(job);
       jobs_empty = false;
       worker_cond.signal();
-    }
-
-    Processor GPUWorker::get_processor(void) const
-    {
-      // should never be called
-      assert(false);
-      return Processor::NO_PROC;
     }
 
     void GPUWorker::thread_main(void)
@@ -949,33 +1043,20 @@ namespace LegionRuntime {
       }
     }
 
-    void GPUWorker::sleep_on_event(Event wait_for)
-    {
-      // should never be called
-      assert(false);
-    }
-
     /*static*/
     GPUWorker* GPUWorker::start_gpu_worker_thread(size_t stack_size)
     {
-      GPUWorker *&the_gpu_worker = get_worker();
-      the_gpu_worker = new GPUWorker();
-      the_gpu_worker->start_thread(stack_size, -1, "GPU worker");
-      return the_gpu_worker;
+      worker_singleton = new GPUWorker(stack_size);
+      return worker_singleton;
     }
 
     /*static*/ void GPUWorker::stop_gpu_worker_thread(void)
     {
-      GPUWorker *worker = get_worker();
-      if (worker != NULL)
-        get_worker()->shutdown(); 
-    }
-
-    /*static*/
-    GPUWorker*& GPUWorker::get_worker(void)
-    {
-      static GPUWorker *worker = NULL;
-      return worker;
+      if(worker_singleton) {
+	worker_singleton->shutdown();
+	delete worker_singleton;
+	worker_singleton = 0;
+      }
     }
 
     // framebuffer memory
@@ -1040,13 +1121,7 @@ namespace LegionRuntime {
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::find_local_gpu(void)
     {
-      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
-      // This can return NULL during start-up
-      if (tls_val == NULL)
-        return NULL;
-      assert(tls_val != NULL);
-      GPUProcessor *local = (GPUProcessor*)tls_val;
-      return local;
+      return ThreadLocal::current_gpu_proc;
     }
 
     /*static*/ std::map<void*,void**>& GPUProcessor::get_deferred_modules(void)
@@ -1308,7 +1383,7 @@ namespace LegionRuntime {
         }
         log_gpu.error("Failed to load CUDA module! Error log: %s", 
                 log_error_buffer);
-#if __CUDA_API_VERSION >= 6050
+#if CUDA_VERSION >= 6050
         const char *name, *str;
         CHECK_CU( cuGetErrorName(result, &name) );
         CHECK_CU( cuGetErrorString(result, &str) );
