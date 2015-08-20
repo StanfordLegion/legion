@@ -37,7 +37,7 @@ void top_level_task(const Task *task,
 		    const std::vector<PhysicalRegion> &regions,
 		    Context ctx, HighLevelRuntime *runtime)
 {
-  int num_elements = 1024;
+  uint64_t num_elements = 1024;
   int sub_regions = 64;
   int ndim = 2;
   volatile int debug_flag = 0;
@@ -46,7 +46,7 @@ void top_level_task(const Task *task,
   for (int i = 1; i < command_args.argc; i++)
   {
     if (!strcmp(command_args.argv[i],"-n"))
-      num_elements = atoi(command_args.argv[++i]);
+      num_elements = atoll(command_args.argv[++i]);
     if (!strcmp(command_args.argv[i],"-s"))
       sub_regions = atoi(command_args.argv[++i]);
     if (!strcmp(command_args.argv[i],"-d"))
