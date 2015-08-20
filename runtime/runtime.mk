@@ -127,6 +127,7 @@ endif
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 CC_FLAGS        += -DUSE_CUDA
+NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
