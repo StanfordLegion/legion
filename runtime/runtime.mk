@@ -100,7 +100,7 @@ ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/greenlet
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
 ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
 else
@@ -276,10 +276,6 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/runtime_impl.cc
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
-		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
-		   $(LG_RT_DIR)/greenlet/greenlet-cc.cc
-ASM_SRC		+= $(LG_RT_DIR)/greenlet/greenlet-asm.S
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL

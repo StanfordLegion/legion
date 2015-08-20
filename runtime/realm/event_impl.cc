@@ -119,7 +119,6 @@ namespace Realm {
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
 
-    // all of the stuff below will hopefully get subsumed by this
     Thread *thread = Thread::self();
     if(thread) {
       // describe the condition we want the thread to wait on
@@ -127,41 +126,7 @@ namespace Realm {
       return;
     }
 
-    // are we a thread that knows how to do something useful while waiting?
-    if(PreemptableThread::preemptable_sleep(*this))
-      return;
-
-    // maybe a GPU thread?
-#ifdef USE_CUDA
-    void *ptr = gasnett_threadkey_get(gpu_thread_ptr);
-    if(ptr != 0) {
-      //assert(0);
-      //printf("oh, good - we're a gpu thread - we'll spin for now\n");
-      //printf("waiting for " IDFMT "/%d\n", id, gen);
-      while(!e->has_triggered(gen)) {
-#ifdef __SSE2__
-	_mm_pause();
-#else
-	usleep(1000);
-#endif
-      }
-      //printf("done\n");
-      return;
-    }
-#endif
-    // we're probably screwed here - try waiting and polling gasnet while
-    //  we wait
-    //printf("waiting on event, polling gasnet to hopefully not die\n");
-    while(!e->has_triggered(gen)) {
-      // can't poll here - the GPU DMA code sometimes polls from inside an active
-      //  message handler (consider turning polling back on once that's fixed)
-      //do_some_polling();
-#ifdef __SSE2__
-      _mm_pause();
-#endif
-      // no sleep - we don't want an OS-scheduler-latency here
-      //usleep(10000);
-    }
+    assert(0); // if we're not a Thread, we have a problem
     return;
     //assert(ptr != 0);
   }

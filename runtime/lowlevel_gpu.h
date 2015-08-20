@@ -84,30 +84,6 @@ namespace LegionRuntime {
       GPUProcessor *const gpu;
     };
 
-    // This just wraps up a normal task
-    class GPUTask : public GPUJob {
-    public:
-      GPUTask(GPUProcessor *_gpu, Task *_task);
-      virtual ~GPUTask(void);
-    public:
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
-      virtual void run_or_wait(Event start_event);
-      virtual void execute(void);
-      virtual void finish_job(void);
-    public:
-      void set_local_stream(CUstream s) { local_stream = s; }
-      void record_modules(const std::set<void**> &m) { modules = m; }
-    public:
-      // Helper methods for handling a callback
-      static void handle_start(CUstream stream, CUresult res, void *data);
-      static void handle_finish(CUstream stream, CUresult res, void *data);
-    public:
-      Task *task;
-      CUstream local_stream;
-      std::set<void**> modules;
-    };
-
     // An abstract base class for all GPU memcpy operations
     class GPUMemcpy : public GPUJob {
     public:

@@ -4133,12 +4133,6 @@ namespace LegionRuntime {
       return fill_size;
     }
 
-#ifdef OLDTHREADS
-    static volatile bool terminate_flag = false;
-    static int num_threads = 0;
-    static pthread_t *worker_threads = 0;
-#endif
-
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
@@ -4181,48 +4175,12 @@ namespace LegionRuntime {
       CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
 #endif
       dma_queue = new DmaRequestQueue;
-#ifdef OLDTHREADS
-      num_threads = count;
-
-      worker_threads = new pthread_t[count];
-      for(int i = 0; i < count; i++) {
-	pthread_attr_t attr;
-	CHECK_PTHREAD( pthread_attr_init(&attr) );
-	if(Realm::proc_assignment)
-	  Realm::proc_assignment->bind_thread(-1, &attr, "DMA worker");
-	CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, 
-				      dma_worker_thread_loop, dma_queue) );
-	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
-#ifdef DEADLOCK_TRACE
-        get_runtime()->add_thread(&worker_threads[i]);
-#endif
-      }
-#else
       dma_queue->start_workers(count);
-#endif
     }
 
     void stop_dma_worker_threads(void)
     {
-#ifdef OLDTHREADS
-      terminate_flag = true;
-#endif
       dma_queue->shutdown_queue();
-
-#ifdef OLDTHREADS
-      if(worker_threads) {
-	for(int i = 0; i < num_threads; i++) {
-	  void *dummy;
-	  CHECK_PTHREAD( pthread_join(worker_threads[i], &dummy) );
-	}
-	num_threads = 0;
-	delete[] worker_threads;
-      }
-
-      delete dma_queue;
-      dma_queue = 0;
-      terminate_flag = false;
-#endif
     }
 
   };

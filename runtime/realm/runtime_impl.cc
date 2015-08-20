@@ -218,9 +218,6 @@ namespace Realm {
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
-#ifdef OLDPROCS
-      unsigned init_stack_count = 1;
-#endif
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
       unsigned num_io_procs = 0;
@@ -229,7 +226,6 @@ namespace Realm {
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       unsigned active_msg_handler_threads = 1;
-      bool     active_msg_sender_threads = false;
 #ifdef USE_CUDA
       size_t zc_mem_size_in_mb = 64;
       size_t fb_mem_size_in_mb = 256;
@@ -247,9 +243,6 @@ namespace Realm {
       double   lock_trace_exp_arrv_rate = 1e2;
 #endif
       // should local proc threads get dedicated cores?
-      bool bind_localproc_threads = true;
-      bool use_greenlet_procs = true;
-      bool disable_greenlets = false;
       bool dummy_reservation_ok = true;
       bool show_reservations = true; // TODO: switch to false eventually
 
@@ -271,9 +264,6 @@ namespace Realm {
 	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
         INT_ARG("-ll:dsize", disk_mem_size_in_mb);
         INT_ARG("-ll:stacksize", stack_size_in_mb);
-#ifdef OLDPROCS
-        INT_ARG("-ll:stacks", init_stack_count);
-#endif
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
         INT_ARG("-ll:io", num_io_procs);
@@ -282,10 +272,6 @@ namespace Realm {
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
 	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
-        BOOL_ARG("-ll:senders", active_msg_sender_threads);
-	INT_ARG("-ll:bind", bind_localproc_threads);
-        BOOL_ARG("-ll:greenlet", use_greenlet_procs);
-        BOOL_ARG("-ll:gdb", disable_greenlets);
 	INT_ARG("-ll:dummy_rsrv_ok", dummy_reservation_ok);
 	INT_ARG("-ll:show_rsrv", show_reservations);
 #ifdef USE_CUDA
@@ -340,19 +326,6 @@ namespace Realm {
           assert(0);
 	}
       }
-
-      if(bind_localproc_threads) {
-	// this has to preceed all spawning of threads, including the ones done by things like gasnet_init()
-	proc_assignment = new ProcessorAssignment(num_local_cpus);
-
-	// now move ourselves off the reserved cores
-	proc_assignment->bind_thread(-1, 0, "machine thread");
-      }
-
-      if (disable_greenlets)
-        use_greenlet_procs = false;
-      if (use_greenlet_procs)
-        greenlet::init_greenlet_library();
 
       //GASNetNode::my_node = new GASNetNode(argc, argv, this);
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
@@ -509,9 +482,6 @@ namespace Realm {
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads);
 
-      if (active_msg_sender_threads)
-        start_sending_threads();
-
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
       // when we try to save event info
@@ -610,18 +580,7 @@ namespace Realm {
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
         LocalTaskProcessor *lp;
-#if OLDPROCS
-        if (use_greenlet_procs)
-          lp = new GreenletProcessor(p, Processor::LOC_PROC,
-                                     stack_size_in_mb << 20, init_stack_count,
-                                     "local worker", i);
-        else
-	  lp = new LocalProcessor(p, Processor::LOC_PROC,
-                                  stack_size_in_mb << 20,
-                                  "local worker", i);
-#else
 	lp = new LocalCPUProcessor(p, stack_size_in_mb << 20);
-#endif
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
       }

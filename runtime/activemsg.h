@@ -171,7 +171,6 @@ extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int argc, const char *argv[]);
 extern void start_polling_threads(int count);
 extern void start_handler_threads(int count, size_t stacksize);
-extern void start_sending_threads(void);
 extern void stop_activemsg_threads(void);
 extern void report_activemsg_status(FILE *f);
 

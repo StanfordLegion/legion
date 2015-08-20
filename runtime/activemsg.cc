@@ -2099,14 +2099,6 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   init_deferred_frees();
 }
 
-#ifdef OLDTHREADS
-static int num_polling_threads = 0;
-static pthread_t *polling_threads = 0;
-static int num_sending_threads = 0;
-static pthread_t *sending_threads = 0;
-static volatile bool thread_shutdown_flag = false;
-#endif
-
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning
 void do_some_polling(void)
@@ -2160,92 +2152,9 @@ void EndpointManager::polling_worker_loop(void)
   }
 }
 
-#ifdef OLDTHREADS
-static void *gasnet_poll_thread_loop(void *data)
-{
-#ifdef TRACE_MESSAGES
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  int prev_report = ts.tv_sec;
-  char filename[80];
-  sprintf(filename, "ams_%d.log", gasnet_mynode());
-  FILE *f = fopen(filename, "w");
-#endif
-  // each polling thread basically does an endless loop of trying to send
-  //  outgoing messages and then polling
-  while(!thread_shutdown_flag) {
-    do_some_polling();
-#ifdef TRACE_MESSAGES
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    if(ts.tv_sec > (prev_report + 29)) {
-      prev_report = ts.tv_sec;
-      report_activemsg_status(f);
-    }
-#endif
-    //usleep(10000);
-  }
-#ifdef TRACE_MESSAGES
-  report_activemsg_status(f);
-  fclose(f);
-#endif
-  return 0;
-}
-#endif
-
 void start_polling_threads(int count)
 {
   endpoint_manager->start_polling_threads(count);
-#ifdef OLDTHREADS
-  num_polling_threads = count;
-  polling_threads = new pthread_t[count];
-
-  for(int i = 0; i < count; i++) {
-    pthread_attr_t attr;
-    CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(Realm::proc_assignment)
-      Realm::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
-    CHECK_PTHREAD( pthread_create(&polling_threads[i], 0, 
-				  gasnet_poll_thread_loop, 0) );
-    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
-#ifdef DEADLOCK_TRACE
-    LegionRuntime::LowLevel::get_runtime()->add_thread(&polling_threads[i]);
-#endif
-  }
-#endif
-}
-
-#ifdef OLDTHREADS
-static void* sender_thread_loop(void * /*unused*/)
-{
-  while (!thread_shutdown_flag) {
-    endpoint_manager->push_messages(10000,true);
-  }
-  return 0;
-}
-#endif
-
-void start_sending_threads(void)
-{
-  assert(0 && "sending threads no longer supported in activemsg.cc");
-#ifdef OLDTHREADS
-  num_sending_threads = gasnet_nodes();
-  sending_threads = new pthread_t[num_sending_threads];
-
-  for (unsigned i = 0; i < gasnet_nodes(); i++)
-  {
-    if (i == gasnet_mynode()) continue;
-    pthread_attr_t attr;
-    CHECK_PTHREAD( pthread_attr_init(&attr) );
-    if(Realm::proc_assignment)
-      Realm::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
-    CHECK_PTHREAD( pthread_create(&sending_threads[i], 0,
-                                  sender_thread_loop, (void*)long(i)));
-    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
-#ifdef DEADLOCK_TRACE
-    LegionRuntime::LowLevel::get_runtime()->add_thread(&sending_threads[i]);
-#endif
-  }
-#endif
 }
 
 void start_handler_threads(int count, size_t stack_size)
@@ -2257,32 +2166,8 @@ void start_handler_threads(int count, size_t stack_size)
 
 void stop_activemsg_threads(void)
 {
-#ifdef OLDTHREADS
-  thread_shutdown_flag = true;
-
-  if(polling_threads) {
-    for(int i = 0; i < num_polling_threads; i++) {
-      void *dummy;
-      CHECK_PTHREAD( pthread_join(polling_threads[i], &dummy) );
-    }
-    num_polling_threads = 0;
-    delete[] polling_threads;
-  }
-#endif
-
   endpoint_manager->stop_threads();
 	
-#ifdef OLDTHREADS
-  if(sending_threads) {
-    for(int i = 0; i < num_sending_threads; i++) {
-      void *dummy;
-      CHECK_PTHREAD( pthread_join(sending_threads[i], &dummy) );
-    }
-    num_sending_threads = 0;
-    delete[] sending_threads;
-  }
-#endif
-
   incoming_message_manager->shutdown();
   delete incoming_message_manager;
 
@@ -2301,10 +2186,6 @@ void stop_activemsg_threads(void)
 #ifdef DETAILED_MESSAGE_TIMING
   // dump timing data from all the endpoints to a file
   detailed_message_timing.dump_detailed_timing_data();
-#endif
-
-#ifdef OLDTHREADS
-  thread_shutdown_flag = false;
 #endif
 }
 	
