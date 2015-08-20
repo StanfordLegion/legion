@@ -67,8 +67,6 @@ static bool is_registered(void *ptr)
   return false;
 }
 
-typedef LegionRuntime::LowLevel::HandlerThread HandlerThread;
-
 class IncomingMessageManager {
 public:
   IncomingMessageManager(int _nodes);
@@ -76,9 +74,13 @@ public:
 
   void add_incoming_message(int sender, IncomingMessage *msg);
 
+  void start_handler_threads(int count, size_t stack_size);
+
   void shutdown(void);
 
   IncomingMessage *get_messages(int &sender, bool wait = true);
+
+  void handler_thread_loop(void);
 
 protected:
   int nodes;
@@ -89,6 +91,8 @@ protected:
   int todo_oldest, todo_newest;
   gasnet_hsl_t mutex;
   gasnett_cond_t condvar;
+  Realm::CoreReservation *core_rsrv;
+  std::vector<Realm::Thread *> handler_threads;
 };
 
 void init_deferred_frees(void)
@@ -629,6 +633,9 @@ IncomingMessageManager::IncomingMessageManager(int _nodes)
   todo_oldest = todo_newest = 0;
   gasnet_hsl_init(&mutex);
   gasnett_cond_init(&condvar);
+
+  core_rsrv = new Realm::CoreReservation("AM handlers",
+					 Realm::CoreReservationParameters());
 }
 
 IncomingMessageManager::~IncomingMessageManager(void)
@@ -663,6 +670,20 @@ void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *m
   gasnet_hsl_unlock(&mutex);
 }
 
+void IncomingMessageManager::start_handler_threads(int count, size_t stack_size)
+{
+  handler_threads.resize(count);
+
+  Realm::ThreadLaunchParameters tlp;
+  tlp.set_stack_size(stack_size);
+
+  for(int i = 0; i < count; i++)
+    handler_threads[i] = Realm::Thread::create_kernel_thread<IncomingMessageManager, 
+							     &IncomingMessageManager::handler_thread_loop>(this,
+													   tlp,
+													   *core_rsrv);
+}
+
 void IncomingMessageManager::shutdown(void)
 {
   gasnet_hsl_lock(&mutex);
@@ -671,6 +692,14 @@ void IncomingMessageManager::shutdown(void)
     gasnett_cond_broadcast(&condvar);  // wake up any sleepers
   }
   gasnet_hsl_unlock(&mutex);
+
+  for(std::vector<Realm::Thread *>::iterator it = handler_threads.begin();
+      it != handler_threads.end();
+      it++) {
+    (*it)->join();
+    delete (*it);
+  }
+  handler_threads.clear();
 }
 
 IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
@@ -718,11 +747,11 @@ extern void enqueue_incoming(gasnet_node_t sender, IncomingMessage *msg)
   incoming_message_manager->add_incoming_message(sender, msg);
 }
 
-void HandlerThread::thread_main(void)
+void IncomingMessageManager::handler_thread_loop(void)
 {
   while (true) {
     int sender = -1;
-    current_msg = manager->get_messages(sender);
+    IncomingMessage *current_msg = get_messages(sender);
     if(!current_msg) {
 #ifdef DEBUG_INCOMING
       printf("received empty list - assuming shutdown!\n");
@@ -733,7 +762,7 @@ void HandlerThread::thread_main(void)
     int count = 0;
 #endif
     while(current_msg) {
-      next_msg = current_msg->next_msg;
+      IncomingMessage *next_msg = current_msg->next_msg;
 #ifdef DETAILED_MESSAGE_TIMING
       int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
       CurrentTime start_time;
@@ -752,35 +781,6 @@ void HandlerThread::thread_main(void)
       current_msg = next_msg;
     }
   }
-}
-
-void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for)
-{
-  while (!wait_for.has_triggered()) {
-    // Try handling the next message
-    if (next_msg) {
-      // Save the old current message
-      IncomingMessage *old_current = current_msg;
-      current_msg = next_msg;
-      next_msg = current_msg->next_msg;
-      // Run the handler
-      current_msg->run_handler();
-      delete current_msg;
-      // Now reset the current msg in case we return
-      current_msg = old_current;
-    } else {
-      // We didn't have anymore messages to handle, so try
-      // and get some more to handle
-      int sender = -1;
-      next_msg = manager->get_messages(sender, false/*wait*/);
-    }
-  }
-}
-
-void HandlerThread::join(void)
-{
-  void *dummy;
-  CHECK_PTHREAD( pthread_join(thread, &dummy) );
 }
 
 class ActiveMessageEndpoint {
@@ -2104,10 +2104,8 @@ static int num_polling_threads = 0;
 static pthread_t *polling_threads = 0;
 static int num_sending_threads = 0;
 static pthread_t *sending_threads = 0;
-#endif
-static int num_handler_threads = 0;
-static HandlerThread **handler_threads = 0;
 static volatile bool thread_shutdown_flag = false;
+#endif
 
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning
@@ -2144,7 +2142,6 @@ void EndpointManager::stop_threads(void)
 
 void EndpointManager::polling_worker_loop(void)
 {
-  printf("POLLING WORKER STARTED\n");
   while(!shutdown_flag) {
     endpoint_manager->push_messages(max_msgs_to_send);
 
@@ -2161,7 +2158,6 @@ void EndpointManager::polling_worker_loop(void)
     }
 #endif
   }
-  printf("POLLING WORKER SHUTDOWN\n");
 }
 
 #ifdef OLDTHREADS
@@ -2254,23 +2250,16 @@ void start_sending_threads(void)
 
 void start_handler_threads(int count, size_t stack_size)
 {
-  num_handler_threads = count;
-  handler_threads = new HandlerThread*[num_handler_threads];
-
   incoming_message_manager = new IncomingMessageManager(gasnet_nodes());
 
-  for (int i = 0; i < num_handler_threads; i++)
-  {
-    handler_threads[i] = new HandlerThread(incoming_message_manager);
-    handler_threads[i]->start_thread(stack_size, -1, "AM handler thread");
-  }
+  incoming_message_manager->start_handler_threads(count, stack_size);
 }
 
 void stop_activemsg_threads(void)
 {
+#ifdef OLDTHREADS
   thread_shutdown_flag = true;
 
-#ifdef OLDTHREADS
   if(polling_threads) {
     for(int i = 0; i < num_polling_threads; i++) {
       void *dummy;
@@ -2295,11 +2284,6 @@ void stop_activemsg_threads(void)
 #endif
 
   incoming_message_manager->shutdown();
-  for(int i = 0; i < num_handler_threads; i++) {
-    handler_threads[i]->join();
-  }
-  num_handler_threads = 0;
-  delete[] handler_threads;
   delete incoming_message_manager;
 
 #ifdef REALM_PROFILE_AM_HANDLERS
@@ -2319,7 +2303,9 @@ void stop_activemsg_threads(void)
   detailed_message_timing.dump_detailed_timing_data();
 #endif
 
+#ifdef OLDTHREADS
   thread_shutdown_flag = false;
+#endif
 }
 	
 void enqueue_message(gasnet_node_t target, int msgid,

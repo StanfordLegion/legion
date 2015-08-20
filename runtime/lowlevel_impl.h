@@ -90,9 +90,6 @@ namespace LegionRuntime {
     typedef Realm::PreemptableThread PreemptableThread;
     typedef Realm::LocalThread LocalThread;
     typedef Realm::DetailedTimer DetailedTimer;
-#ifdef USE_GASNET
-    typedef Realm::HandlerThread HandlerThread;
-#endif
 
     inline Realm::RuntimeImpl *get_runtime(void)
     {

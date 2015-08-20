@@ -50,25 +50,6 @@ namespace Realm {
   class RegionInstanceImpl;
   class Module;
 
-#ifdef USE_GASNET 
-    class HandlerThread : public PreemptableThread {
-    public:
-      HandlerThread(IncomingMessageManager *m) : manager(m) { }
-      virtual ~HandlerThread(void) { }
-    public:
-      virtual Processor get_processor(void) const 
-        { assert(false); return Processor::NO_PROC; }
-    public:
-      virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for);
-    public:
-      void join(void);
-    private:
-      IncomingMessage *current_msg, *next_msg;
-      IncomingMessageManager *const manager;
-    };
-#endif
-
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
     public:
