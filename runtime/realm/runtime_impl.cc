@@ -244,7 +244,7 @@ namespace Realm {
 #endif
       // should local proc threads get dedicated cores?
       bool dummy_reservation_ok = true;
-      bool show_reservations = true; // TODO: switch to false eventually
+      bool show_reservations = false;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname)                       \
