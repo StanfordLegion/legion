@@ -3,3 +3,5 @@ librealm.a
 serializing
 test_profiling
 ctxswitch
+proc_group
+barrier_reduce

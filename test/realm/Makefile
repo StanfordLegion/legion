@@ -51,10 +51,11 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-TESTS := serializing test_profiling ctxswitch
+TESTS := serializing test_profiling ctxswitch proc_group barrier_reduce
 
 # can set arguments to be passed to a test when running
-TESTARGS_ctxswitch := -ll:io 1 -t 20
+TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
+TESTARGS_proc_group := -ll:cpu 4
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
