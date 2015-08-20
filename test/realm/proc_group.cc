@@ -140,6 +140,8 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 						      Event::NO_EVENT, priority);
       task_events.insert(e);
     }
+    // small delay after each batch to make sure the tasks are all enqueued
+    usleep(10000);
   }
   printf("%d tasks launched\n", count);
 
