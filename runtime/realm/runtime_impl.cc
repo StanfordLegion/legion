@@ -1033,14 +1033,7 @@ namespace Realm {
 	return;
       }
 
-      // Initialize the shutdown counter
       const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-      Atomic<int> running_proc_count(local_procs.size());
-
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	(*it)->run(&running_proc_count);
 
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the

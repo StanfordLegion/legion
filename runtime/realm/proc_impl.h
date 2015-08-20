@@ -33,30 +33,6 @@
 
 namespace Realm {
 
-    // TODO: get rid of this class
-    template <class T>
-    class Atomic {
-    public:
-      Atomic(T _value) : value(_value)
-      {
-	//printf("%d: atomic %p = %d\n", gasnet_mynode(), this, value);
-      }
-
-      T get(void) const { return (*((volatile T*)(&value))); }
-
-      void decrement(void)
-      {
-	AutoHSLLock a(mutex);
-	//T old_value(value);
-	value--;
-	//printf("%d: atomic %p %d -> %d\n", gasnet_mynode(), this, old_value, value);
-      }
-
-    protected:
-      T value;
-      GASNetHSL mutex;
-    };
-
     class ProcessorGroup;
 
     class ProcessorImpl {
@@ -64,16 +40,6 @@ namespace Realm {
       ProcessorImpl(Processor _me, Processor::Kind _kind);
 
       virtual ~ProcessorImpl(void);
-
-      void run(Atomic<int> *_run_counter)
-      {
-	run_counter = _run_counter;
-      }
-
-      virtual void start_processor(void) = 0;
-      virtual void shutdown_processor(void) = 0;
-      virtual void initialize_processor(void) = 0;
-      virtual void finalize_processor(void) = 0;
 
       virtual void enqueue_task(Task *task) = 0;
 
@@ -83,18 +49,11 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority) = 0;
 
-      void finished(void)
-      {
-	if(run_counter)
-	  run_counter->decrement();
-      }
-
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
     public:
       Processor me;
       Processor::Kind kind;
-      Atomic<int> *run_counter;
     }; 
 
     // generic local task processor - subclasses must create and configure a task
@@ -119,12 +78,6 @@ namespace Realm {
 
     protected:
       void set_scheduler(ThreadedTaskScheduler *_sched);
-
-      // old methods to delete
-      virtual void start_processor(void);
-      virtual void shutdown_processor(void);
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
 
       ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
@@ -171,11 +124,6 @@ namespace Realm {
       RemoteProcessor(Processor _me, Processor::Kind _kind);
       virtual ~RemoteProcessor(void);
 
-      virtual void start_processor(void);
-      virtual void shutdown_processor(void);
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
-
       virtual void enqueue_task(Task *task);
 
       virtual void add_to_group(ProcessorGroup *group);
@@ -200,11 +148,6 @@ namespace Realm {
       void set_group_members(const std::vector<Processor>& member_list);
 
       void get_group_members(std::vector<Processor>& member_list);
-
-      virtual void start_processor(void);
-      virtual void shutdown_processor(void);
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
 
       virtual void enqueue_task(Task *task);
 

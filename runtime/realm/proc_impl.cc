@@ -197,7 +197,7 @@ namespace Realm {
   //
 
     ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind)
-      : me(_me), kind(_kind), run_counter(0)
+      : me(_me), kind(_kind)
     {
     }
 
@@ -257,26 +257,6 @@ namespace Realm {
 	  it != members.end();
 	  it++)
 	member_list.push_back((*it)->me);
-    }
-
-    void ProcessorGroup::start_processor(void)
-    {
-      assert(0);
-    }
-
-    void ProcessorGroup::shutdown_processor(void)
-    {
-      assert(0);
-    }
-
-    void ProcessorGroup::initialize_processor(void)
-    {
-      assert(0);
-    }
-
-    void ProcessorGroup::finalize_processor(void)
-    {
-      assert(0);
     }
 
     void ProcessorGroup::enqueue_task(Task *task)
@@ -416,26 +396,6 @@ namespace Realm {
     {
     }
 
-    void RemoteProcessor::start_processor(void)
-    {
-      assert(0);
-    }
-
-    void RemoteProcessor::shutdown_processor(void)
-    {
-      assert(0);
-    }
-
-    void RemoteProcessor::initialize_processor(void)
-    {
-      assert(0);
-    }
-
-    void RemoteProcessor::finalize_processor(void)
-    {
-      assert(0);
-    }
-
     void RemoteProcessor::enqueue_task(Task *task)
     {
       // should never be called
@@ -512,12 +472,6 @@ namespace Realm {
     // add the group's task queue to our scheduler too
     sched->add_task_queue(&group->task_queue);
   }
-
-  // old methods to delete
-  void LocalTaskProcessor::start_processor(void) { assert(0); }
-  void LocalTaskProcessor::shutdown_processor(void) { assert(0); }
-  void LocalTaskProcessor::initialize_processor(void) { assert(0); }
-  void LocalTaskProcessor::finalize_processor(void) { assert(0); }
 
   void LocalTaskProcessor::enqueue_task(Task *task)
   {

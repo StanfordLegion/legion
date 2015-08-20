@@ -248,15 +248,7 @@ namespace LegionRuntime {
       CUstream get_current_task_stream(void);
     public:
       void load_context(void);
-#if 0
-      bool execute_gpu(GPUThread *thread);
-#endif
     public:
-#if 0
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
-      virtual LocalThread* create_new_thread(void);
-#endif
     public:
       void enqueue_copy(GPUMemcpy *copy);
     public:
