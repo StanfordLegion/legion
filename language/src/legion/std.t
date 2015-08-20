@@ -2383,6 +2383,10 @@ function task:__call(...)
   return self:getdefinition()(...)
 end
 
+function task:__tostring()
+  return self:getname()
+end
+
 function std.newtask(name)
   local terra proto
   proto.name = name

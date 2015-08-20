@@ -4495,14 +4495,9 @@ namespace LegionRuntime {
     /*static*/ inline uint64_t SSETLBitMask<MAX>::extract_mask(__m128i value)
     //-------------------------------------------------------------------------
     {
-      uint64_t left, right;
-      right = _mm_cvtsi128_si32(value);
-      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 1));
-      uint64_t result = (left << 32) | right;
-      right = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 2));
-      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 3));
-      result |= (left << 32) | right;
-      return result;
+      uint64_t left = _mm_extract_epi64(value, 0);
+      uint64_t right = _mm_extract_epi64(value, 1);
+      return (left | right);
     }
 #undef BIT_ELMTS
 #undef SSE_ELMTS
