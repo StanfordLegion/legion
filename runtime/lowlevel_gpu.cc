@@ -1085,7 +1085,10 @@ namespace LegionRuntime {
       // create an async copy and then wait for it to finish...
       Event e = GenEventImpl::create_genevent()->current_event();
       gpu->copy_to_fb(offset, src, size, Event::NO_EVENT, e);
-      e.wait();
+      // this is called by the remote write AM handler, which is not allowed to
+      //  wait on an event, so just stall until write is complete
+      // the right answer is for the AM handler to not call this method
+      e.external_wait();
     }
 
     // zerocopy memory
