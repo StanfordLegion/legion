@@ -23,6 +23,7 @@ DEBUG           ?= 1		# Include debugging symbols
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time print level
 SHARED_LOWLEVEL ?= 1		# Use the shared low level
 ALT_MAPPERS     ?= 0		# Compile the alternative mappers
+USE_CUDA        ?= 1            # enable gpu kernels by default
 
 # Put the binary file name here
 OUTFILE		?= ckt_sim
