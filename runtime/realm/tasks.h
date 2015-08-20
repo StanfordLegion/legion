@@ -26,6 +26,7 @@
 
 #include "threads.h"
 #include "pri_queue.h"
+#include "bytearray.h"
 
 namespace Realm {
 
@@ -35,14 +36,8 @@ namespace Realm {
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
 	   const void *_args, size_t _arglen,
-	   Event _finish_event, int _priority,
-           int expected_count);
-      Task(Processor _proc,
-	   Processor::TaskFuncID _func_id,
-	   const void *_args, size_t _arglen,
            const ProfilingRequestSet &reqs,
-	   Event _finish_event, int _priority,
-           int expected_count);
+	   Event _finish_event, int _priority);
 
       virtual ~Task(void);
 
@@ -50,12 +45,9 @@ namespace Realm {
 
       Processor proc;
       Processor::TaskFuncID func_id;
-      void *args;
-      size_t arglen;
+      ByteArray args;
       Event finish_event;
       int priority;
-      int run_count, finish_count;
-      bool capture_proc;
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one

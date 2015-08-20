@@ -150,7 +150,7 @@ namespace Realm {
                             priority, args, arglen);
 #endif
 
-      p->spawn_task(func_id, args, arglen, //instances_needed, 
+      p->spawn_task(func_id, args, arglen, ProfilingRequestSet(),
 		    wait_on, e, priority);
       return e;
     }
@@ -242,6 +242,7 @@ namespace Realm {
 	  it++) {
 	ProcessorImpl *m_impl = get_runtime()->get_processor_impl(*it);
 	members.push_back(m_impl);
+	m_impl->add_to_group(this);
       }
 
       members_requested = true;
@@ -280,27 +281,20 @@ namespace Realm {
 
     void ProcessorGroup::enqueue_task(Task *task)
     {
-      for (std::vector<ProcessorImpl *>::const_iterator it = members.begin();
-            it != members.end(); it++)
-      {
-        (*it)->enqueue_task(task);
-      }
+      // put it into the task queue - one of the member procs will eventually grab it
+      task->mark_ready();
+      task_queue.put(task, task->priority);
     }
 
-    /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
-						const void *args, size_t arglen,
-						//std::set<RegionInstance> instances_needed,
-						Event start_event, Event finish_event,
-						int priority)
+    void ProcessorGroup::add_to_group(ProcessorGroup *group)
     {
-      // create a task object and insert it into the queue
-      Task *task = new Task(me, func_id, args, arglen, 
-                            finish_event, priority, members.size());
+      // recursively add all of our members
+      assert(members_valid);
 
-      if (start_event.has_triggered())
-        enqueue_task(task);
-      else
-	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+      for(std::vector<ProcessorImpl *>::const_iterator it = members.begin();
+	  it != members.end();
+	  it++)
+	(*it)->add_to_group(group);
     }
 
     /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
@@ -311,7 +305,7 @@ namespace Realm {
     {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
-                            finish_event, priority, members.size());
+                            finish_event, priority);
 
       if (start_event.has_triggered())
         enqueue_task(task);
@@ -448,26 +442,10 @@ namespace Realm {
       assert(0);
     }
 
-    void RemoteProcessor::tasks_available(int priority)
+    void RemoteProcessor::add_to_group(ProcessorGroup *group)
     {
-      log_task.warning("remote processor " IDFMT " being told about local tasks ready?",
-		       me.id);
-    }
-
-    void RemoteProcessor::spawn_task(Processor::TaskFuncID func_id,
-				     const void *args, size_t arglen,
-				     //std::set<RegionInstance> instances_needed,
-				     Event start_event, Event finish_event,
-				     int priority)
-    {
-      log_task.debug("spawning remote task: proc=" IDFMT " task=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
-		     me.id, func_id, 
-		     start_event.id, start_event.gen,
-		     finish_event.id, finish_event.gen);
-
-      SpawnTaskMessage::send_request(ID(me).node(), me, func_id,
-				     args, arglen, 0 /* no profiling requests */,
-				     start_event, finish_event, priority);
+      // not currently supported
+      assert(0);
     }
 
     void RemoteProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -518,7 +496,7 @@ namespace Realm {
     if(it != get_runtime()->task_table.end()) {
       Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_INIT,
 			 0, 0,
-			 Event::NO_EVENT, 0, 1);
+			 Event::NO_EVENT, 0);
       task_queue.put(t, task_queue.PRI_MAX_FINITE);
     } else {
       log_task.info("no processor init task: proc=" IDFMT "", me.id);
@@ -527,6 +505,12 @@ namespace Realm {
 
     // finally, fire up the scheduler
     sched->start();
+  }
+
+  void LocalTaskProcessor::add_to_group(ProcessorGroup *group)
+  {
+    // add the group's task queue to our scheduler too
+    sched->add_task_queue(&group->task_queue);
   }
 
   // old methods to delete
@@ -544,23 +528,13 @@ namespace Realm {
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
-				     //std::set<RegionInstance> instances_needed,
-				     Event start_event, Event finish_event,
-				     int priority)
-  {
-    spawn_task(func_id, args, arglen, ProfilingRequestSet(),
-	       start_event, finish_event, priority);
-  }
-
-  void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
-				     const void *args, size_t arglen,
 				     const ProfilingRequestSet &reqs,
 				     Event start_event, Event finish_event,
 				     int priority)
   {
     assert(func_id != 0);
     // create a task object for this
-    Task *task = new Task(me, func_id, args, arglen, reqs, finish_event, priority, 1);
+    Task *task = new Task(me, func_id, args, arglen, reqs, finish_event, priority);
 
     // if the start event has already triggered, we can enqueue right away
     if(start_event.has_triggered()) {
@@ -586,7 +560,7 @@ namespace Realm {
     if(it != get_runtime()->task_table.end()) {
       Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_SHUTDOWN,
 			 0, 0,
-			 Event::NO_EVENT, 0, 1);
+			 Event::NO_EVENT, 0);
       task_queue.put(t, task_queue.PRI_MIN_FINITE);
     } else {
       log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);

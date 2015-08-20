@@ -29,46 +29,18 @@ namespace Realm {
   // class Task
   //
 
-    Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
-	       const void *_args, size_t _arglen,
-	       Event _finish_event, int _priority, int expected_count)
-      : Operation(), proc(_proc), func_id(_func_id), arglen(_arglen),
-	finish_event(_finish_event), priority(_priority),
-        run_count(0), finish_count(expected_count), capture_proc(false)
-    {
-      if(arglen) {
-	args = malloc(arglen);
-	memcpy(args, _args, arglen);
-      } else
-	args = 0;
-    }
+  Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
+	     const void *_args, size_t _arglen,
+	     const ProfilingRequestSet &reqs,
+	     Event _finish_event, int _priority)
+    : Operation(reqs), proc(_proc), func_id(_func_id), args(_args, _arglen),
+      finish_event(_finish_event), priority(_priority)
+  {
+  }
 
-    Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
-	       const void *_args, size_t _arglen,
-               const ProfilingRequestSet &reqs,
-	       Event _finish_event, int _priority, int expected_count)
-      : Operation(reqs), proc(_proc), func_id(_func_id), arglen(_arglen),
-	finish_event(_finish_event), priority(_priority),
-        run_count(0), finish_count(expected_count)
-    {
-      if(arglen) {
-	args = malloc(arglen);
-	memcpy(args, _args, arglen);
-      } else
-	args = 0;
-      capture_proc = measurements.wants_measurement<
-                        ProfilingMeasurements::OperationProcessorUsage>();
-    }
-
-    Task::~Task(void)
-    {
-      free(args);
-      if (capture_proc) {
-        ProfilingMeasurements::OperationProcessorUsage usage;
-        usage.proc = proc;
-        measurements.add_measurement(usage);
-      }
-    }
+  Task::~Task(void)
+  {
+  }
 
   void Task::execute_on_processor(Processor p)
   {
@@ -105,7 +77,7 @@ namespace Realm {
     // make sure the current processor is set during execution of the task
     ThreadLocal::current_processor = p;
 
-    (*fptr)(args, arglen, p);
+    (*fptr)(args.base(), args.size(), p);
 
     // and clear the TLS when we're done
     ThreadLocal::current_processor = Processor::NO_PROC;

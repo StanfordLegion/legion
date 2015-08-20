@@ -993,7 +993,7 @@ namespace Realm {
     for(typename T::const_iterator it = container_of_procs.begin();
 	it != container_of_procs.end();
 	it++)
-      (*it)->me.spawn(func_id, args, arglen, start_event, priority);
+      (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
   }
 
     static void *background_run_thread(void *data)
@@ -1075,8 +1075,8 @@ namespace Realm {
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	    it != local_procs.end();
 	    it++) {
-	  (*it)->spawn_task(task_id, args, arglen, 
-			    Event::NO_EVENT, Event::NO_EVENT, 0/*priority*/);
+	  (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
+			  Event::NO_EVENT, 0/*priority*/);
 	  if(style != Runtime::ONE_TASK_PER_PROC) break;
 	}
       }

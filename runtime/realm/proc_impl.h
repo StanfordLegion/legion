@@ -57,6 +57,8 @@ namespace Realm {
       GASNetHSL mutex;
     };
 
+    class ProcessorGroup;
+
     class ProcessorImpl {
     public:
       ProcessorImpl(Processor _me, Processor::Kind _kind);
@@ -77,12 +79,6 @@ namespace Realm {
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
-			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event,
-                              int priority) = 0;
-
-      virtual void spawn_task(Processor::TaskFuncID func_id,
-			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority) = 0;
@@ -92,6 +88,8 @@ namespace Realm {
 	if(run_counter)
 	  run_counter->decrement();
       }
+
+      virtual void add_to_group(ProcessorGroup *group) = 0;
 
     public:
       Processor me;
@@ -107,11 +105,7 @@ namespace Realm {
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
-      virtual void spawn_task(Processor::TaskFuncID func_id,
-			      const void *args, size_t arglen,
-			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event,
-                              int priority);
+
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
@@ -120,6 +114,8 @@ namespace Realm {
 
       // blocks until things are cleaned up
       virtual void shutdown(void);
+
+      virtual void add_to_group(ProcessorGroup *group);
 
     protected:
       void set_scheduler(ThreadedTaskScheduler *_sched);
@@ -182,13 +178,7 @@ namespace Realm {
 
       virtual void enqueue_task(Task *task);
 
-      virtual void tasks_available(int priority);
-
-      virtual void spawn_task(Processor::TaskFuncID func_id,
-			      const void *args, size_t arglen,
-			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event,
-                              int priority);
+      virtual void add_to_group(ProcessorGroup *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -218,11 +208,7 @@ namespace Realm {
 
       virtual void enqueue_task(Task *task);
 
-      virtual void spawn_task(Processor::TaskFuncID func_id,
-			      const void *args, size_t arglen,
-			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event,
-                              int priority);
+      virtual void add_to_group(ProcessorGroup *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -239,6 +225,8 @@ namespace Realm {
       ProcessorGroup *next_free;
 
       void request_group_members(void);
+
+      PriorityQueue<Task *, GASNetHSL> task_queue;      
     };
     
     // this is generally useful to all processor implementations, so put it here
