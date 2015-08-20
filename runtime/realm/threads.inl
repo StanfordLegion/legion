@@ -207,6 +207,7 @@ namespace Realm {
 
     // now tell the scheduler we are blocking
     //  (it will update our status if we succeed in blocking)
+    assert(thread->scheduler != 0);
     thread->scheduler->thread_blocking(thread);
   }
 
