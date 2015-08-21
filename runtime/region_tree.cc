@@ -21183,9 +21183,10 @@ namespace LegionRuntime {
       // and we're permitted to leave the partition open, then don't actually
       // close the partition. Instead close to the individual target child
       // that we are trying to close to. This handles the case of leaving 
-      // many children in a read-only partition open.
+      // many children in a read-only partition open. Only safe to do
+      // this if all the children are disjoint.
       bool success = true;
-      if (leave_open && !targets.empty())
+      if (leave_open && !targets.empty() && row_source->is_disjoint())
       {
         for (std::set<ColorPoint>::const_iterator it = targets.begin();   
               it != targets.end(); it++)
