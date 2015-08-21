@@ -4067,7 +4067,7 @@ namespace LegionRuntime {
       off_t field_start; int field_size;
       find_field_start(inst_impl->metadata.field_sizes, dst.offset,
                        dst.size, field_start, field_size);
-      assert(field_size <= fill_size);
+      assert(field_size <= (int)fill_size);
       typename Arrays::Mapping<DIM, 1> *dst_linearization = 
         inst_impl->metadata.linearization.get_mapping<DIM>();
       typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
