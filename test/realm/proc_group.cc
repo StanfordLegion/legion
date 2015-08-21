@@ -78,10 +78,15 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     machine.get_all_processors(all_processors);
     for(std::set<Processor>::const_iterator it = all_processors.begin();
 	it != all_processors.end();
-	it++)
-      if((*it).kind() == Processor::LOC_PROC)
+	it++) {
+      // try not to use the processor that the top level task is running on
+      if(((*it).kind() == Processor::LOC_PROC) && ((*it) != p))
 	all_cpus.push_back(*it);
+    }
   }
+  // if this is the ONLY processor, go ahead and add it back in
+  if(all_cpus.empty())
+    all_cpus.push_back(p);
   int num_cpus = all_cpus.size();
 
   printf("creating processor group for all CPUs...\n");
@@ -116,7 +121,13 @@ void top_level_task(const void *args, size_t arglen, Processor p)
   // 3) tasks sent to group, priority = 1
   // 4) tasks sent to individual procs, priority = 0
   //
-  // execution order should be 1, 3, 4, 2
+  // execution order in Realm should be 1, 3, 4, 2
+  // NOTE: the shared LLR implements processor groups differently and gets 1, 3, 2, 4
+#ifdef SHARED_LOWLEVEL
+  const int expected_order[4] = { 1, 3, 2, 4 };
+#else
+  const int expected_order[4] = { 1, 3, 4, 2 };
+#endif
   
   int total_tasks = 4 * num_cpus;
   task_counts = new int[total_tasks];
@@ -170,9 +181,14 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       errors++;
     }
 
-  errors += check_task_ordering(0, num_cpus-1, num_cpus*2, num_cpus*3-1);
-  errors += check_task_ordering(num_cpus*2, num_cpus*3-1, num_cpus*3, num_cpus*4-1);
-  errors += check_task_ordering(num_cpus*3, num_cpus*4-1, num_cpus, num_cpus*2-1);
+  for(int i = 0; i < 3; i++) {
+    int start1 = (expected_order[i] - 1) * num_cpus;
+    int end1 = start1 + (num_cpus - 1);
+    int start2 = (expected_order[i+1] - 1) * num_cpus;
+    int end2 = start2 + (num_cpus - 1);
+
+    errors += check_task_ordering(start1, end1, start2, end2);
+  }
 
   if(errors) {
     printf("Raw data:\n");
