@@ -4693,6 +4693,7 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region); 
+      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -5262,6 +5263,7 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region); 
+      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
