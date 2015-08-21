@@ -4920,6 +4920,7 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region); 
+      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -5519,6 +5520,7 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region); 
+      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -8267,6 +8269,7 @@ namespace LegionRuntime {
       partition_kind = BY_FIELD;
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
+      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
 #ifdef LEGION_SPY
@@ -8287,6 +8290,7 @@ namespace LegionRuntime {
       requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
+      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
 #ifdef LEGION_SPY
@@ -8305,6 +8309,7 @@ namespace LegionRuntime {
       partition_kind = BY_PREIMAGE;
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
+      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
       projection = proj;
@@ -8699,6 +8704,7 @@ namespace LegionRuntime {
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
+      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, value_size);
@@ -8718,6 +8724,7 @@ namespace LegionRuntime {
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
+      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
@@ -8737,6 +8744,7 @@ namespace LegionRuntime {
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
+      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, size);
@@ -8757,6 +8765,7 @@ namespace LegionRuntime {
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
+      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
@@ -9191,6 +9200,7 @@ namespace LegionRuntime {
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
+      requirement.initialize_mapping_fields();
       for (std::map<FieldID,const char*>::const_iterator it = fmap.begin();
             it != fmap.end(); it++)
       {
