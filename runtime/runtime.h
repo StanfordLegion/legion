@@ -1449,8 +1449,6 @@ namespace LegionRuntime {
                                              Serializer &rez);
       void send_version_state_request(AddressSpaceID target, Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
-      void send_version_state_broadcast_response(AddressSpaceID target,
-                                                 Serializer &rez);
       void send_remote_instance_creation_request(AddressSpaceID target,
                                                  Serializer &rez);
       void send_remote_reduction_creation_request(AddressSpaceID target,
@@ -1545,7 +1543,6 @@ namespace LegionRuntime {
       void handle_version_state_request(Deserializer &derez);
       void handle_version_state_response(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_version_state_broadcast_response(Deserializer &derez);
       void handle_remote_instance_creation(Deserializer &derez, 
                                            AddressSpaceID source);
       void handle_remote_reduction_creation(Deserializer &derez,

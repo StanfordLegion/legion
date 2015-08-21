@@ -9617,7 +9617,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node, 
-                                          VersionManager *manager, bool capture)
+                         VersionManager *manager, bool initialize, bool capture)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9637,7 +9637,7 @@ namespace LegionRuntime {
                                                      finder->second.path_only(),
                                                      finder->second.close_top(),
                                                      finder->second.advance(),
-                                                     capture);
+                                                     initialize, capture);
       // Save the resulting physical state
       finder->second.physical_state = result;
       finder->second.unset_needs_capture();
@@ -9719,6 +9719,7 @@ namespace LegionRuntime {
         if (info.physical_state == NULL)
         {
           info.physical_state = it->first->get_physical_state(ctx, *this,
+                                                       false/*initialize*/,
                                                        false/*capture*/);
           info.set_needs_capture();
         }
@@ -10009,12 +10010,12 @@ namespace LegionRuntime {
         derez.deserialize(vid);
         DistributedID did;
         derez.deserialize(did);
-        VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                                          did, source);
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
+        VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                        did, source, mask, false/*initialize*/);
         info.physical_state->add_version_state(state, mask);
         // Also add this to the version numbers
         // Only need to do this for the non-advance states
@@ -10028,12 +10029,12 @@ namespace LegionRuntime {
         derez.deserialize(vid);
         DistributedID did;
         derez.deserialize(did);
-        VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                                          did, source);
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
+        VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                        did, source, mask, true/*initialize*/);
         // No point in adding this to the version state infos
         // since we already know we just use that to build the PhysicalState
         info.physical_state->add_advance_state(state, mask);
@@ -13000,38 +13001,38 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
-                               VersionManager *man)
+                               VersionManager *man, const FieldMask &mask,
+                               bool initialize)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
-        manager(man), state_lock(Reservation::create_reservation()),
+        manager(man), state_lock(Reservation::create_reservation())
 #ifdef DEBUG_HIGH_LEVEL
-        currently_active(true), currently_valid(true),
+        , currently_active(true), currently_valid(true)
 #endif
-        eventual_index(0), merged_index(0)
     //--------------------------------------------------------------------------
     {
+      // Initialize any fields that we now have
+      if (initialize)
+        initial_fields |= mask;
       // If we are not the owner, add a valid and resource reference
       if (!is_owner())
       {
         add_base_valid_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
         // If we are remote and we are now initialized send our notification
-#ifdef UNIMPLEMENTED_VERSIONING
-        if (meta_state == EVENTUAL_VERSION_STATE)
+        if (initialize)
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
+            rez.serialize(mask);
           }
           runtime->send_version_state_initialization(owner_space, rez);
         }
-#endif
       }
-#ifdef UNIMPLEMENTED_VERSIONING
       // If we're the owner and we are in eventual state, add ourselves
-      else if (meta_state == EVENTUAL_VERSION_STATE)
-        eventual_nodes.add(local_space);
-#endif
+      else if (initialize)
+        initial_nodes[local_space] = mask;
     }
 
     //--------------------------------------------------------------------------
@@ -13426,14 +13427,12 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
-#ifdef UNIMPLEMENTED_VERSIONING
       // Finally update our state if we are the owner
-      if (is_owner() && (meta_state == INVALID_VERSION_STATE))
+      if (is_owner())
       {
-        meta_state = EVENTUAL_VERSION_STATE;
-        eventual_nodes.add(local_space);
+        initial_fields |= merge_mask;
+        initial_nodes[local_space] |= merge_mask;
       }
-#endif
       if (need_lock)
         state_lock.release();
     }
@@ -13604,14 +13603,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionState::record_initial_fields(const FieldMask &initial_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_owner());
+#endif
+      {
+        AutoLock s_lock(state_lock);
+        initial_fields |= initial_mask;
+      }
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(initial_mask);
+      }
+      runtime->send_version_state_initialization(owner_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionState::request_initial_version_state(
                   const FieldMask &request_mask, std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-#if 0
-      UserEvent result;
-      AddressSpaceID target = owner_space;
+      UserEvent ready_event = UserEvent::NO_USER_EVENT;
       FieldMask remaining_mask = request_mask;
+      LegionDeque<RequestInfo>::aligned targets;
       {
         AutoLock s_lock(state_lock);
         // Check to see which fields we already have initial events for
@@ -13642,159 +13660,227 @@ namespace LegionRuntime {
           if (!remaining_mask)
             return;
         }
-        // At this point we can update the initial fields mask
-        initial_fields |= remaining_mask;
         // If we are the owner and there are no existing versions, we can
         // immediately make ourselves a local_version
-        if (is_owner() && eventual_nodes.empty())
-        {
-          eventual_nodes.add(local_space);
-          return; // we're done
-        }
-        // Otherwise make an event and save it
-        result = UserEvent::create_user_event();
-        initial_events[result] = remaining_mask;
-        // If we 
-      }
-#else
-      assert(false);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::request_final_version_state(const FieldMask &mask,
-                                                 std::set<Event> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    Event VersionState::request_eventual_version_state(void)
-    //--------------------------------------------------------------------------
-    {
-      UserEvent result;
-      AddressSpaceID target = owner_space;
-      {
-        AutoLock s_lock(state_lock);
-        if (meta_state == MERGED_VERSION_STATE)
-          return merged_ready;
-        if (meta_state == EVENTUAL_VERSION_STATE)
-          return eventual_ready;
-        // If we are the owner and there are no existing versions we
-        // can immediately make ourselves a local version
-        if (is_owner() && eventual_nodes.empty())
-        {
-          meta_state = EVENTUAL_VERSION_STATE;
-          eventual_nodes.add(local_space);
-          return eventual_ready; // this will be a no-event
-        }
-        result = UserEvent::create_user_event();
-        eventual_ready = result;
-        meta_state = EVENTUAL_VERSION_STATE;
-        // If we make it here we have to send a request to get the data 
-        // Send a request to the owner for the state which will either
-        // be handled there or sent to someone who can, unless we are
-        // the owner in which case we pick someone to send a request to
-        if (is_owner())
-          target = select_next_target(true/*initial*/, local_space);
-      }
-      send_version_state_request(target, local_space, result,
-                                 false/*final req*/, false/*upgrade*/);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Event VersionState::request_merged_version_state(void)
-    //--------------------------------------------------------------------------
-    {
-      UserEvent result;
-      AddressSpaceID target = owner_space;
-      std::deque<AddressSpaceID> broadcast_targets;
-      {
-        AutoLock s_lock(state_lock);
-        if (meta_state == MERGED_VERSION_STATE)
-          return merged_ready;
         if (is_owner())
         {
-          // Case 1: we are the owner and there is only one initial 
-          // version and we're it
-          if ((meta_state == EVENTUAL_VERSION_STATE) 
-              && (eventual_nodes.size() == 1) 
-              && (eventual_nodes.contains(local_space)))
+          if (initial_nodes.empty())
           {
-            // Upgrade ourselves and we're done
-            merged_ready = eventual_ready;
-            meta_state = MERGED_VERSION_STATE;
-            merged_nodes.add(local_space);
-            return merged_ready;
-          }
-          // Case 2: we are the owner and there are no initial versions
-          // so we can immediately upgrade
-          if (eventual_nodes.empty())
-          {
-            meta_state = MERGED_VERSION_STATE;
-            merged_nodes.add(local_space);
-            return merged_ready; // this will be a no-event
-          }
-        }
-        result = UserEvent::create_user_event();
-        merged_ready = result;
-        meta_state = MERGED_VERSION_STATE;
-        if (is_owner())
-        {
-          if (eventual_nodes.size() == 1)
-          {
-            // Case 2: there is only one initial version and it's someone else
-            target = eventual_nodes.find_first_set(); 
-            // Mark that this target is upgraded
-            merged_nodes.add(target);
+            initial_fields |= remaining_mask;
+            initial_nodes[local_space] = remaining_mask;
           }
           else
           {
-            // Case 3: there are multiple initial versions 
-            // so we need to broadcast
-            BroadcastFunctor functor(local_space, broadcast_targets);
-            eventual_nodes.map(functor);
+            select_initial_targets(local_space, remaining_mask, 
+                                   targets, preconditions);
+            // At this point we can now upgrade our initial fields
+            // and our node information
+            initial_fields |= request_mask;
+            initial_nodes[local_space] |= request_mask;
           }
-          // Record that we are now valid for final
-          merged_nodes.add(local_space);
         }
-      }
-      if (!broadcast_targets.empty())
-      {
-        // Send all the upgrades to the targets
-        std::set<Event> done_events;
-        for (std::deque<AddressSpaceID>::const_iterator it = 
-              broadcast_targets.begin(); it != broadcast_targets.end(); it++)
+        else
         {
-          UserEvent next_event = UserEvent::create_user_event();
-          send_version_state_request(*it, local_space, next_event, 
-                                     false/*final*/, false/*upgrade*/);
-          done_events.insert(next_event);
+          // Make a user event and record it as a precondition
+          ready_event = UserEvent::create_user_event();
+          initial_events[ready_event] = remaining_mask;
+          initial_fields |= remaining_mask;
+          preconditions.insert(ready_event);
         }
-        result.trigger(Event::merge_events(done_events));
       }
-      else if (target != owner_space)
+      if (!is_owner())
       {
-        // Send the update to the target and tell it that it can upgrade
-        send_version_state_request(target, local_space, result,
-                                   false/*final*/, true/*upgrade*/);
-      }
-      else
-      {
-        // Otherwise send a request to the owner for remote instances
-        // so we can do the broadcast ourselves
-        send_version_state_request(target, local_space, result,
-                                   true/*final*/, false/*upgrade*/);
-      }
-      return result;
-    }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!!remaining_mask);
 #endif
+        // If we make it here, then send a request to the owner
+        // for the remaining fields
+        send_version_state_request(owner_space, local_space, ready_event, 
+                                   remaining_mask, false/*final*/);
+      }
+      else if (!targets.empty())
+      {
+        // otherwise we're the owner, send out requests to all 
+        for (LegionDeque<RequestInfo>::aligned::const_iterator 
+              it = targets.begin(); it != targets.end(); it++)
+        {
+          send_version_state_request(it->target, local_space, it->to_trigger,
+                                     it->request_mask, it->request_final);
+                                
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::request_final_version_state(const FieldMask &req_mask,
+                                                 std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent ready_event;
+      FieldMask remaining_mask = req_mask;
+      LegionDeque<RequestInfo>::aligned targets;
+      {
+        AutoLock s_lock(state_lock);
+        if (!final_events.empty() && !(req_mask * final_fields))
+        {
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                final_events.begin(); it != final_events.end(); it++)
+          {
+            if (remaining_mask * it->second)
+              continue;
+            preconditions.insert(it->first);
+          }
+          remaining_mask -= final_fields;
+          if (!remaining_mask)
+            return;
+        }
+        if (is_owner())
+        {
+          select_final_targets(local_space, remaining_mask,
+                               targets, preconditions);
+          // We can now update our final fields and local information
+          final_fields |= remaining_mask;
+          final_nodes[local_space] |= remaining_mask;
+        }
+        else
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!!remaining_mask);
+#endif
+          // Make a user event and record it as a precondition   
+          ready_event = UserEvent::create_user_event();
+          final_fields |= remaining_mask;
+          final_events[ready_event] = remaining_mask;
+          preconditions.insert(ready_event);
+        }
+      }
+      if (!is_owner())
+      {
+        send_version_state_request(owner_space, local_space, ready_event,
+                                   remaining_mask, true/*final*/); 
+      }
+      else if (!targets.empty())
+      {
+        for (LegionDeque<RequestInfo>::aligned::const_iterator 
+              it = targets.begin(); it != targets.end(); it++)
+        {
+          send_version_state_request(it->target, local_space, it->to_trigger,
+                                     it->request_mask, it->request_final);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::select_initial_targets(AddressSpaceID request_space,
+                                              FieldMask &needed_mask,
+                                     LegionDeque<RequestInfo>::aligned &targets,
+                                              std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner()); // should only be called on the owner node
+#endif
+      // Iterate over the initial nodes and issue requests to the first
+      // node we happen upon who has the valid data
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
+            initial_nodes.begin(); it != initial_nodes.end(); it++)
+      {
+        // Skip the requesting space
+        if (request_space == it->first)
+          continue;
+        FieldMask overlap = needed_mask & it->second;
+        if (!overlap)
+          continue;
+        targets.push_back(RequestInfo());
+        RequestInfo &info = targets.back();
+        info.target = it->first;
+        info.to_trigger = UserEvent::create_user_event();
+        info.request_mask = overlap;
+        info.request_final = false;
+        // Add the event to the set of preconditions
+        preconditions.insert(info.to_trigger);
+        // If we are the requester, then update our initial events
+        if (request_space == local_space)
+          initial_events[info.to_trigger] = overlap;
+        needed_mask -= overlap;
+        if (!needed_mask)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::select_final_targets(AddressSpaceID request_space,
+                                            FieldMask &needed_mask,
+                                    LegionDeque<RequestInfo>::aligned &targets,
+                                            std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner()); // should only be called on the owner node
+#endif
+      // First check to see if there are any final versions we can copy from
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
+            final_nodes.begin(); it != final_nodes.end(); it++)
+      {
+        // Skip the requesting state
+        if (request_space == it->first)
+          continue;
+        FieldMask overlap = needed_mask & it->second;
+        if (!overlap)
+          continue;
+        targets.push_back(RequestInfo());
+        RequestInfo &info = targets.back();
+        info.target = it->first;
+        info.to_trigger = UserEvent::create_user_event();
+        info.request_mask = overlap;
+        info.request_final = true;
+        // Add the event to the set of preconditions
+        preconditions.insert(info.to_trigger);
+        // If we are the requester, then update our final events
+        if (request_space == local_space)
+          final_events[info.to_trigger] = overlap;
+        needed_mask -= overlap;
+        if (!needed_mask)
+          return;
+      }
+      // Now if we still have needed fields, we need to create a final
+      // version from all of the earlier versions across all the nodes
+      FieldMask requested_mask;
+      std::set<Event> merge_preconditions;
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
+            initial_nodes.begin(); it != initial_nodes.end(); it++)
+      {
+        if (request_space == it->first)
+          continue;
+        FieldMask overlap = needed_mask & it->second;
+        if (!overlap)
+          continue;
+        RequestInfo &info = targets.back();
+        info.target = it->first;
+        info.to_trigger = UserEvent::create_user_event();
+        info.request_mask = overlap;
+        info.request_final = false;
+        merge_preconditions.insert(info.to_trigger); 
+        requested_mask |= overlap;
+      }
+      if (!!requested_mask)
+      {
+        Event precondition = Event::merge_events(merge_preconditions);
+        if (precondition.exists())
+        {
+          preconditions.insert(precondition);
+          if (request_space == local_space)
+            final_events[precondition] = requested_mask;
+        }
+        needed_mask -= requested_mask;
+      }
+    }
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state(AddressSpaceID target,
+                                          const FieldMask &request_mask,
                                           UserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
@@ -13805,33 +13891,106 @@ namespace LegionRuntime {
         rez.serialize(to_trigger);
         // Hold the lock in read-only mode while iterating these structures
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        rez.serialize(dirty_mask);
-        rez.serialize(reduction_mask);
-        rez.serialize<size_t>(children.open_children.size()); 
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              children.open_children.begin(); it != 
-              children.open_children.end(); it++)
+        // See if we should send all the fields or just do a partial send
+        if (!((initial_fields | final_fields) - request_mask))
         {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
+          // Send everything
+          rez.serialize(dirty_mask);
+          rez.serialize(reduction_mask);
+          rez.serialize<size_t>(children.open_children.size()); 
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                children.open_children.begin(); it != 
+                children.open_children.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(valid_views.size());
+          for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+                track_aligned::const_iterator it = valid_views.begin(); it !=
+                valid_views.end(); it++)
+          {
+            DistributedID view_did = it->first->send_view(target, it->second);
+            rez.serialize(view_did);
+            rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(reduction_views.size());
+          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                track_aligned::const_iterator it = reduction_views.begin(); 
+                it != reduction_views.end(); it++)
+          {
+            DistributedID reduc_did = it->first->send_view(target, it->second);
+            rez.serialize(reduc_did);
+            rez.serialize(it->second);
+          }
         }
-        rez.serialize<size_t>(valid_views.size());
-        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::const_iterator it = valid_views.begin(); it != 
-              valid_views.end(); it++)
+        else
         {
-          DistributedID did = it->first->send_view(target, it->second);
-          rez.serialize(did);
-          rez.serialize(it->second);
-        }
-        rez.serialize<size_t>(reduction_views.size());
-        for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-              track_aligned::const_iterator it = reduction_views.begin(); 
-              it != reduction_views.end(); it++)
-        {
-          DistributedID did = it->first->send_view(target, it->second);
-          rez.serialize(did);
-          rez.serialize(it->second);
+          // Partial send
+          rez.serialize(dirty_mask & request_mask);
+          rez.serialize(reduction_mask & request_mask);
+          if (!children.open_children.empty())
+          {
+            Serializer child_rez;
+            size_t count = 0;
+            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                  children.open_children.begin(); it !=
+                  children.open_children.end(); it++)
+            {
+              FieldMask overlap = it->second & request_mask;
+              if (!overlap)
+                continue;
+              child_rez.serialize(it->first);
+              child_rez.serialize(overlap);
+              count++;
+            }
+            rez.serialize(count);
+            rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
+          }
+          else
+            rez.serialize<size_t>(0);
+          if (!valid_views.empty())
+          {
+            Serializer valid_rez;
+            size_t count = 0;
+            for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+                  track_aligned::const_iterator it = valid_views.begin(); it !=
+                  valid_views.end(); it++)
+            {
+              FieldMask overlap = it->second & request_mask;
+              if (!overlap)
+                continue;
+              DistributedID view_did = it->first->send_view(target, overlap);
+              valid_rez.serialize(view_did);
+              valid_rez.serialize(overlap);
+              count++;
+            }
+            rez.serialize(count);
+            rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
+          }
+          else
+            rez.serialize<size_t>(0);
+          if (!reduction_views.empty())
+          {
+            Serializer reduc_rez;
+            size_t count = 0;
+            for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                  track_aligned::const_iterator it = reduction_views.begin();
+                  it != reduction_views.end(); it++)
+            {
+              FieldMask overlap = it->second & request_mask;
+              if (!overlap)
+                continue;
+              DistributedID reduc_did = it->first->send_view(target, overlap);
+              reduc_rez.serialize(reduc_did);
+              reduc_rez.serialize(overlap);
+              count++;
+            }
+            rez.serialize(count);
+            rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
+          }
+          else
+            rez.serialize<size_t>(0);
         }
       }
       runtime->send_version_state_response(target, rez);
@@ -13843,7 +14002,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_request(AddressSpaceID target,
                                     AddressSpaceID source, UserEvent to_trigger, 
-                                    bool merged_request, bool upgrade)
+                                    const FieldMask &request_mask, 
+                                    bool request_final)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -13852,21 +14012,22 @@ namespace LegionRuntime {
         rez.serialize(did);
         rez.serialize(source);
         rez.serialize(to_trigger);
-        rez.serialize(merged_request);
-        rez.serialize(upgrade);
+        rez.serialize(request_final);
+        rez.serialize(request_mask);
       }
       runtime->send_version_state_request(target, rez);
     }
 
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state(AddressSpaceID target,
-                                       UserEvent to_trigger, Event precondition)
+        UserEvent to_trigger, const FieldMask &request_mask, Event precondition)
     //--------------------------------------------------------------------------
     {
       SendVersionStateArgs args;
       args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
       args.proxy_this = this;
       args.target = target;
+      args.request_mask = new FieldMask(request_mask);
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
@@ -13874,277 +14035,202 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID VersionState::select_next_target(bool eventual,
-                                                    AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // Better be called while holding the lock
-#ifdef DEBUG_HIGH_LEVEL
-      assert(is_owner());
-#endif
-      AddressSpaceID result = source;
-      // use a basic round-robin scheme for now, in the future
-      // we might choose to do some more intelligent node selection
-      if (eventual)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!eventual_nodes.empty());
-        if (eventual_nodes.size() == 1)
-          assert(!eventual_nodes.contains(source));
-#endif
-        while (result == source)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(eventual_index < eventual_nodes.size());
-#endif
-          result = eventual_nodes.find_index_set(eventual_index++); 
-          if (eventual_index == eventual_nodes.size())
-            eventual_index = 0;
-        }
-      }
-      else
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!merged_nodes.empty());
-        if (merged_nodes.size() == 1)
-          assert(!merged_nodes.contains(source));
-#endif
-        while (result == source)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(merged_index < merged_nodes.size());
-#endif
-          result = merged_nodes.find_index_set(merged_index++);
-          if (merged_index == merged_nodes.size())
-            merged_index = 0;
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void VersionState::handle_version_state_initialization(
-                                                          AddressSpaceID source)
+                                 AddressSpaceID source, FieldMask &initial_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
 #endif
-#ifdef UNIMPLEMENTED_VERSIONING
+      // First transform the initial mask
+      manager->owner->column_source->transform_field_mask(initial_mask, source);
       AutoLock s_lock(state_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(meta_state != MERGED_VERSION_STATE);
-#endif
-      eventual_nodes.add(source);
-#else
-      assert(false);
-#endif
+      initial_nodes[source] |= initial_mask;
     }
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_request(AddressSpaceID source,
-                        UserEvent to_trigger, bool merged_request, bool upgrade)
+              UserEvent to_trigger, bool request_final, FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef UNIMPLEMENTED_VERSIONING
-      // If we are not the owner, we should definitely be able to handle this
       if (!is_owner())
       {
-        Event precondition;
-        if (merged_request)
+        // First things first, transform the field mask
+        manager->owner->column_source->transform_field_mask(request_mask, 
+                                                            owner_space);
+        // If we are not the owner, we should definitely be able to handle this 
+        std::set<Event> launch_preconditions;
+        FieldMask remaining_mask = request_mask;
+        if (request_final)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!upgrade);
-#endif
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(meta_state == MERGED_VERSION_STATE);
-#endif
-          precondition = merged_ready;
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                final_events.begin(); it != final_events.end(); it++)
+          {
+            FieldMask overlap = it->second & request_mask;
+            if (!overlap)
+              continue;
+            launch_preconditions.insert(it->first);
+            remaining_mask -= overlap;
+            if (!remaining_mask)
+              break;
+          }
         }
         else
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(meta_state != INVALID_VERSION_STATE);
-#endif
-          if (meta_state == EVENTUAL_VERSION_STATE)
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                initial_events.begin(); it != initial_events.end(); it++)
           {
-            precondition = eventual_ready;
-            if (upgrade)
-            {
-              merged_ready = eventual_ready;
-              meta_state = MERGED_VERSION_STATE;
-            }
+            FieldMask overlap = it->second & request_mask;
+            if (!overlap)
+              continue;
+            launch_preconditions.insert(it->first);
+            remaining_mask -= overlap;
+            if (!remaining_mask)
+              break;
           }
-          else
-            precondition = merged_ready;
         }
-        launch_send_version_state(source, to_trigger, precondition);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!remaining_mask); // request mask should now be empty
+#endif
+        if (!launch_preconditions.empty())
+        {
+          Event pre = Event::merge_events(launch_preconditions);
+          launch_send_version_state(source, to_trigger, request_mask, pre);
+        }
+        else
+          launch_send_version_state(source, to_trigger, request_mask);
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!upgrade);
-#endif
-        // We are the owner, see if we can handle it locally, if not
-        // then send out the right messages to handle the request
-        // and record who we know has certain versions of the state
-        Event precondition = Event::NO_EVENT;
-        bool forward = false;
-        bool trigger_now = false;
-        bool handle_locally = false;
-        // Initialize target with a dumb value because compilers are dumb
-        AddressSpaceID target = source;
-        std::deque<AddressSpaceID> broadcast_targets;
-        if (merged_request)
+        // First things first, transform the field mask
+        manager->owner->column_source->transform_field_mask(request_mask, 
+                                                            source);
+        // We're the owner, figure out what to do
+        FieldMask remaining_fields = request_mask;
+        FieldMask local_fields;
+        int initial_local_index = -1;
+        std::set<Event> local_preconditions, done_conditions;
+        LegionDeque<RequestInfo>::aligned targets;
+        if (request_final)
         {
-          // Handle the final requests
           AutoLock s_lock(state_lock);
-          // Check to see if we are valid and can handle the request
-          if (meta_state == MERGED_VERSION_STATE)
+          // See if we can handle any of the fields locally
+          local_fields = remaining_fields & final_fields;
+          if (!!local_fields)
           {
-            precondition = merged_ready;
-            handle_locally = true;
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  final_events.begin(); it != final_events.end(); it++)
+            {
+              if (it->second * local_fields)
+                continue;
+              local_preconditions.insert(it->first);
+            }
+            remaining_fields -= local_fields;
           }
-          else
+          // See if there are any remote nodes that can handle it
+          if (!!remaining_fields && !final_nodes.empty())
           {
-            // Check to see if we've made a final instance yet
-            if (merged_nodes.empty())
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!eventual_nodes.empty());
-#endif
-              size_t count = eventual_nodes.size();
-              if (eventual_nodes.contains(source))
-                count--;
-              // Optimize for the cases where there is only one 
-              // or zero targets
-              if (count == 0)
-              {
-                // There is only one valid initial state and it
-                // is the requester and it is ready so trigger
-                // it now (not while holding the lock of course)
-                trigger_now = true;
-              }
-              else if (count == 1)
-              {
-                // If there is only one initial, then we can forward
-                target = select_next_target(true/*initial*/, source);
-                // See if it is the owner, if it is, then we
-                // can just handle it now, otherwise we forward
-                // it onto the node that can handle it
-                if (target == local_space)
-                {
-#ifdef DEBUG_HIGH_LEVEL
-                  assert(meta_state == EVENTUAL_VERSION_STATE);
-#endif
-                  precondition = eventual_ready;
-                  handle_locally = true;
-                  // Upgrade ourselves
-                  meta_state = MERGED_VERSION_STATE;
-                  merged_ready = eventual_ready;
-                  merged_nodes.add(local_space);
-                }
-                else
-                {
-                  forward = true;
-                  // Switch the request type to initial since
-                  // this is the only node needed to upgrade
-                  merged_request = false;
-                  merged_nodes.add(target);
-                  // tell the target that it can upgrade
-                  upgrade = true;
-                }
-              }
-              else
-              {
-                BroadcastFunctor functor(source, broadcast_targets);
-                eventual_nodes.map(functor);
-              }
-            }
-            else
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!merged_nodes.contains(source));
-#endif
-              forward = true;
-              target = select_next_target(false/*initial*/, source);
-            }
+            select_final_targets(source, remaining_fields,
+                                 targets, done_conditions);
           }
-          // Record that this node is now a final node
-          merged_nodes.add(source);
+          // Once we are here, we can update our remote state information
+          final_nodes[source] |= request_mask;
         }
         else
         {
-          // Handle the initial request
-          AutoLock s_lock(state_lock); 
-          // Check to see if we are valid and can handle the request
-          if (meta_state != INVALID_VERSION_STATE)
+          AutoLock s_lock(state_lock);
+          // See if we can handle any of the fields locally
+          local_fields = remaining_fields & initial_fields;
+          if (!!local_fields)
           {
-            if (meta_state == EVENTUAL_VERSION_STATE)
-              precondition = eventual_ready;
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  initial_events.begin(); it != initial_events.end(); it++)
+            {
+              if (it->second * local_fields)
+                continue;
+              local_preconditions.insert(it->first);
+            }
+            remaining_fields -= local_fields;
+          }
+          // Now see if there are any remote nodes that can handle it
+          if (!!remaining_fields && !initial_nodes.empty())
+          {
+            select_initial_targets(source, remaining_fields,
+                                   targets, done_conditions);
+          }
+          // Once we are here we can update our remote state information
+          initial_nodes[source] |= request_mask;
+        }
+        // First, issue all our remote requests, pull out any that
+        // were actually intended for us
+        if (!targets.empty())
+        {
+          int idx = 0;
+          for (LegionDeque<RequestInfo>::aligned::const_iterator it = 
+                targets.begin(); it != targets.end(); it++, idx++)
+          {
+            if (it->target == local_space)
+            {
+              // Special case if we were supposed to send it
+#ifdef DEBUG_HIGH_LEVEL
+              assert(request_final && !it->request_final);
+#endif
+              initial_local_index = idx;
+            }
             else
-              precondition = merged_ready;
-            handle_locally = true;
+              send_version_state_request(it->target, source, it->to_trigger,
+                                         it->request_mask, it->request_final);
+          }
+        }
+        // Now see if we have any local fields to send
+        if (!!local_fields)
+        {
+          UserEvent local_trigger = UserEvent::create_user_event();
+          if (!local_preconditions.empty())
+          {
+            Event pre = Event::merge_events(local_preconditions);
+            launch_send_version_state(source, to_trigger, local_fields, pre); 
           }
           else
+            launch_send_version_state(source, to_trigger, local_fields); 
+          done_conditions.insert(local_trigger);
+        }
+        // We might also have some additional local fields to send
+        if (initial_local_index >= 0)
+        {
+          RequestInfo &info = targets[initial_local_index];
+          local_preconditions.clear();
+          // Retake the lock to read the local data structure
           {
-            if (eventual_nodes.empty())
+            AutoLock s_lock(state_lock,1,false/*exclusive*/);
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  initial_events.begin(); it != initial_events.end(); it++)
             {
-              // There are no valid copies, so we can trigger it now 
-              trigger_now = true;
-            }
-            else
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!eventual_nodes.contains(source));
-#endif
-              forward = true;
-              target = select_next_target(true/*initial*/, source); 
+              if (it->second * info.request_mask)
+                continue;
+              local_preconditions.insert(it->first);
             }
           }
-          // Record that this node is now an initial node
-          eventual_nodes.add(source);
+          if (!local_preconditions.empty())
+          {
+            Event pre = Event::merge_events(local_preconditions);
+            launch_send_version_state(source, info.to_trigger, 
+                                      info.request_mask, pre);
+          }
+          else
+            launch_send_version_state(source, info.to_trigger, 
+                                      info.request_mask);
+          done_conditions.insert(info.to_trigger);
         }
-        // If we can handle it locally, we are done
-        if (handle_locally)
-          launch_send_version_state(source, to_trigger, precondition);
-        else if (forward)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(target != source);
-#endif
-          send_version_state_request(target, source, to_trigger,
-                                     merged_request, upgrade); 
-        }
-        else if (trigger_now)
+        // Now if we have any done conditions we trigger the proper 
+        // precondition event, otherwise we can do it immediately
+        if (!done_conditions.empty())
+          to_trigger.trigger(Event::merge_events(done_conditions));
+        else
           to_trigger.trigger();
-        else 
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!broadcast_targets.empty());
-#endif
-          // Respond to the requester with the broadcast information
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(to_trigger);
-            rez.serialize<size_t>(broadcast_targets.size());
-            for (std::deque<AddressSpaceID>::const_iterator it = 
-                  broadcast_targets.begin(); it != 
-                  broadcast_targets.end(); it++)
-            {
-              rez.serialize(*it);
-            }
-          }
-          runtime->send_version_state_broadcast_response(source, rez);
-        }
       }
-#else
-      assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14152,7 +14238,6 @@ namespace LegionRuntime {
                                       UserEvent to_trigger, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef UNIMPLEMENTED_VERSIONING
       // Keep track of any composite veiws we need to check 
       // for having recursive version states at here
       std::vector<CompositeView*> composite_views;
@@ -14162,13 +14247,10 @@ namespace LegionRuntime {
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
         AutoLock s_lock(state_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(meta_state != INVALID_VERSION_STATE);
-#endif
         // Check to see what state we are generating, if it is the initial
         // one then we can just do our unpack in-place, otherwise we have
         // to unpack separately and then do a merge.
-        if (meta_state == EVENTUAL_VERSION_STATE)
+        if (!initial_fields && !final_fields)
         {
           derez.deserialize(dirty_mask);
           field_node->transform_field_mask(dirty_mask, source); 
@@ -14348,43 +14430,6 @@ namespace LegionRuntime {
         // Finally trigger the event saying we have the data
         to_trigger.trigger();
       }
-#else
-      assert(false);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_broadcast_response(
-                                      UserEvent to_trigger, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef UNIMPLEMENTED_VERSIONING
-      size_t target_count;
-      derez.deserialize(target_count);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(target_count > 0);
-#endif
-      std::set<Event> preconditions;
-      for (unsigned idx = 0; idx < target_count; idx++)
-      {
-        AddressSpaceID target;
-        derez.deserialize(target);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(target != runtime->address_space); // shouldn't be ourself
-#endif
-        UserEvent precondition = UserEvent::create_user_event();
-        // Note that even though we are asking for a final state, if we
-        // are doing this broadcast, we are really asking for are all the
-        // initial states, so we tell the remote nodes that we are asking
-        // for their initial states and not their final states.
-        send_version_state_request(target, local_space, precondition,
-                                   false/*final req*/, false/*upgrade*/);
-        preconditions.insert(precondition);
-      }
-      to_trigger.trigger(Event::merge_events(preconditions)); 
-#else
-      assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14395,6 +14440,8 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      FieldMask initial_mask;
+      derez.deserialize(initial_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
       VersionState *vs = dynamic_cast<VersionState*>(target);
@@ -14402,7 +14449,7 @@ namespace LegionRuntime {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_initialization(source);
+      vs->handle_version_state_initialization(source, initial_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -14417,10 +14464,10 @@ namespace LegionRuntime {
       derez.deserialize(source);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      bool merged_request;
-      derez.deserialize(merged_request);
-      bool upgrade;
-      derez.deserialize(upgrade);
+      bool request_final;
+      derez.deserialize(request_final);
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
       VersionState *vs = dynamic_cast<VersionState*>(target);
@@ -14429,7 +14476,7 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_request(source, to_trigger, 
-                                       merged_request, upgrade);
+                                       request_final, request_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -14450,26 +14497,6 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_response(source, to_trigger, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_broadcast_response(
-                                               Runtime *rt, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      UserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
-      VersionState *vs = dynamic_cast<VersionState*>(target);
-      assert(vs != NULL);
-#else
-      VersionState *vs = static_cast<VersionState*>(target);
-#endif
-      vs->handle_version_state_broadcast_response(to_trigger, derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -14518,7 +14545,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
-                     bool path_only, bool close_top, bool advance, bool capture)
+                        bool path_only, bool close_top, bool advance, 
+                        bool initialize, bool capture)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -14563,7 +14591,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = create_new_version_state(it->first+1);
+              VersionState *new_state = 
+                create_new_version_state(it->first+1, to_create, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
@@ -14595,7 +14624,8 @@ namespace LegionRuntime {
               assert(observed_mask * to_create);
               observed_mask |= to_create;
 #endif
-              VersionState *new_state = create_new_version_state(it->first);
+              VersionState *new_state = 
+                create_new_version_state(it->first, to_create, initialize);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
@@ -14936,7 +14966,8 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = create_new_version_state(0);
+        VersionState *init_state = 
+          create_new_version_state(0, user_mask, true/*initialize*/);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, term_event, usage, user_mask);
         current_version_infos[0].valid_fields = user_mask;
@@ -15150,19 +15181,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionManager::create_new_version_state(VersionID vid) 
+    VersionState* VersionManager::create_new_version_state(VersionID vid,
+                                         const FieldMask &mask, bool initialize) 
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = 
         owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                                new_did, local_space, local_space, this);
+                    new_did, local_space, local_space, this, mask, initialize);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::create_remote_version_state(VersionID vid,
-                                  DistributedID did, AddressSpaceID owner_space) 
+                                  DistributedID did, AddressSpaceID owner_space,
+                                  const FieldMask &mask, bool initialize)
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
@@ -15170,32 +15203,37 @@ namespace LegionRuntime {
       assert(owner_space != local_space);
 #endif
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                                      did, owner_space, local_space, this);
+                        did, owner_space, local_space, this, mask, initialize);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::find_remote_version_state(VersionID vid,
-                                       DistributedID did, AddressSpaceID source)
+                                       DistributedID did, AddressSpaceID source,
+                                       const FieldMask &mask, bool initialize)
     //--------------------------------------------------------------------------
     {
       // Use the lock on the version manager to ensure that we don't
       // replicated version states on a node
       VersionState *result = NULL;
+      Runtime *runtime = owner->context->runtime;
       {
         AutoLock v_lock(version_lock);
-        if (owner->context->runtime->has_distributed_collectable(did))
+        if (runtime->has_distributed_collectable(did))
         {
           DistributedCollectable *dc = 
-            owner->context->runtime->find_distributed_collectable(did);
+            runtime->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
           result = dynamic_cast<VersionState*>(dc);
           assert(result != NULL);
 #else
           result = static_cast<VersionState*>(dc);
 #endif
+          if (initialize)
+            result->record_initial_fields(mask);
         }
         else // Otherwise make it
-          result = create_remote_version_state(vid, did, source);
+          result = create_remote_version_state(vid, did, source, 
+                                               mask, initialize);
       }
       return result;
     }
@@ -18998,11 +19036,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
-                  VersionID vid, DistributedID did, AddressSpaceID source)
+                  VersionID vid, DistributedID did, AddressSpaceID source,
+                  const FieldMask &mask, bool initialize)
     //--------------------------------------------------------------------------
     {
       VersionManager *manager = version_managers.lookup_entry(ctx, this);
-      return manager->find_remote_version_state(vid, did, source);
+      return manager->find_remote_version_state(vid, did, source,
+                                                mask, initialize);
     }
 
     //--------------------------------------------------------------------------

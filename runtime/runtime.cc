@@ -3563,11 +3563,6 @@ namespace LegionRuntime {
                                                      remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_BROADCAST_RESPONSE:
-            {
-              runtime->handle_version_state_broadcast_response(derez);
-              break;
-            }
           case SEND_INSTANCE_CREATION:
             {
               runtime->handle_remote_instance_creation(derez, 
@@ -11301,16 +11296,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_broadcast_response(AddressSpaceID target,
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-                SEND_VERSION_STATE_BROADCAST_RESPONSE, DEFAULT_VIRTUAL_CHANNEL,
-                                                                 true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_remote_instance_creation_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11903,13 +11888,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_response(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_broadcast_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_broadcast_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15882,7 +15860,9 @@ namespace LegionRuntime {
             VersionState::SendVersionStateArgs *vargs = 
               (VersionState::SendVersionStateArgs*)args;
             vargs->proxy_this->send_version_state(vargs->target, 
+                                                  *(vargs->request_mask),
                                                   vargs->to_trigger);
+            delete vargs->request_mask;
             break;
           }
         case HLR_ADD_TO_DEP_QUEUE_TASK_ID:

@@ -1458,7 +1458,7 @@ namespace LegionRuntime {
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       PhysicalState* create_physical_state(RegionTreeNode *node,
                                            VersionManager *manager,
-                                           bool capture);
+                                           bool initialize, bool capture);
       FieldVersions* get_versions(RegionTreeNode *node) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
@@ -1986,32 +1986,27 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
-      class BroadcastFunctor {
-      public:
-        BroadcastFunctor(AddressSpaceID loc, std::deque<AddressSpaceID> &t)
-          : local(loc), targets(t) { }
-      public:
-        inline void apply(AddressSpaceID target)
-        {
-          if (target != local)
-            targets.push_back(target);
-        }
-      protected:
-        AddressSpaceID local;
-        std::deque<AddressSpaceID> &targets;
-      };
-    public:
       struct SendVersionStateArgs {
       public:
         HLRTaskID hlr_id;
         VersionState *proxy_this;
         AddressSpaceID target;
+        FieldMask *request_mask;
         UserEvent to_trigger;
+      };
+    public:
+      struct RequestInfo {
+      public:
+        AddressSpaceID target;
+        UserEvent to_trigger;
+        FieldMask request_mask;
+        bool request_final;
       };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   VersionManager *manager);
+                   VersionManager *manager, const FieldMask &mask, 
+                   bool initialize);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2045,21 +2040,33 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
+      void record_initial_fields(const FieldMask &initial_mask);
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<Event> &preconditions);
       void request_final_version_state(const FieldMask &request_mask,
                                        std::set<Event> &preconditions);
+      void select_initial_targets(AddressSpaceID request_space, 
+                                  FieldMask &needed_mask,
+                                  LegionDeque<RequestInfo>::aligned &targets,
+                                  std::set<Event> &preconditions);
+      void select_final_targets(AddressSpaceID request_space,
+                                FieldMask &needed_mask,
+                                LegionDeque<RequestInfo>::aligned &targets,
+                                std::set<Event> &preconditions);
     public:
-      void send_version_state(AddressSpaceID target, UserEvent to_trigger);
+      void send_version_state(AddressSpaceID target,
+                           const FieldMask &request_mask, UserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                           UserEvent to_trigger, bool merged_req, bool upgrade);
-      void launch_send_version_state(AddressSpaceID target, 
-                                 UserEvent to_trigger, Event precondition);
-      AddressSpaceID select_next_target(bool eventual, AddressSpaceID source);
+           UserEvent to_trigger, const FieldMask &request_mask, bool final_req);
+      void launch_send_version_state(AddressSpaceID target,UserEvent to_trigger, 
+           const FieldMask &request_mask, Event precondition = Event::NO_EVENT);
     public:
-      void handle_version_state_initialization(AddressSpaceID source);
+      void handle_version_state_initialization(AddressSpaceID source,
+                                               FieldMask &initial_mask);
       void handle_version_state_request(AddressSpaceID source, 
-                       UserEvent to_trigger, bool merged_req, bool upgrade);
+                                        UserEvent to_trigger, 
+                                        bool request_final,
+                                        FieldMask &request_mask);
       void handle_version_state_response(AddressSpaceID source,
                              UserEvent to_trigger, Deserializer &derez);
       void handle_version_state_broadcast_response(UserEvent to_trigger,
@@ -2104,8 +2111,8 @@ namespace LegionRuntime {
       LegionMap<Event,FieldMask>::aligned initial_events;
       LegionMap<Event,FieldMask>::aligned final_events;
       // These are valid on the owner node only
-      NodeSet eventual_nodes, merged_nodes;
-      unsigned eventual_index, merged_index;
+      LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
+      LegionMap<AddressSpaceID,FieldMask>::aligned final_nodes;
     };
 
     /**
@@ -2130,7 +2137,8 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-          bool path_only, bool close_top, bool initialize, bool capture);
+          bool path_only, bool close_top, bool advance, 
+          bool initialize, bool capture);
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask);
@@ -2160,12 +2168,16 @@ namespace LegionRuntime {
                                   PhysicalState *state, FieldMask &to_create,
                                   bool advance);
     protected:
-      VersionState* create_new_version_state(VersionID vid);
+      VersionState* create_new_version_state(VersionID vid, 
+                              const FieldMask &mask, bool initialize);
       VersionState* create_remote_version_state(VersionID vid, 
-                              DistributedID did, AddressSpaceID owner_space);
+                              DistributedID did, AddressSpaceID owner_space,
+                              const FieldMask &mask, bool initialize);
     public:
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
-                                              AddressSpaceID source);
+                                              AddressSpaceID source,
+                                              const FieldMask &mask,
+                                              bool initialize); 
     public:
       RegionTreeNode *const owner;
     protected:
@@ -2200,6 +2212,7 @@ namespace LegionRuntime {
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
+                                               bool initialize = true,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state
@@ -2212,7 +2225,7 @@ namespace LegionRuntime {
         assert(manager != NULL);
 #endif
         // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager, capture);
+        result = info.create_physical_state(this, manager, initialize, capture);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -2458,7 +2471,8 @@ namespace LegionRuntime {
       void unregister_logical_view(LogicalView *view);
       LogicalView* find_view(DistributedID did);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
-                                  DistributedID did, AddressSpaceID source); 
+                                  DistributedID did, AddressSpaceID source,
+                                  const FieldMask &mask, bool initialize); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
