@@ -18,6 +18,7 @@
 #ifdef USE_CUDA
 #include "lowlevel_gpu.h"
 #endif
+#include "channel.h"
 #include "accessor.h"
 #include <errno.h>
 #include <aio.h>
@@ -93,55 +94,6 @@ namespace LegionRuntime {
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
-    };
-
-    class DmaRequest : public Realm::Operation {
-    public:
-      DmaRequest(int _priority, Event _after_copy) 
-	: Operation(), state(STATE_INIT), priority(_priority), 
-          after_copy(_after_copy) {}
-
-      DmaRequest(int _priority, Event _after_copy,
-                 const Realm::ProfilingRequestSet &reqs)
-        : Realm::Operation(reqs), state(STATE_INIT), priority(_priority), 
-          after_copy(_after_copy) {}
-
-      virtual ~DmaRequest(void) {}
-
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
-
-      virtual bool handler_safe(void) = 0;
-
-      virtual void perform_dma(void) = 0;
-
-      enum State {
-	STATE_INIT,
-	STATE_METADATA_FETCH,
-	STATE_BEFORE_EVENT,
-	STATE_INST_LOCK,
-	STATE_READY,
-	STATE_QUEUED,
-	STATE_DONE
-      };
-
-      State state;
-      int priority;
-      Event after_copy;
-
-      class Waiter : public EventWaiter {
-      public:
-        Waiter(void) { }
-        virtual ~Waiter(void) { }
-      public:
-	Reservation current_lock;
-	DmaRequestQueue *queue;
-	DmaRequest *req;
-
-	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
-
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
-      };
     };
 
     // dma requests come in two flavors:
@@ -456,6 +408,14 @@ namespace LegionRuntime {
  
     CopyRequest::~CopyRequest(void)
     {
+      //<NEWDMA>
+      // destroy all xfer des
+      mark_completed();
+      std::vector<XferDesID>::iterator it;
+      for (it = path.begin(); it != path.end(); it++) {
+        destroy_xfer_des(*it);
+      }
+      //</NEWDMA>
       if (measurements.wants_measurement<
           Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         assert(!oas_by_inst->empty());
@@ -2682,14 +2642,16 @@ namespace LegionRuntime {
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
-    Buffer simple_create_intermediate_buffer(Memory::Kind kind, Domain domain, OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst, DomainLinearization linearization)
+    Buffer simple_create_intermediate_buffer(gasnet_node_t tgt_node, Memory::Kind kind, const Domain& domain,
+                                             OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
+                                             DomainLinearization linearization)
     {
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
       Memory tgt_mem = Memory::NO_MEMORY;
       machine.get_all_memories(mem);
       for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-        if (it->kind() == kind) {
+        if (it->kind() == kind && ID(*it).node() == tgt_node) {
           tgt_mem = *it;
         }
       assert(tgt_mem != Memory::NO_MEMORY);
@@ -2716,6 +2678,7 @@ namespace LegionRuntime {
     template <unsigned DIM>
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
+      mark_started();
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
@@ -2728,7 +2691,6 @@ namespace LegionRuntime {
 
         Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
 
-        std::vector<XferDes*> path;
         // We don't need to care about deallocation of Buffer class
         // This will be handled by XferDes destruction
         Buffer src_buf(&src_impl->metadata, src_mem);
@@ -2741,19 +2703,21 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
           {
-            XferDes* xd = new MemcpyXferDes<DIM>(false, src_buf, dst_buf,
-                                            domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                            100/*max_nr*/, XferOrder::DST_FIFO);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_MEM_CPY, after_copy);
             break;
           }
 #ifdef USE_CUDA
           case MemoryImpl::MKIND_GPUFB:
           {
-            XferDes* xd = new GPUXferDes<DIM>(false, src_buf, dst_buf,
-                                         domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                         100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_TO_FB);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GPU_TO_FB, after_copy);
             break;
           }
 #endif
@@ -2761,10 +2725,11 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_DISK:
           {
             log_dma.info("create mem->disk xferdes\n");
-            XferDes* xd = new DiskXferDes<DIM>(false, src_buf, dst_buf,
-                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_WRITE);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_DISK_WRITE, after_copy);
             break;
           }
 #endif /*USE_DISK*/
@@ -2772,10 +2737,11 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_HDF:
           {
             log_dma.info("create mem->hdf xferdes\n");
-            XferDes* xd = new HDFXferDes<DIM>(dst_inst, false, src_buf, dst_buf,
-                                              domain, oasvec, 100/*max_nr*/,
-                                              XferOrder::DST_FIFO, XferDes::XFER_HDF_WRITE);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_HDF_WRITE, after_copy, dst_inst);
             break;
           }
 #endif
@@ -2783,10 +2749,11 @@ namespace LegionRuntime {
           {
             // cpu mem -> gasnet mem
             log_dma.info("create cpu->gasnet mem XD\n");
-            XferDes* xd = new GASNetXferDes<DIM>(false, src_buf, dst_buf,
-                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_WRITE);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GASNET_WRITE, after_copy);
             break;
           }
           case MemoryImpl::MKIND_RDMA:
@@ -2797,15 +2764,17 @@ namespace LegionRuntime {
             case Memory::REGDMA_MEM:
             {
               // most simple case: destination is registered memory
-              XferDes* xd = new RemoteWriteXferDes<DIM>(false, src_buf, dst_buf,
-                                                  domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                                  100/*max_nr*/, XferOrder::DST_FIFO);
-              path.push_back(xd);
+              log_dma.info("create cpu->regdma XD\n");
+              XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+              path.push_back(guid);
+              create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                   src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_REMOTE_WRITE, after_copy);
               break;
             }
             case Memory::GLOBAL_MEM:
             {
-              fprintf(stderr, "[DMA] TO be implemented\n");
+              fprintf(stderr, "cpu->gasnet mem should be transferred directly\n");
               assert(0);
               break;
             }
@@ -2815,42 +2784,19 @@ namespace LegionRuntime {
             case Memory::SYSTEM_MEM:
             case Memory::SOCKET_MEM:
             {
-              // step 1: allocate intermediate buffer in registered memory on dst node
-              Machine machine = Machine::get_machine();
-              std::set<Memory> mem;
-              Memory reg_mem = Memory::NO_MEMORY;
-              machine.get_all_memories(mem);
-              for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-                if (it->kind() == Memory::REGDMA_MEM) {
-                  reg_mem = *it;
-                }
-              assert(reg_mem != Memory::NO_MEMORY);
-              size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
-              off_t ib_offset = get_runtime()->get_memory_impl(reg_mem)->alloc_bytes(ib_size);
+              // allocate intermediate buffer in registered memory on dst node
               OASVec oasvec_src, oasvec_dst;
-              std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
-              off_t ib_elmnt_size = 0;
-              for (int i = 0; i < oasvec.size(); i++) {
-                OffsetsAndSize oas_src, oas_dst;
-                oas_src.src_offset = oasvec[i].src_offset;
-                oas_src.dst_offset = ib_elmnt_size;
-                oas_src.size = oasvec[i].size;
-                oas_dst.src_offset = ib_elmnt_size;
-                oas_dst.dst_offset = oasvec[i].dst_offset;
-                oas_dst.size = oasvec[i].size;
-                ib_elmnt_size += oasvec[i].size;
-                oasvec_src.push_back(oas_src);
-                oasvec_dst.push_back(oas_dst);
-              }
-              Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, dst_buf.linearization, reg_mem);
-              XferDes* xd1 = new RemoteWriteXferDes<DIM>(false, src_buf, ib_buf,
-                                                   domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                                   100/*max_nr*/, XferOrder::DST_FIFO);
-              XferDes* xd2 = new MemcpyXferDes<DIM>(true, ib_buf, dst_buf,
-                                              domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                              100/*max_nr*/, XferOrder::SRC_FIFO);
-              path.push_back(xd1);
-              path.push_back(xd2);
+              XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+              XferDesID guid2 = get_xdq_singleton()->get_guid(ID(dst_mem).node());
+              path.push_back(guid1);
+              path.push_back(guid2);
+              Buffer ib_buf = simple_create_intermediate_buffer(ID(dst_mem).node(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                   ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_MEM_CPY, after_copy);
+              create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                   src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_REMOTE_WRITE, Event::NO_EVENT);
               break;
             }
             case Memory::Z_COPY_MEM:
@@ -2875,10 +2821,11 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
           {
-            XferDes* xd = new GPUXferDes<DIM>(false, src_buf, dst_buf,
-                                              domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                              100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GPU_FROM_FB);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GPU_FROM_FB, after_copy);
             break;
           }
           case MemoryImpl::MKIND_GPUFB:
@@ -2908,42 +2855,48 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
           {
-            XferDes* xd = new DiskXferDes<DIM>(false, src_buf, dst_buf,
-                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_READ);
-            path.push_back(xd);
+            log_dma.info("create disk->cpu mem XD\n");
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_DISK_READ, after_copy);
             break;
           }
 #ifdef USE_CUDA
           case MemoryImpl::MKIND_GPUFB:
           {
             /* need to find a cpu memory as intermediate buffer*/
+            XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            XferDesID guid2 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid1);
+            path.push_back(guid2);
             OASVec oasvec_src, oasvec_dst;
-            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
-                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
-            XferDes* xd2 = new GPUXferDes<DIM>(true, ib_buf, dst_buf,
-                                          domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                          100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
-            path.push_back(xd1);
-            path.push_back(xd2);
+            Buffer ib_buf = simple_create_intermediate_buffer(gasnet_mynode(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                 ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_GPU_TO_FB, after_copy);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                 src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ, Event::NO_EVENT);
             break;
           }
 #endif
           case MemoryImpl::MKIND_DISK:
           {
             /* need to find a cpu memory as intermediate buffer*/
+            XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            XferDesID guid2 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid1);
+            path.push_back(guid2);
             OASVec oasvec_src, oasvec_dst;
-            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
-                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
-            XferDes* xd2 = new DiskXferDes<DIM>(true, ib_buf, dst_buf,
-                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE);
-            path.push_back(xd1);
-            path.push_back(xd2);
+            Buffer ib_buf = simple_create_intermediate_buffer(gasnet_mynode(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                 ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE, after_copy);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                 src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ, Event::NO_EVENT);
             break;
           }
 #ifdef USE_HDF
@@ -2954,17 +2907,19 @@ namespace LegionRuntime {
 #endif
           case MemoryImpl::MKIND_GLOBAL:
           {
-            log_dma.info("create disk mem->gasnet mem XD\n");
+            log_dma.info("create disk->gasnet mem XD\n");
+            XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            XferDesID guid2 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid1);
+            path.push_back(guid2);
             OASVec oasvec_src, oasvec_dst;
-            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            XferDes* xd1 = new DiskXferDes<DIM>(false, src_buf, ib_buf,
-                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ);
-            XferDes* xd2 = new GASNetXferDes<DIM>(true, ib_buf, dst_buf,
-                                             domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                             100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GASNET_WRITE);
-            path.push_back(xd1);
-            path.push_back(xd2);
+            Buffer ib_buf = simple_create_intermediate_buffer(gasnet_mynode(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                 ib_buf, dst_buf,  domain, oasvec_dst, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_GASNET_WRITE, after_copy);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                 src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_DISK_READ, Event::NO_EVENT);
             break;
           }
           case MemoryImpl::MKIND_RDMA:
@@ -2986,11 +2941,12 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_SYSMEM:
           case MemoryImpl::MKIND_ZEROCOPY:
           {
-            printf("hdf->cpu XferDes\n");
-            XferDes* xd = new HDFXferDes<DIM>(src_inst, false, src_buf, dst_buf,
-                                              domain, oasvec, 100/*max_nr*/,
-                                              Layouts::XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ);
-            path.push_back(xd);
+            log_dma.info("create hdf->cpu mem XD\n");
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_HDF_READ, after_copy, src_inst);
             break;
           }
 #ifdef USE_CUDA
@@ -3027,46 +2983,52 @@ namespace LegionRuntime {
           case MemoryImpl::MKIND_ZEROCOPY:
           {
             log_dma.info("create gasnet->cpu XD\n");
-            XferDes* xd = new GASNetXferDes<DIM>(false, src_buf, dst_buf,
-                                                 domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
-                                                 100/*max_nr*/, Layouts::XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
-            path.push_back(xd);
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ, after_copy);
             break;
           }
 #ifdef USE_CUDA
           case MemoryImpl::MKIND_GPUFB:
+            assert(0);
+            break;
 #endif
           case MemoryImpl::MKIND_DISK:
           {
             log_dma.info("create gasnet->disk mem XD\n");
             /* need to find a cpu memory as intermediate buffer*/
             OASVec oasvec_src, oasvec_dst;
-            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            XferDes* xd1 = new GASNetXferDes<DIM>(false, src_buf, ib_buf,
-                                             domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                             100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
-            XferDes* xd2 = new DiskXferDes<DIM>(true, ib_buf, dst_buf,
-                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                           100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE);
-            path.push_back(xd1);
-            path.push_back(xd2);
-
+            XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            XferDesID guid2 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid1);
+            path.push_back(guid2);
+            Buffer ib_buf = simple_create_intermediate_buffer(gasnet_mynode(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                 ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE, after_copy);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                 src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ, Event::NO_EVENT);
             break;
           }
           case MemoryImpl::MKIND_GLOBAL:
           {
             log_dma.info("create gasnet->gasnet xd\n");
             /* need to find a cpu memory as intermediate buffer*/
+            XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            XferDesID guid2 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid1);
+            path.push_back(guid2);
             OASVec oasvec_src, oasvec_dst;
-            Buffer ib_buf = simple_create_intermediate_buffer(Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            XferDes* xd1 = new GASNetXferDes<DIM>(false, src_buf, ib_buf,
-                                             domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
-                                             100/*max_nr*/, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ);
-            XferDes* xd2 = new GASNetXferDes<DIM>(true, ib_buf, dst_buf,
-                                             domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
-                                             100/*max_nr*/, XferOrder::SRC_FIFO, XferDes::XFER_GASNET_WRITE);
-            path.push_back(xd1);
-            path.push_back(xd2);
+            Buffer ib_buf = simple_create_intermediate_buffer(gasnet_mynode(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                 ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_GASNET_WRITE, after_copy);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                 src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_GASNET_READ, Event::NO_EVENT);
             break;
           }
           case MemoryImpl::MKIND_RDMA:
@@ -3088,16 +3050,10 @@ namespace LegionRuntime {
           fprintf(stderr, "Unrecognized memory kind!\n");
           assert(0);
         }
-        log_dma.info("enqueue xferDes");
-        enqueue_xferDes_path(path);
-        log_dma.info("finished enqueue xferdes");
-        std::set<Event> finish_events;
-        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++)
-          finish_events.insert((*it)->complete_event);
 
-    	if(after_copy.exists())
-    	  get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), GenEventImpl::merge_events(finish_events));
-    	log_dma.info("set event dependencies");
+        //if(after_copy.exists())
+          //get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), GenEventImpl::merge_events(finish_events));
+        log_dma.info("[dma] created all xfer des");
       }
     }
     template <unsigned DIM>

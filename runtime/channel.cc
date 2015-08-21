@@ -51,15 +51,6 @@ namespace LegionRuntime {
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 
-      static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-  				     int block_size, int index)
-      {
-        return (alloc_offset +                                     // start address
-               ((index / block_size) * block_size * elmt_size) +   // full blocks
-               (field_start * block_size) +                        // skip other fields
-               ((index % block_size) * field_size));               // some some of our fields within our block
-      }
-
       static inline bool scatter_ib(off_t start, size_t nbytes, size_t buf_size)
       {
         return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
@@ -299,40 +290,28 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      MemcpyXferDes<DIM>::MemcpyXferDes(bool has_pre_XferDes,
-                                        Buffer& _src_buf, Buffer& _dst_buf,
-                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr, XferOrder::Type _order)
+      MemcpyXferDes<DIM>::MemcpyXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                        XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                        const Buffer& _src_buf, const Buffer& _dst_buf,
+                                        const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size, long max_nr, int _priority,
+                                        XferOrder::Type _order, Event _after_copy)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_MEM_CPY, _after_copy)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
         assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
         assert(dst_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-        kind = XferDes::XFER_MEM_CPY;
         channel = channel_manager->get_memcpy_channel();
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        max_req_size = _max_req_size;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
         src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         dst_buf_base = (char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(), order);
         offset_idx = 0;
@@ -341,7 +320,6 @@ namespace LegionRuntime {
           requests[i].xd = this;
           available_reqs.push(&requests[i]);
         }
-        complete_event = GenEventImpl::create_genevent()->current_event();
       }
 
       template<unsigned DIM>
@@ -401,36 +379,23 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      GASNetXferDes<DIM>::GASNetXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
-                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr,
-                                        XferOrder::Type _order, XferKind _kind)
+      GASNetXferDes<DIM>::GASNetXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                        XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                        const Buffer& _src_buf, const Buffer& _dst_buf,
+                                        const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size, long max_nr, int _priority,
+                                        XferOrder::Type _order, XferKind _kind, Event _after_copy)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        kind = _kind;
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        max_req_size = _max_req_size;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        complete_event = GenEventImpl::create_genevent()->current_event();
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(), order);
         offset_idx = 0;
@@ -497,6 +462,7 @@ namespace LegionRuntime {
             switch (kind) {
               case XferDes::XFER_GASNET_READ:
               {
+                //printf("[GASNetReadXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
                 GASNetReadRequest* gasnet_read_req = (GASNetReadRequest*) requests[idx];
                 gasnet_read_req->src_offset = src_buf.alloc_offset + src_start;
                 gasnet_read_req->dst_buf = (char*)(buf_base + dst_start);
@@ -505,6 +471,7 @@ namespace LegionRuntime {
               }
               case XferDes::XFER_GASNET_WRITE:
               {
+                //printf("[GASNetWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
                 GASNetWriteRequest* gasnet_write_req = (GASNetWriteRequest*) requests[idx];
                 gasnet_write_req->src_buf = (char*)(buf_base + src_start);
                 gasnet_write_req->dst_offset = dst_buf.alloc_offset + dst_start;
@@ -564,48 +531,33 @@ namespace LegionRuntime {
         }
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
-        //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
 
       template<unsigned DIM>
-      RemoteWriteXferDes<DIM>::RemoteWriteXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
-                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr,
-                                        XferOrder::Type _order)
+      RemoteWriteXferDes<DIM>::RemoteWriteXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                                  const Buffer& _src_buf, const Buffer& _dst_buf,
+                                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                                  uint64_t _max_req_size, long max_nr, int _priority,
+                                                  XferOrder::Type _order, Event _after_copy)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_REMOTE_WRITE, _after_copy)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
         assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
         // make sure dst buffer is registered memory
         assert(dst_mem_impl->kind == MemoryImpl::MKIND_RDMA);
-        kind = XferDes::XFER_REMOTE_WRITE;
         channel = channel_manager->get_remote_write_channel();
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        max_req_size = _max_req_size;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
         src_buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         // Note that we could use get_direct_ptr to get dst_buf_base, since it always returns 0
         dst_buf_base = ((const char*)((Realm::RemoteMemory*)dst_mem_impl)->regbase) + dst_buf.alloc_offset;
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        complete_event = GenEventImpl::create_genevent()->current_event();
-
+        pre_bytes_write = (pre_xd_guid==XFERDES_NO_GUID) ? bytes_total : 0;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(),
                                                      src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(),
@@ -617,7 +569,7 @@ namespace LegionRuntime {
           requests[i].dst_mem = _dst_buf.memory;
           available_reqs.push(&requests[i]);
         }
-	  }
+      }
 
       template<unsigned DIM>
       long RemoteWriteXferDes<DIM>::get_requests(Request** requests, long nr)
@@ -679,37 +631,23 @@ namespace LegionRuntime {
 
 #ifdef USE_DISK
       template<unsigned DIM>
-      DiskXferDes<DIM>::DiskXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
-                                    Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                    uint64_t _max_req_size, long max_nr,
-                                    XferOrder::Type _order, XferKind _kind)
+      DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                    XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                    const Buffer& _src_buf, const Buffer& _dst_buf,
+                                    const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                    uint64_t _max_req_size, long max_nr, int _priority,
+                                    XferOrder::Type _order, XferKind _kind, Event _after_copy)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        kind = _kind;
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        max_req_size = _max_req_size;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        complete_event = GenEventImpl::create_genevent()->current_event();
-
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(), order);
         offset_idx = 0;
@@ -854,36 +792,23 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
       template<unsigned DIM>
-      GPUXferDes<DIM>::GPUXferDes(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
-                                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _max_req_size, long max_nr,
-                                  XferOrder::Type _order, XferKind _kind)
+      GPUXferDes<DIM>::GPUXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                  const Buffer& _src_buf, const Buffer& _dst_buf,
+                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _max_req_size, long max_nr, int _priority,
+                                  XferOrder::Type _order, XferKind _kind, Event _after_copy)
+      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        kind = _kind;
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        max_req_size = _max_req_size;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        complete_event = GenEventImpl::create_genevent()->current_event();
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                      dst_buf.linearization.get_mapping<DIM>(), order);
         offset_idx = 0;
@@ -1094,41 +1019,27 @@ namespace LegionRuntime {
 
 #ifdef USE_HDF
       template<unsigned DIM>
-      HDFXferDes<DIM>::HDFXferDes(RegionInstance inst, bool has_pre_XferDes,
-                                  Buffer& _src_buf, Buffer& _dst_buf,
-                                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  long max_nr, XferOrder::Type _order, XferKind _kind)
+      HDFXferDes<DIM>::HDFXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                                  RegionInstance inst, const Buffer& _src_buf, const Buffer& _dst_buf,
+                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _max_req_size, long max_nr, int _priority,
+                                  XferOrder::Type _order, XferKind _kind, Event _after_copy)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
       {
         MemoryImpl* src_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        kind = _kind;
-        order = _order;
-        bytes_read = bytes_write = 0;
-        guid = xferDes_queue->get_guid(ID(src_buf.memory).node());
-        pre_xd_guid = XFERDES_NO_GUID;
-        next_xd_guid = XFERDES_NO_GUID;
-        next_bytes_read = 0;
-        src_buf = _src_buf;
-        dst_buf = _dst_buf;
         // for now, we didn't consider HDF transfer for intermediate buffer
         // since ib may involve a different address space model
         assert(!src_buf.is_ib);
         assert(!dst_buf.is_ib);
-        assert(!has_pre_XferDes);
-        domain = _domain;
         size_t total_field_size = 0;
-        for (int i = 0; i < _oas_vec.size(); i++) {
-          OffsetsAndSize oas;
-          oas.src_offset = _oas_vec[i].src_offset;
-          oas.dst_offset = _oas_vec[i].dst_offset;
-          oas.size = _oas_vec[i].size;
-          total_field_size += oas.size;
-          oas_vec.push_back(oas);
+        for (int i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
-        complete_event = GenEventImpl::create_genevent()->current_event();
-
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         Rect<DIM> subrect_check;
         switch (kind) {
           case XferDes::XFER_HDF_READ:
@@ -1632,17 +1543,17 @@ namespace LegionRuntime {
           }
           case XferDes::XFER_GPU_FROM_FB:
           {
-        	GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
-        	for (int i = 0; i < nr; i++) {
-        	  gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-        	  src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
+            GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
                                     gpu_from_fb_reqs[i]->nbytes,
                                     Event::NO_EVENT,
                                     gpu_from_fb_reqs[i]->complete_event);
-        	  pending_copies.push_back(gpu_from_fb_reqs[i]);
-        	}
-        	break;
+              pending_copies.push_back(gpu_from_fb_reqs[i]);
+            }
+            break;
           }
           case XferDes::XFER_GPU_IN_FB:
           {
@@ -1722,7 +1633,7 @@ namespace LegionRuntime {
             while (!pending_copies.empty()) {
               GPUinFBRequest* gpu_peer_fb_req = (GPUinFBRequest*)pending_copies.front();
               if (gpu_peer_fb_req->complete_event.has_triggered()) {
-            	gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
+                gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
                 gpu_peer_fb_req->xd->notify_request_write_done(gpu_peer_fb_req);
                 pending_copies.pop_front();
               }
@@ -1829,6 +1740,52 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
+      /*static*/ void XferDesCreateMessage::handle_request(RequestArgs args, const void *msgdata, size_t msglen)
+      {
+        const Payload *payload = (const Payload *)msgdata;
+        std::vector<OffsetsAndSize> oas_vec(payload->oas_vec_size);
+        for(size_t i = 0; i < payload->oas_vec_size; i++)
+          oas_vec[i] = payload->oas_vec(i);
+        Buffer src_buf, dst_buf;
+        src_buf.deserialize(payload->src_buf_bits);
+        src_buf.memory = args.src_mem;
+        dst_buf.deserialize(payload->dst_buf_bits);
+        dst_buf.memory = args.dst_mem;
+        switch(payload->domain.dim) {
+        case 0:
+          fprintf(stderr, "Currently we doesn't support unstructured data...To be implemented\n");
+          assert(0);
+          break;
+        case 1:
+          create_xfer_des<1>(payload->dma_request, payload->launch_node,
+                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
+                             src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->max_req_size, payload->max_nr, payload->priority,
+                             payload->order, payload->kind, args.after_copy, args.inst);
+          break;
+        case 2:
+          create_xfer_des<2>(payload->dma_request, payload->launch_node,
+                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
+                             src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->max_req_size, payload->max_nr, payload->priority,
+                             payload->order, payload->kind, args.after_copy, args.inst);
+          break;
+        case 3:
+          create_xfer_des<3>(payload->dma_request, payload->launch_node,
+                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
+                             src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->max_req_size, payload->max_nr, payload->priority,
+                             payload->order, payload->kind, args.after_copy, args.inst);
+          break;
+        default:
+          assert(0);
+        }
+      }
+
+      /*static*/ void XferDesDestroyMessage::handle_request(RequestArgs args)
+      {
+        xferDes_queue->destroy_xferDes(args.guid);
+      }
 
       /*static*/ void UpdateBytesWriteMessage::handle_request(RequestArgs args)
       {
@@ -1866,20 +1823,30 @@ namespace LegionRuntime {
               long nr_submitted = it->first->submit(requests, nr_got);
               nr -= nr_submitted;
               assert(nr_got == nr_submitted);
-              if ((*it2)->is_done()) {
+              if ((*it2)->is_completed()) {
                 finish_xferdes.push_back(*it2);
+                //printf("finish_xferdes.size() = %lu\n", finish_xferdes.size());
               }
-              if (nr ==0)
+              if (nr == 0)
                 break;
             }
             while(!finish_xferdes.empty()) {
               XferDes *xd = finish_xferdes.back();
               finish_xferdes.pop_back();
               it->second->erase(xd);
-              xferDes_queue->destory_xferDes(xd);
+              bool need_to_delete_dma_request = xd->mark_completed();
+              if (need_to_delete_dma_request) {
+                DmaRequest* dma_request = xd->dma_request;
+                delete dma_request;
+              }
             }
           }
         }
+      }
+
+      XferDesQueue* get_xdq_singleton()
+      {
+        return xferDes_queue;
       }
 
       static int num_threads = 0;
@@ -1950,45 +1917,95 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      XferDes* create_xfer_des(bool has_pre_XferDes, Buffer& _src_buf, Buffer& _dst_buf,
-                               Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                               uint64_t _max_req_size, long max_nr,
-                               XferOrder::Type _order, XferDes::XferKind _kind)
+      void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                           XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                           const Buffer& _src_buf, const Buffer& _dst_buf,
+                           const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                           uint64_t _max_req_size, long max_nr, int _priority,
+                           XferOrder::Type _order, XferDes::XferKind _kind,
+                           Event _after_copy, RegionInstance inst)
       {
-        switch (_kind) {
-        case XferDes::XFER_MEM_CPY:
-          return new MemcpyXferDes<DIM>(has_pre_XferDes, _src_buf, _dst_buf,
-                                        _domain, _oas_vec, _max_req_size, max_nr,
-                                        _order);
-        case XferDes::XFER_GASNET_READ:
-        case XferDes::XFER_GASNET_WRITE:
-          return new GASNetXferDes<DIM>(has_pre_XferDes, _src_buf, _dst_buf,
-                                        _domain, _oas_vec, _max_req_size, max_nr,
-                                        _order, _kind);
-        case XferDes::XFER_REMOTE_WRITE:
-          return new RemoteWriteXferDes<DIM>(has_pre_XferDes, _src_buf, _dst_buf,
-                                             _domain, _oas_vec, _max_req_size, max_nr,
-                                             _order);
+        printf("create XD[%lu]\n", _guid);
+        if (ID(_src_buf.memory).node() == gasnet_mynode()) {
+          XferDes* xd;
+          switch (_kind) {
+          case XferDes::XFER_MEM_CPY:
+            xd = new MemcpyXferDes<DIM>(_dma_request, _launch_node,
+                                        _guid, _pre_xd_guid, _next_xd_guid,
+                                        _src_buf, _dst_buf, _domain, _oas_vec,
+                                        _max_req_size, max_nr, _priority,
+                                        _order, _after_copy);
+            break;
+          case XferDes::XFER_GASNET_READ:
+          case XferDes::XFER_GASNET_WRITE:
+            xd = new GASNetXferDes<DIM>(_dma_request, _launch_node,
+                                        _guid, _pre_xd_guid, _next_xd_guid,
+                                        _src_buf, _dst_buf, _domain, _oas_vec,
+                                        _max_req_size, max_nr, _priority,
+                                        _order, _kind, _after_copy);
+            break;
+          case XferDes::XFER_REMOTE_WRITE:
+            xd = new RemoteWriteXferDes<DIM>(_dma_request, _launch_node,
+                                             _guid, _pre_xd_guid, _next_xd_guid,
+                                             _src_buf, _dst_buf, _domain, _oas_vec,
+                                             _max_req_size, max_nr, _priority,
+                                             _order, _after_copy);
+            break;
 #ifdef USE_DISK
-        case XferDes::XFER_DISK_READ:
-        case XferDes::XFER_DISK_WRITE:
-          return new DiskXferDes<DIM>(has_pre_XferDes, _src_buf, _dst_buf,
-                                      _domain, _oas_vec, _max_req_size, max_nr,
-                                      _order, _kind);
+          case XferDes::XFER_DISK_READ:
+          case XferDes::XFER_DISK_WRITE:
+            xd = new DiskXferDes<DIM>(_dma_request, _launch_node,
+                                      _guid, _pre_xd_guid, _next_xd_guid,
+                                      _src_buf, _dst_buf, _domain, _oas_vec,
+                                      _max_req_size, max_nr, _priority,
+                                      _order, _kind, _after_copy);
+            break;
 #endif
-#ifdef USE_GPU
-        case XferDes::XFER_GPU_FROM_FB:
-        case XferDes::XFER_GPU_TO_FB:
-        case XferDes::XFER_GPU_IN_FB:
-        case XferDes::XFER_GPU_PEER_FB:
-          return new GPUXferDes<DIM>(has_pre_XferDes, _src_buf, _dst_buf,
-                                     _domain, _oas_vec, _max_req_size, max_nr,
-                                     _order, _kind);
+#ifdef USE_CUDA
+          case XferDes::XFER_GPU_FROM_FB:
+          case XferDes::XFER_GPU_TO_FB:
+          case XferDes::XFER_GPU_IN_FB:
+          case XferDes::XFER_GPU_PEER_FB:
+            xd = new GPUXferDes<DIM>(_dma_request, _launch_node,
+                                     _guid, _pre_xd_guid, _next_xd_guid,
+                                     _src_buf, _dst_buf, _domain, _oas_vec,
+                                     _max_req_size, max_nr, _priority,
+                                     _order, _kind, _after_copy);
+            break;
+#endif
+#ifdef USE_HDF
+          case XferDes::XFER_HDF_READ:
+          case XferDes::XFER_HDF_WRITE:
+            xd = new HDFXferDes<DIM>(_dma_request, _launch_node,
+                                     _guid, _pre_xd_guid, _next_xd_guid,
+                                     inst, _src_buf, _dst_buf, _domain, _oas_vec,
+                                     _max_req_size, max_nr, _priority,
+                                     _order, _kind, _after_copy);
+            break;
 #endif
         default:
           assert(false);
         }
+        xferDes_queue->enqueue_xferDes_local(xd);
+      } else {
+        XferDesCreateMessage::send_request(ID(_src_buf.memory).node(), _dma_request, _launch_node,
+                                           _guid, _pre_xd_guid, _next_xd_guid,
+                                           _src_buf, _dst_buf, _domain, _oas_vec,
+                                           _max_req_size, max_nr, _priority,
+                                           _order, _kind, _after_copy, inst);
       }
+    }
+
+    void destroy_xfer_des(XferDesID _guid)
+    {
+      gasnet_node_t execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
+      if (execution_node == gasnet_mynode()) {
+        xferDes_queue->destroy_xferDes(_guid);
+      }
+      else {
+        XferDesDestroyMessage::send_request(execution_node, _guid);
+      }
+    }
 
 #ifdef USE_HDF
       template<unsigned DIM>
@@ -1997,8 +2014,7 @@ namespace LegionRuntime {
                                    Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
                                    long max_nr, XferOrder::Type order, XferDes::XferKind kind)
       {
-        return new HDFXferDes<DIM>(inst, has_pre_XferDes, src_buf, dst_buf,
-                                   domain, oas_vec, max_nr, order, kind);
+        assert(0);
       }
 #endif
 

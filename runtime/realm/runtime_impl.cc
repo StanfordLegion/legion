@@ -49,6 +49,8 @@ namespace Realm {
 #include "channel.h"
 namespace Realm {
   typedef LegionRuntime::LowLevel::XferDesCreateMessage XferDesCreateMessage;
+  typedef LegionRuntime::LowLevel::XferDesDestroyMessage XferDesDestroyMessage;
+  typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
 }
@@ -453,8 +455,9 @@ namespace Realm {
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
       hcount += MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
-      //hcount += XferDesCreateMessage::Request::add_handler_entries(&handlers[hcount], "Create XferDes Request AM");
-      //hcount += XferDesCreateMessage::Response::add_handler_entries(&handlers[hcount], "Create XferDes Response AM");
+      hcount += XferDesCreateMessage::Message::add_handler_entries(&handlers[hcount], "Create XferDes Request AM");
+      hcount += XferDesDestroyMessage::Message::add_handler_entries(&handlers[hcount], "Destroy XferDes Request AM");
+      hcount += NotifyXferDesCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Notify XferDes Completion Request AM");
       hcount += UpdateBytesWriteMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Write AM");
       hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");

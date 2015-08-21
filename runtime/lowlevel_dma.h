@@ -17,11 +17,86 @@
 #define LOWLEVEL_DMA_H
 
 #include "lowlevel_impl.h"
-#include "channel.h"
 #include "activemsg.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+  class DmaRequestQueue;
+  typedef uint64_t XferDesID;
+  class DmaRequest : public Realm::Operation {
+  public:
+    DmaRequest(int _priority, Event _after_copy)
+	: Operation(), state(STATE_INIT), priority(_priority),
+        after_copy(_after_copy) {
+      pthread_mutex_init(&request_lock, NULL);
+    }
+
+    DmaRequest(int _priority, Event _after_copy,
+               const Realm::ProfilingRequestSet &reqs)
+      : Realm::Operation(reqs), state(STATE_INIT), priority(_priority),
+        after_copy(_after_copy) {
+      pthread_mutex_init(&request_lock, NULL);
+    }
+
+    virtual ~DmaRequest(void) {
+      pthread_mutex_destroy(&request_lock);
+    }
+
+    virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
+
+    virtual bool handler_safe(void) = 0;
+
+    virtual void perform_dma(void) = 0;
+
+    enum State {
+	STATE_INIT,
+	STATE_METADATA_FETCH,
+	STATE_BEFORE_EVENT,
+	STATE_INST_LOCK,
+	STATE_READY,
+	STATE_QUEUED,
+	STATE_DONE
+    };
+
+    State state;
+    int priority;
+    Event after_copy;
+
+    // <NEWDMA>
+	pthread_mutex_t request_lock;
+    std::vector<XferDesID> path;
+    std::set<XferDesID> complete_xd;
+
+    // Returns true if all xfer des of this DmaRequest
+    // have been marked completed
+    // This return val is a signal for delete this DmaRequest
+    bool notify_xfer_des_completion(XferDesID guid)
+    {
+      pthread_mutex_lock(&request_lock);
+      complete_xd.insert(guid);
+      bool all_completed = (complete_xd.size() == path.size());
+      pthread_mutex_unlock(&request_lock);
+      return all_completed;
+    }
+    // </NEWDMA>
+
+    class Waiter : public EventWaiter {
+    public:
+      Waiter(void) { }
+      virtual ~Waiter(void) { }
+    public:
+	Reservation current_lock;
+	DmaRequestQueue *queue;
+	DmaRequest *req;
+
+	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+
+	virtual bool event_triggered(void);
+	virtual void print_info(FILE *f);
+    };
+  };
+
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
       bool red_fold;
