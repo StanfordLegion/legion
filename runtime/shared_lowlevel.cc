@@ -1098,6 +1098,13 @@ namespace LegionRuntime {
 
     void EventImpl::wait(EventGeneration needed_gen)
     {
+      // If this is a barrier decrement the needed generation
+      // by 1 because it is always one ahead, note we can test
+      // this without the lock because we know that the field
+      // is monotonic. Once an event imple becomes a barrier then
+      // it is always a barrier.
+      if (is_barrier)
+        needed_gen--;
       ProcessorImpl::ProcessorThread *thread = 
         (ProcessorImpl::ProcessorThread*)pthread_getspecific(local_thread_key);
       thread->preempt(this, needed_gen);
@@ -1206,7 +1213,7 @@ namespace LegionRuntime {
           // Also check to see if we have any pending operations 
           {
             std::map<EventGeneration,int>::iterator finder = 
-              pending_alterations.find(current.gen+1);
+              pending_alterations.find(generation+2);
             if (finder != pending_alterations.end()) {
               sources += finder->second;
               if (sources == 0)
@@ -1412,7 +1419,7 @@ namespace LegionRuntime {
     bool EventImpl::get_result(Event::gen_t needed_gen, void *value, size_t value_size)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-      bool result = (needed_gen <= generation);
+      bool result = ((needed_gen-1) <= generation);
       if(result) {
 	assert(redop != 0);
 	assert(value_size == redop->sizeof_lhs);
