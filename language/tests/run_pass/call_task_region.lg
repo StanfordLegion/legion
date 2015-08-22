@@ -32,10 +32,13 @@ task g() : int
   f(r, x)
   h(r, x)
   f(r, x)
+  for i = 0, 5 do
+    h(r, x)
+  end
   return f(r, x)
 end
 
 task main()
-  legionlib.assert(g() == 105, "test failed")
+  legionlib.assert(g() == 605, "test failed")
 end
 legionlib.start(main)
