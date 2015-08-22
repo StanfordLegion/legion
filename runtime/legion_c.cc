@@ -436,6 +436,28 @@ legion_index_partition_create_domain_coloring(
   return CObjectWrapper::wrap(ip);
 }
 
+legion_index_partition_t
+legion_index_partition_create_by_field(legion_runtime_t runtime_,
+                                       legion_context_t ctx_,
+                                       legion_logical_region_t handle_,
+                                       legion_logical_region_t parent_,
+                                       legion_field_id_t fid,
+                                       legion_domain_t color_space_,
+                                       int color /* = AUTO_GENERATE_ID */,
+                                       bool allocable /* = false */)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
+                                       color, allocable);
+  return CObjectWrapper::wrap(ip);
+}
+
 legion_index_space_t
 legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
                                           legion_context_t ctx_,
