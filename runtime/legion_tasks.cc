@@ -557,6 +557,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::recapture_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::pack_version_infos(Serializer &rez,
                                     std::vector<VersionInfo> &infos)
     //--------------------------------------------------------------------------
@@ -5819,6 +5826,16 @@ namespace LegionRuntime {
       return version_infos[idx];
     }
 
+    //--------------------------------------------------------------------------
+    void MultiTask::recapture_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < version_infos.size());
+#endif
+      version_infos[idx].recapture_state();
+    }
+
     /////////////////////////////////////////////////////////////
     // Individual Task 
     /////////////////////////////////////////////////////////////
@@ -6478,6 +6495,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::recapture_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < version_infos.size());
+#endif
+      version_infos[idx].recapture_state();
+    }
+
+    //--------------------------------------------------------------------------
     Event IndividualTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
@@ -7086,6 +7113,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::recapture_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->recapture_version_info(idx);
     }
 
     //--------------------------------------------------------------------------

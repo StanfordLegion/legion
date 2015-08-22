@@ -1453,6 +1453,7 @@ namespace LegionRuntime {
       void reset(void);
       void release(void);
       void clear(void);
+      void recapture_state(void);
       void sanity_check(RegionTreeNode *node);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 

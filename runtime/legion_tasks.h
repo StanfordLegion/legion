@@ -85,6 +85,7 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual void recapture_version_info(unsigned idx);
     public:
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
@@ -603,6 +604,7 @@ namespace LegionRuntime {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool map_and_launch(void) = 0;
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual void recapture_version_info(unsigned idx);
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -697,6 +699,7 @@ namespace LegionRuntime {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual void recapture_version_info(unsigned idx);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -790,6 +793,7 @@ namespace LegionRuntime {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual void recapture_version_info(unsigned idx);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;

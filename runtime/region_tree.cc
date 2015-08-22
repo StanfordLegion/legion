@@ -9566,6 +9566,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionInfo::recapture_state(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
+      {
+        it->second.set_needs_capture();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::sanity_check(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {

@@ -7192,6 +7192,12 @@ namespace LegionRuntime {
                                                        it->dtype));
               mapping_dependences[*it1].push_back(*it2);
               mapping_dependences[*it2].push_back(*it1);
+              // Tell the tasks they will need to refetch physical
+              // state when mapping these regions so we can make
+              // sure that they see other mapped regions from other
+              // tasks in this must epoch launch
+              (*it1)->recapture_version_info(it->reg1_idx);
+              (*it2)->recapture_version_info(it->reg2_idx);
             }
           }
         }
