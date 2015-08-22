@@ -46,6 +46,7 @@ task g() : int
   c.legion_coloring_destroy(rc)
   var x0 = dynamic_cast(ptr(int, r0), x)
   var x00 = dynamic_cast(ptr(int, r00), x)
+  var x01 = dynamic_cast(ptr(int, r01), x)
   var x1 = dynamic_cast(ptr(int, r1), x)
   @x = 5
 
@@ -66,10 +67,15 @@ task g() : int
   f(r0, x0)
   f(r00, x00)
   h(r1, x1)
+
+  for i = 0, 5 do
+    h(r00, x00)
+    h(r01, x01)
+  end
   return f(r0, x0)
 end
 
 task main()
-  legionlib.assert(g() == 505, "test failed")
+  legionlib.assert(g() == 1505, "test failed")
 end
 legionlib.start(main)
