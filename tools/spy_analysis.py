@@ -700,18 +700,33 @@ class SingleTask(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def print_dataflow(self, path, simplify):
+        return 0
+
+    def print_logical_node(self, printer):
+        # This better be an individual task
+        assert self.enclosing is None
+        self.print_base_node(printer, True)
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer, logical):
         inst_string = ''
         if self.state.verbose:
-            for idx,inst in self.instances.iteritems():
-                assert idx in self.reqs
-                req = self.reqs[idx]
-                if req.region_node.name != None:
-                    to_add = req.region_node.name+' '
-                else:
-                    to_add = ''
-                to_add = to_add+'Inst\ '+hex(inst.iid)+'\ '+req.dot_requirement()
-                inst_string = inst_string+'\\n'+to_add
+            if logical:
+                for idx,req, in self.reqs.iteritems():
+                    inst_string = inst_string+'\\n'+req.dot_requirement()
+            else:
+                for idx,inst in self.instances.iteritems():
+                    assert idx in self.reqs
+                    req = self.reqs[idx]
+                    if req.region_node.name != None:
+                        to_add = req.region_node.name+' '
+                    else:
+                        to_add = ''
+                    to_add = to_add+'Inst\ '+hex(inst.iid)+'\ '+req.dot_requirement()
+                    inst_string = inst_string+'\\n'+to_add
         if self.enclosing <> None:
             # Index Space Point
             index_string = '\\nPoint\ '+self.point.to_string()
@@ -875,6 +890,22 @@ class SingleTask(object):
             dtype = self.state.compute_dependence(other_req, req)
             if is_mapping_dependence(dtype):
                 self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def print_dataflow(self, path, simplify_graphs):
+        if len(self.ops) < 2:
+            return 0
+        filename = 'dataflow_'+self.name+'_'+str(self.uid)
+        printer = GraphPrinter(path,filename)
+        # First emit the nodes
+        for op in self.ops:
+            op.print_logical_node(printer) 
+        # Now emit the edges
+        previous_pairs = set()
+        for dep in self.mdeps:
+            dep.print_dataflow_edge(printer, previous_pairs)
+        printer.print_pdf_after_close(simplify_graphs)
+        # We printed our datflow graph
+        return 1
 
     def check_data_flow(self):
         print "Performing data flow check for task "+self.name+" (UID "+str(self.uid)+")"
@@ -1065,6 +1096,7 @@ class IndexTask(object):
         self.logical_marked = False
         self.reqs = dict()
         self.op_instances = set()
+        self.node_name = 'task_node_'+str(self.uid)
 
     def get_name(self):
         return self.name
@@ -1124,6 +1156,19 @@ class IndexTask(object):
 
     def unmark_logical(self):
         self.logical_marked = False
+
+    def print_logical_node(self, printer):
+        inst_string = ''
+        if self.state.verbose:
+            for idx,req in self.reqs.iteritems():
+                inst_string = inst_string+'\\n'+req.dot_requirement() 
+        printer.println(self.node_name+' [style=filled,label="'+\
+                str(self.name)+'\\nUnique\ ID\ '+str(self.uid)+inst_string+\
+                '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_dataflow(self, path, simplify):
+        return 0
 
     def compute_dependence_diff(self, verbose):
         # No need to do anything
@@ -1241,21 +1286,34 @@ class Mapping(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer, logical):
         ranges = list_to_ranges(self.requirement.fields)
         field_string = ','.join([r for r in ranges])
         inst_string = ''
         if self.state.verbose:
-            inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+self.requirement.dot_requirement()
+            if (logical):
+                inst_string = '\\n'+requirement.dot_requirement()
+            else:
+                inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+\
+                    self.requirement.dot_requirement()
         printer.println(self.node_name+' [style=filled,label="'+\
-                'Mapping\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
-                field_string+'\}\\nReq: '+\
-                self.requirement.to_summary_string()+\
-                ('' if self.requirement.region_node.name == None
-                    else '\\n('+self.requirement.region_node.name+')')+\
-                inst_string+'",'+\
-                'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+            'Mapping\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
+            field_string+'\}\\nReq: '+\
+            self.requirement.to_summary_string()+\
+            ('' if self.requirement.region_node.name == None
+                else '\\n('+self.requirement.region_node.name+')')+\
+            inst_string+'",'+\
+            'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
+            'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -1300,6 +1358,7 @@ class Deletion(object):
         self.logical_outgoing = set()
         self.logical_marked = False
         self.op_instances = set()
+        self.node_name = 'deletion_node_'+str(self.uid)
 
     def get_name(self):
         return "Deletion "+str(self.uid)
@@ -1329,6 +1388,15 @@ class Deletion(object):
 
     def unmark_logical(self):
         self.logical_marked = False
+
+    def print_logical_node(self, printer):
+        printer.println(self.node_name+' [style=filled,label="'+\
+                'Deletion\\nUnique\ ID\ '+str(self.uid)+\
+                '",fillcolor=dodgerblue3,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_dataflow(self, path, simplify):
+        return 0
 
     def compute_dependence_diff(self, verbose):
         # No need to do anything
@@ -1470,12 +1538,21 @@ class CopyOp(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer, logical):
         label = 'Copy Across '+str(self.uid)+'\\n '+\
-                'Inst:\ '+hex(self.instances[0].iid)+'@'+\
+                ('' if logical else 'Inst:\ '+hex(self.instances[0].iid)+'@'+\
                 hex(self.instances[0].memory.uid)+'\ '+\
                 '\ \=\=\>\ '+hex(self.instances[1].iid)+'@'+\
-                hex(self.instances[1].memory.uid)+'\\n'+\
+                hex(self.instances[1].memory.uid)+'\\n')+\
                 'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
                 '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n'+\
                 'Src Req:\ '+self.reqs[0].to_summary_string()+\
@@ -1621,10 +1698,19 @@ class AcquireOp(object):
         # do nothing for the moment
         pass
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer, logical):
         printer.println(self.node_name+\
                 ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
-                'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
@@ -1755,10 +1841,19 @@ class ReleaseOp(object):
         # do nothing for the moment
         pass
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_dataflow(self, printer, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer):
         printer.println(self.node_name+\
                 ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
-                'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
@@ -1892,7 +1987,16 @@ class DependentPartitionOp(object):
         # do nothing for the moment
         pass
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer)
+
+    def print_base_node(self, printer):
         field_names = []
         fspace = self.state.field_space_nodes[self.reqs[0].fspace]
         for f in self.reqs[0].fields:
@@ -2054,7 +2158,16 @@ class PendingPartitionOp(object):
         # do nothing for the moment
         pass
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
+        self.print_base_node(printer)
+
+    def print_base_node(self, printer):
         kind_str = None
         if self.kind == 0:
             kind_str = "Equal Partition"
@@ -2158,15 +2271,27 @@ class Close(object):
     def unmark_logical(self):
         self.logical_marked = False
 
+    def print_logical_node(self, printer):
+        self.print_base_node(printer)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
     def print_physical_node(self, printer):
         if self.state.verbose:
-            color = 'orangered'
-            if self.is_inter_close_op:
-                color = 'red'
-            printer.println(self.node_name+' [style=filled,label="'+\
-                'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+'",'+\
-                'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+            self.print_base_node(printer)
+
+    def print_base_node(self, printer):
+        color = 'orangered'
+        if self.is_inter_close_op:
+            color = 'red'
+        req_string = ''
+        if self.state.verbose:
+            req_string = '\\n'+self.requirement.dot_requirement() 
+        printer.println(self.node_name+' [style=filled,label="'+\
+            'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+req_string+'",'+\
+            'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
+            'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
         if self.state.verbose:
@@ -2684,6 +2809,12 @@ class MappingDependence(object):
     def __eq__(self,other):
         return (self.ctx == other.ctx) and (self.op1 is other.op1) and (self.op2 is other.op2) and (self.idx1 == other.idx1) and (self.idx2 == other.idx2) and (self.dtype == other.dtype)
 
+    def print_dataflow_edge(self, printer, previous_pairs):
+        pair = (self.op1,self.op2)
+        if pair not in previous_pairs:
+            printer.println(self.op1.node_name+' -> '+self.op2.node_name+
+                            ' [style=solid,color=black,penwidth=2];')
+            previous_pairs.add(pair)
 
 class Event(object):
     def __init__(self, state, handle):
@@ -3097,17 +3228,7 @@ class ConnectedComponent(object):
                 if ctx.uid not in self.tasks:
                     ctx.print_physical_node(printer)
 
-        dot_file = printer.close()
-        pdf_file = name+'.pdf'
-        try:
-            if simplify:
-                command = ['tred ' + dot_file + ' | dot -Tpdf -o '+pdf_file]
-            else:
-                command = ['dot -Tpdf -o '+pdf_file+' '+dot_file]
-            subprocess.check_call(command,shell=True)
-        except:
-            print "WARNING: DOT failure, image for event graph "+str(idx)+" not generated"
-            subprocess.call(['rm -f core '+pdf_file],shell=True)
+        printer.print_pdf_after_close(simplify)
 
     def collect_physical_instances(self):
         def collect(op):
@@ -3152,7 +3273,7 @@ class ConnectedComponent(object):
         for c in self.copies.itervalues():
             c.print_igraph_edges(printer)
 
-        printer.print_pdf_after_close()
+        printer.print_pdf_after_close(True)
 
 class GraphPrinter(object):
     def __init__(self,path,name,dir='LR'):
@@ -3177,13 +3298,17 @@ class GraphPrinter(object):
         self.out.close()
         return self.filename
 
-    def print_pdf_after_close(self):
+    def print_pdf_after_close(self, simplify):
         dot_file = self.close()
         pdf_file = self.name+".pdf"
         try:
-            command = ['dot -Tpdf -o'+pdf_file+' '+dot_file]
+            if simplify:
+                command = ['tred ' + dot_file + ' | dot -Tpdf -o '+pdf_file]
+            else:
+                command = ['dot -Tpdf -o'+pdf_file+' '+dot_file]
             subprocess.check_call(command,shell=True)
         except:
+            print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
             subprocess.call(['rm -f core '+pdf_file],shell=True)
 
     def up(self):
@@ -3833,6 +3958,12 @@ class State(object):
                                                     print "      Second Requirement:"
                                                     req2.print_requirement()
 
+    def print_dataflow_graphs(self, path, simplify_graphs):
+        total_dataflow_graphs = 0
+        for uid,op in self.ops.iteritems():
+            total_dataflow_graphs += op.print_dataflow(path,simplify_graphs) 
+        print "Found "+str(total_dataflow_graphs)+" dataflow graphs"
+
     def print_pictures(self, path, simplify_graphs):
         components = list()
         for h,e in self.events.iteritems():
@@ -3867,16 +3998,16 @@ class State(object):
             if isinstance(index_space_node, IndexSpaceNode) and \
                     index_space_node.parent == None:
                         index_space_node.print_graph(index_space_printer)
-        index_space_printer.print_pdf_after_close()
+        index_space_printer.print_pdf_after_close(simplify_graphs)
 
         field_space_printer = GraphPrinter(path, "field_space_graph")
         for field_space_node in self.field_space_nodes.itervalues():
             field_space_node.print_graph(field_space_printer)
-        field_space_printer.print_pdf_after_close()
+        field_space_printer.print_pdf_after_close(simplify_graphs)
 
         region_graph_printer = GraphPrinter(path, "region_graph")
         for region_node in self.region_trees.itervalues():
             if simplify_graphs:
                 region_node.mark_named_children()
             region_node.print_graph(region_graph_printer, simplify_graphs)
-        region_graph_printer.print_pdf_after_close()
+        region_graph_printer.print_pdf_after_close(simplify_graphs)
