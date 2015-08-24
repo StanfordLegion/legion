@@ -74,12 +74,6 @@ void child_task(const void *args, size_t arglen, Processor p)
       }
     }
 
-#ifdef SHARED_LOWLEVEL
-    // shared LLR's barriers assume all arrivals are stratified (i.e. no arrivals for phase i+1
-    //  before all arrivals from phase i are seen) - this is broken, but work around it here
-    b.wait();
-#endif
-
     b = b.advance_barrier();
   }
 
