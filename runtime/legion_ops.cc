@@ -4949,7 +4949,7 @@ namespace LegionRuntime {
           Event e = it->phase_barrier.get_previous_phase();
           acquire_preconditions.insert(e);
 #ifdef LEGION_SPY
-          acquire_preconditions_spy.insert(it->phase_barrier);
+          acquire_preconditions_spy.insert(it->phase_barrier.get_previous_phase());
 #endif
         }
       }
@@ -5522,7 +5522,7 @@ namespace LegionRuntime {
           Event e = it->phase_barrier.get_previous_phase();
           release_preconditions.insert(e);
 #ifdef LEGION_SPY
-          release_preconditions_spy.insert(it->phase_barrier);
+          release_preconditions_spy.insert(it->phase_barrier.get_previous_phase());
 #endif
         }
       }
@@ -5569,7 +5569,7 @@ namespace LegionRuntime {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier.get_previous_phase());
+              it->phase_barrier);
 #endif
           it->phase_barrier.arrive(1/*count*/, release_complete);
         }
