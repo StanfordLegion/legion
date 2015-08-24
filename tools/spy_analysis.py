@@ -596,7 +596,10 @@ class SingleTask(object):
         self.generation = 0
 
     def get_name(self):
-        return self.name
+        if self.name <> None:
+            return self.name+" "+str(self.uid)
+        else:
+            return "task "+str(self.uid)
 
     def get_op_kind(self):
         return SINGLE_OP
@@ -2425,6 +2428,9 @@ class Copy(object):
         self.prev_event_deps = set()
         self.generation = 0
 
+    def get_name(self):
+        return "Copy "+str(self.uid)
+
     def get_ctx(self):
         return None
 
@@ -2833,6 +2839,9 @@ class Event(object):
         self.physical_marked = False
         self.generation = 0
         self.prev_event_deps = set()
+
+    def get_name(self):
+        return repr(self.handle)
 
     def add_physical_incoming(self, event):
         assert self <> event
@@ -4058,4 +4067,4 @@ class State(object):
                     if len(traverser.paths) > 0:
                         print("##### paths between "+op1.get_name()+" and "+op2.get_name()+" #####")
                         for p in traverser.paths:
-                            print('  ' + '->'.join([hex(op.handle.uid) if isinstance(op, Event) else hex(op.uid) for op in p]))
+                            print('    ' + ' -> '.join([op.get_name() for op in p]))
