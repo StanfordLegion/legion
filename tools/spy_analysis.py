@@ -2875,7 +2875,7 @@ class Event(object):
 
     def print_prev_event_dependences(self, printer, name):
         if name not in self.prev_event_deps:
-            self.prev_event_deps.add(name)
+            #self.prev_event_deps.add(name)
             if self.is_phase_barrier():
                 self.handle.print_prev_event_dependences(printer, name)
                 for n in self.physical_incoming:
@@ -3025,9 +3025,11 @@ class EventGraphTraverser(object):
         if not do_next:
             return
         if self.forwards:
-            node.term_event.event_graph_traverse(self)
+            if node.term_event <> None:
+                node.term_event.event_graph_traverse(self)
         else:
-            node.start_event.event_graph_traverse(self)
+            if node.start_event <> None:
+                node.start_event.event_graph_traverse(self)
         if self.post_close_fn <> None:
             self.post_close_fn(node, self)
 
@@ -4019,3 +4021,41 @@ class State(object):
                 region_node.mark_named_children()
             region_node.print_graph(region_graph_printer, simplify_graphs)
         region_graph_printer.print_pdf_after_close(simplify_graphs)
+
+    def dump_event_paths(self):
+        for uid1,op1 in self.ops.iteritems():
+            for uid2,op2 in self.ops.iteritems():
+                if op1 <> op2 and not (isinstance(op1, IndexTask) or isinstance(op2, IndexTask)) :
+                    def traverse_event(node, traverser):
+                        if node in traverser.visited:
+                            return False
+                        else:
+                            traverser.path.append(node)
+                            return True
+                    def traverse_op(node, traverser):
+                        traverser.path.append(node)
+                        if traverser.target == node:
+                            traverser.paths.append(traverser.path)
+                            traverser.path = list(traverser.path)
+                            return False
+                        else:
+                            return True
+                    def post_traverse(node, traverser):
+                        if not (node in traverser.visited):
+                            traverser.visited.add(node)
+                            traverser.path.pop()
+                    traverser = EventGraphTraverser(True, False, True,
+                            self.get_next_traverser_gen(), traverse_event,
+                            traverse_op, traverse_op, traverse_op, traverse_op,
+                            traverse_op, traverse_op, post_traverse, post_traverse,
+                            post_traverse, post_traverse, post_traverse, post_traverse,
+                            post_traverse)
+                    traverser.target = op2
+                    traverser.path = list()
+                    traverser.paths = list()
+                    traverser.visited = set()
+                    op1.event_graph_traverse(traverser)
+                    if len(traverser.paths) > 0:
+                        print("##### paths between "+op1.get_name()+" and "+op2.get_name()+" #####")
+                        for p in traverser.paths:
+                            print('  ' + '->'.join([hex(op.handle.uid) if isinstance(op, Event) else hex(op.uid) for op in p]))
