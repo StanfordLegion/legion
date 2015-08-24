@@ -1710,7 +1710,7 @@ class AcquireOp(object):
     def print_base_node(self, printer, logical):
         printer.println(self.node_name+\
                 ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
-                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
@@ -1850,10 +1850,10 @@ class ReleaseOp(object):
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
 
-    def print_base_node(self, printer):
+    def print_base_node(self, printer, logical):
         printer.println(self.node_name+\
                 ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
-                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
