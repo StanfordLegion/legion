@@ -550,7 +550,6 @@ namespace LegionRuntime {
       UserEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
-      RegionTreePath mapping_path;
       unsigned parent_req_index;
       VersionInfo version_info;
       RestrictInfo restrict_info;
@@ -608,8 +607,6 @@ namespace LegionRuntime {
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
-      std::vector<RegionTreePath> src_mapping_paths; 
-      std::vector<RegionTreePath> dst_mapping_paths;
       std::vector<unsigned>       src_parent_indexes;
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
@@ -929,9 +926,6 @@ namespace LegionRuntime {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
-#ifdef DEBUG_HIGH_LEVEL
-      RegionTreePath    mapping_path;
-#endif
     };
 
     /**
@@ -986,9 +980,6 @@ namespace LegionRuntime {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
-#ifdef DEBUG_HIGH_LEVEL
-      RegionTreePath    mapping_path;
-#endif
     };
 
     /**
@@ -1694,7 +1685,6 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
-      RegionTreePath mapping_path;
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;

@@ -15862,7 +15862,7 @@ namespace LegionRuntime {
             vargs->proxy_this->send_version_state(vargs->target, 
                                                   *(vargs->request_mask),
                                                   vargs->to_trigger);
-            delete vargs->request_mask;
+            legion_delete(vargs->request_mask);
             break;
           }
         case HLR_ADD_TO_DEP_QUEUE_TASK_ID:

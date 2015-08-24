@@ -1762,6 +1762,18 @@ namespace LegionRuntime {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       MappableInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask); 
+      // Get the start node
+      RegionTreeNode *start_node;
+      if (req.handle_type == PART_PROJECTION)
+        start_node = get_node(req.partition);
+      else
+        start_node = get_node(req.region);
+      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
+        start_node = start_node->get_parent();
+#ifdef DEBUG_HIGH_LEVEL
+      // Little sanity checking
+      assert(start_node->get_depth() >= parent_node->get_depth());
+#endif
       PremapTraverser traverser(path, info);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -1770,7 +1782,7 @@ namespace LegionRuntime {
                                      false/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
-      const bool result = traverser.traverse(parent_node);
+      const bool result = traverser.traverse(start_node);
 #ifdef DEBUG_HIGH_LEVEL
       if (result)
       {
@@ -1789,7 +1801,6 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappingRef RegionTreeForest::map_physical_region(RegionTreeContext ctx,
-                                                     RegionTreePath &path,
                                                      RegionRequirement &req,
                                                      unsigned index,
                                                      VersionInfo &version_info,
@@ -1820,10 +1831,10 @@ namespace LegionRuntime {
                         req, version_info, user_mask);
       // Get the start node
       RegionTreeNode *start_node = child_node;
-      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
-        start_node = start_node->get_parent();
       // Construct the traverser
-      MappingTraverser<false/*restrict*/> traverser(path, info, 
+      RegionTreePath single_path;
+      single_path.initialize(child_node->get_depth(), child_node->get_depth());
+      MappingTraverser<false/*restrict*/> traverser(single_path, info, 
                                                     RegionUsage(req), user_mask,
                                                     target_proc, index);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1939,58 +1950,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
-                                                      RegionTreePath &path,
-                                                      RegionRequirement &req,
-                                                      unsigned index,
-                                                      VersionInfo &version_info,
-                                                      Processor target_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , const char *log_name
-                                                      , UniqueID uid
-#endif
-                                                      )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-#endif
-#ifdef DEBUG_PERF
-      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
-#endif
-      RegionNode *child_node = get_node(req.region);
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      // Construct a dummy mappable info
-      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
-                        req, version_info, user_mask);
-      // Get the start node
-      RegionTreeNode *start_node = child_node;
-      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
-        start_node = start_node->get_parent();
-      MappingTraverser<true/*restricted*/> traverser(path, info, 
-                                                     RegionUsage(req), 
-                                                     user_mask, 
-                                                     target_proc, index);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     start_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      bool result = traverser.traverse(start_node);
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      if (result)
-        return traverser.get_instance_ref();
-      else
-        return MappingRef();
-    }
-
-    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::register_physical_region(
                                                       RegionTreeContext ctx,
                                                       const MappingRef &ref,
@@ -2003,7 +1962,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                       , const char *log_name
                                                       , UniqueID uid
-                                                      , RegionTreePath &path
 #endif
                                                       ) 
     //--------------------------------------------------------------------------
@@ -2054,8 +2012,6 @@ namespace LegionRuntime {
       }
 #ifdef DEBUG_HIGH_LEVEL 
       RegionTreeNode *start_node = child_node;
-      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
-        start_node = start_node->get_parent();
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      start_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 
@@ -2192,7 +2148,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
-                                     true/*before*/, true/*premap*/,
+                                     true/*before*/, false/*premap*/,
                                      true/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
 #endif
@@ -2224,7 +2180,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
-                                     false/*before*/, true/*premap*/,
+                                     false/*before*/, false/*premap*/,
                                      true/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
 #endif
@@ -9399,8 +9355,6 @@ namespace LegionRuntime {
         if (entry != NULL)
         {
           NodeInfo &next = node_infos[vit->first];
-          if (vit->second.premap_only())
-            next.set_premap_only();
           if (vit->second.path_only())
             next.set_path_only();
           if (vit->second.needs_final())
@@ -9423,31 +9377,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_premapping(ContextID ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!packed);
-#endif
-      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
-            node_infos.begin(); it != node_infos.end(); it++)
-      {
-        // Apply the update, but don't delete it yet because 
-        // we still might be rolled back. Note we only advance if
-        // we we're premapping only since the actual advance hasn't
-        // been done for the other nodes yet.
-        if (it->second.physical_state != NULL)
-        {
-          if (it->second.path_only())
-            it->second.physical_state->apply_premapping_state(
-                                                it->second.advance());
-          else
-            it->second.physical_state->apply_state(false/*advance*/);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void VersionInfo::apply_mapping(ContextID ctx)
     //--------------------------------------------------------------------------
     {
@@ -9457,16 +9386,17 @@ namespace LegionRuntime {
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
-        // Skip anything that was premapping only
-        if (it->second.premap_only())
+        if (it->second.physical_state == NULL)
           continue;
-        if (it->second.physical_state != NULL)
-        {
-          it->second.physical_state->apply_state(true/*apply advance*/);
-          // Don't delete it because we need to hold onto the 
-          // version manager references in case this operation
-          // fails to complete
-        }
+        // Apply path only differently
+        if (it->second.path_only())
+          it->second.physical_state->apply_path_only_state(
+                                                 it->second.advance());
+        else
+          it->second.physical_state->apply_state(it->second.advance());
+        // Don't delete it because we need to hold onto the 
+        // version manager references in case this operation
+        // fails to complete
       }
     }
 
@@ -9482,14 +9412,14 @@ namespace LegionRuntime {
         for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
               node_infos.begin(); it != node_infos.end(); it++)
         {
-          // Skip anything that was premapping only
-          if (it->second.premap_only())
+          if (it->second.physical_state == NULL)
             continue;
-          if (it->second.physical_state != NULL)
-          {
+          if (it->second.path_only())
+            it->second.physical_state->apply_path_only_state(
+                                              it->second.advance());
+          else
             it->second.physical_state->filter_and_apply(it->second.close_top(),
                                                  false/*filter children*/);
-          }
         }
       }
       else
@@ -9497,17 +9427,18 @@ namespace LegionRuntime {
         for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
               node_infos.begin(); it != node_infos.end(); it++)
         {
-          // Skip anything that was premapping only
-          if (it->second.premap_only())
+          if (it->second.physical_state == NULL)
             continue;
+          if (it->second.path_only())
+          {
+            it->second.physical_state->apply_path_only_state(
+                                              it->second.advance());
+          }
           // We can also skip anything that isn't the top node
           if (!it->second.close_top())
             continue;
-          if (it->second.physical_state != NULL)
-          {
-            it->second.physical_state->filter_and_apply(true/*top*/,
-                                           true/*filter children*/);
-          }
+          it->second.physical_state->filter_and_apply(true/*top*/,
+                                         true/*filter children*/);
         }
       }
     }
@@ -9618,7 +9549,7 @@ namespace LegionRuntime {
 #endif
         // Recapture the state if we had to be reset
         finder->second.physical_state->capture_state(
-                           finder->second.premap_only(),
+                           finder->second.path_only(),
                            finder->second.close_top(),
                            finder->second.field_versions->get_field_versions());
         finder->second.unset_needs_capture();
@@ -9707,26 +9638,17 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionInfo::make_local(std::set<Event> &preconditions, 
-                                 RegionTreeForest *forest,
-                                 ContextID ctx, bool path_only)
+                                 RegionTreeForest *forest, ContextID ctx)
     //--------------------------------------------------------------------------
     {
       if (packed)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!path_only); // shouldn't be doing this if we are unpacking
-#endif
         unpack_buffer(forest, ctx);
-      }
       // Iterate over all version state infos and build physical states
       // without actually capturing any data
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
         NodeInfo &info = it->second;
-        // Skip any unnecessary entries if we are doing path only
-        if (path_only && !info.path_only())
-          continue;
         if (info.physical_state == NULL)
         {
           info.physical_state = it->first->get_physical_state(ctx, *this,
@@ -9735,7 +9657,8 @@ namespace LegionRuntime {
           info.set_needs_capture();
         }
         // Now get the preconditions for the state
-        info.physical_state->make_local(preconditions, info.needs_final());
+        info.physical_state->make_local(preconditions, info.needs_final(),
+                                        info.close_top());
       }
     } 
 
@@ -9931,6 +9854,7 @@ namespace LegionRuntime {
       rez.serialize(info.bit_mask);
       if (info.physical_state == NULL)
         info.physical_state = node->get_physical_state(ctx, *this,
+                                                       false/*initialize*/,
                                                        false/*capture*/);
       PhysicalState *state = info.physical_state;
 #ifdef DEBUG_HIGH_LEVEL
@@ -10002,7 +9926,8 @@ namespace LegionRuntime {
 #endif
       // Don't need premap
       derez.deserialize(info.bit_mask);
-      info.set_needs_capture();
+      // Mark that we won't need to capture this node info
+      info.unset_needs_capture();
       // Unpack the version states
       size_t num_states;
       derez.deserialize(num_states);
@@ -10045,7 +9970,7 @@ namespace LegionRuntime {
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                        did, source, mask, true/*initialize*/);
+                            did, source, mask, !info.path_only()/*initialize*/);
         // No point in adding this to the version state infos
         // since we already know we just use that to build the PhysicalState
         info.physical_state->add_advance_state(state, mask);
@@ -12024,12 +11949,12 @@ namespace LegionRuntime {
       // region has already been advanced.
       if (leave_open)
         node->record_version_numbers(state, local_mask, leave_open_versions, 
-                                     false/*previous*/, false/*premap*/, 
+                                     false/*previous*/, 
                                      false/*path only*/, true/*final*/,
                                      false/*close top*/);
       else
         node->record_version_numbers(state, local_mask, force_close_versions, 
-                                     false/*previous*/, false/*premap*/, 
+                                     false/*previous*/,
                                      false/*path only*/, true/*final*/,
                                      false/*close top*/);
     }
@@ -12052,21 +11977,21 @@ namespace LegionRuntime {
       if (!!leave_open_mask)
       {
         node->record_version_numbers(state, leave_open_mask,leave_open_versions,
-                                     true/*previous*/, false/*premap*/, 
+                                     true/*previous*/, 
                                      false/*path only*/, true/*final*/,
                                      true/*close top*/);
         FieldMask force_close_mask = closed_mask - leave_open_mask;
         if (!!force_close_mask)
           node->record_version_numbers(state, force_close_mask,
                                        force_close_versions, true/*previous*/,
-                                       false/*premap*/, false/*path only*/,
+                                       false/*path only*/,
                                        true/*final*/, true/*close top*/);
       }
       else
       {
         // Normal case is simple
         node->record_version_numbers(state, closed_mask, force_close_versions, 
-                                     true/*previous*/, false/*premap*/, 
+                                     true/*previous*/, 
                                      false/*path only*/, true/*final*/,
                                      true/*close top*/);
       }
@@ -12562,7 +12487,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_premapping_state(bool advance) const
+    void PhysicalState::apply_path_only_state(bool advance) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12843,7 +12768,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PhysicalState::make_local(std::set<Event> &preconditions, 
-                                   bool needs_final)
+                                   bool needs_final, bool needs_advance)
     //--------------------------------------------------------------------------
     {
       if (needs_final)
@@ -12866,6 +12791,19 @@ namespace LegionRuntime {
         // Otherwise, we just need one instance of the initial version state
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
              vit = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->request_initial_version_state(it->second, preconditions);
+          }
+        }
+      }
+      if (needs_advance && !advance_states.empty())
+      {
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+             vit = advance_states.begin(); vit != advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
@@ -13868,6 +13806,7 @@ namespace LegionRuntime {
         FieldMask overlap = needed_mask & it->second;
         if (!overlap)
           continue;
+        targets.push_back(RequestInfo());
         RequestInfo &info = targets.back();
         info.target = it->first;
         info.to_trigger = UserEvent::create_user_event();
@@ -14038,7 +13977,7 @@ namespace LegionRuntime {
       args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
       args.proxy_this = this;
       args.target = target;
-      args.request_mask = new FieldMask(request_mask);
+      args.request_mask = legion_new<FieldMask>(request_mask);
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
@@ -14071,21 +14010,22 @@ namespace LegionRuntime {
                                                             owner_space);
         // If we are not the owner, we should definitely be able to handle this 
         std::set<Event> launch_preconditions;
+#ifdef DEBUG_HIGH_LEVEL
         FieldMask remaining_mask = request_mask;
+#endif
         if (request_final)
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
           for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
                 final_events.begin(); it != final_events.end(); it++)
           {
-            FieldMask overlap = it->second & request_mask;
-            if (!overlap)
+            if (it->second * request_mask)
               continue;
             launch_preconditions.insert(it->first);
-            remaining_mask -= overlap;
-            if (!remaining_mask)
-              break;
           }
+#ifdef DEBUG_HIGH_LEVEL
+          remaining_mask -= final_fields;
+#endif
         }
         else
         {
@@ -14093,14 +14033,13 @@ namespace LegionRuntime {
           for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
                 initial_events.begin(); it != initial_events.end(); it++)
           {
-            FieldMask overlap = it->second & request_mask;
-            if (!overlap)
+            if (it->second * request_mask)
               continue;
             launch_preconditions.insert(it->first);
-            remaining_mask -= overlap;
-            if (!remaining_mask)
-              break;
           }
+#ifdef DEBUG_HIGH_LEVEL
+          remaining_mask -= initial_fields;
+#endif
         }
 #ifdef DEBUG_HIGH_LEVEL
         assert(!remaining_mask); // request mask should now be empty
@@ -15570,7 +15509,7 @@ namespace LegionRuntime {
           // version numbers from farther down in the tree as well. 
           // Do this before the version numbers can be updated.
           record_version_numbers(state, user.field_mask, version_info, 
-                                 is_write, false/*premap*/, false/*path only*/,
+                                 is_write, false/*path only*/,
                                  is_write, false/*close top*/);
           
           // If this is a reduction, record that we have an outstanding 
@@ -15617,7 +15556,7 @@ namespace LegionRuntime {
         // Record version numbers of the fields which we are contributing
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*premap*/, true/*path only*/,
+                               is_write, true/*path only*/,
                                false/*final*/, false/*close top*/);
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
@@ -15668,7 +15607,7 @@ namespace LegionRuntime {
         {
           // First record any version information that we need
           record_version_numbers(state, user.field_mask, version_info, 
-                                 is_write, false/*premap*/, false/*path only*/, 
+                                 is_write, false/*path only*/, 
                                  is_write, false/*close top*/);
           // If this is a reduction, record that we have an outstanding 
           // reduction at this node in the region tree
@@ -15712,7 +15651,7 @@ namespace LegionRuntime {
         // Record version numbers of the fields which we are contributing
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*premap*/, true/*path only*/, 
+                               is_write, true/*path only*/, 
                                false/*final*/, false/*close top*/);
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
@@ -15868,7 +15807,7 @@ namespace LegionRuntime {
         }
         // No need to register ourselves as a user 
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, false/*premap*/, false/*path only*/, 
+                               is_write, false/*path only*/, 
                                is_write, false/*close top*/);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
@@ -15903,7 +15842,7 @@ namespace LegionRuntime {
         // Record version numbers of the fields which we are contributing
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, false/*premap*/, true/*path only*/, 
+                               is_write, true/*path only*/, 
                                false/*final*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
@@ -15944,7 +15883,7 @@ namespace LegionRuntime {
           advance_version_numbers(state, user.field_mask);
         // First record any version information that we need
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, false/*premap*/, false/*path only*/, 
+                               is_write, false/*path only*/, 
                                is_write, false/*close top*/);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
@@ -15979,7 +15918,7 @@ namespace LegionRuntime {
         // Record version numbers of the fields which we are contributing
         // to from this node.
         record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, false/*premap*/, true/*path only*/, 
+                               is_write, true/*path only*/, 
                                false/*final*/, false/*close top*/);
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
@@ -16019,7 +15958,7 @@ namespace LegionRuntime {
       perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, 
                                      state.prev_epoch_users, user.field_mask);
       record_version_numbers(state, user.field_mask, version_info,
-                             false/*advance*/, false/*premap only*/,
+                             false/*advance*/, 
                              false/*path only*/, true/*final*/, 
                              false/*close top*/);
     }
@@ -16729,7 +16668,6 @@ namespace LegionRuntime {
                                                 const FieldMask &mask,
                                                 VersionInfo &version_info,
                                                 bool capture_previous,
-                                                bool premap_only,
                                                 bool path_only,
                                                 bool needs_final,
                                                 bool close_top)
@@ -16740,8 +16678,6 @@ namespace LegionRuntime {
 #endif
       // Capture the version information for this logical region  
       VersionInfo::NodeInfo &node_info = version_info.find_tree_node_info(this);
-      if (premap_only)
-        node_info.set_premap_only();
       if (path_only)
         node_info.set_path_only();
       if (needs_final)

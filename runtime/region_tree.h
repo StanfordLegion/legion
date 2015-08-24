@@ -288,7 +288,6 @@ namespace LegionRuntime {
 #endif
                                   );
       MappingRef map_physical_region(RegionTreeContext ctx,
-                                     RegionTreePath &path,
                                      RegionRequirement &req,
                                      unsigned idx,
                                      VersionInfo &version_info,
@@ -326,18 +325,6 @@ namespace LegionRuntime {
                                        , UniqueID uid
 #endif
                                        );
-      // Same as the call above, but with a mapping path
-      MappingRef map_restricted_region(RegionTreeContext ctx,
-                                       RegionTreePath &path,
-                                       RegionRequirement &req,
-                                       unsigned index,
-                                       VersionInfo &version_info,
-                                       Processor target_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                       , const char *log_name
-                                       , UniqueID uid
-#endif
-                                       );
       InstanceRef register_physical_region(RegionTreeContext ctx,
                                            const MappingRef &ref,
                                            RegionRequirement &req,
@@ -349,7 +336,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                            , const char *log_name
                                            , UniqueID uid
-                                           , RegionTreePath &path
 #endif
                                            );
       InstanceRef initialize_physical_context(RegionTreeContext ctx,
@@ -1411,21 +1397,19 @@ namespace LegionRuntime {
         ~NodeInfo(void);
         NodeInfo& operator=(const NodeInfo &rhs);
       public:
-        inline void set_premap_only(void) { bit_mask |= 1; }
-        inline void set_path_only(void) { bit_mask |= 2; }
-        inline void set_needs_final(void) { bit_mask |= 4; }
-        inline void set_advance(void) { bit_mask |= 8; }
-        inline void set_close_top(void) { bit_mask |= 16; }
-        inline void set_needs_capture(void) { bit_mask |= 32; }
+        inline void set_path_only(void) { bit_mask |= 1; }
+        inline void set_needs_final(void) { bit_mask |= 2; }
+        inline void set_advance(void) { bit_mask |= 4; }
+        inline void set_close_top(void) { bit_mask |= 8; }
+        inline void set_needs_capture(void) { bit_mask |= 16; }
         inline void unset_needs_capture(void)
-        { if (needs_capture()) bit_mask -= 32; }
+        { if (needs_capture()) bit_mask -= 16; }
       public:
-        inline bool premap_only(void) const { return (1 & bit_mask); }
-        inline bool path_only(void) const { return (2 & bit_mask); }
-        inline bool needs_final(void) const { return (4 & bit_mask); }
-        inline bool advance(void) const { return (8 & bit_mask); }
-        inline bool close_top(void) const { return (16 & bit_mask); }
-        inline bool needs_capture(void) const { return (32 & bit_mask); }
+        inline bool path_only(void) const { return (1 & bit_mask); }
+        inline bool needs_final(void) const { return (2 & bit_mask); }
+        inline bool advance(void) const { return (4 & bit_mask); }
+        inline bool close_top(void) const { return (8 & bit_mask); }
+        inline bool needs_capture(void) const { return (16 & bit_mask); }
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
@@ -1447,7 +1431,6 @@ namespace LegionRuntime {
         { return (node == upper_bound_node); }
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
-      void apply_premapping(ContextID ctx);
       void apply_mapping(ContextID ctx);
       void apply_close(ContextID ctx, bool permit_leave_open); 
       void reset(void);
@@ -1466,8 +1449,7 @@ namespace LegionRuntime {
                              ContextID ctx);
       void unpack_version_info(Deserializer &derez);
       void make_local(std::set<Event> &preconditions,
-                      RegionTreeForest *forest,
-                      ContextID ctx, bool path_only = false);
+                      RegionTreeForest *forest, ContextID ctx);
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     protected:
@@ -1936,7 +1918,7 @@ namespace LegionRuntime {
       void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool path_only, bool close_top,
           const LegionMap<VersionID,FieldMask>::aligned &field_versions);
-      void apply_premapping_state(bool advance) const;
+      void apply_path_only_state(bool advance) const;
       void apply_state(bool advance);
       void filter_and_apply(bool top, bool filter_children);
       void reset(void);
@@ -1944,7 +1926,8 @@ namespace LegionRuntime {
     public:
       PhysicalState* clone(bool clone_state) const;
       PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
-      void make_local(std::set<Event> &preconditions, bool needs_final); 
+      void make_local(std::set<Event> &preconditions, 
+                      bool needs_final, bool needs_advance); 
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -2303,8 +2286,7 @@ namespace LegionRuntime {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
                                   VersionInfo &info, bool capture_previous,
-                                  bool premap_only, bool path_only, 
-                                  bool needs_final, bool close_top);
+                              bool path_only, bool needs_final, bool close_top);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);

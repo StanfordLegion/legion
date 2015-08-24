@@ -216,7 +216,7 @@ namespace LegionRuntime {
       rez.serialize(depth);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
-      // No need to pack premapped, must be true or can't be sent remotely
+      rez.serialize(premapped);
       // Can figure out variants remotely
       rez.serialize(selected_variant);
       rez.serialize(target_proc);
@@ -316,7 +316,7 @@ namespace LegionRuntime {
       derez.deserialize(steal_count);
       derez.deserialize(depth);
       derez.deserialize(speculated);
-      premapped = true;
+      derez.deserialize(premapped);
       variants = Runtime::get_variant_collection(task_id);
       derez.deserialize(selected_variant);
       derez.deserialize(target_proc);
@@ -554,6 +554,15 @@ namespace LegionRuntime {
       // This should never be called
       assert(false);
       return (*(new VersionInfo()));
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreePath& TaskOp::get_privilege_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called
+      assert(false);
+      return (*(new RegionTreePath()));
     }
 
     //--------------------------------------------------------------------------
@@ -1489,7 +1498,7 @@ namespace LegionRuntime {
       this->steal_count = rhs->steal_count;
       this->depth = rhs->depth;
       this->speculated = rhs->speculated;
-      this->premapped = rhs->premapped;
+      // Premapping should never get cloned
       this->variants = rhs->variants;
       this->selected_variant = rhs->selected_variant;
       this->schedule = rhs->schedule;
@@ -1660,14 +1669,29 @@ namespace LegionRuntime {
         {
           if (req.handle_type == SINGULAR)
           {
+            // Premap it first
+            VersionInfo &version_info = get_version_info(idx);
+            if (!regions[idx].premapped)
+            {
+              RegionTreePath &privilege_path = get_privilege_path(idx);
+              regions[idx].premapped = runtime->forest->premap_physical_region(
+                                       enclosing_physical_contexts[idx],
+                                       privilege_path, regions[idx], 
+                                       version_info, this, parent_ctx,
+                                       parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                       , idx, get_logging_name(), unique_op_id
+#endif
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+              assert(regions[idx].premapped);
+#endif
+            }
             has_early_maps = true;
-            RegionTreePath mapping_path;
-            initialize_mapping_path(mapping_path, req, req.region); 
             mapping_refs[idx] = runtime->forest->map_physical_region(
                                        enclosing_physical_contexts[idx],
-                                                      mapping_path,
                                                       req, idx, 
-                                                      get_version_info(idx), 
+                                                      version_info, 
                                                       this,
                                                       current_proc,
                                                       current_proc
@@ -1721,7 +1745,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
                                                           , unique_op_id
-                                                          , mapping_path
 #endif
                                                           );
 #ifdef DEBUG_HIGH_LEVEL
@@ -1753,6 +1776,18 @@ namespace LegionRuntime {
         }
       }
       return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskOp::prepare_steal(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_locally_mapped())
+        return false;
+      if (!is_remote())
+        return early_map_regions();
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2104,7 +2139,6 @@ namespace LegionRuntime {
       executing_children.clear();
       executed_children.clear();
       complete_children.clear();
-      mapping_paths.clear();
       safe_cast_domains.clear();
       restricted_trees.clear();
       frame_events.clear();
@@ -2411,21 +2445,7 @@ namespace LegionRuntime {
         physical_instances[idx].unpack_reference(runtime, derez);
       }
       locally_mapped.resize(num_phy,false);
-      // Initialize the mapping paths on this node
-      initialize_mapping_paths(); 
     }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::initialize_mapping_paths(void)
-    //--------------------------------------------------------------------------
-    {
-      mapping_paths.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        initialize_mapping_path(mapping_paths[idx], regions[idx],
-                                regions[idx].region);
-      }
-    } 
 
     //--------------------------------------------------------------------------
     void SingleTask::pack_parent_task(Serializer &rez)
@@ -4179,7 +4199,7 @@ namespace LegionRuntime {
       else
       {
         // Not remote
-        if (is_premapped() || premap_task())
+        if (early_map_task())
         {
           // See if we have a must epoch in which case
           // we can simply record ourselves and we are done
@@ -4255,7 +4275,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(mapping_paths.size() == regions.size());
       assert(enclosing_physical_contexts.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
@@ -4309,7 +4328,6 @@ namespace LegionRuntime {
         {
           mapping_refs[idx] = runtime->forest->map_restricted_region(
                                       enclosing_physical_contexts[idx],
-                                                    mapping_paths[idx],
                                                     regions[idx],
                                                     idx, get_version_info(idx),
                                                     target
@@ -4324,7 +4342,6 @@ namespace LegionRuntime {
           // Otherwise we're going to do an actual mapping
           mapping_refs[idx] = runtime->forest->map_physical_region(
                                       enclosing_physical_contexts[idx],
-                                                    mapping_paths[idx],
                                                     regions[idx],
                                                     idx, get_version_info(idx),
                                                     this,
@@ -4426,7 +4443,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
                                                           , unique_op_id
-                                                          , mapping_paths[idx]
 #endif
                                                           );
           if (notify)
@@ -5567,34 +5583,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::trigger_remote_state_analysis(UserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // If we're remote and locally mapped, we are done
-      if (is_remote() && is_locally_mapped())
-      {
-        ready_event.trigger();
-        return;
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_physical_contexts.size() == version_infos.size());
-#endif
-      // Tasks are a little weird for this stage. If we're local we only
-      // localize the pre-mapping nodes now so we can premap in which
-      // case we might be sent remotely. If we decide to map locally, we
-      // localize those states on demand. If we are remote though, we assume
-      // we are going to be mapping here and request all the state now.
-      std::set<Event> preconditions;
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].make_local(preconditions, runtime->forest, 
-            enclosing_physical_contexts[idx].get_id(), !is_remote());
-      if (preconditions.empty())
-        ready_event.trigger();
-      else
-        ready_event.trigger(Event::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     bool MultiTask::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
@@ -5627,8 +5615,8 @@ namespace LegionRuntime {
       }
       else
       {
-        // Not remote, make sure it is premapped
-        if (is_premapped() || premap_task())
+        // Not remote
+        if (early_map_task())
         {
           if (is_locally_mapped())
           {
@@ -6145,7 +6133,6 @@ namespace LegionRuntime {
       {
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
       }
-      initialize_mapping_paths();
     }
 
     //--------------------------------------------------------------------------
@@ -6202,24 +6189,52 @@ namespace LegionRuntime {
     void IndividualTask::trigger_remote_state_analysis(UserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      // If we're remote and locally mapped, we are done
-      if (is_remote() && is_locally_mapped())
-      {
-        ready_event.trigger();
-        return;
-      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == version_infos.size());
 #endif
-      // Tasks are a little weird for this stage. If we're local we only
-      // localize the pre-mapping nodes now so we can premap in which
-      // case we might be sent remotely. If we decide to map locally, we
-      // localize those states on demand. If we are remote though, we assume
-      // we are going to be mapping here and request all the state now.
       std::set<Event> preconditions; 
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].make_local(preconditions, runtime->forest, 
-            enclosing_physical_contexts[idx].get_id(), !is_remote());
+      if (is_remote())
+      {
+        // If we're remote and locally mapped, we are done
+        if (is_locally_mapped())
+        {
+          ready_event.trigger();
+          return;
+        }
+        // Otherwise request state for anything 
+        // that was not early mapped 
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+            version_infos[idx].make_local(preconditions, runtime->forest,
+                              enclosing_physical_contexts[idx].get_id());
+        }
+      }
+      else
+      {
+        // We're still local, see if we are locally mapped or not
+        if (is_locally_mapped())
+        {
+          // If we're locally mapping, we need everything now
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          {
+            version_infos[idx].make_local(preconditions, runtime->forest,
+                              enclosing_physical_contexts[idx].get_id());
+          }
+        }
+        else
+        {
+          // Otherwise, only request any data for early mapped regions
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          {
+            const RegionRequirement &req = regions[idx];
+            if ((req.handle_type == SINGULAR) && 
+                (req.must_early_map || req.early_map))
+              version_infos[idx].make_local(preconditions, runtime->forest,
+                              enclosing_physical_contexts[idx].get_id());
+          }
+        }
+      }
       if (preconditions.empty())
         ready_event.trigger();
       else
@@ -6305,69 +6320,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::premap_task(void)
+    bool IndividualTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      if (premapped)
-        return true;
-      premapped = true;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_physical_contexts.size() == regions.size());
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      BEGIN_PRE_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(get_unique_task_id(), 
-                                 PROF_BEGIN_PREMAP_ANALYSIS);
-#endif
-      // All regions need to be premapped no matter what
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Check to see if we already premapped this region
-        // If not then we need to do it now
-        if (!regions[idx].premapped)
-        {
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       enclosing_physical_contexts[idx],
-                                       privilege_paths[idx], regions[idx], 
-                                       version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
-#endif
-                                       );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
-#endif
-          version_infos[idx].apply_premapping(
-                              enclosing_physical_contexts[idx].get_id());
-        }
-      }
-      if (premapped)
-        premapped = early_map_regions();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_PRE_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(get_unique_task_id(),
-                                 PROF_END_PREMAP_ANALYSIS);
-#endif
-      return premapped;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndividualTask::prepare_steal(void)
-    //--------------------------------------------------------------------------
-    {
-      if (premapped)
-        return true;
-      else
-        return premap_task();
+      return early_map_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -6401,6 +6357,31 @@ namespace LegionRuntime {
           Event wait_on = Event::merge_events(preconditions);
           wait_on.wait();
         }
+      }
+      // Do our premapping of all the regions before we do any mapper calls
+      if (!premapped)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          // Do the premapping if it is not already premapped or early mapped
+          if (!regions[idx].premapped && 
+              (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+          {
+            regions[idx].premapped = runtime->forest->premap_physical_region(
+                                         enclosing_physical_contexts[idx],
+                                         privilege_paths[idx], regions[idx], 
+                                         version_infos[idx], this, parent_ctx,
+                                         parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                         , idx, get_logging_name(), unique_op_id
+#endif
+                                         );
+#ifdef DEBUG_HIGH_LEVEL
+            assert(regions[idx].premapped);
+#endif
+          }
+        }
+        premapped = true;
       }
       // Before we try mapping the task, ask the mapper to pick a task variant
       runtime->invoke_mapper_select_variant(current_proc, this);
@@ -6492,6 +6473,16 @@ namespace LegionRuntime {
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < privilege_paths.size());
+#endif
+      return privilege_paths[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -7037,21 +7028,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::premap_task(void)
+    bool PointTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      // Point tasks are always ready to map since they had to be
-      // premapped first anyway
+      // Point tasks are always done with early mapping
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PointTask::prepare_steal(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7066,6 +7047,39 @@ namespace LegionRuntime {
     bool PointTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
+      // Premap all the regions that are not early mapped before we
+      // call the mapper
+      if (!premapped)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+          {
+            const RegionRequirement &slice_req = slice_owner->regions[idx];
+            RegionTreePath mapping_path;
+            if (slice_req.handle_type == PART_PROJECTION)
+              initialize_mapping_path(mapping_path, regions[idx],
+                                      slice_req.partition);
+            else
+              initialize_mapping_path(mapping_path, regions[idx],
+                                      slice_req.region);
+            VersionInfo &version_info = slice_owner->get_version_info(idx);
+            regions[idx].premapped = runtime->forest->premap_physical_region(
+                                       enclosing_physical_contexts[idx],
+                                       mapping_path, regions[idx], 
+                                       version_info, this, parent_ctx,
+                                       parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                       , idx, get_logging_name(), unique_op_id
+#endif
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+            assert(regions[idx].premapped);
+#endif
+          }
+        }
+        premapped = true;
+      }
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
@@ -7308,21 +7322,6 @@ namespace LegionRuntime {
       mp->assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
       point_termination = UserEvent::create_user_event();
-      // Finally compute the paths for this point task
-      mapping_paths.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (owner->regions[idx].handle_type == PART_PROJECTION)
-        {
-          initialize_mapping_path(mapping_paths[idx], regions[idx],
-                                  owner->regions[idx].partition);
-        }
-        else
-        {
-          initialize_mapping_path(mapping_paths[idx], regions[idx],
-                                  owner->regions[idx].region);
-        }
-      }
     } 
 
 #if 0
@@ -7384,16 +7383,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::premap_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::prepare_steal(void)
+    bool WrapperTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8446,6 +8436,39 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::trigger_remote_state_analysis(UserEvent ready_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+      std::set<Event> preconditions;
+      if (is_locally_mapped())
+      {
+        // If we're locally mapped, request everyone's state
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].make_local(preconditions, runtime->forest, 
+                            enclosing_physical_contexts[idx].get_id());
+      }
+      else
+      {
+        // Otherwise we only need to request state for early mapped regions
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        {
+          const RegionRequirement &req = regions[idx];
+          if ((req.handle_type == SINGULAR) && 
+                (req.must_early_map || req.early_map))
+            version_infos[idx].make_local(preconditions, runtime->forest, 
+                              enclosing_physical_contexts[idx].get_id());
+        }
+      }
+      if (preconditions.empty())
+        ready_event.trigger();
+      else
+        ready_event.trigger(Event::merge_events(preconditions));
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::report_aliased_requirements(unsigned idx1, unsigned idx2)
     //--------------------------------------------------------------------------
     {
@@ -8557,6 +8580,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    RegionTreePath& IndexTask::get_privilege_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < privilege_paths.size());
+#endif
+      return privilege_paths[idx];
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
@@ -8659,68 +8692,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::premap_task(void)
+    bool IndexTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      if (premapped)
-        return true;
-      premapped = true;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_physical_contexts.size() == regions.size());
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      BEGIN_PRE_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(get_unique_task_id(), 
-                                 PROF_BEGIN_PREMAP_ANALYSIS);
-#endif
-      // All regions need to be premapped no matter what
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Check to see if we already premapped this region
-        // If not then we need to do it now
-        if (!regions[idx].premapped)
-        {
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       enclosing_physical_contexts[idx],
-                                       privilege_paths[idx], regions[idx], 
-                                       version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
-#endif
-                                       );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
-#endif
-          version_infos[idx].apply_premapping(
-                              enclosing_physical_contexts[idx].get_id());
-        }
-      }
-      if (premapped)
-        premapped = early_map_regions();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_PRE_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(get_unique_task_id(),
-                                 PROF_END_PREMAP_ANALYSIS);
-#endif
-      return premapped;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexTask::prepare_steal(void)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called since index tasks are never stealable
-      assert(false);
-      return false;
+      return early_map_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -9481,6 +9456,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::trigger_remote_state_analysis(UserEvent ready_event)
+    //--------------------------------------------------------------------------
+    {
+      // If we are locally mapped, we are done no matter what
+      if (is_locally_mapped())
+      {
+        ready_event.trigger();
+        return;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(enclosing_physical_contexts.size() == version_infos.size());
+#endif
+      // Otherwise we just need to request state for any non-eary mapped regions
+      std::set<Event> preconditions;
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+          version_infos[idx].make_local(preconditions, runtime->forest,
+                            enclosing_physical_contexts[idx].get_id());
+      }
+      if (preconditions.empty())
+        ready_event.trigger();
+      else
+        ready_event.trigger(Event::merge_events(preconditions));
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
@@ -9489,21 +9491,45 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::premap_task(void)
+    bool SliceTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      // Do nothing. We've already been sanitized by our index task owner.
+      // Slices are already done with early mapping 
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::prepare_steal(void)
+    void SliceTask::premap_slice(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!is_locally_mapped());
+      assert(!premapped);
 #endif
-      return true;
+      // Premap all regions that were not early mapped
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // Check to see if we already premapped this region
+        // If not then we need to do it now
+        if (!regions[idx].premapped && 
+            (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+        {
+          RegionTreePath privilege_path;
+          initialize_privilege_path(privilege_path, regions[idx]);
+          regions[idx].premapped = runtime->forest->premap_physical_region(
+                                       enclosing_physical_contexts[idx],
+                                       privilege_path, regions[idx], 
+                                       version_infos[idx], this, parent_ctx,
+                                       parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                       , idx, get_logging_name(), unique_op_id
+#endif
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[idx].premapped);
+#endif
+        }
+      }
+      premapped = true;
     }
 
     //--------------------------------------------------------------------------
@@ -9527,6 +9553,9 @@ namespace LegionRuntime {
     bool SliceTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
+      // Premap everything first
+      if (!premapped)
+        premap_slice();
       bool map_success = true;
       // If slices are empty, this is a leaf slice so we can do the
       // normal mapping procedure
@@ -9634,6 +9663,9 @@ namespace LegionRuntime {
     bool SliceTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
+      // Premap everything first
+      if (!premapped)
+        premap_slice();
       bool map_success = true;
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.

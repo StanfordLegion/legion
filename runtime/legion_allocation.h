@@ -204,6 +204,46 @@ namespace LegionRuntime {
       static void trace_free(Runtime *&rt, AllocationType a, 
                              size_t size, int elems=1);
     };
+
+    // A Helper class for determining if we have an allocation type
+    template<typename T>
+    struct HasAllocType {
+      typedef char no[1];
+      typedef char yes[2];
+
+      struct Fallback { int alloc_type; };
+      struct Derived : T, Fallback { };
+
+      template<typename U, U> struct Check;
+
+      template<typename U>
+      static no& test_for_alloc_type(
+          Check<int (Fallback::*), &U::alloc_type> *);
+
+      template<typename U>
+      static yes& test_for_alloc_type(...);
+
+      static const bool value = 
+        (sizeof(test_for_alloc_type<Derived>(0)) == sizeof(yes));
+    };
+
+    template<typename T, bool HAS_ALLOC_TYPE>
+    struct HandleAllocation {
+      static inline void trace_allocation(void)
+      {
+        LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      }
+      static inline void trace_free(void)
+      {
+        LegionAllocation::trace_free(T::alloc_type, sizeof(T));
+      }
+    };
+
+    template<typename T>
+    struct HandleAllocation<T,false> {
+      static inline void trace_allocation(void) { /*nothing*/ }
+      static inline void trace_free(void) { /*nothing*/ }
+    };
 #endif
 
     // Helper methods for doing tracing of memory allocations
@@ -246,7 +286,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T();
@@ -259,7 +299,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1);
@@ -272,7 +312,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2);
@@ -285,7 +325,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3);
@@ -299,7 +339,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4);
@@ -314,7 +354,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5);
@@ -330,7 +370,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6);
@@ -346,7 +386,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
@@ -364,7 +404,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, 
@@ -383,7 +423,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
@@ -403,7 +443,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
@@ -423,7 +463,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
@@ -445,7 +485,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
@@ -457,7 +497,7 @@ namespace LegionRuntime {
     inline void legion_delete(T *to_free)
     {
 #ifdef TRACE_ALLOCATION
-      LegionAllocation::trace_free(T::alloc_type, sizeof(T));
+      HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
       to_free->~T();
       free(to_free);

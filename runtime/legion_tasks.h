@@ -85,10 +85,10 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
-      virtual bool premap_task(void) = 0;
-      virtual bool prepare_steal(void) = 0;
+      virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual void launch_task(void) = 0;
@@ -162,6 +162,7 @@ namespace LegionRuntime {
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(MinimalPoint *mp = NULL);
       bool early_map_regions(void);
+      bool prepare_steal(void);
     protected:
       void compute_parent_indexes(void);
     protected:
@@ -436,7 +437,6 @@ namespace LegionRuntime {
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez);
-      void initialize_mapping_paths(void);
     public:
       void pack_parent_task(Serializer &rez);
       virtual void pack_remote_ctx_info(Serializer &rez);
@@ -456,8 +456,7 @@ namespace LegionRuntime {
     public:
       virtual void resolve_false(void) = 0;
       virtual void launch_task(void);
-      virtual bool premap_task(void) = 0;
-      virtual bool prepare_steal(void) = 0;
+      virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual bool is_stealable(void) const = 0;
@@ -595,8 +594,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void) = 0;
     public:
       virtual void resolve_false(void) = 0;
-      virtual bool premap_task(void) = 0;
-      virtual bool prepare_steal(void) = 0;
+      virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual void launch_task(void) = 0;
@@ -609,7 +607,6 @@ namespace LegionRuntime {
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
-      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
     protected:
       virtual void trigger_task_complete(void) = 0;
@@ -691,14 +688,14 @@ namespace LegionRuntime {
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
       virtual void resolve_false(void);
-      virtual bool premap_task(void);
-      virtual bool prepare_steal(void);
+      virtual bool early_map_task(void);
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
       virtual Event get_task_completion(void) const;
@@ -785,8 +782,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
     public:
       virtual void resolve_false(void);
-      virtual bool premap_task(void);
-      virtual bool prepare_steal(void);
+      virtual bool early_map_task(void);
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
@@ -848,8 +844,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
     public:
       virtual void resolve_false(void);
-      virtual bool premap_task(void);
-      virtual bool prepare_steal(void);
+      virtual bool early_map_task(void);
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
@@ -1047,12 +1042,13 @@ namespace LegionRuntime {
       virtual void deactivate(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
       virtual FatTreePath* compute_fat_path(unsigned idx);
+      virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void resolve_false(void);
-      virtual bool premap_task(void);
-      virtual bool prepare_steal(void);
+      virtual bool early_map_task(void);
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual void launch_task(void);
@@ -1138,10 +1134,10 @@ namespace LegionRuntime {
       virtual void deactivate(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
     public:
       virtual void resolve_false(void);
-      virtual bool premap_task(void);
-      virtual bool prepare_steal(void);
+      virtual bool early_map_task(void);
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoke = false);
       virtual void launch_task(void);
@@ -1165,6 +1161,7 @@ namespace LegionRuntime {
       PointTask* clone_as_point_task(const DomainPoint &p,
                                      MinimalPoint *mp);
       void enumerate_points(void);
+      void premap_slice(void);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

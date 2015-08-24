@@ -1622,7 +1622,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
 #ifdef LEGION_LOGGING
       LegionLogging::log_mapping_operation(
           parent_ctx->get_executing_processor(),
@@ -1689,7 +1688,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
 #ifdef LEGION_LOGGING
       LegionLogging::log_mapping_operation(
           parent_ctx->get_executing_processor(),
@@ -1746,7 +1744,6 @@ namespace LegionRuntime {
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
 #ifdef LEGION_LOGGING
       LegionLogging::log_mapping_operation(
           parent_ctx->get_executing_processor(),
@@ -1799,7 +1796,6 @@ namespace LegionRuntime {
       // Remove our reference to the region
       region = PhysicalRegion();
       privilege_path.clear();
-      mapping_path.clear();
       version_info.clear();
       restrict_info.clear();
       // Now return this operation to the queue
@@ -1898,7 +1894,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       MappingRef map_ref;
       bool notify = false;
@@ -1946,7 +1941,6 @@ namespace LegionRuntime {
         notify = runtime->invoke_mapper_map_inline(local_proc, this);
         // Do the mapping and see if it succeeded 
         map_ref = runtime->forest->map_physical_region(physical_ctx,
-                                                       mapping_path,
                                                        requirement,
                                                        0/*idx*/,
                                                        version_info,
@@ -1981,7 +1975,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
                                                           , unique_op_id
-                                                          , mapping_path
 #endif
                                                             );
 #ifdef DEBUG_HIGH_LEVEL
@@ -2559,24 +2552,16 @@ namespace LegionRuntime {
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
       src_privilege_paths.resize(src_requirements.size());
-      src_mapping_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         initialize_privilege_path(src_privilege_paths[idx],
                                   src_requirements[idx]);
-        initialize_mapping_path(src_mapping_paths[idx],
-                                src_requirements[idx],
-                                src_requirements[idx].region);
       }
       dst_privilege_paths.resize(dst_requirements.size());
-      dst_mapping_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
-        initialize_mapping_path(dst_mapping_paths[idx],
-                                dst_requirements[idx],
-                                dst_requirements[idx].region);
       }
 #ifdef LEGION_LOGGING
       LegionLogging::log_copy_operation(parent_ctx->get_executing_processor(),
@@ -2670,8 +2655,6 @@ namespace LegionRuntime {
       arrive_barriers.clear();
       src_privilege_paths.clear();
       dst_privilege_paths.clear();
-      src_mapping_paths.clear();
-      dst_mapping_paths.clear();
       src_parent_indexes.clear();
       dst_parent_indexes.clear();
       src_versions.clear();
@@ -2834,7 +2817,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(src_requirements[idx].premapped);
 #endif
-          src_versions[idx].apply_premapping(src_contexts[idx].get_id());
         }
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2856,7 +2838,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(dst_requirements[idx].premapped);
 #endif
-          dst_versions[idx].apply_premapping(dst_contexts[idx].get_id());
         }
       }
       // If we couldn't premap, then we need to try again later
@@ -2896,7 +2877,6 @@ namespace LegionRuntime {
         }
         src_mapping_refs[idx] = runtime->forest->map_physical_region(
                                                         src_contexts[idx],
-                                                        src_mapping_paths[idx],
                                                         src_requirements[idx],
                                                         idx,
                                                         src_versions[idx],
@@ -2943,7 +2923,6 @@ namespace LegionRuntime {
         }
         dst_mapping_refs[idx] = runtime->forest->map_physical_region(
                                                     dst_contexts[idx],
-                                                    dst_mapping_paths[idx],
                                                     dst_requirements[idx],
                                                     src_requirements.size()+idx,
                                                     dst_versions[idx],
@@ -3027,7 +3006,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
                                                         , unique_op_id
-                                                        , dst_mapping_paths[idx]
 #endif
                                                         );
 #ifdef DEBUG_HIGH_LEVEL
@@ -3080,7 +3058,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
                                                         , unique_op_id
-                                                        , src_mapping_paths[idx]
 #endif
                                                         );
             
@@ -4995,9 +4972,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_acquire_privilege();
       initialize_privilege_path(privilege_path, requirement);
-#ifdef DEBUG_HIGH_LEVEL
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_acquire_operation(parent_ctx->get_unique_task_id(),
                                        unique_op_id);
@@ -5029,9 +5003,6 @@ namespace LegionRuntime {
       // Remove our reference to the physical region
       region = PhysicalRegion();
       privilege_path.clear();
-#ifdef DEBUG_HIGH_LEVEL
-      mapping_path.clear();
-#endif
       fields.clear();
       grants.clear();
       wait_barriers.clear();
@@ -5146,7 +5117,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       
       // Map this is a restricted region. We already know the 
@@ -5176,7 +5146,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
                                                           , unique_op_id
-                                                          , mapping_path
 #endif
                                                           );
 #ifdef DEBUG_HIGH_LEVEL
@@ -5594,9 +5563,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_release_privilege();
       initialize_privilege_path(privilege_path, requirement);
-#ifdef DEBUG_HIGH_LEVEL
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_release_operation(parent_ctx->get_unique_task_id(),
                                        unique_op_id);
@@ -5628,9 +5594,6 @@ namespace LegionRuntime {
       // Remove our reference to the physical region
       region = PhysicalRegion();
       privilege_path.clear();
-#ifdef DEBUG_HIGH_LEVEL
-      mapping_path.clear();
-#endif
       fields.clear();
       grants.clear();
       wait_barriers.clear();
@@ -5745,7 +5708,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       
 #ifdef LEGION_SPY
@@ -5782,7 +5744,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
                                                             , get_logging_name()
                                                             , unique_op_id
-                                                            , mapping_path
 #endif
                                                             );
 #ifdef DEBUG_HIGH_LEVEL
@@ -8415,7 +8376,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
 
       Event ready_event = Event::NO_EVENT;
@@ -8717,7 +8677,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
     }
 
     //--------------------------------------------------------------------------
@@ -8735,7 +8694,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
     }
 
     //--------------------------------------------------------------------------
@@ -8757,7 +8715,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
     }
 
       //--------------------------------------------------------------------------
@@ -8776,7 +8733,6 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      initialize_mapping_path(mapping_path, requirement, requirement.region);
     }
 
     //--------------------------------------------------------------------------
@@ -8794,7 +8750,6 @@ namespace LegionRuntime {
     {
       deactivate_speculative();
       privilege_path.clear();
-      mapping_path.clear();
       if (value != NULL) 
       {
         free(value);
@@ -8916,7 +8871,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       
       // Tell the region tree forest to fill in this field
@@ -9352,7 +9306,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
@@ -9713,7 +9666,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!requirement.premapped);
 #endif
-        version_info.apply_premapping(physical_ctx.get_id());
       }
       runtime->forest->detach_file(physical_ctx, requirement, reference);
       version_info.apply_mapping(physical_ctx.get_id());
