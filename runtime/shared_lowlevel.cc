@@ -501,7 +501,6 @@ namespace LegionRuntime {
 		: index(idx)
 	{
 	  in_use = activate;
-          is_barrier = false;
 	  generation = 0;
           free_generation = 0;
 	  sources = 0;
@@ -573,7 +572,6 @@ namespace LegionRuntime {
         void print_waiters(void);
     private: 
 	bool in_use;
-        bool is_barrier;
 	unsigned sources;
         unsigned arrivals; // for use with barriers
 	const EventIndex index;
@@ -602,6 +600,8 @@ namespace LegionRuntime {
         };
         // for use with barriers
         std::map<EventGeneration,int/*alterations*/> pending_alterations;
+        std::map<EventGeneration,std::deque<PendingArrival> > pending_arrivals;
+
         // happens before advice from app
         struct HappensBeforePair {
 	  std::set<Event> events;
@@ -1098,13 +1098,6 @@ namespace LegionRuntime {
 
     void EventImpl::wait(EventGeneration needed_gen)
     {
-      // If this is a barrier decrement the needed generation
-      // by 1 because it is always one ahead, note we can test
-      // this without the lock because we know that the field
-      // is monotonic. Once an event imple becomes a barrier then
-      // it is always a barrier.
-      if (is_barrier)
-        needed_gen--;
       ProcessorImpl::ProcessorThread *thread = 
         (ProcessorImpl::ProcessorThread*)pthread_getspecific(local_thread_key);
       thread->preempt(this, needed_gen);
@@ -1154,10 +1147,7 @@ namespace LegionRuntime {
         // with this event, but keep event in_use so no one can use the event
         generation++;
 #ifdef DEBUG_LOW_LEVEL
-        if (is_barrier)
-          assert((generation+1) == current.gen);
-        else
-          assert(generation == current.gen);
+        assert(generation == current.gen);
 #endif
         // Get the set of people to trigger
         std::vector<EventWaiter*> to_trigger;
@@ -1213,12 +1203,21 @@ namespace LegionRuntime {
           // Also check to see if we have any pending operations 
           {
             std::map<EventGeneration,int>::iterator finder = 
-              pending_alterations.find(generation+2);
+              pending_alterations.find(current.gen);
             if (finder != pending_alterations.end()) {
               sources += finder->second;
               if (sources == 0)
                 trigger_again = true;
               pending_alterations.erase(finder);
+            }
+          }
+          // Also see if we have any pending arrivals
+          {
+            std::map<EventGeneration,std::deque<PendingArrival> >::iterator
+              finder = pending_arrivals.find(current.gen);
+            if (finder != pending_arrivals.end()) {
+              pending_copy = finder->second;
+              pending_arrivals.erase(finder);
             }
           }
         }
@@ -1329,17 +1328,14 @@ namespace LegionRuntime {
       assert(in_use);
 #endif
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-      is_barrier = true;
-      // Since this is a barrier, bump the generation count
-      current.gen++;
-      // Make sure we don't prematurely free this event
-      free_generation = (unsigned)-1;
       Barrier result;
       result.id = current.id;
       result.gen = current.gen;
       // Set the number of expected arrivals
       sources = expected_arrivals;
       arrivals = expected_arrivals;
+      // Make sure we don't prematurely free this event
+      free_generation = (unsigned)-1;
 
       if(_redop_id) {
 	redop = RuntimeImpl::get_runtime()->get_reduction_op(_redop_id);
@@ -1363,7 +1359,7 @@ namespace LegionRuntime {
 #endif
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // Check to see if we are on the right generation
-      if (alter_gen > (generation+2)) {
+      if (alter_gen > (generation+1)) {
         // Add this to the list of pending alterations for future generation
         std::map<EventGeneration,int>::iterator finder = 
           pending_alterations.find(alter_gen);
@@ -1399,7 +1395,7 @@ namespace LegionRuntime {
       bool trigger_now = true;
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // Check to see if we are on the right generation
-      if (apply_gen > (generation+2)) {
+      if (apply_gen > (generation+1)) {
         trigger_now = false;
         // If there is no wait on, then we can just update
         // the pending alteration count
@@ -1419,7 +1415,7 @@ namespace LegionRuntime {
     bool EventImpl::get_result(Event::gen_t needed_gen, void *value, size_t value_size)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-      bool result = ((needed_gen-1) <= generation);
+      bool result = (needed_gen <= generation);
       if(result) {
 	assert(redop != 0);
 	assert(value_size == redop->sizeof_lhs);
