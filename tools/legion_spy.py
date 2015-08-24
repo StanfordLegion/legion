@@ -145,7 +145,7 @@ if __name__ == "__main__":
         main()
         shutil.rmtree(temp_dir)
     except:
-        #shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir)
         raise
 
 # EOF

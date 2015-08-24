@@ -2616,6 +2616,9 @@ class EventHandle(object):
     def __eq__(self, other):
         return (self.uid,self.gen) == (other.uid,other.gen)
 
+    def __repr__(self):
+        return "ev(" + hex(self.uid) + "," + str(self.gen) + ")"
+
     def exists(self):
         return (self.uid <> 0)
 
@@ -2631,6 +2634,9 @@ class PhaseBarrier(object):
 
     def __eq__(self, other):
         return (self.uid,self.gen) == (other.uid,other.gen)
+
+    def __repr__(self):
+        return "pb(" + hex(self.uid) + "," + str(self.gen) + ")"
 
     def exists(self):
         return (self.uid <> 0)
@@ -2826,6 +2832,7 @@ class Event(object):
         self.implicit_outgoing = set()
         self.physical_marked = False
         self.generation = 0
+        self.prev_event_deps = set()
 
     def add_physical_incoming(self, event):
         assert self <> event
@@ -2867,14 +2874,15 @@ class Event(object):
                 n.print_prev_event_dependences(printer, self.handle.node_name)
 
     def print_prev_event_dependences(self, printer, name):
-        if self.is_phase_barrier():
-            self.handle.print_prev_event_dependences(printer, name)
-            for n in self.physical_incoming:
-                n.print_prev_event_dependences(printer, self.handle.node_name)
-        else:
-            for n in self.physical_incoming:
-                n.print_prev_event_dependences(printer, name)
-
+        if name not in self.prev_event_deps:
+            self.prev_event_deps.add(name)
+            if self.is_phase_barrier():
+                self.handle.print_prev_event_dependences(printer, name)
+                for n in self.physical_incoming:
+                    n.print_prev_event_dependences(printer, self.handle.node_name)
+            else:
+                for n in self.physical_incoming:
+                    n.print_prev_event_dependences(printer, name)
     def print_prev_filtered_dependences(self, printer, name, printed_nodes):
         for n in self.physical_incoming:
             n.print_prev_filtered_dependences(printer, name, printed_nodes)
