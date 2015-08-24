@@ -2863,6 +2863,11 @@ class Event(object):
         if self.physical_marked or not self.handle.exists():
             return
         self.physical_marked = True
+        if self.is_phase_barrier() and \
+                len(self.physical_outgoing) == 0 and \
+                len(self.physical_incoming) == 1 and \
+                list(self.physical_incoming)[0].is_phase_barrier():
+            return
         component.add_event(self)
         if self.is_phase_barrier():
             component.add_phase_barrier(self.handle)
