@@ -9559,7 +9559,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState* VersionInfo::create_physical_state(RegionTreeNode *node, 
-                         VersionManager *manager, bool initialize, bool capture)
+                                          VersionManager *manager, bool capture)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9579,7 +9579,7 @@ namespace LegionRuntime {
                                                      finder->second.path_only(),
                                                      finder->second.close_top(),
                                                      finder->second.advance(),
-                                                     initialize, capture);
+                                                     capture);
       // Save the resulting physical state
       finder->second.physical_state = result;
       finder->second.unset_needs_capture();
@@ -9652,7 +9652,6 @@ namespace LegionRuntime {
         if (info.physical_state == NULL)
         {
           info.physical_state = it->first->get_physical_state(ctx, *this,
-                                                       false/*initialize*/,
                                                        false/*capture*/);
           info.set_needs_capture();
         }
@@ -9854,7 +9853,6 @@ namespace LegionRuntime {
       rez.serialize(info.bit_mask);
       if (info.physical_state == NULL)
         info.physical_state = node->get_physical_state(ctx, *this,
-                                                       false/*initialize*/,
                                                        false/*capture*/);
       PhysicalState *state = info.physical_state;
 #ifdef DEBUG_HIGH_LEVEL
@@ -9951,7 +9949,7 @@ namespace LegionRuntime {
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                        did, source, mask, false/*initialize*/);
+                                                    did, source, mask);
         info.physical_state->add_version_state(state, mask);
         // Also add this to the version numbers
         // Only need to do this for the non-advance states
@@ -9970,7 +9968,7 @@ namespace LegionRuntime {
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                            did, source, mask, !info.path_only()/*initialize*/);
+                                                    did, source, mask);
         // No point in adding this to the version state infos
         // since we already know we just use that to build the PhysicalState
         info.physical_state->add_advance_state(state, mask);
@@ -12503,7 +12501,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_premap_state(this, it->second);
+            it->first->merge_path_only_state(this, it->second);
           }
         }
       }
@@ -12517,7 +12515,7 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_premap_state(this, it->second); 
+            it->first->merge_path_only_state(this, it->second); 
           }
         }
       }
@@ -12950,8 +12948,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
-                               VersionManager *man, const FieldMask &mask,
-                               bool initialize)
+                               VersionManager *man, const FieldMask &mask)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
         manager(man), state_lock(Reservation::create_reservation())
 #ifdef DEBUG_HIGH_LEVEL
@@ -12959,29 +12956,12 @@ namespace LegionRuntime {
 #endif
     //--------------------------------------------------------------------------
     {
-      // Initialize any fields that we now have
-      if (initialize)
-        initial_fields |= mask;
       // If we are not the owner, add a valid and resource reference
       if (!is_owner())
       {
         add_base_valid_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
-        // If we are remote and we are now initialized send our notification
-        if (initialize)
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(mask);
-          }
-          runtime->send_version_state_initialization(owner_space, rez);
-        }
       }
-      // If we're the owner and we are in eventual state, add ourselves
-      else if (initialize)
-        initial_nodes[local_space] = mask;
     }
 
     //--------------------------------------------------------------------------
@@ -13057,6 +13037,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
       assert(currently_valid);
       assert(new_view->is_instance_view());
 #endif
@@ -13087,6 +13068,9 @@ namespace LegionRuntime {
           dirty_mask |= user_mask;
         inst_view->add_initial_user(term_event, usage, user_mask);
       }
+      // Update our field information, we know we are the owner
+      initial_nodes[local_space] |= user_mask;
+      initial_fields |= user_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -13267,8 +13251,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::merge_premap_state(const PhysicalState *state,
-                                          const FieldMask &merge_mask)
+    void VersionState::merge_path_only_state(const PhysicalState *state,
+                                             const FieldMask &merge_mask)
     //--------------------------------------------------------------------------
     {
       // We're writing so we need the lock in exclusive mode
@@ -13296,6 +13280,25 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
+      if (is_owner())
+      {
+        path_only_nodes[local_space] |= merge_mask;
+      }
+      else
+      {
+        FieldMask new_path_only = merge_mask - path_only_fields;
+        if (!!new_path_only)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(new_path_only);
+          }
+          runtime->send_version_state_path_only(owner_space, rez);
+        }
+      }
+      path_only_fields |= merge_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -13376,12 +13379,27 @@ namespace LegionRuntime {
             finder->second |= overlap;
         }
       }
-      // Finally update our state if we are the owner
+      // Update our field information
       if (is_owner())
       {
-        initial_fields |= merge_mask;
         initial_nodes[local_space] |= merge_mask;
       }
+      else
+      {
+        // We're remote see if we need to send any notifications
+        FieldMask new_initial_fields = merge_mask - initial_fields;
+        if (!!new_initial_fields)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(new_initial_fields);
+          }
+          runtime->send_version_state_initialization(owner_space, rez);
+        }
+      }
+      initial_fields |= merge_mask;
       if (need_lock)
         state_lock.release();
     }
@@ -13552,26 +13570,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::record_initial_fields(const FieldMask &initial_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_owner());
-#endif
-      {
-        AutoLock s_lock(state_lock);
-        initial_fields |= initial_mask;
-      }
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(initial_mask);
-      }
-      runtime->send_version_state_initialization(owner_space, rez);
-    }
-
-    //--------------------------------------------------------------------------
     void VersionState::request_initial_version_state(
                   const FieldMask &request_mask, std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
@@ -13645,7 +13643,7 @@ namespace LegionRuntime {
         // If we make it here, then send a request to the owner
         // for the remaining fields
         send_version_state_request(owner_space, local_space, ready_event, 
-                                   remaining_mask, false/*final*/);
+                                   remaining_mask, INITIAL_VERSION_REQUEST);
       }
       else if (!targets.empty())
       {
@@ -13654,7 +13652,7 @@ namespace LegionRuntime {
               it = targets.begin(); it != targets.end(); it++)
         {
           send_version_state_request(it->target, local_space, it->to_trigger,
-                                     it->request_mask, it->request_final);
+                                     it->request_mask, it->kind);
                                 
         }
       }
@@ -13706,7 +13704,7 @@ namespace LegionRuntime {
       if (!is_owner())
       {
         send_version_state_request(owner_space, local_space, ready_event,
-                                   remaining_mask, true/*final*/); 
+                                   remaining_mask, FINAL_VERSION_REQUEST); 
       }
       else if (!targets.empty())
       {
@@ -13714,7 +13712,7 @@ namespace LegionRuntime {
               it = targets.begin(); it != targets.end(); it++)
         {
           send_version_state_request(it->target, local_space, it->to_trigger,
-                                     it->request_mask, it->request_final);
+                                     it->request_mask, it->kind);
         }
       }
     }
@@ -13746,7 +13744,33 @@ namespace LegionRuntime {
         info.target = it->first;
         info.to_trigger = UserEvent::create_user_event();
         info.request_mask = overlap;
-        info.request_final = false;
+        info.kind = INITIAL_VERSION_REQUEST;
+        // Add the event to the set of preconditions
+        preconditions.insert(info.to_trigger);
+        // If we are the requester, then update our initial events
+        if (request_space == local_space)
+          initial_events[info.to_trigger] = overlap;
+        needed_mask -= overlap;
+        if (!needed_mask)
+          return;
+      }
+      // If we still have needed fields, check to see if we have
+      // any path only nodes that we need to request
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+            path_only_nodes.begin(); it != path_only_nodes.end(); it++)
+      {
+        // Skip the requesting space
+        if (request_space == it->first)
+          continue;
+        FieldMask overlap = needed_mask & it->second;
+        if (!overlap)
+          continue;
+        targets.push_back(RequestInfo());
+        RequestInfo &info = targets.back();
+        info.target = it->first;
+        info.to_trigger = UserEvent::create_user_event();
+        info.request_mask = overlap;
+        info.kind = PATH_ONLY_VERSION_REQUEST;
         // Add the event to the set of preconditions
         preconditions.insert(info.to_trigger);
         // If we are the requester, then update our initial events
@@ -13784,7 +13808,7 @@ namespace LegionRuntime {
         info.target = it->first;
         info.to_trigger = UserEvent::create_user_event();
         info.request_mask = overlap;
-        info.request_final = true;
+        info.kind = FINAL_VERSION_REQUEST;
         // Add the event to the set of preconditions
         preconditions.insert(info.to_trigger);
         // If we are the requester, then update our final events
@@ -13811,9 +13835,32 @@ namespace LegionRuntime {
         info.target = it->first;
         info.to_trigger = UserEvent::create_user_event();
         info.request_mask = overlap;
-        info.request_final = false;
+        info.kind = INITIAL_VERSION_REQUEST;
         merge_preconditions.insert(info.to_trigger); 
         requested_mask |= overlap;
+      }
+      needed_mask -= requested_mask;
+      // Also check for any path only nodes for fields with no initial states
+      if (!!needed_mask)
+      {
+        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+              path_only_nodes.begin(); it != path_only_nodes.end(); it++)
+        {
+          if (request_space == it->first)
+            continue;
+          FieldMask overlap = needed_mask & it->second;
+          if (!overlap)
+            continue;
+          targets.push_back(RequestInfo());
+          RequestInfo &info = targets.back();
+          info.target = it->first;
+          info.to_trigger = UserEvent::create_user_event();
+          info.request_mask = overlap;
+          info.kind = PATH_ONLY_VERSION_REQUEST;
+          merge_preconditions.insert(info.to_trigger); 
+          requested_mask |= overlap;
+        }
+        needed_mask -= requested_mask;
       }
       if (!!requested_mask)
       {
@@ -13824,21 +13871,52 @@ namespace LegionRuntime {
           if (request_space == local_space)
             final_events[precondition] = requested_mask;
         }
-        needed_mask -= requested_mask;
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state(AddressSpaceID target,
+                                          VersionRequestKind request_kind,
                                           const FieldMask &request_mask,
                                           UserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
+      if (request_kind == PATH_ONLY_VERSION_REQUEST)
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(to_trigger);
+        rez.serialize(request_kind);
+        // Hold the lock in read-only mode while iterating these structures
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        if (!(children.valid_fields * request_mask))
+        {
+          Serializer child_rez;
+          size_t count = 0;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                children.open_children.begin(); it != 
+                children.open_children.end(); it++)
+          {
+            FieldMask overlap = it->second & request_mask;
+            if (!overlap)
+              continue;
+            child_rez.serialize(it->first);
+            child_rez.serialize(overlap);
+            count++;
+          }
+          rez.serialize<size_t>(count);
+          rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
+        }
+        else
+          rez.serialize<size_t>(0);
+      }
+      else // All other request go through the normal path
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(to_trigger);
+        rez.serialize(request_kind);
         // Hold the lock in read-only mode while iterating these structures
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
         // See if we should send all the fields or just do a partial send
@@ -13953,7 +14031,7 @@ namespace LegionRuntime {
     void VersionState::send_version_state_request(AddressSpaceID target,
                                     AddressSpaceID source, UserEvent to_trigger, 
                                     const FieldMask &request_mask, 
-                                    bool request_final)
+                                    VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -13962,7 +14040,7 @@ namespace LegionRuntime {
         rez.serialize(did);
         rez.serialize(source);
         rez.serialize(to_trigger);
-        rez.serialize(request_final);
+        rez.serialize(request_kind);
         rez.serialize(request_mask);
       }
       runtime->send_version_state_request(target, rez);
@@ -13970,18 +14048,37 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state(AddressSpaceID target,
-        UserEvent to_trigger, const FieldMask &request_mask, Event precondition)
+                                                 UserEvent to_trigger, 
+                                                 VersionRequestKind req_kind,
+                                                 const FieldMask &request_mask, 
+                                                 Event precondition)
     //--------------------------------------------------------------------------
     {
       SendVersionStateArgs args;
       args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
       args.proxy_this = this;
       args.target = target;
+      args.request_kind = req_kind;
       args.request_mask = legion_new<FieldMask>(request_mask);
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
                                        NULL/*op*/, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::handle_version_state_path_only(AddressSpaceID source,
+                                                      FieldMask &path_only_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      // First transform the initial mask
+      manager->owner->column_source->transform_field_mask(path_only_mask, 
+                                                          source);
+      AutoLock s_lock(state_lock);
+      path_only_nodes[source] |= path_only_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -14000,7 +14097,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_request(AddressSpaceID source,
-              UserEvent to_trigger, bool request_final, FieldMask &request_mask)
+                    UserEvent to_trigger, VersionRequestKind request_kind, 
+                                                    FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -14013,7 +14111,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         FieldMask remaining_mask = request_mask;
 #endif
-        if (request_final)
+        if (request_kind == FINAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
           for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
@@ -14027,7 +14125,7 @@ namespace LegionRuntime {
           remaining_mask -= final_fields;
 #endif
         }
-        else
+        else if (request_kind == INITIAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
           for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
@@ -14042,15 +14140,26 @@ namespace LegionRuntime {
 #endif
         }
 #ifdef DEBUG_HIGH_LEVEL
+        else
+        {
+          assert(request_kind == PATH_ONLY_VERSION_REQUEST);
+          // There are no preconditions for path only, but we
+          // will take the lock to update the remaining mask
+          // for debugging purposes
+          AutoLock s_lock(state_lock,1,false/*exclusive*/);
+          remaining_mask -= path_only_fields;
+        }
         assert(!remaining_mask); // request mask should now be empty
 #endif
         if (!launch_preconditions.empty())
         {
           Event pre = Event::merge_events(launch_preconditions);
-          launch_send_version_state(source, to_trigger, request_mask, pre);
+          launch_send_version_state(source, to_trigger, request_kind, 
+                                    request_mask, pre);
         }
         else
-          launch_send_version_state(source, to_trigger, request_mask);
+          launch_send_version_state(source, to_trigger, 
+                                    request_kind, request_mask);
       }
       else
       {
@@ -14063,7 +14172,7 @@ namespace LegionRuntime {
         int initial_local_index = -1;
         std::set<Event> local_preconditions, done_conditions;
         LegionDeque<RequestInfo>::aligned targets;
-        if (request_final)
+        if (request_kind == FINAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock);
           // See if we can handle any of the fields locally
@@ -14088,7 +14197,7 @@ namespace LegionRuntime {
           // Once we are here, we can update our remote state information
           final_nodes[source] |= request_mask;
         }
-        else
+        else if (request_kind == INITIAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock);
           // See if we can handle any of the fields locally
@@ -14113,6 +14222,8 @@ namespace LegionRuntime {
           // Once we are here we can update our remote state information
           initial_nodes[source] |= request_mask;
         }
+        else // should never get a request for path only on the owner node
+          assert(false);  
         // First, issue all our remote requests, pull out any that
         // were actually intended for us
         if (!targets.empty())
@@ -14125,13 +14236,14 @@ namespace LegionRuntime {
             {
               // Special case if we were supposed to send it
 #ifdef DEBUG_HIGH_LEVEL
-              assert(request_final && !it->request_final);
+              assert((request_kind == FINAL_VERSION_REQUEST) &&
+                     (it->kind == INITIAL_VERSION_REQUEST));
 #endif
               initial_local_index = idx;
             }
             else
               send_version_state_request(it->target, source, it->to_trigger,
-                                         it->request_mask, it->request_final);
+                                         it->request_mask, it->kind);
           }
         }
         // Now see if we have any local fields to send
@@ -14141,10 +14253,12 @@ namespace LegionRuntime {
           if (!local_preconditions.empty())
           {
             Event pre = Event::merge_events(local_preconditions);
-            launch_send_version_state(source, to_trigger, local_fields, pre); 
+            launch_send_version_state(source, to_trigger, request_kind, 
+                                      local_fields, pre); 
           }
           else
-            launch_send_version_state(source, to_trigger, local_fields); 
+            launch_send_version_state(source, to_trigger, 
+                                      request_kind, local_fields); 
           done_conditions.insert(local_trigger);
         }
         // We might also have some additional local fields to send
@@ -14166,11 +14280,11 @@ namespace LegionRuntime {
           if (!local_preconditions.empty())
           {
             Event pre = Event::merge_events(local_preconditions);
-            launch_send_version_state(source, info.to_trigger, 
+            launch_send_version_state(source, info.to_trigger, info.kind, 
                                       info.request_mask, pre);
           }
           else
-            launch_send_version_state(source, info.to_trigger, 
+            launch_send_version_state(source, info.to_trigger, info.kind,
                                       info.request_mask);
           done_conditions.insert(info.to_trigger);
         }
@@ -14185,27 +14299,78 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_response(AddressSpaceID source,
-                                      UserEvent to_trigger, Deserializer &derez)
+     UserEvent to_trigger, VersionRequestKind request_kind, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      RegionTreeNode *owner_node = manager->owner;
+      FieldSpaceNode *field_node = owner_node->column_source;
+      // Special case for path only response
+      if (request_kind == PATH_ONLY_VERSION_REQUEST)
+      {
+        {
+          AutoLock s_lock(state_lock);
+          size_t num_children;
+          derez.deserialize(num_children);
+          for (unsigned idx = 0; idx < num_children; idx++)
+          {
+            ColorPoint child;
+            derez.deserialize(child);
+            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+              children.open_children.find(child);
+            if (finder != children.open_children.end())
+            {
+              FieldMask child_update;
+              derez.deserialize(child_update);
+              field_node->transform_field_mask(child_update, source);
+              finder->second |= child_update;
+              children.valid_fields |= child_update;
+            }
+            else
+            {
+              FieldMask &mask = children.open_children[child];
+              derez.deserialize(mask);
+              field_node->transform_field_mask(mask, source);
+              children.valid_fields |= mask;
+            }
+          }
+        }
+        to_trigger.trigger();
+        return;
+      }
       // Keep track of any composite veiws we need to check 
       // for having recursive version states at here
       std::vector<CompositeView*> composite_views;
       {
-        RegionTreeNode *owner_node = manager->owner;
-        FieldSpaceNode *field_node = owner_node->column_source;
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
         AutoLock s_lock(state_lock);
         // Check to see what state we are generating, if it is the initial
         // one then we can just do our unpack in-place, otherwise we have
         // to unpack separately and then do a merge.
-        if (!initial_fields && !final_fields)
+        const bool in_place = !initial_fields && !final_fields;
+        // Unpack the dirty and reduction fields
+        if (in_place)
         {
           derez.deserialize(dirty_mask);
           field_node->transform_field_mask(dirty_mask, source); 
           derez.deserialize(reduction_mask);
           field_node->transform_field_mask(reduction_mask, source);
+        }
+        else
+        {
+          FieldMask dirty_update;
+          derez.deserialize(dirty_update);
+          field_node->transform_field_mask(dirty_update, source);
+          dirty_mask |= dirty_update;
+
+          FieldMask reduction_update;
+          derez.deserialize(reduction_update);
+          field_node->transform_field_mask(reduction_update, source);
+          reduction_mask |= reduction_update;
+        }
+        // Unpack the open children
+        if (in_place && !path_only_fields)
+        {
           size_t num_children;
           derez.deserialize(num_children);
           for (unsigned idx = 0; idx < num_children; idx++)
@@ -14217,6 +14382,37 @@ namespace LegionRuntime {
             field_node->transform_field_mask(mask, source);
             children.valid_fields |= mask;
           }
+        }
+        else
+        {
+          size_t num_children;
+          derez.deserialize(num_children);
+          for (unsigned idx = 0; idx < num_children; idx++)
+          {
+            ColorPoint child;
+            derez.deserialize(child);
+            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+              children.open_children.find(child);
+            if (finder != children.open_children.end())
+            {
+              FieldMask child_update;
+              derez.deserialize(child_update);
+              field_node->transform_field_mask(child_update, source);
+              finder->second |= child_update;
+              children.valid_fields |= child_update;
+            }
+            else
+            {
+              FieldMask &mask = children.open_children[child];
+              derez.deserialize(mask);
+              field_node->transform_field_mask(mask, source);
+              children.valid_fields |= mask;
+            }
+          }
+        }
+        // Finally do the views
+        if (!initial_fields && !final_fields)
+        {
           size_t num_valid_views;
           derez.deserialize(num_valid_views);
           for (unsigned idx = 0; idx < num_valid_views; idx++)
@@ -14259,42 +14455,6 @@ namespace LegionRuntime {
         }
         else
         {
-          {
-            FieldMask dirty_update;
-            derez.deserialize(dirty_update);
-            field_node->transform_field_mask(dirty_update, source);
-            dirty_mask |= dirty_update;
-          }
-          {
-            FieldMask reduction_update;
-            derez.deserialize(reduction_update);
-            field_node->transform_field_mask(reduction_update, source);
-            reduction_mask |= reduction_update;
-          }
-          size_t num_children;
-          derez.deserialize(num_children);
-          for (unsigned idx = 0; idx < num_children; idx++)
-          {
-            ColorPoint child;
-            derez.deserialize(child);
-            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-              children.open_children.find(child);
-            if (finder != children.open_children.end())
-            {
-              FieldMask child_update;
-              derez.deserialize(child_update);
-              field_node->transform_field_mask(child_update, source);
-              finder->second |= child_update;
-              children.valid_fields |= child_update;
-            }
-            else
-            {
-              FieldMask &mask = children.open_children[child];
-              derez.deserialize(mask);
-              field_node->transform_field_mask(mask, source);
-              children.valid_fields |= mask;
-            }
-          }
           size_t num_valid_views;
           derez.deserialize(num_valid_views);
           for (unsigned idx = 0; idx < num_valid_views; idx++)
@@ -14383,6 +14543,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_path_only(
+                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask path_only_mask;
+      derez.deserialize(path_only_mask);
+      DistributedCollectable *target = rt->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->handle_version_state_path_only(source, path_only_mask);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_initialization(
                         Runtime *rt, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -14414,8 +14594,8 @@ namespace LegionRuntime {
       derez.deserialize(source);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      bool request_final;
-      derez.deserialize(request_final);
+      VersionRequestKind request_kind;
+      derez.deserialize(request_kind);
       FieldMask request_mask;
       derez.deserialize(request_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
@@ -14426,7 +14606,7 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_request(source, to_trigger, 
-                                       request_final, request_mask);
+                                       request_kind, request_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -14439,6 +14619,8 @@ namespace LegionRuntime {
       derez.deserialize(did);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
+      VersionRequestKind req_kind;
+      derez.deserialize(req_kind);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
 #ifdef DEBUG_HIGH_LEVEL
       VersionState *vs = dynamic_cast<VersionState*>(target);
@@ -14446,7 +14628,7 @@ namespace LegionRuntime {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_response(source, to_trigger, derez);
+      vs->handle_version_state_response(source, to_trigger, req_kind, derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -14495,8 +14677,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
-                        bool path_only, bool close_top, bool advance, 
-                        bool initialize, bool capture)
+                     bool path_only, bool close_top, bool advance, bool capture)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -14542,7 +14723,7 @@ namespace LegionRuntime {
               observed_mask |= to_create;
 #endif
               VersionState *new_state = 
-                create_new_version_state(it->first+1, to_create, initialize);
+                create_new_version_state(it->first+1, to_create);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first+1];
               info.states[new_state] = to_create;
@@ -14575,7 +14756,7 @@ namespace LegionRuntime {
               observed_mask |= to_create;
 #endif
               VersionState *new_state = 
-                create_new_version_state(it->first, to_create, initialize);
+                create_new_version_state(it->first, to_create);
               new_state->add_base_valid_ref(VERSION_MANAGER_REF);
               VersionStateInfo &info = current_version_infos[it->first];
               info.states[new_state] = to_create;
@@ -14916,8 +15097,7 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = 
-          create_new_version_state(0, user_mask, true/*initialize*/);
+        VersionState *init_state = create_new_version_state(0, user_mask);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, term_event, usage, user_mask);
         current_version_infos[0].valid_fields = user_mask;
@@ -15132,20 +15312,20 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::create_new_version_state(VersionID vid,
-                                         const FieldMask &mask, bool initialize) 
+                                                          const FieldMask &mask) 
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = 
         owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                    new_did, local_space, local_space, this, mask, initialize);
+                        new_did, local_space, local_space, this, mask);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::create_remote_version_state(VersionID vid,
                                   DistributedID did, AddressSpaceID owner_space,
-                                  const FieldMask &mask, bool initialize)
+                                  const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
@@ -15153,13 +15333,13 @@ namespace LegionRuntime {
       assert(owner_space != local_space);
 #endif
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                        did, owner_space, local_space, this, mask, initialize);
+                              did, owner_space, local_space, this, mask);
     }
 
     //--------------------------------------------------------------------------
     VersionState* VersionManager::find_remote_version_state(VersionID vid,
                                        DistributedID did, AddressSpaceID source,
-                                       const FieldMask &mask, bool initialize)
+                                       const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       // Use the lock on the version manager to ensure that we don't
@@ -15178,12 +15358,9 @@ namespace LegionRuntime {
 #else
           result = static_cast<VersionState*>(dc);
 #endif
-          if (initialize)
-            result->record_initial_fields(mask);
         }
         else // Otherwise make it
-          result = create_remote_version_state(vid, did, source, 
-                                               mask, initialize);
+          result = create_remote_version_state(vid, did, source, mask);
       }
       return result;
     }
@@ -18984,12 +19161,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
                   VersionID vid, DistributedID did, AddressSpaceID source,
-                  const FieldMask &mask, bool initialize)
+                  const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager *manager = version_managers.lookup_entry(ctx, this);
-      return manager->find_remote_version_state(vid, did, source,
-                                                mask, initialize);
+      return manager->find_remote_version_state(vid, did, source, mask);
     }
 
     //--------------------------------------------------------------------------

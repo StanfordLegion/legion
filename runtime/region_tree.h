@@ -1442,7 +1442,7 @@ namespace LegionRuntime {
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       PhysicalState* create_physical_state(RegionTreeNode *node,
                                            VersionManager *manager,
-                                           bool initialize, bool capture);
+                                           bool capture);
       FieldVersions* get_versions(RegionTreeNode *node) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
@@ -1970,27 +1970,32 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
-      struct SendVersionStateArgs {
-      public:
-        HLRTaskID hlr_id;
-        VersionState *proxy_this;
-        AddressSpaceID target;
-        FieldMask *request_mask;
-        UserEvent to_trigger;
+      enum VersionRequestKind {
+        PATH_ONLY_VERSION_REQUEST,
+        INITIAL_VERSION_REQUEST,
+        FINAL_VERSION_REQUEST,
       };
-    public:
       struct RequestInfo {
       public:
         AddressSpaceID target;
         UserEvent to_trigger;
         FieldMask request_mask;
-        bool request_final;
+        VersionRequestKind kind;
+      };
+    public:
+      struct SendVersionStateArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *proxy_this;
+        AddressSpaceID target;
+        VersionRequestKind request_kind;
+        FieldMask *request_mask;
+        UserEvent to_trigger;
       };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   VersionManager *manager, const FieldMask &mask, 
-                   bool initialize);
+                   VersionManager *manager, const FieldMask &mask); 
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2011,7 +2016,7 @@ namespace LegionRuntime {
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
-      void merge_premap_state(const PhysicalState *state,
+      void merge_path_only_state(const PhysicalState *state,
                               const FieldMask &merge_mask);
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
@@ -2024,7 +2029,6 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      void record_initial_fields(const FieldMask &initial_mask);
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<Event> &preconditions);
       void request_final_version_state(const FieldMask &request_mask,
@@ -2038,32 +2042,36 @@ namespace LegionRuntime {
                                 LegionDeque<RequestInfo>::aligned &targets,
                                 std::set<Event> &preconditions);
     public:
-      void send_version_state(AddressSpaceID target,
+      void send_version_state(AddressSpaceID target, VersionRequestKind kind,
                            const FieldMask &request_mask, UserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-           UserEvent to_trigger, const FieldMask &request_mask, bool final_req);
-      void launch_send_version_state(AddressSpaceID target,UserEvent to_trigger, 
-           const FieldMask &request_mask, Event precondition = Event::NO_EVENT);
+                            UserEvent to_trigger, const FieldMask &request_mask, 
+                            VersionRequestKind request_kind);
+      void launch_send_version_state(AddressSpaceID target,
+                                     UserEvent to_trigger, 
+                                     VersionRequestKind request_kind,
+                                     const FieldMask &request_mask, 
+                                     Event precondition = Event::NO_EVENT);
     public:
+      void handle_version_state_path_only(AddressSpaceID source,
+                                          FieldMask &path_only_mask);
       void handle_version_state_initialization(AddressSpaceID source,
                                                FieldMask &initial_mask);
       void handle_version_state_request(AddressSpaceID source, 
                                         UserEvent to_trigger, 
-                                        bool request_final,
+                                        VersionRequestKind request_kind,
                                         FieldMask &request_mask);
       void handle_version_state_response(AddressSpaceID source,
-                             UserEvent to_trigger, Deserializer &derez);
-      void handle_version_state_broadcast_response(UserEvent to_trigger,
-                                                   Deserializer &derez);
+            UserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
+      static void process_version_state_path_only(Runtime *rt,
+                              Deserializer &derez, AddressSpaceID source);
       static void process_version_state_initialization(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
       static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
       static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_broadcast_response(Runtime *rt,
-                                                     Deserializer &derez);
     public:
       const VersionID version_number;
       VersionManager *const manager;
@@ -2087,6 +2095,8 @@ namespace LegionRuntime {
       bool currently_valid;
 #endif
     protected:
+      // Fields which are in the path only state
+      FieldMask path_only_fields;
       // Fields which are in the initial state
       FieldMask initial_fields;
       // Fields which are in the final state
@@ -2095,6 +2105,7 @@ namespace LegionRuntime {
       LegionMap<Event,FieldMask>::aligned initial_events;
       LegionMap<Event,FieldMask>::aligned final_events;
       // These are valid on the owner node only
+      LegionMap<AddressSpaceID,FieldMask>::aligned path_only_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned final_nodes;
     };
@@ -2121,8 +2132,7 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-          bool path_only, bool close_top, bool advance, 
-          bool initialize, bool capture);
+          bool path_only, bool close_top, bool advance, bool capture);
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask);
@@ -2153,15 +2163,14 @@ namespace LegionRuntime {
                                   bool advance);
     protected:
       VersionState* create_new_version_state(VersionID vid, 
-                              const FieldMask &mask, bool initialize);
+                                             const FieldMask &mask);
       VersionState* create_remote_version_state(VersionID vid, 
                               DistributedID did, AddressSpaceID owner_space,
-                              const FieldMask &mask, bool initialize);
+                              const FieldMask &mask);
     public:
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
                                               AddressSpaceID source,
-                                              const FieldMask &mask,
-                                              bool initialize); 
+                                              const FieldMask &mask);
     public:
       RegionTreeNode *const owner;
     protected:
@@ -2196,7 +2205,6 @@ namespace LegionRuntime {
       LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
-                                               bool initialize = true,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state
@@ -2209,7 +2217,7 @@ namespace LegionRuntime {
         assert(manager != NULL);
 #endif
         // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager, initialize, capture);
+        result = info.create_physical_state(this, manager, capture);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -2455,7 +2463,7 @@ namespace LegionRuntime {
       LogicalView* find_view(DistributedID did);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
                                   DistributedID did, AddressSpaceID source,
-                                  const FieldMask &mask, bool initialize); 
+                                  const FieldMask &mask); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
