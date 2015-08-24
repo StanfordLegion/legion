@@ -289,7 +289,7 @@ namespace Realm {
       int l = logger->get_name().length();
       const char *n = logger->get_name().c_str();
       while(*p) {
-	if(((p[l] == '\0') || (p[l] == ',')) && !strcmp(p, n)) {
+	if(((p[l] == '\0') || (p[l] == ',')) && !strncmp(p, n, l)) {
 	  found = true;
 	  break;
 	}
