@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <unistd.h>
 #include "legion.h"
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
@@ -29,6 +30,7 @@ enum {
   SPMD_TASK_ID,
   INIT_FIELD_TASK_ID,
   STENCIL_TASK_ID,
+  CHECK_FIELD_TASK_ID,
 };
 
 enum {
@@ -48,6 +50,8 @@ public:
   PhaseBarrier notify_empty[2];
   PhaseBarrier wait_ready[2];
   PhaseBarrier wait_empty[2];
+  int num_elements;
+  int num_subregions;
   int num_steps;
 };
 
@@ -232,6 +236,8 @@ void top_level_task(const Task *task,
         args[color].wait_ready[GHOST_RIGHT] = left_ready_barriers[color+1];
         args[color].notify_empty[GHOST_RIGHT] = left_empty_barriers[color+1];
       }
+      args[color].num_elements = num_elements;
+      args[color].num_subregions = num_subregions;
       args[color].num_steps = num_steps;
 
       TaskLauncher spmd_launcher(SPMD_TASK_ID,
@@ -282,7 +288,6 @@ void top_level_task(const Task *task,
 
     printf("Test completed.\n");
   }
-
 
   // Clean up our mess when we are done
   for (unsigned idx = 0; idx < ghost_left.size(); idx++)
@@ -368,17 +373,19 @@ void spmd_task(const Task *task,
       // It's not safe to issue the copy until we know
       // that the destination instance is empty. Only
       // need to do this after the first iteration.
-      if (s > 0)
+      if (s > 0) {
+	// advance the barrier first - we're waiting for the next phase
+	//  to start
+        args->wait_empty[idx] = 
+          runtime->advance_phase_barrier(ctx, args->wait_empty[idx]);
         copy_launcher.add_wait_barrier(args->wait_empty[idx]);
+      }
       // When we are done with the copy, signal that the
       // destination instnace is now ready
       copy_launcher.add_arrival_barrier(args->notify_ready[idx]);
       runtime->issue_copy_operation(ctx, copy_launcher);
       // Once we've issued our copy operation, advance both of
       // the barriers to the next generation.
-      if (s > 0)
-        args->wait_empty[idx] = 
-          runtime->advance_phase_barrier(ctx, args->wait_empty[idx]);
       args->notify_ready[idx] = 
         runtime->advance_phase_barrier(ctx, args->notify_ready[idx]);
     }
@@ -391,12 +398,12 @@ void spmd_task(const Task *task,
                                        regions[2+idx]);
       acquire_launcher.add_field(FID_GHOST);
       // The acquire operation needs to wait for the data to
-      // be ready to consume, so wait on the ready barrier.
-      acquire_launcher.add_wait_barrier(args->wait_ready[idx]);
-      runtime->issue_acquire(ctx, acquire_launcher);
-      // Now we can advance the wait ready barrier
+      // be ready to consume, so wait on the next phase of the
+      // ready barrier.
       args->wait_ready[idx] = 
         runtime->advance_phase_barrier(ctx, args->wait_ready[idx]);
+      acquire_launcher.add_wait_barrier(args->wait_ready[idx]);
+      runtime->issue_acquire(ctx, acquire_launcher);
     }
 
     // Run the stencil computation
@@ -434,6 +441,24 @@ void spmd_task(const Task *task,
           runtime->advance_phase_barrier(ctx, args->notify_empty[idx]);
     }
   }
+
+  // now check our results
+  {
+    TaskLauncher check_launcher(CHECK_FIELD_TASK_ID,
+				TaskArgument(args, sizeof(SPMDArgs)));
+    check_launcher.add_region_requirement(
+			  RegionRequirement(local_lr, READ_ONLY,
+                          EXCLUSIVE, local_lr));
+    check_launcher.add_field(0, FID_DERIV);
+    Future f = runtime->execute_task(ctx, check_launcher);
+    int errors = f.get_result<int>();
+    if(errors > 0) {
+      printf("Errors detected in check task!\n");
+      sleep(1); // let other tasks also report errors if they wish
+      exit(1);
+    }
+  }
+
   runtime->destroy_logical_region(ctx, local_lr);
   runtime->destroy_field_space(ctx, local_fs);
 }
@@ -456,7 +481,11 @@ void init_field_task(const Task *task,
   Rect<1> rect = dom.get_rect<1>();
   for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
   {
-    double value = drand48();
+    // use a ramp with little ripples
+    const int ripple_period = 4;
+    const double ripple[ripple_period] = { 0, 0.25, 0, -0.25 };
+
+    double value = (double)(pir.p[0]) + ripple[pir.p[0] % ripple_period];
     acc.write(DomainPoint::from_point<1>(pir.p), value);
   }
 }
@@ -493,56 +522,129 @@ void stencil_field_task(const Task *task,
   Rect<1> left_rect = left_dom.get_rect<1>();
   Rect<1> right_rect = right_dom.get_rect<1>();
   Rect<1> main_rect = main_dom.get_rect<1>();
-  // Break the main rect into left, main, and right components
-  Rect<1> left_edge = main_rect;
-  left_edge.hi = left_edge.lo[0] + (ORDER-1);
-  Rect<1> right_edge = main_rect;
-  right_edge.lo = right_edge.hi[0] - (ORDER-1);
-  // Doctor the main bounds
-  main_rect.lo = left_edge.hi;
-  main_rect.lo = main_rect.lo[0] + 1;
-  main_rect.hi = right_edge.lo;
-  main_rect.hi = main_rect.hi[0] - 1;
 
   double window[2*ORDER+1];
-  // Prime the window with the left data
-  unsigned idx = 0;
-  for (GenericPointInRectIterator<1> pir(left_rect); pir; pir++, idx++)
+
+  // we're going to perform the stencil computation with 4 iterators: read iterators
+  //  for the left, main, and right rectangles, and a write iterator for the main
+  //  rectangle (the read and write iterators for the main rectangle will effectively
+  //  be offset by ORDER
+  GenericPointInRectIterator<1> pir_left(left_rect);
+  GenericPointInRectIterator<1> pir_main_read(main_rect);
+  GenericPointInRectIterator<1> pir_main_write(main_rect);
+  GenericPointInRectIterator<1> pir_right(right_rect);
+
+  // Prime the window with the left data and the first ORDER elements of main
+  for (int i = 0; i < ORDER; i++)
   {
-    window[idx] = left_ghost_acc.read(DomainPoint::from_point<1>(pir.p));
+    window[i] = left_ghost_acc.read(DomainPoint::from_point<1>((pir_left++).p));
+    window[i + ORDER] = read_acc.read(DomainPoint::from_point<1>((pir_main_read++).p));
   }
-  for (GenericPointInRectIterator<1> pir(left_edge); pir; pir++, idx++)
+
+  // now iterate over the main rectangle's write value, pulling from the right ghost
+  //  data once the main read iterator is exhausted
+  while (pir_main_write)
   {
-    window[idx] = read_acc.read(DomainPoint::from_point<1>(pir.p));
-  }
-  // This code assumes the order is 2
-  assert(ORDER == 2);
-  for (GenericPointInRectIterator<1> pir(main_rect); pir; pir++)
-  {
-    DomainPoint point = DomainPoint::from_point<1>(pir.p);
-    window[2*ORDER] = read_acc.read(point);
-    // Do the compuation
-    double deriv = -window[0] + 8.0 * window[1] -
-                   8.0 * window[3] + window[4];
-    // Write the derivative two spots to the left
-    point.point_data[0] -= ORDER;
-    write_acc.write(point, deriv);
-    // Shift down all the values in the window
+    if (pir_main_read)
+      window[2 * ORDER] = read_acc.read(DomainPoint::from_point<1>((pir_main_read++).p));
+    else
+      window[2 * ORDER] = right_ghost_acc.read(DomainPoint::from_point<1>((pir_right++).p));
+
+    // only have calculation for ORDER == 2
+    double deriv;
+    switch(ORDER)
+    {
+      case 2: {
+	deriv = (window[0] - 8.0 * window[1] +
+		 8.0 * window[3] - window[4]);
+#ifdef DEBUG_STENCIL_CALC
+	printf("A: [%d] %g %g %g %g %g -> %g\n",
+	       pir_main_write.p[0], 
+	       window[0],
+	       window[1],
+	       window[2],
+	       window[3],
+	       window[4],
+	       deriv);
+#endif
+	break;
+      }
+
+      default: assert(0);
+    }
+    
+    write_acc.write(DomainPoint::from_point<1>((pir_main_write++).p),
+		    deriv);
+
+    // slide the window for the next point
     for (int j = 0; j < (2*ORDER); j++)
       window[j] = window[j+1];
   }
-  // Finally handle the last few points on the edge
-  GenericPointInRectIterator<1> oir(right_edge);
-  for (GenericPointInRectIterator<1> pir(right_rect); pir; pir++, oir++)
+
+  // check that we exhausted all the iterators
+  assert(!pir_left);
+  assert(!pir_main_read);
+  assert(!pir_main_write);
+  assert(!pir_right);
+}
+
+int check_field_task(const Task *task,
+		     const std::vector<PhysicalRegion> &regions,
+		     Context ctx, HighLevelRuntime *runtime)
+{
+  SPMDArgs *args = (SPMDArgs*)task->args; 
+
+  assert(regions.size() == 1); 
+  assert(task->regions.size() == 1);
+  assert(task->regions[0].privilege_fields.size() == 1);
+
+  FieldID fid = *(task->regions[0].privilege_fields.begin());
+
+  RegionAccessor<AccessorType::Generic, double> acc = 
+    regions[0].get_field_accessor(fid).typeify<double>();
+
+  Domain dom = runtime->get_index_space_domain(ctx, 
+      task->regions[0].region.get_index_space());
+  Rect<1> rect = dom.get_rect<1>();
+  int errors = 0;
+  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
   {
-    window[2*ORDER] = right_ghost_acc.read(DomainPoint::from_point<1>(pir.p)); 
-    // Do the computation
-    double deriv = -window[0] + 8.0* window[1] -
-                   8.0 * window[3] + window[4];
-    write_acc.write(DomainPoint::from_point<1>(oir.p), deriv);
-    for (int j = 0; j < (2*ORDER); j++)
-      window[j] = window[j+1];
+    // the derivative of a ramp with ripples is a constant function with ripples
+    const int ripple_period = 4;
+    const double deriv_ripple[ripple_period] = { 4.0, 0, -4.0, 0 };
+    double exp_value = 12.0 + deriv_ripple[pir.p[0] % ripple_period];
+
+    // correct for the wraparound cases
+    if(pir.p[0] < ORDER) {
+      // again only actually supporting ORDER == 2
+      assert(ORDER == 2);
+      if(pir.p[0] == 0) exp_value += -7.0 * args->num_elements;
+      if(pir.p[1] == 1) exp_value += 1.0 * args->num_elements;
+    }
+    if(pir.p[0] >= (args->num_elements - ORDER)) {
+      // again only actually supporting ORDER == 2
+      assert(ORDER == 2);
+      if(pir.p[0] == (args->num_elements - 1)) exp_value += -7.0 * args->num_elements;
+      if(pir.p[1] == (args->num_elements - 2)) exp_value += 1.0 * args->num_elements;
+    }
+
+    double act_value = acc.read(DomainPoint::from_point<1>(pir.p));
+
+    // polarity is important here - comparisons with NaN always return false
+    bool ok = ((exp_value < 0) ? ((-act_value >= 0.99 * -exp_value) && 
+				  (-act_value <= 1.01 * -exp_value)) :
+	       (exp_value > 0) ? ((act_value >= 0.99 * exp_value) &&
+				  (act_value <= 1.01 * exp_value)) :
+ 	                         (act_value == 0));
+
+    if(!ok) {
+      printf("ERROR: check for location %d failed: expected=%g, actual=%g\n",
+	     pir.p[0], exp_value, act_value);
+      errors++;
+    }
   }
+
+  return errors;
 }
 
 int main(int argc, char **argv)
@@ -560,6 +662,9 @@ int main(int argc, char **argv)
   HighLevelRuntime::register_legion_task<stencil_field_task>(STENCIL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*single*/,
       AUTO_GENERATE_ID, TaskConfigOptions(true), "stencil");
+  HighLevelRuntime::register_legion_task<int, check_field_task>(CHECK_FIELD_TASK_ID,
+      Processor::LOC_PROC, true/*single*/, true/*single*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "check");
 
   return HighLevelRuntime::start(argc, argv);
 }

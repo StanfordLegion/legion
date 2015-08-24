@@ -2644,7 +2644,7 @@ class PhaseBarrier(object):
     def print_physical_node(self, printer):
         printer.println(self.node_name+\
                 ' [style=filled,label="PB '+hex(self.uid)+'\\n '+\
-                str(self.gen)+\
+                str(self.gen)+"->"+str(self.gen+1)+\
                 '",fillcolor=deeppink3,fontsize=12,fontcolor=white,'+\
                 'shape=circle,penwidth=0,margin=0];')
 
