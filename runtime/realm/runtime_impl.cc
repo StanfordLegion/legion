@@ -669,11 +669,13 @@ namespace Realm {
       // create local disk memory
       DiskMemory *diskmem;
       if(disk_mem_size_in_mb > 0) {
+        char file_name[30];
+        sprintf(file_name, "disk_file%d.tmp", gasnet_mynode());
         diskmem = new DiskMemory(ID(ID::ID_MEMORY,
                                     gasnet_mynode(),
                                     n->memories.size(), 0).convert<Memory>(),
                                  disk_mem_size_in_mb << 20,
-                                 "disk_file.tmp");
+                                 std::string(file_name));
         n->memories.push_back(diskmem);
       } else
         diskmem = 0;

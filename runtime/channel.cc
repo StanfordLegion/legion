@@ -237,7 +237,7 @@ namespace LegionRuntime {
             update = true;
           }
           else {
-            printf("[%llx] insert: key = %ld, value = %lu\n", (long long) this, offset, size);
+            printf("[%lx] insert: key = %ld, value = %lu\n", guid, offset, size);
             segments_read[offset] = size;
           }
           std::map<int64_t, uint64_t>::iterator it;
@@ -247,7 +247,7 @@ namespace LegionRuntime {
               break;
             bytes_read += it->second;
             update = true;
-            printf("[%llx] erase: key = %ld, value = %lu\n", (long long) this, it->first, it->second);
+            printf("[%lx] erase: key = %ld, value = %lu\n", guid, it->first, it->second);
             segments_read.erase(it);
           }
           if (update) {
@@ -287,6 +287,7 @@ namespace LegionRuntime {
         else {
           bytes_write += size;
         }
+        //printf("[%d] offset = %ld, bytes_writes[%lx]: %ld\n", gasnet_mynode(), offset, guid, bytes_write);
       }
 
       template<unsigned DIM>
@@ -331,7 +332,7 @@ namespace LegionRuntime {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
+          //printf("[MemcpyXferDes] offset_idx = %d, oas_vec.size() = %lu\n", offset_idx, oas_vec.size());
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -346,7 +347,7 @@ namespace LegionRuntime {
             }
             mem_cpy_reqs[idx] = (MemcpyRequest*) available_reqs.front();
             available_reqs.pop();
-            //printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf.alloc_offset, dst_start - dst_buf.alloc_offset, nbytes);
+            //printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, nbytes);
             mem_cpy_reqs[idx]->is_read_done = false;
             mem_cpy_reqs[idx]->is_write_done = false;
             mem_cpy_reqs[idx]->src_buf = (char*)(src_buf_base + src_start);
@@ -1910,12 +1911,6 @@ namespace LegionRuntime {
         delete channel_manager;
       }
 
-      bool enqueue_xferDes_path(std::vector<XferDes*>& path)
-      {
-        xferDes_queue->enqueue_xferDes_path(path);
-        return true;
-      }
-
       template<unsigned DIM>
       void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                            XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
@@ -1925,7 +1920,6 @@ namespace LegionRuntime {
                            XferOrder::Type _order, XferDes::XferKind _kind,
                            Event _after_copy, RegionInstance inst)
       {
-        printf("create XD[%lu]\n", _guid);
         if (ID(_src_buf.memory).node() == gasnet_mynode()) {
           XferDes* xd;
           switch (_kind) {
@@ -2006,17 +2000,6 @@ namespace LegionRuntime {
         XferDesDestroyMessage::send_request(execution_node, _guid);
       }
     }
-
-#ifdef USE_HDF
-      template<unsigned DIM>
-      XferDes* create_hdf_xfer_des(RegionInstance inst, bool has_pre_XferDes,
-                                   Buffer& src_buf, Buffer& dst_buf,
-                                   Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
-                                   long max_nr, XferOrder::Type order, XferDes::XferKind kind)
-      {
-        assert(0);
-      }
-#endif
 
       template class MemcpyXferDes<1>;
       template class MemcpyXferDes<2>;

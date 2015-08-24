@@ -2646,6 +2646,8 @@ namespace LegionRuntime {
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
                                              DomainLinearization linearization)
     {
+      oasvec_src.clear();
+      oasvec_dst.clear();
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
       Memory tgt_mem = Memory::NO_MEMORY;
@@ -2675,6 +2677,172 @@ namespace LegionRuntime {
       return ib_buf;
     }
 
+    inline bool is_cpu_mem(Memory::Kind kind)
+    {
+      return (kind == Memory::REGDMA_MEM || kind == Memory::LEVEL3_CACHE || kind == Memory::LEVEL2_CACHE
+              || kind == Memory::LEVEL1_CACHE || kind == Memory::SYSTEM_MEM || kind == Memory::SOCKET_MEM
+              || kind == Memory::Z_COPY_MEM);
+    }
+
+    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem)
+    {
+      Memory::Kind src_ll_kind = get_runtime()->get_memory_impl(src_mem)->lowlevel_kind;
+      Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
+      if(ID(src_mem).node() == ID(dst_mem).node()) {
+        switch(src_ll_kind) {
+        case Memory::GLOBAL_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_GASNET_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::REGDMA_MEM:
+        case Memory::LEVEL3_CACHE:
+        case Memory::LEVEL2_CACHE:
+        case Memory::LEVEL1_CACHE:
+        case Memory::SYSTEM_MEM:
+        case Memory::SOCKET_MEM:
+        case Memory::Z_COPY_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_MEM_CPY;
+          else if (dst_ll_kind == Memory::GLOBAL_MEM)
+            return XferDes::XFER_GASNET_WRITE;
+          else if (dst_ll_kind == Memory::GPU_FB_MEM)
+            return XferDes::XFER_GPU_TO_FB;
+          else if (dst_ll_kind == Memory::DISK_MEM)
+            return XferDes::XFER_DISK_WRITE;
+          else if (dst_ll_kind == Memory::HDF_MEM)
+            return XferDes::XFER_HDF_WRITE;
+          assert(0);
+          break;
+        case Memory::GPU_FB_MEM:
+          //TODO: We cannot distinguish GPU_IN_FB/GPU_PEER_FB
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_GPU_FROM_FB;
+          else if (dst_ll_kind == Memory::GPU_FB_MEM)
+            return XferDes::XFER_GPU_PEER_FB;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::DISK_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_DISK_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::HDF_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_HDF_READ;
+          else
+            return XferDes::XFER_NONE;
+        default:
+          assert(0);
+        }
+      } else {
+        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM)
+          return XferDes::XFER_REMOTE_WRITE;
+        else
+          return XferDes::XFER_NONE;
+      }
+      return XferDes::XFER_NONE;
+    }
+
+    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path)
+    {
+      std::map<Memory, std::vector<Memory> > dist;
+      std::set<Memory> all_mem;
+      std::queue<Memory> active_nodes;
+      Machine::get_machine().get_all_memories(all_mem);
+      for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+        if (get_xfer_des(src_mem, *it) != XferDes::XFER_NONE) {
+          dist[*it] = std::vector<Memory>();
+          dist[*it].push_back(src_mem);
+          dist[*it].push_back(*it);
+          active_nodes.push(*it);
+        }
+      }
+      while (!active_nodes.empty()) {
+        Memory cur = active_nodes.front();
+        active_nodes.pop();
+        std::vector<Memory> sub_path = dist[cur];
+        for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it ++) {
+          if (get_xfer_des(cur, *it) != XferDes::XFER_NONE) {
+            if (dist.find(*it) == dist.end()) {
+              dist[*it] = sub_path;
+              dist[*it].push_back(*it);
+              active_nodes.push(*it);
+            }
+          }
+        }
+      }
+      assert(dist.find(dst_mem) != dist.end());
+      path = dist[dst_mem];
+    }
+
+    template<unsigned DIM>
+    void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
+    {
+      mark_started();
+      std::vector<Memory> mem_path;
+      find_shortest_path(src_mem, dst_mem, mem_path);
+      for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
+        path.push_back(get_xdq_singleton()->get_guid(ID(mem_path[idx]).node()));
+      }
+      for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        RegionInstance src_inst = it->first.first;
+        RegionInstance dst_inst = it->first.second;
+        OASVec oasvec = it->second, oasvec_src, oasvec_dst;
+        RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
+        RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
+
+        //MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
+        //MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
+
+        //Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
+
+        // We don't need to care about deallocation of Buffer class
+        // This will be handled by XferDes destruction
+        Buffer src_buf(&src_impl->metadata, src_mem);
+        Buffer dst_buf(&dst_impl->metadata, dst_mem);
+        Buffer pre_buf;
+        assert(mem_path.size() - 1 == path.size());
+        for (int idx = 0; idx < mem_path.size(); idx ++) {
+          if (idx == 0) {
+            pre_buf = src_buf;
+          } else {
+            XferDesID xd_guid = path[idx - 1];
+            XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : path[idx - 2];
+            XferDesID next_xd_guid = idx == path.size() ? XferDes::XFERDES_NO_GUID : path[idx];
+            Buffer cur_buf;
+            Event event;
+            XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
+            XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
+            RegionInstance hdf_inst;
+            if (kind == XferDes::XFER_HDF_READ)
+              hdf_inst = src_inst;
+            else if (kind == XferDes::XFER_HDF_WRITE)
+              hdf_inst = dst_inst;
+            else
+              hdf_inst = RegionInstance::NO_INST;
+
+            if (idx != mem_path.size() - 1) {
+              cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).node(), mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              event = Event::NO_EVENT;
+            } else {
+              cur_buf = dst_buf;
+              event = after_copy;
+              oasvec_src = oasvec;
+              oasvec.clear();
+            }
+            create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
+                                 pre_buf, cur_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, order,
+                                 kind, event, hdf_inst);
+            pre_buf = cur_buf;
+            oasvec = oasvec_dst;
+        }
+      }
+    }
+  }
+
+#ifdef ENUM_PERFORM_NEW_DMA
     template <unsigned DIM>
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
@@ -2764,7 +2932,6 @@ namespace LegionRuntime {
             case Memory::REGDMA_MEM:
             {
               // most simple case: destination is registered memory
-              log_dma.info("create cpu->regdma XD\n");
               XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
               path.push_back(guid);
               create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
@@ -2783,6 +2950,7 @@ namespace LegionRuntime {
             case Memory::LEVEL1_CACHE:
             case Memory::SYSTEM_MEM:
             case Memory::SOCKET_MEM:
+            case Memory::Z_COPY_MEM:
             {
               // allocate intermediate buffer in registered memory on dst node
               OASVec oasvec_src, oasvec_dst;
@@ -2790,7 +2958,7 @@ namespace LegionRuntime {
               XferDesID guid2 = get_xdq_singleton()->get_guid(ID(dst_mem).node());
               path.push_back(guid1);
               path.push_back(guid2);
-              Buffer ib_buf = simple_create_intermediate_buffer(ID(dst_mem).node(), Memory::SYSTEM_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              Buffer ib_buf = simple_create_intermediate_buffer(ID(dst_mem).node(), Memory::REGDMA_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
               create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
                                    ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_MEM_CPY, after_copy);
@@ -2799,9 +2967,28 @@ namespace LegionRuntime {
                                    100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_REMOTE_WRITE, Event::NO_EVENT);
               break;
             }
-            case Memory::Z_COPY_MEM:
             case Memory::GPU_FB_MEM:
+            {
+              assert(0);
+              break;
+            }
             case Memory::DISK_MEM:
+            {
+              // allocate intermediate buffer in registered memory on dst node
+              OASVec oasvec_src, oasvec_dst;
+              XferDesID guid1 = get_xdq_singleton()->get_guid(ID(src_mem).node());
+              XferDesID guid2 = get_xdq_singleton()->get_guid(ID(dst_mem).node());
+              path.push_back(guid1);
+              path.push_back(guid2);
+              Buffer ib_buf = simple_create_intermediate_buffer(ID(dst_mem).node(), Memory::REGDMA_MEM, domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              create_xfer_des<DIM>(this, gasnet_mynode(), guid2, guid1, XferDes::XFERDES_NO_GUID,
+                                   ib_buf, dst_buf, domain, oasvec_dst, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_DISK_WRITE, after_copy);
+              create_xfer_des<DIM>(this, gasnet_mynode(), guid1, XferDes::XFERDES_NO_GUID, guid2,
+                                   src_buf, ib_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_REMOTE_WRITE, Event::NO_EVENT);
+              break;
+            }
             case Memory::HDF_MEM:
             default:
               assert(0);
@@ -2924,9 +3111,11 @@ namespace LegionRuntime {
           }
           case MemoryImpl::MKIND_RDMA:
           case MemoryImpl::MKIND_REMOTE:
+          {
             fprintf(stderr, "[DMA] To be implemented: disk memory -> remote memory\n");
             assert(0);
             break;
+          }
           default:
             fprintf(stderr, "Unrecognized destination memory kind!\n");
             assert(0);
@@ -3056,6 +3245,8 @@ namespace LegionRuntime {
         log_dma.info("[dma] created all xfer des");
       }
     }
+#endif
+
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {

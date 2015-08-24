@@ -308,6 +308,7 @@ namespace LegionRuntime{
     class XferDes {
     public:
       enum XferKind {
+        XFER_NONE,
         XFER_DISK_READ,
         XFER_DISK_WRITE,
         XFER_SSD_READ,
@@ -468,11 +469,13 @@ namespace LegionRuntime{
       }
 
       void update_pre_bytes_write(size_t new_val) {
-        pre_bytes_write = new_val;
+        if (pre_bytes_write < new_val)
+          pre_bytes_write = new_val;
       }
 
       void update_next_bytes_read(size_t new_val) {
-        next_bytes_read = new_val;
+        if (next_bytes_read < new_val)
+          next_bytes_read = new_val;
       }
 
       gasnet_node_t find_execution_node() {
@@ -1329,6 +1332,11 @@ namespace LegionRuntime{
 
     class XferDesQueue {
     public:
+      struct XferDesWithUpdates{
+        XferDesWithUpdates(void): xd(NULL), pre_bytes_write(0) {}
+        XferDes* xd;
+        uint64_t pre_bytes_write;
+      };
       enum {
         NODE_BITS = 16,
         INDEX_BITS = 32
@@ -1367,10 +1375,18 @@ namespace LegionRuntime{
         gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == gasnet_mynode()) {
           pthread_rwlock_rdlock(&guid_lock);
-          std::map<XferDesID, XferDes*>::const_iterator it = guid_to_xd.find(xd_guid);
-          assert(it != guid_to_xd.end());
+          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
-            it->second->update_pre_bytes_write(bytes_write);
+            if (it->second.xd != NULL) {
+              it->second.xd->update_pre_bytes_write(bytes_write);
+            } else {
+              if (bytes_write > it->second.pre_bytes_write)
+                it->second.pre_bytes_write = bytes_write;
+            }
+          } else {
+            XferDesWithUpdates xd_struct;
+            xd_struct.pre_bytes_write = bytes_write;
+            guid_to_xd[xd_guid] = xd_struct;
           }
           pthread_rwlock_unlock(&guid_lock);
         }
@@ -1385,11 +1401,10 @@ namespace LegionRuntime{
         gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == gasnet_mynode()) {
           pthread_rwlock_rdlock(&guid_lock);
-          std::map<XferDesID, XferDes*>::const_iterator it = guid_to_xd.find(xd_guid);
+          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           assert(it != guid_to_xd.end());
-          if (it != guid_to_xd.end()) {
-            it->second->update_next_bytes_read(bytes_read);
-          }
+          assert(it->second.xd != NULL);
+          it->second.xd->update_next_bytes_read(bytes_read);
           pthread_rwlock_unlock(&guid_lock);
         }
         else {
@@ -1412,9 +1427,10 @@ namespace LegionRuntime{
       void destroy_xferDes(XferDesID guid) {
         pthread_rwlock_wrlock(&guid_lock);
         //printf("destroy xd = %lu\n", guid);
-        std::map<XferDesID, XferDes*>::iterator it = guid_to_xd.find(guid);
+        std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
         assert(it != guid_to_xd.end());
-        XferDes* xd = it->second;
+        assert(it->second.xd != NULL);
+        XferDes* xd = it->second.xd;
         guid_to_xd.erase(it);
         delete xd;
         pthread_rwlock_unlock(&guid_lock);
@@ -1422,7 +1438,19 @@ namespace LegionRuntime{
 
       void enqueue_xferDes_local(XferDes* xd) {
         pthread_rwlock_wrlock(&guid_lock);
-        guid_to_xd[xd->guid] = xd;
+        std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
+        if (git != guid_to_xd.end()) {
+          // xerDes_queue has received updates of this xferdes
+          // need to integrate these updates into xferdes
+          assert(git->second.xd == NULL);
+          xd->update_pre_bytes_write(git->second.pre_bytes_write);
+          git->second.xd = xd;
+          git->second.pre_bytes_write = 0;
+        } else {
+          XferDesWithUpdates xd_struct;
+          xd_struct.xd = xd;
+          guid_to_xd[xd->guid] = xd_struct;
+        }
         pthread_rwlock_unlock(&guid_lock);
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
@@ -1441,21 +1469,6 @@ namespace LegionRuntime{
           pthread_cond_signal(&dma_thread->enqueue_cond);
         }
         pthread_mutex_unlock(&dma_thread->enqueue_lock);
-      }
-
-      void enqueue_xferDes_remote(XferDes* xd) {
-        // TODO
-        assert(0);
-      }
-
-      void enqueue_xferDes_path(std::vector<XferDes*>& path) {
-        for (std::vector<XferDes*>::reverse_iterator it = path.rbegin(); it != path.rend(); it++) {
-          if ((*it)->find_execution_node() == gasnet_mynode()) {
-            enqueue_xferDes_local(*it);
-          } else {
-            enqueue_xferDes_remote(*it);
-          }
-        }
       }
 
       bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
@@ -1494,7 +1507,7 @@ namespace LegionRuntime{
     protected:
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
-      std::map<XferDesID, XferDes*> guid_to_xd;
+      std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       pthread_mutex_t queues_lock;
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
@@ -1517,14 +1530,6 @@ namespace LegionRuntime{
                          Event _after_copy, RegionInstance inst = RegionInstance::NO_INST);
 
     void destroy_xfer_des(XferDesID _guid);
-#ifdef USE_HDF
-    template<unsigned DIM>
-    void create_hdf_xfer_des(XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                             RegionInstance inst, Buffer& src_buf, Buffer& _dst_buf,
-                             Domain domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                             uint64_t _max_req_size, long max_nr,
-                             XferOrder::Type _order, XferDes::XferKind _kind);
-#endif
   }  // namespace LowLevel
 } // namespace LegionRuntime
 #endif
