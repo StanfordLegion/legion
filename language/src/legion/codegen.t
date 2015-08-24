@@ -647,18 +647,32 @@ local function get_element_pointer(cx, region_types, index_type, field_type,
       end
       return pointer
     end
+
+    local pointer_value
+    if not index_type.fields then
+      -- Currently unchecked.
+    elseif #index_type.fields == 1 then
+      local field = index_type.fields[1]
+      pointer_value = `(c.legion_ptr_t { value = [index].__ptr.[field] })
+    else
+      -- Currently unchecked.
+    end
+
     local pointer_index = 1
     if #region_types > 1 then
       pointer_index = `([index].__index)
     end
-    for region_index, region_type in ipairs(region_types) do
-      assert(cx:has_region(region_type))
-      local lr = cx:region(region_type).logical_region
-      index = `([index_type] {
-          __ptr = check(
-            [cx.runtime], [cx.context],
-            [index].__ptr, [pointer_index],
-            [lr].impl, [region_index])})
+
+    if pointer_value then
+      for region_index, region_type in ipairs(region_types) do
+        assert(cx:has_region(region_type))
+        local lr = cx:region(region_type).logical_region
+        index = `([index_type] {
+            __ptr = check(
+              [cx.runtime], [cx.context],
+              [pointer_value], [pointer_index],
+              [lr].impl, [region_index])})
+      end
     end
   end
 
@@ -3789,10 +3803,13 @@ function codegen.stat_assignment(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr_list(cx, node.lhs)
   local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = std.zip(rhs, node.lhs, node.rhs):map(
+  rhs = std.zip(rhs, node.rhs):map(
     function(pair)
-      local rh_value, lh_node, rh_node = unpack(pair)
+      local rh_value, rh_node = unpack(pair)
       local rh_expr = rh_value:read(cx, rh_node.expr_type)
+      -- Capture the rhs value in a temporary so that it doesn't get
+      -- overridden on assignment to the lhs (if lhs and rhs alias).
+      rh_expr = expr.once_only(rh_expr.actions, rh_expr.value)
       actions:insert(rh_expr.actions)
       return values.value(
         expr.just(quote end, rh_expr.value),

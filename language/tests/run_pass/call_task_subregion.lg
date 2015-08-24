@@ -21,19 +21,61 @@ where reads(s) do
   return @y
 end
 
+task h(s : region(int), y : ptr(int, s)) : int
+where reads(s), writes(s) do
+  @y += 100
+  return @y
+end
+
+function raw(t)
+  return terra(x : t) return x.__ptr end
+end
+
 task g() : int
   var r = region(ispace(ptr, 5), int)
   var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
-  var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  var x = new(ptr(int, r))
+  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x))
+  c.legion_coloring_add_point(rc, 1, [raw(ptr(int, r))](x))
+  var p = partition(aliased, r, rc)
   var r0 = p[0]
-  var x = new(ptr(int, r0))
+  var r1 = p[1]
+  var p0 = partition(aliased, r0, rc)
+  var r00 = p0[0]
+  var r01 = p0[1]
+  c.legion_coloring_destroy(rc)
+  var x0 = dynamic_cast(ptr(int, r0), x)
+  var x00 = dynamic_cast(ptr(int, r00), x)
+  var x01 = dynamic_cast(ptr(int, r01), x)
+  var x1 = dynamic_cast(ptr(int, r1), x)
   @x = 5
-  return f(r0, x)
+
+  -- Open.
+  f(r0, x0)
+  h(r0, x0)
+
+  -- Close.
+  f(r, x)
+  h(r, x)
+
+  -- Close and reopen (write).
+  h(r0, x0)
+  h(r1, x1)
+
+  -- Close and reopen (read).
+  f(r, x)
+  f(r0, x0)
+  f(r00, x00)
+  h(r1, x1)
+
+  for i = 0, 5 do
+    h(r00, x00)
+    h(r01, x01)
+  end
+  return f(r0, x0)
 end
 
 task main()
-  legionlib.assert(g() == 5, "test failed")
+  legionlib.assert(g() == 1505, "test failed")
 end
 legionlib.start(main)

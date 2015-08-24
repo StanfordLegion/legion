@@ -52,7 +52,7 @@ function region_usage:__tostring()
   return result
 end
 
-function uses(cx, region_type, polarity)
+local function uses(cx, region_type, polarity)
   -- In order for this to be sound, we need to unmap *all* regions
   -- that could potentially alias with this one, not just just the
   -- region itself. Not all of these regions will necessarily be
@@ -75,7 +75,7 @@ function uses(cx, region_type, polarity)
   return setmetatable(usage, region_usage)
 end
 
-function usage_meet_polarity(a, b)
+local function usage_meet_polarity(a, b)
   if not a then
     return b
   elseif not b then
@@ -92,7 +92,7 @@ function usage_meet_polarity(a, b)
   end
 end
 
-function usage_meet(...)
+local function usage_meet(...)
   local usage = {}
   for _, a in pairs({...}) do
     if a then
@@ -104,7 +104,7 @@ function usage_meet(...)
   return setmetatable(usage, region_usage)
 end
 
-function usage_diff_polarity(a, b)
+local function usage_diff_polarity(a, b)
   if not a or not b or a == b then
     return nil
   else
@@ -112,7 +112,7 @@ function usage_diff_polarity(a, b)
   end
 end
 
-function usage_diff(a, b)
+local function usage_diff(a, b)
   if not a or not b then
     return nil
   end
@@ -127,7 +127,7 @@ function usage_diff(a, b)
   return setmetatable(usage, region_usage)
 end
 
-function usage_apply_polarity(a, b)
+local function usage_apply_polarity(a, b)
   if not a then
     return b
   elseif not b then
@@ -137,7 +137,7 @@ function usage_apply_polarity(a, b)
   end
 end
 
-function usage_apply(...)
+local function usage_apply(...)
   local usage = {}
   for _, a in pairs({...}) do
     if a then

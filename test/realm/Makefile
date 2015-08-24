@@ -51,7 +51,7 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
 NO_BUILD_RULES=1
 include $(LG_RT_DIR)/runtime.mk
 
-TESTS := serializing test_profiling ctxswitch
+TESTS := serializing test_profiling ctxswitch barrier_reduce
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20

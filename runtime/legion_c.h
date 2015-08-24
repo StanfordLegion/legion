@@ -654,6 +654,21 @@ extern "C" {
     int part_color /* = -1 */);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_partition_by_field
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_field(legion_runtime_t runtime,
+                                         legion_context_t ctx,
+                                         legion_logical_region_t handle,
+                                         legion_logical_region_t parent,
+                                         legion_field_id_t fid,
+                                         legion_domain_t color_space,
+                                         int color /* = AUTO_GENERATE_ID */,
+                                         bool allocable /* = false */);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::get_index_subspace()
