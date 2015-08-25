@@ -9744,18 +9744,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
-      assert(upper_bound_node != NULL);
 #endif
-      if (upper_bound_node->is_region())
-      {
-        rez.serialize<bool>(true);
-        rez.serialize(upper_bound_node->as_region_node()->handle);
-      }
-      else
-      {
-        rez.serialize<bool>(false);
-        rez.serialize(upper_bound_node->as_partition_node()->handle);
-      }
       rez.serialize(local_space);
       size_t total_regions = 0;
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
@@ -9785,6 +9774,22 @@ namespace LegionRuntime {
           pack_node_info(rez, it->second, it->first, ctx);
         }
       }
+      if (node_infos.size() > 0)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(upper_bound_node != NULL);
+        if (upper_bound_node->is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(upper_bound_node->as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(upper_bound_node->as_partition_node()->handle);
+        }
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9796,23 +9801,6 @@ namespace LegionRuntime {
       assert(packed_buffer != NULL);
 #endif
       Deserializer derez(packed_buffer, packed_size);
-      // Unpack the upper bound node
-      {
-        bool is_region;
-        derez.deserialize(is_region);
-        if (is_region)
-        {
-          LogicalRegion handle;
-          derez.deserialize(handle);
-          upper_bound_node = forest->get_node(handle);
-        }
-        else
-        {
-          LogicalPartition handle;
-          derez.deserialize(handle);
-          upper_bound_node = forest->get_node(handle);
-        }
-      }
       // Unpack the source
       AddressSpaceID source;
       derez.deserialize(source);
@@ -9834,6 +9822,24 @@ namespace LegionRuntime {
         derez.deserialize(handle);
         RegionTreeNode *node = forest->get_node(handle);
         unpack_node_info(node, ctx, derez, source);
+      }
+      if ((num_regions > 0) || (num_partitions > 0))
+      {
+        // Unpack the upper bound node
+        bool is_region;
+        derez.deserialize(is_region);
+        if (is_region)
+        {
+          LogicalRegion handle;
+          derez.deserialize(handle);
+          upper_bound_node = forest->get_node(handle);
+        }
+        else
+        {
+          LogicalPartition handle;
+          derez.deserialize(handle);
+          upper_bound_node = forest->get_node(handle);
+        }
       }
       // Keep the buffer around for now in case we need
       // to pack it again later (e.g. for composite views)
