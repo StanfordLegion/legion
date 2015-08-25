@@ -9544,14 +9544,9 @@ namespace LegionRuntime {
       if ((finder->second.physical_state != NULL) &&
            finder->second.needs_capture())
       { 
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder->second.field_versions != NULL);
-#endif
         // Recapture the state if we had to be reset
-        finder->second.physical_state->capture_state(
-                           finder->second.path_only(),
-                           finder->second.close_top(),
-                           finder->second.field_versions->get_field_versions());
+        finder->second.physical_state->capture_state(finder->second.path_only(),
+                                                    finder->second.close_top());
         finder->second.unset_needs_capture();
       }
       return finder->second.physical_state;
@@ -9924,8 +9919,8 @@ namespace LegionRuntime {
 #endif
       // Don't need premap
       derez.deserialize(info.bit_mask);
-      // Mark that we won't need to capture this node info
-      info.unset_needs_capture();
+      // Mark that we definitely need to recapture this node info
+      info.set_needs_capture();
       // Unpack the version states
       size_t num_states;
       derez.deserialize(num_states);
@@ -12408,10 +12403,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::capture_state(bool path_only, bool close_top,
-                  const LegionMap<VersionID,FieldMask>::aligned &field_versions)
+    void PhysicalState::capture_state(bool path_only, bool close_top)
     //--------------------------------------------------------------------------
     {
+      FieldMask space_mask;
+      const bool capture_persistent = manager->has_persistent_views();
       if (close_top)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12430,6 +12426,8 @@ namespace LegionRuntime {
           {
             it->first->update_close_top_state(this, it->second);
           }
+          if (capture_persistent)
+            space_mask |= info.valid_fields;
         }
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
               vit = advance_states.begin(); vit != advance_states.end(); vit++)
@@ -12440,6 +12438,8 @@ namespace LegionRuntime {
           {
             it->first->update_open_children_state(this, it->second);
           }
+          if (capture_persistent)
+            space_mask |= info.valid_fields;
         }
       }
       else if (path_only)
@@ -12453,6 +12453,8 @@ namespace LegionRuntime {
           {
             it->first->update_path_only_state(this, it->second);
           }
+          if (capture_persistent)
+            space_mask |= info.valid_fields;
         }
       }
       else
@@ -12466,22 +12468,13 @@ namespace LegionRuntime {
           {
             it->first->update_physical_state(this, it->second);
           }
+          if (capture_persistent)
+            space_mask |= info.valid_fields;
         }
       }
       // Check to see if we have any persistent views to include
-      if (manager->has_persistent_views())
-      {
-        // Build this up from the set of version numbers since
-        // the version states might not exist if we've advanced
-        // more than one version number ahead.
-        FieldMask space_mask;
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++)
-        {
-          space_mask |= it->second;
-        }
+      if (capture_persistent)
         manager->capture_persistent_views(this, space_mask);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -13686,8 +13679,8 @@ namespace LegionRuntime {
           select_final_targets(local_space, remaining_mask,
                                targets, preconditions);
           // We can now update our final fields and local information
-          final_fields |= remaining_mask;
-          final_nodes[local_space] |= remaining_mask;
+          final_fields |= req_mask;
+          final_nodes[local_space] |= req_mask;
         }
         else
         {
@@ -14772,7 +14765,7 @@ namespace LegionRuntime {
       // Now that we've got the set of states, tell the physical state
       // to capture from them
       if (capture)
-        state->capture_state(path_only, close_top, versions);
+        state->capture_state(path_only, close_top);
       return state;
     } 
 

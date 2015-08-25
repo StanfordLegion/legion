@@ -1916,8 +1916,7 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool path_only, bool close_top,
-          const LegionMap<VersionID,FieldMask>::aligned &field_versions);
+      void capture_state(bool path_only, bool close_top);
       void apply_path_only_state(bool advance) const;
       void apply_state(bool advance);
       void filter_and_apply(bool top, bool filter_children);
