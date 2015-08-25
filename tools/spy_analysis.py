@@ -997,16 +997,20 @@ class SingleTask(object):
                                 src_fields = node.get_src_fields()
                                 dst_fields = node.get_dst_fields()
 
-                                if ((last_inst == dst_inst) and
-                                    (last_field in dst_fields)):
-                                    traverser.found = traverser.found or \
-                                            (node == traverser.target)
-                                    if not traverser.found:
-                                        idx = dst_fields.index(last_field)
-                                        traverser.field_stack.append(src_fields[idx])
-                                        traverser.instance_stack.append(src_inst)
+                                if last_inst <> dst_inst:
+                                    return False
+                                traverser.found = node == traverser.target
+                                if traverser.found:
+                                    return False
+                                if not last_field in dst_fields:
+                                    traverser.field_stack.append(last_field)
+                                    traverser.instance_stack.append(dst_inst)
                                     return not traverser.found
-                                return False
+                                else:
+                                    idx = dst_fields.index(last_field)
+                                    traverser.field_stack.append(src_fields[idx])
+                                    traverser.instance_stack.append(src_inst)
+                                    return not traverser.found
                             def traverse_acquire(node, traverser):
                                 if record_visit(node, traverser):
                                     return False
@@ -4039,7 +4043,8 @@ class State(object):
     def dump_event_paths(self):
         for uid1,op1 in self.ops.iteritems():
             for uid2,op2 in self.ops.iteritems():
-                if op1 <> op2 and not (isinstance(op1, IndexTask) or isinstance(op2, IndexTask)) :
+                if op1 <> op2 and not (isinstance(op1, IndexTask) or isinstance(op2, IndexTask)) and\
+                        not (isinstance(op1, Deletion) or isinstance(op2, Deletion)):
                     def traverse_event(node, traverser):
                         if node in traverser.visited:
                             return False
