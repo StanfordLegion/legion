@@ -29,8 +29,12 @@ function ast_node:__index(field)
   error(node_type .. " has no field '" .. field .. "'", 2)
 end
 
+function ast.is_node(node)
+  return type(node) == "table" and getmetatable(node) == ast_node
+end
+
 local function ast_node_tostring(node, indent)
-  if type(node) == "table" and getmetatable(node) == ast_node then
+  if ast.is_node(node) then
     local str = tostring(node.node_type) .. "(\n"
     for k, v in pairs(node) do
       if k ~= "node_type" then
@@ -126,6 +130,31 @@ function ast.factory(name)
   setmetatable(factory, ast_factory)
 
   return factory
+end
+
+-- Traversal
+
+function ast.traverse_node_postorder(fn, node)
+  if ast.is_node(node) then
+    for _, child in pairs(node) do
+      ast.traverse_node_postorder(fn, child)
+    end
+    fn(node)
+  elseif terralib.islist(node) then
+    for _, child in ipairs(node) do
+      ast.traverse_node_postorder(fn, child)
+    end
+  end
+end
+
+function ast.traverse_expr_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(child)
+      if rawget(child, "expr_type") then
+        fn(child)
+      end
+    end,
+    node)
 end
 
 -- Location
