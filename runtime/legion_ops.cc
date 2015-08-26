@@ -5510,10 +5510,11 @@ namespace LegionRuntime {
                                                             );
       Event release_event = result.get_ready_event();
       std::set<Event> release_preconditions;
+      release_preconditions.insert(release_event);
 #ifdef LEGION_SPY
       std::set<Event> release_preconditions_spy;
+      release_preconditions_spy.insert(release_event);
 #endif
-      release_preconditions.insert(release_event);
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 

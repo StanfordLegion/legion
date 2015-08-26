@@ -45,7 +45,6 @@ where reads(r1), writes(r1) do
     h2b(p1_disjoint[i])
   end
 
-  __demand(__parallel)
   for i = 0, n do
     h2(p1_disjoint[i])
   end
