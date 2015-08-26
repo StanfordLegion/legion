@@ -3505,34 +3505,75 @@ namespace LegionRuntime {
               runtime->handle_mapper_broadcast(derez);
               break;
             }
+          case SEND_INDEX_SPACE_SEMANTIC_REQ:
+            {
+              runtime->handle_index_space_semantic_request(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_SEMANTIC_REQ:
+            {
+              runtime->handle_index_partition_semantic_request(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_SEMANTIC_REQ:
+            {
+              runtime->handle_field_space_semantic_request(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SEMANTIC_REQ:
+            {
+              runtime->handle_field_semantic_request(derez, 
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_LOGICAL_REGION_SEMANTIC_REQ:
+            {
+              runtime->handle_logical_region_semantic_request(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_LOGICAL_PARTITION_SEMANTIC_REQ:
+            {
+              runtime->handle_logical_partition_semantic_request(derez,
+                                                          remote_address_space);
+              break;
+            }
           case SEND_INDEX_SPACE_SEMANTIC_INFO:
             {
-              runtime->handle_index_space_semantic_info(derez);
+              runtime->handle_index_space_semantic_info(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_SEMANTIC_INFO:
             {
-              runtime->handle_index_partition_semantic_info(derez);
+              runtime->handle_index_partition_semantic_info(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_FIELD_SPACE_SEMANTIC_INFO:
             {
-              runtime->handle_field_space_semantic_info(derez);
+              runtime->handle_field_space_semantic_info(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_FIELD_SEMANTIC_INFO:
             {
-              runtime->handle_field_semantic_info(derez);
+              runtime->handle_field_semantic_info(derez, remote_address_space);
               break;
             }
           case SEND_LOGICAL_REGION_SEMANTIC_INFO:
             {
-              runtime->handle_logical_region_semantic_info(derez);
+              runtime->handle_logical_region_semantic_info(derez,
+                                                          remote_address_space);
               break;
             }
           case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
             {
-              runtime->handle_logical_partition_semantic_info(derez);
+              runtime->handle_logical_partition_semantic_info(derez,
+                                                          remote_address_space);
               break;
             }
           case SEND_SUBSCRIBE_REMOTE_CONTEXT:
@@ -10105,9 +10146,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
-      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
+      forest->attach_semantic_information(handle, tag, address_space, 
+                                          buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10116,9 +10156,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
-      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
+      forest->attach_semantic_information(handle, tag, address_space, 
+                                          buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10127,9 +10166,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
-      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
+      forest->attach_semantic_information(handle, tag, address_space, 
+                                          buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10138,10 +10176,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
       forest->attach_semantic_information(handle, fid, tag, 
-                                          node_set, buffer, size);
+                                          address_space, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10150,9 +10186,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
-      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
+      forest->attach_semantic_information(handle, tag, address_space, 
+                                          buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10161,9 +10196,8 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeSet node_set;
-      node_set.add(address_space);
-      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
+      forest->attach_semantic_information(handle, tag, address_space, 
+                                          buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -11200,12 +11234,69 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_semantic_request(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_REQ,
+                                 SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_semantic_request(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_semantic_request(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_REQ,
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_semantic_request(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_REQ,
+                                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_logical_region_semantic_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+              SEND_LOGICAL_REGION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
+                                                                true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_logical_partition_semantic_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+            SEND_LOGICAL_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_semantic_info(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                 SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11214,7 +11305,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_INDEX_PARTITION_SEMANTIC_INFO, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
+          SEND_INDEX_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
     }
 
@@ -11224,7 +11315,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11233,7 +11324,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_INFO,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11242,7 +11333,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_LOGICAL_REGION_SEMANTIC_INFO, LOGICAL_TREE_VIRTUAL_CHANNEL,
+              SEND_LOGICAL_REGION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
     }
 
@@ -11252,7 +11343,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,
-          SEND_LOGICAL_PARTITION_SEMANTIC_INFO, LOGICAL_TREE_VIRTUAL_CHANNEL,
+            SEND_LOGICAL_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
     }
 
@@ -11805,45 +11896,99 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_semantic_info(Deserializer &derez)
+    void Runtime::handle_index_space_semantic_request(Deserializer &derez,
+                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_semantic_info(forest, derez);
+      IndexSpaceNode::handle_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_semantic_info(Deserializer &derez)
+    void Runtime::handle_index_partition_semantic_request(Deserializer &derez, 
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_semantic_info(forest, derez);
+      IndexPartNode::handle_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_semantic_info(Deserializer &derez)
+    void Runtime::handle_field_space_semantic_request(Deserializer &derez,
+                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_semantic_info(forest, derez);
+      FieldSpaceNode::handle_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_semantic_info(Deserializer &derez)
+    void Runtime::handle_field_semantic_request(Deserializer &derez,
+                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_field_semantic_info(forest, derez);
+      FieldSpaceNode::handle_field_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_semantic_info(Deserializer &derez)
+    void Runtime::handle_logical_region_semantic_request(Deserializer &derez,
+                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionNode::handle_semantic_info(forest, derez);
+      RegionNode::handle_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_semantic_info(Deserializer &derez)
+    void Runtime::handle_logical_partition_semantic_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PartitionNode::handle_semantic_info(forest, derez);
+      PartitionNode::handle_semantic_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_semantic_info(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_semantic_info(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_semantic_info(Deserializer &derez, 
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_semantic_info(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_semantic_info(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_semantic_info(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_semantic_info(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_field_semantic_info(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_logical_region_semantic_info(Deserializer &derez,
+                                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode::handle_semantic_info(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_logical_partition_semantic_info(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PartitionNode::handle_semantic_info(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15914,6 +16059,54 @@ namespace LegionRuntime {
         case HLR_CONTINUATION_TASK_ID:
           {
             LegionContinuation::handle_continuation(args);
+            break;
+          }
+        case HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            IndexSpaceNode::SemanticRequestArgs *req_args = 
+              (IndexSpaceNode::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            IndexPartNode::SemanticRequestArgs *req_args = 
+              (IndexPartNode::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            FieldSpaceNode::SemanticRequestArgs *req_args = 
+              (FieldSpaceNode::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            FieldSpaceNode::SemanticFieldRequestArgs *req_args = 
+              (FieldSpaceNode::SemanticFieldRequestArgs*)args;
+            req_args->proxy_this->process_semantic_field_request(
+                  req_args->fid, req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            RegionNode::SemanticRequestArgs *req_args = 
+              (RegionNode::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            PartitionNode::SemanticRequestArgs *req_args = 
+              (PartitionNode::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
             break;
           }
         default:

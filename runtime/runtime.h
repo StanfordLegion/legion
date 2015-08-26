@@ -1432,6 +1432,17 @@ namespace LegionRuntime {
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_index_space_semantic_request(AddressSpaceID target, 
+                                             Serializer &rez);
+      void send_index_partition_semantic_request(AddressSpaceID target,
+                                                 Serializer &rez);
+      void send_field_space_semantic_request(AddressSpaceID target,
+                                             Serializer &rez);
+      void send_field_semantic_request(AddressSpaceID target, Serializer &rez);
+      void send_logical_region_semantic_request(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_logical_partition_semantic_request(AddressSpaceID target,
+                                                   Serializer &rez);
       void send_index_space_semantic_info(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_partition_semantic_info(AddressSpaceID target,
@@ -1530,12 +1541,30 @@ namespace LegionRuntime {
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
-      void handle_index_space_semantic_info(Deserializer &derez);
-      void handle_index_partition_semantic_info(Deserializer &derez);
-      void handle_field_space_semantic_info(Deserializer &derez);
-      void handle_field_semantic_info(Deserializer &derez);
-      void handle_logical_region_semantic_info(Deserializer &derez);
-      void handle_logical_partition_semantic_info(Deserializer &derez);
+      void handle_index_space_semantic_request(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_index_partition_semantic_request(Deserializer &derez,
+                                                   AddressSpaceID source);
+      void handle_field_space_semantic_request(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_field_semantic_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_logical_region_semantic_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_logical_partition_semantic_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_index_space_semantic_info(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_index_partition_semantic_info(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_field_space_semantic_info(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_field_semantic_info(Deserializer &derez,
+                                      AddressSpaceID source);
+      void handle_logical_region_semantic_info(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_logical_partition_semantic_info(Deserializer &derez,
+                                                  AddressSpaceID source);
       void handle_subscribe_remote_context(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_free_remote_context(Deserializer &derez);
