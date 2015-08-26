@@ -14609,6 +14609,7 @@ namespace LegionRuntime {
         // We're the owner, figure out what to do
         FieldMask remaining_fields = request_mask;
         FieldMask local_fields;
+        int path_only_local_index = -1;
         int initial_local_index = -1;
         std::set<Event> local_preconditions, done_conditions;
         LegionDeque<RequestInfo>::aligned targets;
@@ -14674,12 +14675,22 @@ namespace LegionRuntime {
           {
             if (it->target == local_space)
             {
-              // Special case if we were supposed to send it
+              // Handle cases where we were supposed to send something
+              if (request_kind == INITIAL_VERSION_REQUEST)
+              {
 #ifdef DEBUG_HIGH_LEVEL
-              assert((request_kind == FINAL_VERSION_REQUEST) &&
-                     (it->kind == INITIAL_VERSION_REQUEST));
+                assert(it->kind == PATH_ONLY_VERSION_REQUEST);
 #endif
-              initial_local_index = idx;
+                path_only_local_index = idx;
+              }
+              else
+              {
+#ifdef DEBUG_HIGH_LEVEL
+                assert((request_kind == FINAL_VERSION_REQUEST) &&
+                       (it->kind == INITIAL_VERSION_REQUEST));
+#endif
+                initial_local_index = idx;
+              }
             }
             else
               send_version_state_request(it->target, source, it->to_trigger,
@@ -14702,6 +14713,13 @@ namespace LegionRuntime {
           done_conditions.insert(local_trigger);
         }
         // We might also have some additional local fields to send
+        if (path_only_local_index >= 0)
+        {
+          RequestInfo &info = targets[initial_local_index];
+          launch_send_version_state(source, info.to_trigger, info.kind,
+                                    info.request_mask);
+          done_conditions.insert(info.to_trigger);
+        }
         if (initial_local_index >= 0)
         {
           RequestInfo &info = targets[initial_local_index];
