@@ -14715,7 +14715,7 @@ namespace LegionRuntime {
         // We might also have some additional local fields to send
         if (path_only_local_index >= 0)
         {
-          RequestInfo &info = targets[initial_local_index];
+          RequestInfo &info = targets[path_only_local_index];
           launch_send_version_state(source, info.to_trigger, info.kind,
                                     info.request_mask);
           done_conditions.insert(info.to_trigger);
