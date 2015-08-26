@@ -210,8 +210,10 @@ function type_check.expr_index_access(cx, node)
       (index:is(ast.typed.ExprID) and not std.is_rawref(index.expr_type))
     then
       local parent = value_type:parent_region()
+      local partition = value_type:partition()
       local subregion = value_type:subregion_constant(index.value)
-      std.add_constraint(cx, subregion, parent, "<=", false)
+      std.add_constraint(cx, partition, parent, "<=", false)
+      std.add_constraint(cx, subregion, partition, "<=", false)
 
       if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
@@ -230,8 +232,10 @@ function type_check.expr_index_access(cx, node)
       }
     else
       local parent = value_type:parent_region()
+      local partition = value_type:partition()
       local subregion = value_type:subregion_dynamic()
-      std.add_constraint(cx, subregion, parent, "<=", false)
+      std.add_constraint(cx, partition, parent, "<=", false)
+      std.add_constraint(cx, subregion, partition, "<=", false)
 
       return ast.typed.ExprIndexAccess {
         value = value,
