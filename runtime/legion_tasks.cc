@@ -10001,22 +10001,6 @@ namespace LegionRuntime {
     void SliceTask::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we need to localize anymore state before starting
-      if (!is_remote() && parent_ctx->has_remote_state())
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(enclosing_physical_contexts.size() == version_infos.size());
-#endif
-        std::set<Event> preconditions;
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, runtime->forest,
-              enclosing_physical_contexts[idx].get_id());
-        if (!preconditions.empty())
-        {
-          Event wait_on = Event::merge_events(preconditions);
-          wait_on.wait();
-        }
-      }
       // Before we enumerate the points, ask the mapper to pick the
       // task variant to be used for all of these points so when
       // we clone each of the point tasks, they will get the right

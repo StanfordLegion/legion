@@ -20189,7 +20189,7 @@ namespace LegionRuntime {
     AddressSpaceID RegionNode::get_owner_space(void) const
     //--------------------------------------------------------------------------
     {
-      return RegionNode::get_owner_space(handle, context->runtime);
+      return get_owner_space(handle, context->runtime);
     }
 
     //--------------------------------------------------------------------------
