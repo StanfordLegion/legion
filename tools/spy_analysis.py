@@ -596,7 +596,10 @@ class SingleTask(object):
         self.generation = 0
 
     def get_name(self):
-        return self.name
+        if self.name <> None:
+            return self.name+" "+str(self.uid)
+        else:
+            return "task "+str(self.uid)
 
     def get_op_kind(self):
         return SINGLE_OP
@@ -994,16 +997,20 @@ class SingleTask(object):
                                 src_fields = node.get_src_fields()
                                 dst_fields = node.get_dst_fields()
 
-                                if ((last_inst == dst_inst) and
-                                    (last_field in dst_fields)):
-                                    traverser.found = traverser.found or \
-                                            (node == traverser.target)
-                                    if not traverser.found:
-                                        idx = dst_fields.index(last_field)
-                                        traverser.field_stack.append(src_fields[idx])
-                                        traverser.instance_stack.append(src_inst)
+                                if last_inst <> dst_inst:
+                                    return False
+                                traverser.found = node == traverser.target
+                                if traverser.found:
+                                    return False
+                                if not last_field in dst_fields:
+                                    traverser.field_stack.append(last_field)
+                                    traverser.instance_stack.append(dst_inst)
                                     return not traverser.found
-                                return False
+                                else:
+                                    idx = dst_fields.index(last_field)
+                                    traverser.field_stack.append(src_fields[idx])
+                                    traverser.instance_stack.append(src_inst)
+                                    return not traverser.found
                             def traverse_acquire(node, traverser):
                                 if record_visit(node, traverser):
                                     return False
@@ -1710,7 +1717,7 @@ class AcquireOp(object):
     def print_base_node(self, printer, logical):
         printer.println(self.node_name+\
                 ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
-                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
@@ -1850,10 +1857,10 @@ class ReleaseOp(object):
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
 
-    def print_base_node(self, printer):
+    def print_base_node(self, printer, logical):
         printer.println(self.node_name+\
                 ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
-                '' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n '+\
+                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
                 'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
@@ -2425,6 +2432,9 @@ class Copy(object):
         self.prev_event_deps = set()
         self.generation = 0
 
+    def get_name(self):
+        return "Copy "+str(self.uid)
+
     def get_ctx(self):
         return None
 
@@ -2616,6 +2626,9 @@ class EventHandle(object):
     def __eq__(self, other):
         return (self.uid,self.gen) == (other.uid,other.gen)
 
+    def __repr__(self):
+        return "ev(" + hex(self.uid) + "," + str(self.gen) + ")"
+
     def exists(self):
         return (self.uid <> 0)
 
@@ -2632,13 +2645,16 @@ class PhaseBarrier(object):
     def __eq__(self, other):
         return (self.uid,self.gen) == (other.uid,other.gen)
 
+    def __repr__(self):
+        return "pb(" + hex(self.uid) + "," + str(self.gen) + ")"
+
     def exists(self):
         return (self.uid <> 0)
 
     def print_physical_node(self, printer):
         printer.println(self.node_name+\
                 ' [style=filled,label="PB '+hex(self.uid)+'\\n '+\
-                str(self.gen)+\
+                str(self.gen)+"->"+str(self.gen+1)+\
                 '",fillcolor=deeppink3,fontsize=12,fontcolor=white,'+\
                 'shape=circle,penwidth=0,margin=0];')
 
@@ -2826,6 +2842,10 @@ class Event(object):
         self.implicit_outgoing = set()
         self.physical_marked = False
         self.generation = 0
+        self.prev_event_deps = set()
+
+    def get_name(self):
+        return repr(self.handle)
 
     def add_physical_incoming(self, event):
         assert self <> event
@@ -2847,6 +2867,11 @@ class Event(object):
         if self.physical_marked or not self.handle.exists():
             return
         self.physical_marked = True
+        if self.is_phase_barrier() and \
+                len(self.physical_outgoing) == 0 and \
+                len(self.physical_incoming) == 1 and \
+                list(self.physical_incoming)[0].is_phase_barrier():
+            return
         component.add_event(self)
         if self.is_phase_barrier():
             component.add_phase_barrier(self.handle)
@@ -2867,14 +2892,15 @@ class Event(object):
                 n.print_prev_event_dependences(printer, self.handle.node_name)
 
     def print_prev_event_dependences(self, printer, name):
-        if self.is_phase_barrier():
-            self.handle.print_prev_event_dependences(printer, name)
-            for n in self.physical_incoming:
-                n.print_prev_event_dependences(printer, self.handle.node_name)
-        else:
-            for n in self.physical_incoming:
-                n.print_prev_event_dependences(printer, name)
-
+        if name not in self.prev_event_deps:
+            #self.prev_event_deps.add(name)
+            if self.is_phase_barrier():
+                self.handle.print_prev_event_dependences(printer, name)
+                for n in self.physical_incoming:
+                    n.print_prev_event_dependences(printer, self.handle.node_name)
+            else:
+                for n in self.physical_incoming:
+                    n.print_prev_event_dependences(printer, name)
     def print_prev_filtered_dependences(self, printer, name, printed_nodes):
         for n in self.physical_incoming:
             n.print_prev_filtered_dependences(printer, name, printed_nodes)
@@ -3017,9 +3043,11 @@ class EventGraphTraverser(object):
         if not do_next:
             return
         if self.forwards:
-            node.term_event.event_graph_traverse(self)
+            if node.term_event <> None:
+                node.term_event.event_graph_traverse(self)
         else:
-            node.start_event.event_graph_traverse(self)
+            if node.start_event <> None:
+                node.start_event.event_graph_traverse(self)
         if self.post_close_fn <> None:
             self.post_close_fn(node, self)
 
@@ -4011,3 +4039,42 @@ class State(object):
                 region_node.mark_named_children()
             region_node.print_graph(region_graph_printer, simplify_graphs)
         region_graph_printer.print_pdf_after_close(simplify_graphs)
+
+    def dump_event_paths(self):
+        for uid1,op1 in self.ops.iteritems():
+            for uid2,op2 in self.ops.iteritems():
+                if op1 <> op2 and not (isinstance(op1, IndexTask) or isinstance(op2, IndexTask)) and\
+                        not (isinstance(op1, Deletion) or isinstance(op2, Deletion)):
+                    def traverse_event(node, traverser):
+                        if node in traverser.visited:
+                            return False
+                        else:
+                            traverser.path.append(node)
+                            return True
+                    def traverse_op(node, traverser):
+                        traverser.path.append(node)
+                        if traverser.target == node:
+                            traverser.paths.append(traverser.path)
+                            traverser.path = list(traverser.path)
+                            return False
+                        else:
+                            return True
+                    def post_traverse(node, traverser):
+                        if not (node in traverser.visited):
+                            traverser.visited.add(node)
+                            traverser.path.pop()
+                    traverser = EventGraphTraverser(True, False, True,
+                            self.get_next_traverser_gen(), traverse_event,
+                            traverse_op, traverse_op, traverse_op, traverse_op,
+                            traverse_op, traverse_op, post_traverse, post_traverse,
+                            post_traverse, post_traverse, post_traverse, post_traverse,
+                            post_traverse)
+                    traverser.target = op2
+                    traverser.path = list()
+                    traverser.paths = list()
+                    traverser.visited = set()
+                    op1.event_graph_traverse(traverser)
+                    if len(traverser.paths) > 0:
+                        print("##### paths between "+op1.get_name()+" and "+op2.get_name()+" #####")
+                        for p in traverser.paths:
+                            print('    ' + ' -> '.join([op.get_name() for op in p]))

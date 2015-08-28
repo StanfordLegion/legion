@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <unistd.h>
+#include <csignal>
 
 #include <time.h>
 
@@ -13,6 +15,7 @@ using namespace Realm;
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   CHILD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
+  CHECK_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+2,
 };
 
 enum { REDOP_ADD = 1 };
@@ -44,6 +47,13 @@ static const int BARRIER_INITIAL_VALUE = 42;
 
 static int errors = 0;
 
+// we're going to use alarm() as a watchdog to detect deadlocks
+void sigalrm_handler(int sig)
+{
+  fprintf(stderr, "HELP!  Alarm triggered - likely hang!\n");
+  exit(1);
+}
+
 void child_task(const void *args, size_t arglen, Processor p)
 {
   assert(arglen == sizeof(ChildTaskArgs));
@@ -52,6 +62,9 @@ void child_task(const void *args, size_t arglen, Processor p)
   printf("starting child task %zd on processor " IDFMT "\n", child_args.index, p.id);
   Barrier b = child_args.b;  // so we can advance it
   for(size_t i = 0; i < child_args.num_iters; i++) {
+    // make one task slower than all the others
+    if(i != 0) sleep(1);
+
     int reduce_val = (i+1)*(child_args.index+1);
     b.arrive(1, Event::NO_EVENT, &reduce_val, sizeof(reduce_val));
 
@@ -62,15 +75,21 @@ void child_task(const void *args, size_t arglen, Processor p)
       if(!ready) {
 	// wait on barrier to be ready and then ask for result again
 	b.wait();
-	bool ready2 = b.get_result(&result, sizeof(result));
-	assert(ready2);
+	ready = b.get_result(&result, sizeof(result));
+	if(!ready) {
+	  printf("child %zd: iter %zd still not ready after explicit wait!?\n",
+		 child_args.index, i);
+	  errors++;
+	}
       }
-      int exp_result = BARRIER_INITIAL_VALUE + (i+1)*child_args.num_iters*(child_args.num_iters + 1) / 2;
-      if(result == exp_result)
-	printf("child %zd: iter %zd = %d (%d) OK\n", child_args.index, i, result, ready);
-      else {
-	printf("child %zd: iter %zd = %d (%d) ERROR (expected %d)\n", child_args.index, i, result, ready, exp_result);
-	errors++;
+      if(ready) {
+	int exp_result = BARRIER_INITIAL_VALUE + (i+1)*child_args.num_iters*(child_args.num_iters + 1) / 2;
+	if(result == exp_result)
+	  printf("child %zd: iter %zd = %d (%d) OK\n", child_args.index, i, result, ready);
+	else {
+	  printf("child %zd: iter %zd = %d (%d) ERROR (expected %d)\n", child_args.index, i, result, ready, exp_result);
+	  errors++;
+	}
       }
     }
 
@@ -78,6 +97,27 @@ void child_task(const void *args, size_t arglen, Processor p)
   }
 
   printf("ending child task %zd on processor " IDFMT "\n", child_args.index, p.id);
+}
+
+void check_task(const void *args, size_t arglen, Processor p)
+{
+  assert(arglen == sizeof(ChildTaskArgs));
+  const ChildTaskArgs& child_args = *(const ChildTaskArgs *)args;
+
+  int result;
+  bool ready = child_args.b.get_result(&result, sizeof(result));
+  if(!ready) {
+    printf("check %zd: barrier data wasn't ready!?\n", child_args.index);
+    errors++;
+  } else {
+    int exp_result = BARRIER_INITIAL_VALUE + (child_args.index+1)*child_args.num_iters*(child_args.num_iters + 1) / 2;
+    if(result == exp_result)
+      printf("check %zd = %d OK\n", child_args.index, result);
+    else {
+      printf("check %zd = %d ERROR (expected %d)\n", child_args.index, result, exp_result);
+      errors++;
+    }
+  }
 }
 
 void top_level_task(const void *args, size_t arglen, Processor p)
@@ -102,6 +142,28 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 				      &BARRIER_INITIAL_VALUE, sizeof(BARRIER_INITIAL_VALUE));
 
   std::set<Event> task_events;
+
+  // set an alarm so that we turn hangs into error messages
+  alarm(10);
+
+  // spawn the check tasks before the arriving tasks
+  {
+    Barrier check_barrier = b;
+    for(size_t i = 0; i < all_cpus.size(); i++) {
+      ChildTaskArgs args;
+      args.num_iters = all_cpus.size();
+      args.index = i;
+      args.b = check_barrier;
+
+      Event e = all_cpus[i].spawn(CHECK_TASK, &args, sizeof(args),
+				  ProfilingRequestSet(),
+				  check_barrier);
+      task_events.insert(e);
+
+      check_barrier = check_barrier.advance_barrier();
+    }
+  }
+
   for(size_t i = 0; i < all_cpus.size(); i++) {
     ChildTaskArgs args;
     args.num_iters = all_cpus.size();
@@ -121,7 +183,11 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       // wait on barrier to be ready and then ask for result again
       b.wait();
       bool ready2 = b.get_result(&result, sizeof(result));
-      assert(ready2);
+      if(!ready2) {
+	printf("parent: iter %zd still not ready after explicit wait!?\n", i);
+	errors++;
+	continue;
+      }
     }
     int exp_result = BARRIER_INITIAL_VALUE + (i+1)*all_cpus.size()*(all_cpus.size() + 1) / 2;
     if(result == exp_result)
@@ -147,6 +213,8 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     exit(1);
   }
 
+  alarm(0);
+
   printf("done!\n");
 
   Runtime::get_runtime().shutdown();
@@ -160,9 +228,12 @@ int main(int argc, char **argv)
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(CHILD_TASK, child_task);
+  rt.register_task(CHECK_TASK, check_task);
 
   rt.register_reduction(REDOP_ADD, 
 			ReductionOpUntyped::create_reduction_op<ReductionOpIntAdd>());
+
+  signal(SIGALRM, sigalrm_handler);
 
   // Start the machine running
   // Control never returns from this call

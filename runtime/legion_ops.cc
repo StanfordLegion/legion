@@ -5182,7 +5182,7 @@ namespace LegionRuntime {
           Event e = it->phase_barrier.get_previous_phase();
           acquire_preconditions.insert(e);
 #ifdef LEGION_SPY
-          acquire_preconditions_spy.insert(it->phase_barrier);
+          acquire_preconditions_spy.insert(it->phase_barrier.get_previous_phase());
 #endif
         }
       }
@@ -5768,10 +5768,11 @@ namespace LegionRuntime {
 
       Event release_event = result.get_ready_event();
       std::set<Event> release_preconditions;
+      release_preconditions.insert(release_event);
 #ifdef LEGION_SPY
       std::set<Event> release_preconditions_spy;
+      release_preconditions_spy.insert(release_event);
 #endif
-      release_preconditions.insert(release_event);
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -5780,7 +5781,7 @@ namespace LegionRuntime {
           Event e = it->phase_barrier.get_previous_phase();
           release_preconditions.insert(e);
 #ifdef LEGION_SPY
-          release_preconditions_spy.insert(it->phase_barrier);
+          release_preconditions_spy.insert(it->phase_barrier.get_previous_phase());
 #endif
         }
       }
@@ -5827,7 +5828,7 @@ namespace LegionRuntime {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier.get_previous_phase());
+              it->phase_barrier);
 #endif
           it->phase_barrier.arrive(1/*count*/, release_complete);
         }

@@ -266,6 +266,8 @@ function std.add_privilege(cx, privilege, region, field_path)
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
+  assert(std.is_region(lhs) or std.is_partition(lhs))
+  assert(std.is_region(rhs) or std.is_partition(rhs))
   if not cx.constraints[op] then
     cx.constraints[op] = {}
   end
@@ -393,13 +395,13 @@ function std.check_constraint(cx, constraint)
   if terralib.issymbol(lhs) then
     lhs = lhs.type
   end
-  assert(std.is_region(lhs))
+  assert(std.is_region(lhs) or std.is_partition(lhs))
 
   local rhs = constraint.rhs
   if terralib.issymbol(rhs) then
     rhs = rhs.type
   end
-  assert(std.is_region(rhs))
+  assert(std.is_region(rhs) or std.is_partition(rhs))
 
   local constraint = {
     lhs = lhs,
@@ -433,9 +435,9 @@ end
 function std.meet_privilege(a, b)
   if a == b then
     return a
-  elseif a == "none" then
+  elseif not a or a == "none" then
     return b
-  elseif b == "none" then
+  elseif not b or b == "none" then
     return a
   else
     return "reads_writes"
@@ -1734,6 +1736,10 @@ function std.partition(disjointness, region)
 
   function st:is_disjoint()
     return self.disjointness == std.disjoint
+  end
+
+  function st:partition()
+    return self
   end
 
   function st:parent_region()
