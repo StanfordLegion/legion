@@ -515,13 +515,14 @@ namespace Realm {
     // call the actual thread body
     (*thread->entry_wrapper)(thread->target);
 
-    if(thread->scheduler)
-      thread->scheduler->thread_terminating(thread);
-    
     // on return, we update our status and terminate
     log_thread.info() << "thread " << thread << " finished";
     thread->update_state(STATE_FINISHED);
 
+    // this is last so that the scheduler can delete us if it wants to
+    if(thread->scheduler)
+      thread->scheduler->thread_terminating(thread);
+    
     return 0;
   }
 

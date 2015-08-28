@@ -598,6 +598,10 @@ namespace Realm {
 	worker_terminate(0);
       }
     }
+
+    // detach and delete the worker thread
+    thread->detach();
+    delete thread;
   }
 
   bool KernelThreadTaskScheduler::execute_task(Task *task)
@@ -681,10 +685,6 @@ namespace Realm {
     if(switch_to)
       worker_wake(switch_to);
 
-    // detach and delete the worker thread
-    me->detach();
-    delete me;
-    
     // if this was the last thread, we'd better be in shutdown...
     if(all_workers.empty()) {
       assert(shutdown_flag);
