@@ -1301,7 +1301,7 @@ class Mapping(object):
         inst_string = ''
         if self.state.verbose:
             if (logical):
-                inst_string = '\\n'+requirement.dot_requirement()
+                inst_string = '\\n'+self.requirement.dot_requirement()
             else:
                 inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+\
                     self.requirement.dot_requirement()
