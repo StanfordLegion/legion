@@ -3261,6 +3261,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(this, ARE_DISJOINT_CALL);
 #endif
+      if (parent == child)
+        return false;
       std::vector<ColorPoint> path;
       if (compute_index_path(parent, child, path))
         return false;
@@ -3354,6 +3356,62 @@ namespace LegionRuntime {
       }
       // Otherwise they are not in the same tree
       // and therefore by definition disjoint
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::are_disjoint(IndexPartition one, IndexPartition two)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, ARE_DISJOINT_CALL);
+#endif
+      if (one == two)
+        return false;
+      IndexPartNode *part_one = get_node(one);
+      IndexPartNode *part_two = get_node(two);
+      if (part_one->depth < part_two->depth)
+      {
+        // See if there is a path
+        std::vector<ColorPoint> path;
+        if (compute_partition_path(part_one->parent->handle, two, path))
+          return false;
+        // Otherwise bring it up to the same level
+        while (part_one->depth < part_two->depth)
+          part_two = part_two->parent->parent;
+      }
+      else if (part_one->depth > part_two->depth)
+      {
+        // See if there is a path
+        std::vector<ColorPoint> path;
+        if (compute_partition_path(part_two->parent->handle, one, path))
+          return false;
+        // Otherwise bring it up to the same level
+        while (part_one->depth > part_two->depth)
+          part_one = part_one->parent->parent;
+      }
+      // Once we get here they are at the same level
+#ifdef DEBUG_HIGH_LEVEL
+      assert(part_one != part_two);
+      assert(part_one->depth == part_two->depth);
+#endif
+      IndexSpaceNode *sp_one = part_one->parent;
+      IndexSpaceNode *sp_two = part_two->parent;
+      if (sp_one == sp_two)
+        return false;
+      while (sp_one->depth != 0)
+      {
+        // Check for a common partition
+        if (sp_one->parent == sp_two->parent)
+          return sp_one->parent->are_disjoint(sp_one->color, sp_two->color);
+        // Check for a common new space
+        if (sp_one->parent->parent == sp_two->parent->parent)
+          return sp_one->parent->parent->are_disjoint(sp_one->parent->color,
+                                                      sp_two->parent->color);
+        // Otherwise advance everything
+        sp_one = sp_one->parent->parent;
+        sp_two = sp_two->parent->parent;
+      }
       return true;
     }
 
@@ -5470,7 +5528,16 @@ namespace LegionRuntime {
           if (finder != pending_tests.end())
             ready = finder->second;
           else
-            issue_dynamic_test = true;
+          {
+            if (Runtime::dynamic_independence_tests)
+              issue_dynamic_test = true;
+            else
+            {
+              aliased_subsets.insert(key);
+              aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+              return false;
+            }
+          }
         }
       }
       if (issue_dynamic_test)
@@ -6612,7 +6679,16 @@ namespace LegionRuntime {
           if (finder != pending_tests.end())
             ready_event = finder->second;
           else
-            issue_dynamic_test = true;
+          {
+            if (Runtime::dynamic_independence_tests)
+              issue_dynamic_test = true;
+            else
+            {
+              aliased_subspaces.insert(key);
+              aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+              return false;
+            }
+          }
         }
       }
       if (issue_dynamic_test)
@@ -9657,7 +9733,8 @@ namespace LegionRuntime {
     VersionInfo::NodeInfo::NodeInfo(const NodeInfo &rhs)
       : physical_state((rhs.physical_state == NULL) ? NULL : 
                         rhs.physical_state->clone(!rhs.needs_capture())),
-        field_versions(rhs.field_versions), bit_mask(rhs.bit_mask) 
+        field_versions(rhs.field_versions), advance_mask(rhs.advance_mask),
+        bit_mask(rhs.bit_mask) 
     //--------------------------------------------------------------------------
     {
       if (field_versions != NULL)
@@ -9692,6 +9769,7 @@ namespace LegionRuntime {
       field_versions = rhs.field_versions;
       if (field_versions != NULL)
         field_versions->add_reference();
+      advance_mask = rhs.advance_mask;
       bit_mask = rhs.bit_mask;
       return *this;
     }
@@ -9796,12 +9874,11 @@ namespace LegionRuntime {
         if (entry != NULL)
         {
           NodeInfo &next = node_infos[vit->first];
+          next.advance_mask |= vit->second.advance_mask;
           if (vit->second.path_only())
             next.set_path_only();
           if (vit->second.needs_final())
             next.set_needs_final();
-          if (vit->second.advance())
-            next.set_advance();
           if (vit->second.close_top())
             next.set_close_top();
         }
@@ -9832,9 +9909,9 @@ namespace LegionRuntime {
         // Apply path only differently
         if (it->second.path_only())
           it->second.physical_state->apply_path_only_state(
-                                                 it->second.advance());
+                                                  it->second.advance_mask);
         else
-          it->second.physical_state->apply_state(it->second.advance());
+          it->second.physical_state->apply_state(it->second.advance_mask);
         // Don't delete it because we need to hold onto the 
         // version manager references in case this operation
         // fails to complete
@@ -9857,7 +9934,7 @@ namespace LegionRuntime {
             continue;
           if (it->second.path_only())
             it->second.physical_state->apply_path_only_state(
-                                              it->second.advance());
+                                                    it->second.advance_mask);
           else
             it->second.physical_state->filter_and_apply(it->second.close_top(),
                                                  false/*filter children*/);
@@ -9873,7 +9950,7 @@ namespace LegionRuntime {
           if (it->second.path_only())
           {
             it->second.physical_state->apply_path_only_state(
-                                              it->second.advance());
+                                                    it->second.advance_mask);
           }
           // We can also skip anything that isn't the top node
           if (!it->second.close_top())
@@ -10012,10 +10089,10 @@ namespace LegionRuntime {
         finder->second.field_versions->get_field_versions();
       // Ask the manager to make the physical state
       PhysicalState *result = manager->construct_state(node, field_versions, 
-                                                     finder->second.path_only(),
-                                                     finder->second.close_top(),
-                                                     finder->second.advance(),
-                                                     capture);
+                                                    finder->second.advance_mask,
+                                                    finder->second.path_only(),
+                                                    finder->second.close_top(),
+                                                    capture);
       // Save the resulting physical state
       finder->second.physical_state = result;
       finder->second.unset_needs_capture();
@@ -10298,7 +10375,7 @@ namespace LegionRuntime {
                                                        false/*capture*/);
       PhysicalState *state = info.physical_state;
 #ifdef DEBUG_HIGH_LEVEL
-      if (!info.advance())
+      if (!info.advance_mask)
         assert(state->advance_states.empty());
 #endif
       size_t total_version_states = 0;
@@ -12925,14 +13002,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_path_only_state(bool advance) const
+    void PhysicalState::apply_path_only_state(const FieldMask &adv_mask) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(created_instances.empty());
 #endif
-      if (advance && !advance_states.empty())
+      if (!advance_states.empty())
       {
+        FieldMask non_advance_mask = adv_mask;
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
               vit = advance_states.begin(); vit != 
               advance_states.end(); vit++)
@@ -12942,6 +13020,27 @@ namespace LegionRuntime {
                 it = info.states.begin(); it != info.states.end(); it++)
           {
             it->first->merge_path_only_state(this, it->second);
+          }
+          non_advance_mask -= info.valid_fields;
+        }
+        if (!!non_advance_mask)
+        {
+          // If we had non-advanced fields, issue updates to those states
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = version_states.begin(); vit != 
+                version_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            if (info.valid_fields * non_advance_mask)
+              continue;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              FieldMask overlap = it->second & non_advance_mask;
+              if (!overlap)
+                continue;
+              it->first->merge_path_only_state(this, overlap); 
+            }
           }
         }
       }
@@ -12962,11 +13061,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_state(bool advance)
+    void PhysicalState::apply_state(const FieldMask &advance_mask)
     //--------------------------------------------------------------------------
     {
-      if (advance && !advance_states.empty())
+      if (!advance_states.empty())
       {
+        FieldMask non_advance_mask = advance_mask;
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
               vit = advance_states.begin(); vit != 
               advance_states.end(); vit++)
@@ -12977,6 +13077,26 @@ namespace LegionRuntime {
           {
             it->first->merge_physical_state(this, it->second);
           }
+          non_advance_mask -= info.valid_fields;
+        }
+        if (!!non_advance_mask)
+        {
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+                vit = version_states.begin(); vit != 
+                version_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            if (info.valid_fields * non_advance_mask)
+              continue;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              FieldMask overlap = it->second & non_advance_mask;
+              if (!overlap)
+                continue;
+              it->first->merge_physical_state(this, overlap); 
+            }
+          } 
         }
       }
       else
@@ -13854,6 +13974,12 @@ namespace LegionRuntime {
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(currently_valid);
+      // If we are the top we should not be in initial or final mode
+      if (top)
+      {
+        assert(merge_mask * initial_fields);
+        assert(merge_mask * final_fields);
+      }
 #endif
       // Do the filtering first
       if (!top)
@@ -15135,7 +15261,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalState* VersionManager::construct_state(RegionTreeNode *node,
                         const LegionMap<VersionID,FieldMask>::aligned &versions,
-                     bool path_only, bool close_top, bool advance, bool capture)
+                        const FieldMask &advance_mask,
+                        bool path_only, bool close_top, bool capture)
     //--------------------------------------------------------------------------
     {
       // Create the result
@@ -15159,20 +15286,23 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         sanity_check();
 #endif
-        if (advance)
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              versions.begin(); it != versions.end(); it++)
         {
-          // If we're advancing we need to filter everything less than
-          // VID from previous states and VID+1 from current states
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                versions.begin(); it != versions.end(); it++)
+          // Figure out which fields are not advancing 
+          FieldMask non_advance = it->second - advance_mask;
+          if (!non_advance)
           {
+            // All advancing
+            // If we're advancing we need to filter everything less than
+            // VID from previous states and VID+1 from current states
+            FieldMask to_create = it->second;
             if (it->first > 0)
               filter_previous_states(it->first-1, it->second);
             filter_current_states(it->first, it->second);
             capture_previous_states(it->first, it->second, state);
-            FieldMask to_create = it->second;
-            capture_current_states(it->first+1, it->second, state, 
-                                    to_create, true/*advance*/);
+            capture_current_states(it->first+1, it->second, state,
+                                   to_create, true/*advance*/);
             if (!!to_create)
             {
 #ifdef DEBUG_HIGH_LEVEL
@@ -15189,25 +15319,23 @@ namespace LegionRuntime {
               state->add_advance_state(new_state, to_create);
             }
           }
-        }
-        else
-        {
-          // If we're not advancing then we need to filter everything
-          // less than VID-1 from both previous and current states
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                versions.begin(); it != versions.end(); it++)
+          else
           {
-            if (it->first > 1)
-              filter_previous_states(it->first-2, it->second);
-            if (it->first > 0)
-              filter_current_states(it->first-1, it->second);
-            FieldMask to_create = it->second;
-            capture_previous_states(it->first, it->second, state, to_create);
+            // Do non-advancing
+            FieldMask to_create = non_advance;
+            // Try capturing in the current states first
+            capture_current_states(it->first, it->second, state, 
+                                     to_create, false/*advancing*/);
+            // See if we still have states to capture
             if (!!to_create)
-              capture_current_states(it->first, it->second, state, 
-                                     to_create, false/*advance*/);
+              capture_previous_states(it->first, it->second, state, to_create);
             if (!!to_create)
             {
+              // If we're making a new state, do some filtering
+              if (it->first > 1)
+                filter_previous_states(it->first-2, to_create);
+              if (it->first > 0)
+                filter_current_states(it->first-1, to_create);
 #ifdef DEBUG_HIGH_LEVEL
               FieldMask &observed_mask = observed[it->first];
               assert(observed_mask * to_create);
@@ -15220,6 +15348,33 @@ namespace LegionRuntime {
               info.states[new_state] = to_create;
               info.valid_fields |= to_create;
               state->add_version_state(new_state, to_create);
+            }
+            // Now see if we have any advancing
+            FieldMask advance = it->second & advance_mask;
+            if (!!advance)
+            {
+              FieldMask advance_create = advance;
+              if (it->first > 0)
+                filter_previous_states(it->first-1, advance);
+              filter_current_states(it->first, advance);
+              capture_previous_states(it->first, advance, state);
+              capture_current_states(it->first+1, it->second, state,
+                                     advance_create, true/*advance*/);
+              if (!!advance_create)
+              {
+#ifdef DEBUG_HIGH_LEVEL
+                FieldMask &observed_mask = observed[it->first+1];
+                assert(observed_mask * advance_create);
+                observed_mask |= advance_create;
+#endif
+                VersionState *new_state = 
+                  create_new_version_state(it->first+1, advance_create);
+                new_state->add_base_valid_ref(VERSION_MANAGER_REF);
+                VersionStateInfo &info = current_version_infos[it->first+1];
+                info.states[new_state] = advance_create;
+                info.valid_fields |= advance_create;
+                state->add_advance_state(new_state, advance_create);
+              }
             }
           }
         }
@@ -16238,12 +16393,38 @@ namespace LegionRuntime {
             advance_version_numbers(state, new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
           }
+          // We already know that all the version numbers have been advanced
+          record_version_numbers(state, user.field_mask, version_info, 
+                                 true/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
         }
-        // Record version numbers of the fields which we are contributing
-        // to from this node.
-        record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*path only*/,
-                               false/*final*/, false/*close top*/);
+        else // read-only case
+        {
+          // See if there are any dirty fields for which we need to capture
+          // the previous version numbers
+          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          if (!dirty_overlap)
+          {
+            // No dirty fields below, which means we don't have any previous
+            record_version_numbers(state, user.field_mask, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/);
+          }
+          else
+          {
+            // We have overlapping dirty fields, capture previous
+            record_version_numbers(state, dirty_overlap, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/);
+            // See if we have any non-overlapping
+            FieldMask non_dirty = user.field_mask - dirty_overlap;
+            if (!!non_dirty)
+              record_version_numbers(state, non_dirty, version_info,
+                                     false/*previous*/, true/*path only*/,
+                                     false/*final*/, false/*close top*/);
+          }
+        }
+        
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
@@ -16325,20 +16506,25 @@ namespace LegionRuntime {
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
+#ifdef DEBUG_HIGH_LEVEL
+        assert(user.field_mask * state.dirty_below);
+#endif
         if (has_write)
         {
-          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
-          if (!!new_dirty_fields)
-          {
-            advance_version_numbers(state, new_dirty_fields);
-            state.dirty_below |= new_dirty_fields;
-          }
+          advance_version_numbers(state, user.field_mask);
+          state.dirty_below |= user.field_mask;
+          // We already know we advanced
+          record_version_numbers(state, user.field_mask, version_info,
+                                 true/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
         }
-        // Record version numbers of the fields which we are contributing
-        // to from this node.
-        record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*path only*/, 
-                               false/*final*/, false/*close top*/);
+        else
+        {
+          // We're opening only so we don't need to record previous
+          record_version_numbers(state, user.field_mask, version_info,
+                                 false/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
+        }
         const ColorPoint &next_child = path.get_child(depth);
         // Update our field states
         merge_new_field_state(state, 
@@ -16524,12 +16710,38 @@ namespace LegionRuntime {
             advance_version_numbers(state, new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
           }
+          // We already know that we advanced all the version numbers
+          record_version_numbers(state, user.field_mask, version_info,
+                                 true/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
         }
-        // Record version numbers of the fields which we are contributing
-        // to from this node.
-        record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*path only*/, 
-                               false/*final*/, false/*close top*/);
+        else // read only case
+        {
+          // See if there are any dirty fields for which we need to 
+          // capture the previous version numbers
+          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          if (!dirty_overlap)
+          {
+            // No dirty fields below, so we don't need to 
+            // capture any previous versions
+            record_version_numbers(state, user.field_mask, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/);
+          }
+          else
+          {
+            // We have overlapping dirty fields, capture previous
+            record_version_numbers(state, dirty_overlap, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/);
+            // See if we have any non-overlapping
+            FieldMask non_dirty = user.field_mask - dirty_overlap;
+            if (!!non_dirty)
+              record_version_numbers(state, non_dirty, version_info,
+                                     false/*previous*/, true/*path only*/,
+                                     false/*final*/, false/*close top*/);
+          }
+        }
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -16592,20 +16804,25 @@ namespace LegionRuntime {
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
+#ifdef DEBUG_HIGH_LEVEL
+        assert(user.field_mask * state.dirty_below);
+#endif
         if (has_write)
         {
-          FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
-          if (!!new_dirty_fields)
-          {
-            advance_version_numbers(state, new_dirty_fields);
-            state.dirty_below |= new_dirty_fields;
-          }
+          advance_version_numbers(state, user.field_mask);
+          state.dirty_below |= user.field_mask;
+          // We already know that we advanced
+          record_version_numbers(state, user.field_mask, version_info,
+                                 true/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
         }
-        // Record version numbers of the fields which we are contributing
-        // to from this node.
-        record_version_numbers(state, user.field_mask, version_info, 
-                               is_write, true/*path only*/, 
-                               false/*final*/, false/*close top*/);
+        else
+        {
+          // We're opening only, so we don't need to record previous
+          record_version_numbers(state, user.field_mask, version_info,
+                                 false/*previous*/, true/*path only*/,
+                                 false/*final*/, false/*close top*/);
+        }
         for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
@@ -17368,10 +17585,10 @@ namespace LegionRuntime {
         node_info.set_path_only();
       if (needs_final)
         node_info.set_needs_final();
-      if (capture_previous)
-        node_info.set_advance();
       if (close_top)
         node_info.set_close_top();
+      if (capture_previous)
+        node_info.advance_mask |= mask;
 #ifdef DEBUG_HIGH_LEVEL
       FieldMask unversioned = mask;
 #endif
@@ -19899,6 +20116,8 @@ namespace LegionRuntime {
         // Skip any users of the same op, we know they won't be dependences
         if ((it->op == closer.user.op) && (it->gen == closer.user.gen))
         {
+          // Report the interfering close operation
+          it->op->report_interfering_close_requirement(it->idx);
           it->field_mask -= overlap; 
           if (!it->field_mask)
           {

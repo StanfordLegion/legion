@@ -5740,7 +5740,7 @@ namespace LegionRuntime {
     inline bool IndexPartition::operator==(const IndexPartition &rhs) const
     //--------------------------------------------------------------------------
     {
-      if (id != rhs.tid)
+      if (id != rhs.id)
         return false;
       if (tid != rhs.tid)
         return false;

@@ -189,6 +189,21 @@ namespace LegionRuntime {
                                                 it->prev_idx, it->next_idx,
                                                 it->dtype, it->dependent_mask);
           }
+          // Also see if we have any aliased region requirements that we
+          // need to notify the generating task of
+          std::map<unsigned,std::vector<std::pair<unsigned,unsigned> > >::
+            const_iterator finder = alias_reqs.find(index-1);
+          if (finder != alias_reqs.end())
+          {
+            Operation *create_op = operations.back().first;
+            unsigned close_idx = close_op->get_close_index();
+            for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
+                  it = finder->second.begin(); it != finder->second.end(); it++)
+            {
+              if (it->second == close_idx)
+                create_op->report_interfering_close_requirement(it->first);
+            }
+          }
         }
       }
     }
@@ -331,6 +346,17 @@ namespace LegionRuntime {
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionTrace::record_aliased_requirements(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx1 < idx2);
+#endif
+      unsigned index = operations.size() - 1;
+      alias_reqs[index].push_back(std::pair<unsigned,unsigned>(idx1,idx2));
     }
 
     /////////////////////////////////////////////////////////////

@@ -14758,7 +14758,13 @@ namespace LegionRuntime {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
+#ifdef LEGION_SPY
+        // No dynamic tests for legion spy because it doesn't know how
+        // to figure this kind of information out
+        dynamic_independence_tests = false;
+#else
         dynamic_independence_tests = true;
+#endif
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;

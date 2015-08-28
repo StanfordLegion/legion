@@ -468,14 +468,19 @@ namespace LegionRuntime {
       bool is_subregion(LogicalRegion child, LogicalRegion parent);
       bool is_disjoint(IndexPartition handle);
       bool is_disjoint(LogicalPartition handle);
+    public:
       bool are_disjoint(IndexSpace parent, IndexSpace child);
       bool are_disjoint(IndexSpace parent, IndexPartition child);
+      bool are_disjoint(IndexPartition one, IndexPartition two); 
+    public:
       bool are_compatible(IndexSpace left, IndexSpace right);
       bool is_dominated(IndexSpace src, IndexSpace dst);
+    public:
       bool compute_index_path(IndexSpace parent, IndexSpace child,
                               std::vector<ColorPoint> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
                                   std::vector<ColorPoint> &path); 
+    public:
       void initialize_path(IndexSpace child, IndexSpace parent,
                            RegionTreePath &path);
       void initialize_path(IndexPartition child, IndexSpace parent,
@@ -484,6 +489,7 @@ namespace LegionRuntime {
                            RegionTreePath &path);
       void initialize_path(IndexPartition child, IndexPartition parent,
                            RegionTreePath &path);
+    public:
       FatTreePath* compute_fat_path(IndexSpace child, IndexSpace parent,
                                std::map<IndexTreeNode*,FatTreePath*> &storage,
                                bool test_overlap, bool &overlap);
@@ -1442,20 +1448,19 @@ namespace LegionRuntime {
       public:
         inline void set_path_only(void) { bit_mask |= 1; }
         inline void set_needs_final(void) { bit_mask |= 2; }
-        inline void set_advance(void) { bit_mask |= 4; }
-        inline void set_close_top(void) { bit_mask |= 8; }
-        inline void set_needs_capture(void) { bit_mask |= 16; }
+        inline void set_close_top(void) { bit_mask |= 4; }
+        inline void set_needs_capture(void) { bit_mask |= 8; }
         inline void unset_needs_capture(void)
-        { if (needs_capture()) bit_mask -= 16; }
+        { if (needs_capture()) bit_mask -= 8; }
       public:
         inline bool path_only(void) const { return (1 & bit_mask); }
         inline bool needs_final(void) const { return (2 & bit_mask); }
-        inline bool advance(void) const { return (4 & bit_mask); }
-        inline bool close_top(void) const { return (8 & bit_mask); }
-        inline bool needs_capture(void) const { return (16 & bit_mask); }
+        inline bool close_top(void) const { return (4 & bit_mask); }
+        inline bool needs_capture(void) const { return (8 & bit_mask); }
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
+        FieldMask        advance_mask;
       public:
         unsigned bit_mask;
       };
@@ -1960,8 +1965,8 @@ namespace LegionRuntime {
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool path_only, bool close_top);
-      void apply_path_only_state(bool advance) const;
-      void apply_state(bool advance);
+      void apply_path_only_state(const FieldMask &advance_mask) const;
+      void apply_state(const FieldMask &advance_mask);
       void filter_and_apply(bool top, bool filter_children);
       void reset(void);
       void record_created_instance(InstanceView *view);
@@ -2174,7 +2179,8 @@ namespace LegionRuntime {
     public:
       PhysicalState* construct_state(RegionTreeNode *node,
           const LegionMap<VersionID,FieldMask>::aligned &versions, 
-          bool path_only, bool close_top, bool advance, bool capture);
+          const FieldMask &advance_mask,
+          bool path_only, bool close_top, bool capture);
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask);
@@ -2336,7 +2342,7 @@ namespace LegionRuntime {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void record_version_numbers(LogicalState &state, const FieldMask &mask,
-                                  VersionInfo &info, bool capture_previous,
+                              VersionInfo &info, bool capture_previous,
                               bool path_only, bool needs_final, bool close_top);
       void advance_version_numbers(LogicalState &state, const FieldMask &mask);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,

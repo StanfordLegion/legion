@@ -165,6 +165,7 @@ namespace LegionRuntime {
       bool prepare_steal(void);
     protected:
       void compute_parent_indexes(void);
+      void record_aliased_region_requirements(LegionTrace *trace);
     protected:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -685,7 +686,8 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
-      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual void report_interfering_close_requirement(unsigned idx);
     public:
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
@@ -732,6 +734,7 @@ namespace LegionRuntime {
       void *future_store;
       size_t future_size;
       Future result; 
+      std::set<unsigned>          rerun_analysis_requirements; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
       std::vector<VersionInfo>    version_infos;
@@ -1043,7 +1046,8 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
-      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual void report_interfering_close_requirement(unsigned idx);
       virtual FatTreePath* compute_fat_path(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
@@ -1109,6 +1113,7 @@ namespace LegionRuntime {
       void *predicate_false_result;
       size_t predicate_false_size;
     protected:
+      std::set<unsigned>          rerun_analysis_requirements;
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> locally_mapped_slices;
     };

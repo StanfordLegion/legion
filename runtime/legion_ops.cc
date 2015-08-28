@@ -315,7 +315,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_aliased_requirements(unsigned idx1, unsigned idx2)
+    void Operation::report_interfering_requirements(unsigned idx1,unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called if overridden
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_interfering_close_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
       // should only be called if overridden
@@ -752,7 +760,7 @@ namespace LegionRuntime {
       if (target == this)
       {
         if (target_gen == gen)
-          report_aliased_requirements(target_idx, idx);
+          report_interfering_requirements(target_idx, idx);
         // Can't remove this if we are tracing
         if (tracing)
         {
@@ -3237,7 +3245,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::report_aliased_requirements(unsigned idx1, unsigned idx2)
+    void CopyOp::report_interfering_requirements(unsigned idx1, unsigned idx2)
     //--------------------------------------------------------------------------
     {
       bool is_src1 = idx1 < src_requirements.size();
@@ -3256,6 +3264,13 @@ namespace LegionRuntime {
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_interfering_close_requirement(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do here, we can skip these since it won't impact anything
     }
 
     //--------------------------------------------------------------------------
