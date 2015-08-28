@@ -177,6 +177,8 @@ namespace Realm {
       volatile bool shutdown_requested;
       GASNetHSL shutdown_mutex;
       GASNetCondVar shutdown_condvar;
+
+      CoreReservationSet core_reservations;
     };
 
     extern RuntimeImpl *runtime_singleton;

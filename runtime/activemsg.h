@@ -74,6 +74,10 @@ enum { PAYLOAD_NONE, // no payload in packet
 typedef std::pair<const void *, size_t> SpanListEntry;
 typedef std::vector<SpanListEntry> SpanList;
 
+namespace Realm {
+  class CoreReservationSet;
+};
+
 // if USE_GASNET isn't defined, then we replace all the good stuff with 
 //  single-node-only stubs
 #ifdef USE_GASNET
@@ -168,9 +172,10 @@ protected:
 extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   Realm::CoreReservationSet& crs,
 			   int argc, const char *argv[]);
 extern void start_polling_threads(int count);
-extern void start_handler_threads(int count, size_t stacksize);
+extern void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stacksize);
 extern void stop_activemsg_threads(void);
 extern void report_activemsg_status(FILE *f);
 
@@ -847,6 +852,7 @@ template <class T> struct HandlerReplyFuture {
 inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   Realm::CoreReservationSet& crs,
                            int argc, const char *argv[])
 {
   // just use malloc to obtain "gasnet" and/or "registered" memory
@@ -856,9 +862,14 @@ inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 }
 
 inline void start_polling_threads(int) {}
-inline void start_sending_threads(void) {}
-inline void start_handler_threads(int, size_t) {}
-inline void stop_activemsg_threads(void) {}
+inline void start_handler_threads(int, Realm::CoreReservationSet&, size_t) {}
+inline void stop_activemsg_threads(void)
+{
+  if(fake_gasnet_mem_base)
+    free(fake_gasnet_mem_base);
+  fake_gasnet_mem_base = 0;
+}
+    
 inline void do_some_polling(void) {}
 inline size_t get_lmb_size(int target_node) { return 0; }
 

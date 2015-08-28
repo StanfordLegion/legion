@@ -539,7 +539,8 @@ namespace Realm {
   // class LocalCPUProcessor
   //
 
-  LocalCPUProcessor::LocalCPUProcessor(Processor _me, size_t _stack_size)
+  LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
+				       size_t _stack_size)
     : LocalTaskProcessor(_me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
@@ -551,7 +552,7 @@ namespace Realm {
 
     std::string name = stringbuilder() << "CPU proc " << _me;
 
-    core_rsrv = new CoreReservation(name, params);
+    core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
     UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
@@ -574,7 +575,8 @@ namespace Realm {
   // class LocalUtilityProcessor
   //
 
-  LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, size_t _stack_size)
+  LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
+					       size_t _stack_size)
     : LocalTaskProcessor(_me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
@@ -586,7 +588,7 @@ namespace Realm {
 
     std::string name = stringbuilder() << "utility proc " << _me;
 
-    core_rsrv = new CoreReservation(name, params);
+    core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
     UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
@@ -609,8 +611,8 @@ namespace Realm {
   // class LocalIOProcessor
   //
 
-  LocalIOProcessor::LocalIOProcessor(Processor _me, size_t _stack_size,
-                                     int _concurrent_io_threads)
+  LocalIOProcessor::LocalIOProcessor(Processor _me, CoreReservationSet& crs,
+				     size_t _stack_size, int _concurrent_io_threads)
     : LocalTaskProcessor(_me, Processor::IO_PROC)
   {
     CoreReservationParameters params;
@@ -621,7 +623,7 @@ namespace Realm {
 
     std::string name = stringbuilder() << "IO proc " << _me;
 
-    core_rsrv = new CoreReservation(name, params);
+    core_rsrv = new CoreReservation(name, crs, params);
 
     // IO processors always use kernel threads
     ThreadedTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);

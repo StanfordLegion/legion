@@ -96,7 +96,7 @@ namespace Realm {
 
     class LocalCPUProcessor : public LocalTaskProcessor {
     public:
-      LocalCPUProcessor(Processor _me, size_t _stack_size);
+      LocalCPUProcessor(Processor _me, CoreReservationSet& crs, size_t _stack_size);
       virtual ~LocalCPUProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -104,7 +104,7 @@ namespace Realm {
 
     class LocalUtilityProcessor : public LocalTaskProcessor {
     public:
-      LocalUtilityProcessor(Processor _me, size_t _stack_size);
+      LocalUtilityProcessor(Processor _me, CoreReservationSet& crs, size_t _stack_size);
       virtual ~LocalUtilityProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -112,7 +112,7 @@ namespace Realm {
 
     class LocalIOProcessor : public LocalTaskProcessor {
     public:
-      LocalIOProcessor(Processor _me, size_t _stack_size,
+      LocalIOProcessor(Processor _me, CoreReservationSet& crs, size_t _stack_size,
 		       int _concurrent_io_threads);
       virtual ~LocalIOProcessor(void);
     protected:

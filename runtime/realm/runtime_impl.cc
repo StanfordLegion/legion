@@ -430,6 +430,7 @@ namespace Realm {
 
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
+		     core_reservations,
 		     *argc, (const char **)*argv);
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
@@ -478,9 +479,12 @@ namespace Realm {
       
       start_polling_threads(active_msg_worker_threads);
 
-      start_handler_threads(active_msg_handler_threads, stack_size_in_mb << 20);
+      start_handler_threads(active_msg_handler_threads,
+			    core_reservations,
+			    stack_size_in_mb << 20);
 
-      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads);
+      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
+							core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -512,7 +516,8 @@ namespace Realm {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
-          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, stack_size_in_mb << 20);
+          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, core_reservations,
+								stack_size_in_mb << 20);
           n->processors.push_back(up);
           local_util_procs.push_back(up);
         }
@@ -524,7 +529,8 @@ namespace Realm {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
-	  LocalIOProcessor *io = new LocalIOProcessor(p, stack_size_in_mb << 20,
+	  LocalIOProcessor *io = new LocalIOProcessor(p, core_reservations,
+						      stack_size_in_mb << 20,
 						      concurrent_io_threads);
           n->processors.push_back(io);
           local_io_procs.push_back(io);
@@ -580,7 +586,7 @@ namespace Realm {
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
         LocalTaskProcessor *lp;
-	lp = new LocalCPUProcessor(p, stack_size_in_mb << 20);
+	lp = new LocalCPUProcessor(p, core_reservations, stack_size_in_mb << 20);
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
       }
@@ -651,14 +657,15 @@ namespace Realm {
         }
         GPUWorker *gpu_worker = 0;
         if (gpu_worker_thread) {
-          gpu_worker = GPUWorker::start_gpu_worker_thread(stack_size_in_mb << 20);
+          gpu_worker = GPUWorker::start_gpu_worker_thread(core_reservations,
+							  stack_size_in_mb << 20);
         }
 	for(unsigned i = 0; i < num_local_gpus; i++) {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
 	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p,
+ 	  GPUProcessor *gp = new GPUProcessor(p, core_reservations,
                                               (i < peer_gpus.size() ?
                                                 peer_gpus[i] : 
                                                 dumb_gpus[i-peer_gpus.size()]), 
@@ -718,13 +725,11 @@ namespace Realm {
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = Realm::CoreReservation::satisfy_reservations(dummy_reservation_ok);
+      bool ok = core_reservations.satisfy_reservations(dummy_reservation_ok);
       if(ok) {
 	if(show_reservations) {
-	  CoreMap *cm = CoreMap::discover_core_map();
-	  std::cout << *cm << std::endl;
-	  delete cm;
-	  CoreReservation::report_reservations(std::cout);
+	  std::cout << *core_reservations.get_core_map() << std::endl;
+	  core_reservations.report_reservations(std::cout);
 	}
       } else {
 	printf("HELP!  Could not satisfy all core reservations!\n");
@@ -1150,18 +1155,29 @@ namespace Realm {
 #endif
 
 
-      // delete local processors and memories
+      // delete processors, memories, nodes, etc.
       {
-	Node& n = nodes[gasnet_mynode()];
+	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	  Node& n = nodes[i];
 
-	for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
-	    it != n.memories.end();
-	    it++)
-	  delete (*it);
+	  for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
+	      it != n.memories.end();
+	      it++)
+	    delete (*it);
 
-	// node 0 also deletes the gasnet memory
-	if(gasnet_mynode() == 0)
-	  delete global_memory;
+	  for(std::vector<ProcessorImpl *>::iterator it = n.processors.begin();
+	      it != n.processors.end();
+	      it++)
+	    delete (*it);
+	}
+	
+	delete[] nodes;
+	delete global_memory;
+	delete local_event_free_list;
+	delete local_barrier_free_list;
+	delete local_reservation_free_list;
+	delete local_index_space_free_list;
+	delete local_proc_group_free_list;
       }
 
       // need to kill other threads too so we can actually terminate process
@@ -1178,6 +1194,9 @@ namespace Realm {
       if(running_as_background_thread) {
 	pthread_exit(0);
       } else {
+	// not strictly necessary, but helps us find memory leaks
+	runtime_singleton = 0;
+	delete this;
 	exit(0);
       }
     }

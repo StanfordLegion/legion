@@ -274,7 +274,8 @@ namespace LegionRuntime {
       return ok;
     }
 
-    GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
+    GPUProcessor::GPUProcessor(Processor _me, Realm::CoreReservationSet& crs, 
+			       int _gpu_index, 
                                size_t _zcmem_size, size_t _fbmem_size, 
                                size_t _stack_size, GPUWorker *worker/*can be 0*/,
                                int streams)
@@ -320,7 +321,7 @@ namespace LegionRuntime {
 
       std::string name = stringbuilder() << "GPU proc " << _me;
 
-      core_rsrv = new Realm::CoreReservation(name, params);
+      core_rsrv = new Realm::CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS_FOR_GPU
       Realm::UserThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::UserThreadTaskScheduler>(me, *core_rsrv, this);
@@ -676,10 +677,10 @@ namespace LegionRuntime {
 
     /*static*/ GPUWorker *GPUWorker::worker_singleton = 0;
 
-    GPUWorker::GPUWorker(size_t stack_size)
+    GPUWorker::GPUWorker(Realm::CoreReservationSet& crs, size_t stack_size)
       : copies_empty(true), jobs_empty(true),
 	worker_cond(worker_lock), worker_shutdown_requested(false),
-	core_rsrv("GPU worker thread", Realm::CoreReservationParameters())
+	core_rsrv("GPU worker thread", crs, Realm::CoreReservationParameters())
     {
       Realm::ThreadLaunchParameters tlp;
 
@@ -781,9 +782,10 @@ namespace LegionRuntime {
     }
 
     /*static*/
-    GPUWorker* GPUWorker::start_gpu_worker_thread(size_t stack_size)
+    GPUWorker* GPUWorker::start_gpu_worker_thread(Realm::CoreReservationSet& crs,
+						  size_t stack_size)
     {
-      worker_singleton = new GPUWorker(stack_size);
+      worker_singleton = new GPUWorker(crs, stack_size);
       return worker_singleton;
     }
 

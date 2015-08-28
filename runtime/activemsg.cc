@@ -69,7 +69,7 @@ static bool is_registered(void *ptr)
 
 class IncomingMessageManager {
 public:
-  IncomingMessageManager(int _nodes);
+  IncomingMessageManager(int _nodes, Realm::CoreReservationSet& crs);
   ~IncomingMessageManager(void);
 
   void add_incoming_message(int sender, IncomingMessage *msg);
@@ -620,7 +620,7 @@ protected:
 static DetailedMessageTiming detailed_message_timing;
 #endif
 
-IncomingMessageManager::IncomingMessageManager(int _nodes)
+IncomingMessageManager::IncomingMessageManager(int _nodes, Realm::CoreReservationSet& crs)
   : nodes(_nodes), shutdown_flag(0)
 {
   heads = new IncomingMessage *[nodes];
@@ -634,7 +634,7 @@ IncomingMessageManager::IncomingMessageManager(int _nodes)
   gasnet_hsl_init(&mutex);
   gasnett_cond_init(&condvar);
 
-  core_rsrv = new Realm::CoreReservation("AM handlers",
+  core_rsrv = new Realm::CoreReservation("AM handlers", crs,
 					 Realm::CoreReservationParameters());
 }
 
@@ -1770,7 +1770,7 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
 
 class EndpointManager {
 public:
-  EndpointManager(int num_endpoints)
+  EndpointManager(int num_endpoints, Realm::CoreReservationSet& crs)
     : total_endpoints(num_endpoints)
   {
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
@@ -1797,7 +1797,7 @@ public:
 
     // for worker threads
     shutdown_flag = false;
-    core_rsrv = new Realm::CoreReservation("EndpointManager workers",
+    core_rsrv = new Realm::CoreReservation("EndpointManager workers", crs,
 					   Realm::CoreReservationParameters());
   }
 
@@ -1981,6 +1981,7 @@ static void handle_flip_ack(gasnet_token_t token,
 void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		    int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
+		    Realm::CoreReservationSet& crs,
 		    int argc, const char *argv[])
 {
   size_t srcdatapool_size = 64 << 20;
@@ -2094,7 +2095,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
 #endif
 
-  endpoint_manager = new EndpointManager(gasnet_nodes());
+  endpoint_manager = new EndpointManager(gasnet_nodes(), crs);
 
   init_deferred_frees();
 }
@@ -2157,9 +2158,9 @@ void start_polling_threads(int count)
   endpoint_manager->start_polling_threads(count);
 }
 
-void start_handler_threads(int count, size_t stack_size)
+void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stack_size)
 {
-  incoming_message_manager = new IncomingMessageManager(gasnet_nodes());
+  incoming_message_manager = new IncomingMessageManager(gasnet_nodes(), crs);
 
   incoming_message_manager->start_handler_threads(count, stack_size);
 }

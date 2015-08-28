@@ -81,7 +81,7 @@ namespace LegionRuntime {
 
     class DmaRequestQueue {
     public:
-      DmaRequestQueue(void);
+      DmaRequestQueue(Realm::CoreReservationSet& crs);
 
       void enqueue_request(DmaRequest *r);
 
@@ -278,9 +278,9 @@ namespace LegionRuntime {
       Waiter waiter;
     };
 
-    DmaRequestQueue::DmaRequestQueue(void)
+    DmaRequestQueue::DmaRequestQueue(Realm::CoreReservationSet& crs)
       : queue_condvar(queue_mutex)
-      , core_rsrv("DMA request queue", CoreReservationParameters())
+      , core_rsrv("DMA request queue", crs, CoreReservationParameters())
     {
       queue_sleepers = 0;
       shutdown_flag = false;
@@ -4169,18 +4169,20 @@ namespace LegionRuntime {
       }
     }
     
-    void start_dma_worker_threads(int count)
+    void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
 #ifdef OLD_LEGION_PROF
       CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
 #endif
-      dma_queue = new DmaRequestQueue;
+      dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }
 
     void stop_dma_worker_threads(void)
     {
       dma_queue->shutdown_queue();
+      delete dma_queue;
+      dma_queue = 0;
     }
 
   };

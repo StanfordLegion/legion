@@ -260,14 +260,12 @@ namespace Realm {
     CoreReservationParameters& set_max_heap_size(ptrdiff_t new_max_heap_size);
   };
 
+  class CoreReservationSet;
+
   class CoreReservation {
   public:
-    CoreReservation(const std::string& _name, const CoreReservationParameters& _params);
-
-    // if 'dummy_reservation_ok' is set, a failed reservation will be "satisfied" with
-    //  one that uses dummy (i.e. no assign cores) reservations
-    static bool satisfy_reservations(bool dummy_reservation_ok = false);
-    static void report_reservations(std::ostream& os);
+    CoreReservation(const std::string& _name, CoreReservationSet &crs,
+		    const CoreReservationParameters& _params);
 
     // eventually we'll get an Allocation, which is an opaque type because it's OS-dependent :(
     struct Allocation;
@@ -288,6 +286,9 @@ namespace Realm {
     // no locks needed here because we aren't multi-threaded until the allocation exists
     Allocation *allocation;
   protected:
+    friend class CoreReservationSet;
+    void notify_listeners(void);
+
     std::list<NotificationListener *> listeners;
   };    
 
@@ -325,6 +326,31 @@ namespace Realm {
 
     ProcMap all_procs;
     DomainMap by_domain;
+  };
+
+  // manages a set of core reservations and if/how they are satisfied
+  class CoreReservationSet {
+  public:
+    // if constructed without a CoreMap, it'll attempt to discover one itself
+    CoreReservationSet(void);
+    CoreReservationSet(const CoreMap* _cm);
+
+    ~CoreReservationSet(void);
+
+    const CoreMap *get_core_map(void) const;
+
+    void add_reservation(CoreReservation& rsrv);
+
+    // if 'dummy_reservation_ok' is set, a failed reservation will be "satisfied" with
+    //  one that uses dummy (i.e. no assign cores) reservations
+    bool satisfy_reservations(bool dummy_reservation_ok = false);
+
+    void report_reservations(std::ostream& os) const;
+
+  protected:
+    bool owns_coremap;
+    const CoreMap *cm;
+    std::map<CoreReservation *, CoreReservation::Allocation *> allocations;
   };
 
 #if 0

@@ -153,7 +153,7 @@ namespace LegionRuntime {
 
     class GPUWorker {
     public:
-      GPUWorker(size_t stack_size);
+      GPUWorker(Realm::CoreReservationSet& crs, size_t stack_size);
       virtual ~GPUWorker(void);
     public:
       void shutdown(void);
@@ -163,7 +163,8 @@ namespace LegionRuntime {
     public:
       void thread_main(void);
     public:
-      static GPUWorker* start_gpu_worker_thread(size_t stack_size);
+      static GPUWorker* start_gpu_worker_thread(Realm::CoreReservationSet& crs,
+						size_t stack_size);
       static void stop_gpu_worker_thread(void);
     protected:
       // Keep these sorted by processors
@@ -180,7 +181,8 @@ namespace LegionRuntime {
 
     class GPUProcessor : public Realm::LocalTaskProcessor {
     public:
-      GPUProcessor(Processor _me, int _gpu_index, 
+      GPUProcessor(Processor _me, Realm::CoreReservationSet& crs,
+		   int _gpu_index, 
 		   size_t _zcmem_size, size_t _fbmem_size, 
                    size_t _stack_size, GPUWorker *worker/*can be 0*/,
                    int _streams);

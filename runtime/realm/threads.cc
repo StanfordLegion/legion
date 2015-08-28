@@ -84,12 +84,12 @@ namespace Realm {
   // we keep a global map of reservations to their allocations (this is inherently a global problem)
   std::map<CoreReservation *, CoreReservation::Allocation *> allocations;
 
-  CoreReservation::CoreReservation(const std::string& _name, const CoreReservationParameters& _params)
+  CoreReservation::CoreReservation(const std::string& _name, CoreReservationSet &crs,
+				   const CoreReservationParameters& _params)
     : name(_name), params(_params), allocation(0)
   {
-    // reservations automatically add themselves to the map
-    assert(allocations.count(this) == 0);
-    allocations[this] = 0;
+    // reservations automatically add themselves to the set
+    crs.add_reservation(*this);
 
     log_thread.info() << "reservation created: " << name;
   }
@@ -103,6 +103,57 @@ namespace Realm {
     cpu_set_t allowed_cpus;
 #endif
   };
+
+  void CoreReservation::add_listener(NotificationListener *listener)
+  {
+    if(allocation) {
+      // already have allocation - just call back immediately
+      listener->notify_allocation(*this);
+    } else {
+      listeners.push_back(listener);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CoreReservationSet
+
+  CoreReservationSet::CoreReservationSet(void)
+    : owns_coremap(true), cm(0)
+  {
+    cm = CoreMap::discover_core_map();
+  }
+
+  CoreReservationSet::CoreReservationSet(const CoreMap *_cm)
+    : owns_coremap(false), cm(_cm)
+  {
+  }
+
+  CoreReservationSet::~CoreReservationSet(void)
+  {
+    if(owns_coremap)
+      delete const_cast<CoreMap *>(cm);
+    
+    // we don't own the CoreReservation *'s in the allocation map, but we do own the 
+    //  allocations
+    for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocations.begin();
+	it != allocations.end();
+	it++)
+      delete it->second;
+    allocations.clear();
+  }
+
+  const CoreMap *CoreReservationSet::get_core_map(void) const
+  {
+    return cm;
+  }
+
+  void CoreReservationSet::add_reservation(CoreReservation& rsrv)
+  {
+    assert(allocations.count(&rsrv) == 0);
+    allocations[&rsrv] = 0;
+  }
 
   static bool can_add_usage(CoreReservationParameters::CoreUsage current,
 			    CoreReservationParameters::CoreUsage reqd)
@@ -363,10 +414,8 @@ namespace Realm {
     return true;
   }
 
-  /*static*/ bool CoreReservation::satisfy_reservations(bool dummy_reservation_ok /*= false*/)
+  bool CoreReservationSet::satisfy_reservations(bool dummy_reservation_ok /*= false*/)
   {
-    CoreMap *cm = CoreMap::discover_core_map();
-
     // remember who is missing an allocation - we'll need to notify them
     std::set<CoreReservation *> missing;
     for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocations.begin();
@@ -431,7 +480,7 @@ namespace Realm {
     return os;
   }
 
-  /*static*/ void CoreReservation::report_reservations(std::ostream& os)
+  void CoreReservationSet::report_reservations(std::ostream& os) const
   {
     // iterate over the allocation map and print stuff out
     for(std::map<CoreReservation *, CoreReservation::Allocation *>::const_iterator it = allocations.begin();
@@ -446,16 +495,6 @@ namespace Realm {
 	os << "not allocated";
       }
       os << std::endl;
-    }
-  }
-
-  void CoreReservation::add_listener(NotificationListener *listener)
-  {
-    if(allocation) {
-      // already have allocation - just call back immediately
-      listener->notify_allocation(*this);
-    } else {
-      listeners.push_back(listener);
     }
   }
 
@@ -569,6 +608,8 @@ namespace Realm {
 
     // time to actually create the thread
     CHECK_PTHREAD( pthread_create(&thread, &attr, pthread_entry, this) );
+
+    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 
     log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - pthread " << thread;
   }
