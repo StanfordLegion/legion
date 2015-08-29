@@ -9732,7 +9732,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionInfo::NodeInfo::NodeInfo(const NodeInfo &rhs)
       : physical_state((rhs.physical_state == NULL) ? NULL : 
-                        rhs.physical_state->clone(!rhs.needs_capture())),
+                        rhs.physical_state->clone(!rhs.needs_capture(),true)),
         field_versions(rhs.field_versions), advance_mask(rhs.advance_mask),
         bit_mask(rhs.bit_mask) 
     //--------------------------------------------------------------------------
@@ -9762,7 +9762,7 @@ namespace LegionRuntime {
       {
         if (physical_state != NULL)
           delete physical_state;
-        physical_state = rhs.physical_state->clone(!rhs.needs_capture());
+        physical_state = rhs.physical_state->clone(!rhs.needs_capture(), true);
       }
       if ((field_versions != NULL) && (field_versions->remove_reference()))
         delete field_versions;
@@ -10199,12 +10199,12 @@ namespace LegionRuntime {
 #endif
         // Capture the physical state versions, but not the actual state
         if (current.physical_state != NULL)
-          next.physical_state = 
-            current.physical_state->clone(false/*capture state*/);
+          next.physical_state = current.physical_state->clone(
+              false/*capture state*/, false/*need advance*/);
         next.advance_mask = current.advance_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & 15;
+        next.bit_mask = current.bit_mask & 0x7;
         // Needs capture is already set
       }
     }
@@ -10244,12 +10244,12 @@ namespace LegionRuntime {
         assert(next.physical_state == NULL); 
 #endif
         if (current.physical_state != NULL)
-          next.physical_state = 
-            current.physical_state->clone(clone_mask, false/*capture state*/);
+          next.physical_state = current.physical_state->clone(
+              clone_mask, false/*capture state*/, false/*need advance*/);
         next.advance_mask = current.advance_mask & clone_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & 15;
+        next.bit_mask = current.bit_mask & 0x7;
         // Needs capture is already set
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -13205,7 +13205,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState* PhysicalState::clone(bool capture_state) const
+    PhysicalState* PhysicalState::clone(bool capture_state, bool need_adv) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13223,14 +13223,17 @@ namespace LegionRuntime {
           result->add_version_state(it->first, it->second);
         }
       }
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
-            advance_states.begin(); it1 != advance_states.end(); it1++)
+      if (need_adv && !advance_states.empty())
       {
-        const VersionStateInfo &info = it1->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              it1 = advance_states.begin(); it1 != advance_states.end(); it1++)
         {
-          result->add_advance_state(it->first, it->second);
+          const VersionStateInfo &info = it1->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            result->add_advance_state(it->first, it->second);
+          }
         }
       }
       if (capture_state)
@@ -13247,7 +13250,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalState* PhysicalState::clone(const FieldMask &clone_mask, 
-                                        bool capture_state) const
+                                        bool capture_state, bool need_adv) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13270,19 +13273,22 @@ namespace LegionRuntime {
           result->add_version_state(it->first, it->second);
         }
       }
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 =
-            advance_states.begin(); it1 != advance_states.end(); it1++)
+      if (need_adv && !advance_states.empty())
       {
-        const VersionStateInfo &info = it1->second;
-        if (it1->second.valid_fields * clone_mask)
-          continue;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              it1 = advance_states.begin(); it1 != advance_states.end(); it1++)
         {
-          FieldMask overlap = it->second & clone_mask;
-          if (!overlap)
+          const VersionStateInfo &info = it1->second;
+          if (it1->second.valid_fields * clone_mask)
             continue;
-          result->add_advance_state(it->first, it->second);
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            FieldMask overlap = it->second & clone_mask;
+            if (!overlap)
+              continue;
+            result->add_advance_state(it->first, it->second);
+          }
         }
       }
       if (capture_state)

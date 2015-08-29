@@ -1446,6 +1446,8 @@ namespace LegionRuntime {
         ~NodeInfo(void);
         NodeInfo& operator=(const NodeInfo &rhs);
       public:
+        // Don't forget to update clone_from methods
+        // when changing these bit values
         inline void set_path_only(void) { bit_mask |= 1; }
         inline void set_needs_final(void) { bit_mask |= 2; }
         inline void set_close_top(void) { bit_mask |= 4; }
@@ -1971,8 +1973,9 @@ namespace LegionRuntime {
       void reset(void);
       void record_created_instance(InstanceView *view);
     public:
-      PhysicalState* clone(bool clone_state) const;
-      PhysicalState* clone(const FieldMask &clone_mask, bool clone_state) const;
+      PhysicalState* clone(bool clone_state, bool need_advance) const;
+      PhysicalState* clone(const FieldMask &clone_mask, 
+                           bool clone_state, bool need_advance) const;
       void make_local(std::set<Event> &preconditions, 
                       bool needs_final, bool needs_advance); 
     public:
