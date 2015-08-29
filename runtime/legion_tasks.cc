@@ -1836,7 +1836,7 @@ namespace LegionRuntime {
             }
           }
           // Regions are aliased, see if there are overlapping fields
-          bool overlap = true;
+          bool overlap = false;
           if (regions[i].privilege_fields.size() < 
               regions[j].privilege_fields.size())
           {
