@@ -10298,6 +10298,7 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(upper_bound_node != NULL);
+#endif
         if (upper_bound_node->is_region())
         {
           rez.serialize<bool>(true);
@@ -10308,7 +10309,6 @@ namespace LegionRuntime {
           rez.serialize<bool>(false);
           rez.serialize(upper_bound_node->as_partition_node()->handle);
         }
-#endif
       }
     }
 
