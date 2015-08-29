@@ -10760,7 +10760,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10787,7 +10787,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10813,7 +10813,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
+                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10858,7 +10858,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOGICAL_REGION_NODE,
-                                  LOGICAL_TREE_VIRTUAL_CHANNEL, false/*flush*/);
+                                  LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
