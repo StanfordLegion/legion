@@ -10194,10 +10194,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(next.physical_state == NULL);
 #endif
-        // Don't capture the physical states, we don't need them
-        // If we do capture them, we'll create a cycle in the 
-        // garbage collection scheme that will hold onto all
-        // version states from the beginning of time
+#ifdef DEBUG_HIGH_LEVEL
+        assert(next.physical_state == NULL); 
+#endif
+        // Capture the physical state versions, but not the actual state
+        if (current.physical_state != NULL)
+          next.physical_state = 
+            current.physical_state->clone(false/*capture state*/);
+        next.advance_mask = current.advance_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
         next.bit_mask = current.bit_mask & 15;
@@ -10239,12 +10243,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(next.physical_state == NULL); 
 #endif
-        // Don't capture the physical states, we don't need them
-        // If we do capture them, we'll create a cycle in the 
-        // garbage collection scheme that will hold onto all
-        // version states from the beginning of time
-        // Just copy the reference, we'll still have all the necessary
-        // version numbers for each fields and maybe a few more
+        if (current.physical_state != NULL)
+          next.physical_state = 
+            current.physical_state->clone(clone_mask, false/*capture state*/);
+        next.advance_mask = current.advance_mask & clone_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
         next.bit_mask = current.bit_mask & 15;
@@ -13974,12 +13976,9 @@ namespace LegionRuntime {
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(currently_valid);
-      // If we are the top we should not be in initial or final mode
+      // If we are the top we should not be in final mode
       if (top)
-      {
-        assert(merge_mask * initial_fields);
         assert(merge_mask * final_fields);
-      }
 #endif
       // Do the filtering first
       if (!top)
@@ -14146,28 +14145,34 @@ namespace LegionRuntime {
       {
         AutoLock s_lock(state_lock);
         // Check to see which fields we already have initial events for
-        if (!initial_events.empty() && !(request_mask * initial_fields))
+        if (!(remaining_mask * initial_fields))
         {
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                initial_events.begin(); it != initial_events.end(); it++)
+          if (!initial_events.empty())
           {
-            if (remaining_mask * it->second)
-              continue;
-            preconditions.insert(it->first);
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  initial_events.begin(); it != initial_events.end(); it++)
+            {
+              if (remaining_mask * it->second)
+                continue;
+              preconditions.insert(it->first);
+            }
           }
           remaining_mask -= initial_fields;
           if (!remaining_mask)
             return;
         }
         // Also check to see which fields we already have final events for
-        if (!final_events.empty() && !(request_mask * final_fields))
+        if (!(remaining_mask * final_fields))
         {
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                final_events.begin(); it != final_events.end(); it++)
+          if (!final_events.empty())
           {
-            if (remaining_mask * it->second)
-              continue;
-            preconditions.insert(it->first);
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  final_events.begin(); it != final_events.end(); it++)
+            {
+              if (remaining_mask * it->second)
+                continue;
+              preconditions.insert(it->first);
+            }
           }
           remaining_mask -= final_fields;
           if (!remaining_mask)
@@ -14234,14 +14239,17 @@ namespace LegionRuntime {
       LegionDeque<RequestInfo>::aligned targets;
       {
         AutoLock s_lock(state_lock);
-        if (!final_events.empty() && !(req_mask * final_fields))
+        if (!(remaining_mask * final_fields))
         {
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                final_events.begin(); it != final_events.end(); it++)
+          if (!final_events.empty())
           {
-            if (remaining_mask * it->second)
-              continue;
-            preconditions.insert(it->first);
+            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                  final_events.begin(); it != final_events.end(); it++)
+            {
+              if (remaining_mask * it->second)
+                continue;
+              preconditions.insert(it->first);
+            }
           }
           remaining_mask -= final_fields;
           if (!remaining_mask)
@@ -14672,7 +14680,7 @@ namespace LegionRuntime {
         // First things first, transform the field mask
         manager->owner->column_source->transform_field_mask(request_mask, 
                                                             owner_space);
-        // If we are not the owner, we should definitely be able to handle this 
+        // If we are not the owner, we should definitely be able to handle this
         std::set<Event> launch_preconditions;
 #ifdef DEBUG_HIGH_LEVEL
         FieldMask remaining_mask = request_mask;
@@ -14830,11 +14838,11 @@ namespace LegionRuntime {
           if (!local_preconditions.empty())
           {
             Event pre = Event::merge_events(local_preconditions);
-            launch_send_version_state(source, to_trigger, request_kind, 
+            launch_send_version_state(source, local_trigger, request_kind,
                                       local_fields, pre); 
           }
           else
-            launch_send_version_state(source, to_trigger, 
+            launch_send_version_state(source, local_trigger,
                                       request_kind, local_fields); 
           done_conditions.insert(local_trigger);
         }
@@ -19859,7 +19867,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      logical_views.erase(view->did);
+      LegionMap<DistributedID,LogicalView*>::aligned::iterator finder = 
+        logical_views.find(view->did);
+      if ((finder != logical_views.end()) && (finder->second == view))
+        logical_views.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -23374,7 +23385,9 @@ namespace LegionRuntime {
     PhysicalManager::~PhysicalManager(void)
     //--------------------------------------------------------------------------
     {
-      region_node->unregister_physical_manager(this);
+      // Only do the unregistration if we were successfully registered
+      if (registered_with_runtime)
+        region_node->unregister_physical_manager(this);
       // If we're the owner remove our resource references
       if (is_owner())
       {
@@ -23710,7 +23723,10 @@ namespace LegionRuntime {
                                         target_node, layout, use_event,
                                         depth, false/*reg now*/, flags);
       if (!target_node->register_physical_manager(inst_manager))
-        legion_delete(inst_manager);
+      {
+        if (inst_manager->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(inst_manager);
+      }
       else
       {
         inst_manager->register_with_runtime();
@@ -27043,7 +27059,10 @@ namespace LegionRuntime {
                                       depth, false/*don't register yet*/,
                                       is_persistent);
       if (!target_node->register_logical_view(new_view))
-        legion_delete(new_view);
+      {
+        if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(new_view);
+      }
       else
         new_view->update_remote_instances(source);
     }
@@ -28388,6 +28407,7 @@ namespace LegionRuntime {
     CompositeVersionInfo::~CompositeVersionInfo(void)
     //--------------------------------------------------------------------------
     {
+      version_info.clear();
     }
 
     //--------------------------------------------------------------------------
