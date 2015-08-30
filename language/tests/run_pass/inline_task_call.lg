@@ -12,30 +12,38 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- invalid_inline_task4.lg:23: inline tasks cannot have a parameter of type region(int32)
--- task f(r : region(int))
---        ^
-
 import "legion"
 
+task f(s : region(int), y : ptr(int, s)) : int
+where reads(s) do
+  return @y
+end
+
+task h(s : region(int), y : ptr(int, s)) : int
+where reads(s), writes(s) do
+  @y += 100
+  return @y
+end
+
 __demand(__inline)
-task f(r : region(int))
-where reads(r) do
-  var x = 0
-  for e in r do
-    x = x + @e
+task id(x : int) : int
+  return x
+end
+
+task g() : int
+  var r = region(ispace(ptr, 5), int)
+  var x = new(ptr(int, r))
+  @x = 5
+  __demand(__inline, f(r, x))
+  __demand(__inline, h(r, x))
+  f(r, x)
+  for i = 0, 5 do
+    h(r, x)
   end
+  return __demand(__inline, f(r, x))
 end
 
 task main()
-  var r = region(int, 10)
-  for i = 0, 10 do
-    var p = new(ptr(int, r))
-    @p = i
-  end
-
-  f(r)
+  legionlib.assert(g() == 605, "test failed")
 end
-
 legionlib.start(main)
