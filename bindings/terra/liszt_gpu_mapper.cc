@@ -94,13 +94,13 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
         // Latency-optimized cores (LOCs) are CPUs
         case Processor::LOC_PROC:
           {
-            printf("  Processor ID %x is CPU\n", it->id); 
+            printf("  Processor ID " IDFMT " is CPU\n", it->id); 
             break;
           }
         // Throughput-optimized cores (TOCs) are GPUs
         case Processor::TOC_PROC:
           {
-            printf("  Processor ID %x is GPU\n", it->id);
+            printf("  Processor ID " IDFMT " is GPU\n", it->id);
             break;
           }
         // Utility processors are helper processors for
@@ -108,7 +108,7 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
         // should not be used for running application tasks
         case Processor::UTIL_PROC:
           {
-            printf("  Processor ID %x is utility\n", it->id);
+            printf("  Processor ID " IDFMT " is utility\n", it->id);
             break;
           }
         default:
@@ -129,28 +129,28 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
         // RDMA addressable memory when running with GASNet
         case Memory::GLOBAL_MEM:
           {
-            printf("  GASNet Global Memory ID %x has %ld KB\n", 
+            printf("  GASNet Global Memory ID " IDFMT " has %ld KB\n", 
                     it->id, memory_size_in_kb);
             break;
           }
         // DRAM on a single node
         case Memory::SYSTEM_MEM:
           {
-            printf("  System Memory ID %x has %ld KB\n",
+            printf("  System Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Pinned memory on a single node
         case Memory::REGDMA_MEM:
           {
-            printf("  Pinned Memory ID %x has %ld KB\n",
+            printf("  Pinned Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // A memory associated with a single socket
         case Memory::SOCKET_MEM:
           {
-            printf("  Socket Memory ID %x has %ld KB\n",
+            printf("  Socket Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -158,42 +158,42 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
         // all GPUs on a single node
         case Memory::Z_COPY_MEM:
           {
-            printf("  Zero-Copy Memory ID %x has %ld KB\n",
+            printf("  Zero-Copy Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // GPU framebuffer memory for a single GPU
         case Memory::GPU_FB_MEM:
           {
-            printf("  GPU Frame Buffer Memory ID %x has %ld KB\n",
+            printf("  GPU Frame Buffer Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Disk memory on a single node
         case Memory::DISK_MEM:
           {
-            printf("  Disk Memory ID %x has %ld KB\n",
+            printf("  Disk Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L3 cache
         case Memory::LEVEL3_CACHE:
           {
-            printf("  Level 3 Cache ID %x has %ld KB\n",
+            printf("  Level 3 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L2 cache
         case Memory::LEVEL2_CACHE:
           {
-            printf("  Level 2 Cache ID %x has %ld KB\n",
+            printf("  Level 2 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L1 cache
         case Memory::LEVEL1_CACHE:
           {
-            printf("  Level 1 Cache ID %x has %ld KB\n",
+            printf("  Level 1 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -204,7 +204,7 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
 
     std::set<Memory> vis_mems;
     machine.get_visible_memories(local_proc, vis_mems);
-    printf("There are %ld memories visible from processor %x\n",
+    printf("There are %ld memories visible from processor " IDFMT "\n",
             vis_mems.size(), local_proc.id);
     for (std::set<Memory>::const_iterator it = vis_mems.begin();
           it != vis_mems.end(); it++)
@@ -222,7 +222,7 @@ LzGpuMapper::LzGpuMapper(Machine machine, HighLevelRuntime *rt, Processor local)
       // We should only have found 1 results since we
       // explicitly specified both values.
       assert(results == 1);
-      printf("  Memory %x has bandwidth %d and latency %d\n",
+      printf("  Memory " IDFMT " has bandwidth %d and latency %d\n",
               it->id, affinities[0].bandwidth, affinities[0].latency);
     }
   }
@@ -296,7 +296,7 @@ bool LzGpuMapper::map_inline(Inline *inline_operation)
   req.target_ranking.push_back(local_sysmem);
 
   log_mapper.debug(
-    "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
+    "inline mapping region (%d,%d,%d) target ranking front " IDFMT " (size %lu)",
     req.region.get_index_space().get_id(),
     req.region.get_field_space().get_id(),
     req.region.get_tree_id(),
@@ -325,7 +325,7 @@ void LzGpuMapper::notify_mapping_failed(const Mappable *mappable)
       RegionRequirement &req = _inline->requirement;
       LogicalRegion region = req.region;
       log_mapper.warning(
-        "mapping %s on inline region (%d,%d,%d) memory %d",
+        "mapping %s on inline region (%d,%d,%d) memory " IDFMT,
         (req.mapping_failed ? "failed" : "succeeded"),
         region.get_index_space().get_id(),
         region.get_field_space().get_id(),
