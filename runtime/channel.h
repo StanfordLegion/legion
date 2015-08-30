@@ -813,8 +813,7 @@ namespace LegionRuntime{
           available_reqs.pop();
         }
         free(requests);
-        delete pir;
-        delete lsi;
+        delete hli;
         // trigger complete event
         if (complete_event.exists()) {
           get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -830,8 +829,9 @@ namespace LegionRuntime{
       char *buf_base;
       HDFMemory::HDFMetadata *hdf_metadata;
       std::vector<OffsetsAndSize>::iterator fit;
-      GenericPointInRectIterator<DIM>* pir;
-      GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
+      //GenericPointInRectIterator<DIM>* pir;
+      //GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
+      Layouts::HDFLayoutIterator<DIM>* hli;
     };
 #endif
 

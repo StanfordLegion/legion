@@ -272,6 +272,70 @@ namespace LegionRuntime {
       size_t cur_idx, rect_size;
     };
 
+#ifdef USE_HDF
+   template<unsigned DIM>
+   class HDFLayoutIterator {
+   public:
+     HDFLayoutIterator(Rect<DIM> rect, Mapping<DIM, 1> *m, size_t bs)
+     : orig_rect(rect), mapping(m), cur_idx(0), rect_size(rect.volume()), block_size(bs)
+     {
+       mapping->add_reference();
+       Rect<DIM> local_rect;
+       cur_idx = mapping->image_linear_subrect(orig_rect, local_rect, strides);
+       assert(cur_idx == 0);
+       sub_rect = Rect<DIM>(local_rect.lo, local_rect.lo);
+       size_t subtotal = 1;
+       size_t left_over = block_size - cur_idx % block_size;
+       for (int j = 0; j < DIM; j++) {
+         if (strides[j][0] == subtotal && subtotal * local_rect.dim_size(j) <= left_over) {
+           sub_rect.hi.x[j] = local_rect.hi[j];
+           subtotal *= local_rect.dim_size(j);
+         }
+         else
+           break;
+       }
+     }
+
+     ~HDFLayoutIterator()
+     {
+       mapping->remove_reference();
+     }
+
+     bool any_left()
+     {
+       return cur_idx < rect_size;
+     }
+
+     bool step()
+     {
+       cur_idx += sub_rect.volume();
+       size_t left_over = block_size - cur_idx % block_size;
+       if (!any_left())
+         return false;
+       Rect<DIM> r = mapping->preimage(make_point(cur_idx)), temp_rect;
+       assert(r.volume() == 1);
+       r.hi = orig_rect.hi;
+       mapping->image_linear_subrect(r, temp_rect, strides);
+       sub_rect = Rect<DIM>(temp_rect.lo, temp_rect.lo);
+       int subtotal = 1;
+       for (int j = 0; j < DIM; j++) {
+         if (strides[j][0] == subtotal && subtotal * temp_rect.dim_size(j) <= left_over) {
+           sub_rect.hi.x[j] = temp_rect.hi[j];
+           subtotal *= temp_rect.dim_size(j);
+         }
+         else
+           break;
+       }
+       return true;
+     }
+   public:
+     Rect<DIM> orig_rect, sub_rect;
+     Point<1> strides[DIM];
+     Mapping<DIM, 1> *mapping;
+     size_t cur_idx, rect_size, block_size;
+   };
+#endif
+
   } // namespace Layout
 } // namespace LegionRuntime
 #endif

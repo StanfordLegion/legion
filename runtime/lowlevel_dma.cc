@@ -2736,7 +2736,7 @@ namespace LegionRuntime {
           assert(0);
         }
       } else {
-        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM)
+        if (src_ll_kind == Memory::REGDMA_MEM && dst_ll_kind == Memory::REGDMA_MEM)
           return XferDes::XFER_REMOTE_WRITE;
         else
           return XferDes::XFER_NONE;
