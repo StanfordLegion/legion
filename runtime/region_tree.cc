@@ -10176,7 +10176,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionInfo::clone_version_info(RegionTreeForest *context,
-                                   LogicalRegion handle, const VersionInfo &rhs)
+                 LogicalRegion handle, const VersionInfo &rhs, bool check_below)
     //--------------------------------------------------------------------------
     {
       // Copy over all the version infos from the logical region up to
@@ -10185,7 +10185,44 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(current != NULL);
 #endif
-      while (node_infos.find(current) == node_infos.end())
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator 
+        current_finder = node_infos.find(current);
+      if (check_below && (current_finder == node_infos.end()))
+      {
+        // See if we have any children we need to clone over
+        std::set<ColorPoint> child_colors;
+        current->get_row_source()->get_colors(child_colors);
+        std::deque<RegionTreeNode*> children; 
+        for (std::set<ColorPoint>::const_iterator it = child_colors.begin();
+              it != child_colors.end(); it++)
+        {
+          children.push_back(current->get_tree_child(*it));
+        }
+        child_colors.clear();
+        while (!children.empty())
+        {
+          // Pop off the next child
+          RegionTreeNode *child_node = children.front();
+          children.pop_front();
+          // See if rhs has an entry for this child
+          LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder =
+            rhs.node_infos.find(child_node);
+          if (finder != rhs.node_infos.end())
+          {
+            // Copy it over, and then find all it's children
+            node_infos.insert(*finder);
+            child_node->get_row_source()->get_colors(child_colors);
+            for (std::set<ColorPoint>::const_iterator it = child_colors.begin();
+                  it != child_colors.end(); it++)
+            {
+              children.push_back(current->get_tree_child(*it));
+            }
+            child_colors.clear();   
+          }
+          // Otherwise we can keep going
+        }
+      }
+      while (current_finder == node_infos.end())
       {
         LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder =
           rhs.node_infos.find(current);
@@ -10202,6 +10239,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(current != NULL);
 #endif
+        current_finder = node_infos.find(current);
       }
     }
 

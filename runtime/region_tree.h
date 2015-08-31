@@ -809,6 +809,7 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual size_t get_num_elmts(void) = 0;
+      virtual void get_colors(std::set<ColorPoint> &colors) = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
@@ -902,6 +903,7 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
+      virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
                                          SemanticTag tag);
@@ -934,7 +936,6 @@ namespace LegionRuntime {
       void record_disjointness(bool disjoint, 
                                const ColorPoint &c1, const ColorPoint &c2);
       Color generate_color(void);
-      void get_colors(std::set<ColorPoint> &colors);
     public:
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -1053,6 +1054,7 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
+      virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
                                          SemanticTag tag);
@@ -1078,7 +1080,6 @@ namespace LegionRuntime {
       void record_disjointness(bool disjoint,
                                const ColorPoint &c1, const ColorPoint &c2);
       bool is_complete(void);
-      void get_colors(std::set<ColorPoint> &colors);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -1501,7 +1502,7 @@ namespace LegionRuntime {
       void make_local(std::set<Event> &preconditions,
                       RegionTreeForest *forest, ContextID ctx);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
-                              const VersionInfo &rhs);
+                              const VersionInfo &rhs, bool check_below);
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     protected:

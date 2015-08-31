@@ -5624,7 +5624,8 @@ namespace LegionRuntime {
           for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
           {
             this->version_infos[idx].clone_version_info(runtime->forest,
-                it->second->find_logical_region(idx), rhs->version_infos[idx]);
+                                   it->second->find_logical_region(idx), 
+                         rhs->version_infos[idx], IS_WRITE(regions[idx]));
           }
         }
       }
