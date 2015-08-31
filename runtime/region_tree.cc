@@ -29452,6 +29452,7 @@ namespace LegionRuntime {
         DistributedID did;
         derez.deserialize(did);
         LogicalView *view = logical_node->find_view(did);
+        view->add_base_resource_ref(COMPOSITE_NODE_REF);
         FieldMask &mask = valid_views[view];
         derez.deserialize(mask);
         field_node->transform_field_mask(mask, source);
