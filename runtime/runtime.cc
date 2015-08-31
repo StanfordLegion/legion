@@ -3262,6 +3262,11 @@ namespace LegionRuntime {
               runtime->handle_index_space_return(derez);
               break;
             }
+          case SEND_INDEX_SPACE_CHILD_REQUEST:
+            {
+              runtime->handle_index_space_child_request(derez);
+              break;
+            }
           case SEND_INDEX_PARTITION_NODE:
             {
               runtime->handle_index_partition_node(derez, remote_address_space);
@@ -10782,6 +10787,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_child_request(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_REQUEST,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_node(AddressSpaceID target, 
                                             Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11493,6 +11507,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_node_return(derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_child_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_node_child_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------

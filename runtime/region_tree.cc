@@ -5317,10 +5317,38 @@ namespace LegionRuntime {
     IndexPartNode* IndexSpaceNode::get_child(const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
+      // See if we have it locally if not go find it
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
+          color_map.find(c);
+        if (finder != color_map.end())
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder->second != NULL);
+#endif
+          return finder->second;
+        }
+      }
+      // if we make it here, send a request
+      AddressSpaceID owner_space = get_owner_space();
+      AddressSpaceID local_space = context->runtime->address_space;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(owner_space != local_space);
+#endif
+      UserEvent ready_event = UserEvent::create_user_event();
+      Serializer rez;
+      rez.serialize(handle);
+      rez.serialize(local_space);
+      rez.serialize(c);
+      rez.serialize(ready_event);
+      context->runtime->send_index_space_child_request(owner_space, rez);
+      ready_event.wait();
+      // Retake the lock and get the result
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert((color_map.find(c) != color_map.end()) &&
-             (color_map[c] != NULL));
+              (color_map[c] != NULL));
 #endif
       return color_map[c];
     }
@@ -6156,6 +6184,69 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::ChildRequestFunctor::apply(AddressSpaceID next)
+    //--------------------------------------------------------------------------
+    {
+      if (next != target)
+        runtime->send_index_space_child_request(next, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::send_child_node(AddressSpaceID target,
+                            const ColorPoint &child_color, UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if we have it
+      IndexPartNode *child_node = NULL;
+      // If we're the owner, check to see if we have it
+      AddressSpaceID local_space = context->runtime->address_space;
+      if (get_owner_space() == local_space)
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
+          color_map.find(child_color);
+        if (finder != color_map.end())
+          child_node = finder->second;
+      }
+      else
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
+          color_map.find(child_color);
+        // We only got this as a result of a broadcast, so see if we
+        // are the owner
+        if ((finder != color_map.end()) &&
+            (finder->second->get_owner_space() == local_space))
+          child_node = finder->second;
+        else
+          return; // nothing for us to do
+      }
+      // If we got the node, send its information
+      if (child_node != NULL)
+      {
+        child_node->send_node(target, false/*up*/, true/*down*/);
+        // Then send the trigger
+        Serializer rez;
+        rez.serialize(to_trigger);
+        context->runtime->send_index_partition_return(target, rez);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(get_owner_space() == local_space); // better be the owner
+#endif
+        // Send out broadcasts to everyone with the node
+        Serializer rez;
+        rez.serialize(handle);
+        rez.serialize(target);
+        rez.serialize(child_color);
+        rez.serialize(to_trigger);
+        ChildRequestFunctor functor(context->runtime, rez, target);
+        creation_set.map(functor);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_creation(
         RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6241,6 +6332,23 @@ namespace LegionRuntime {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_node_child_request(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace handle;
+      derez.deserialize(handle);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      ColorPoint child_color;
+      derez.deserialize(child_color);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      IndexSpaceNode *target = forest->get_node(handle);
+      target->send_child_node(source, child_color, to_trigger);
     }
 
     //--------------------------------------------------------------------------
