@@ -10046,6 +10046,7 @@ namespace LegionRuntime {
       result->denominator = this->denominator * scale_denominator;
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
+      result->remote_parent_ctx = this->remote_parent_ctx;
 #ifdef LEGION_LOGGING
       LegionLogging::log_slice_slice(Processor::get_executing_processor(),
                                      unique_op_id, result->get_unique_op_id());
