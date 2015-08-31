@@ -27933,6 +27933,7 @@ namespace LegionRuntime {
         CompositeNode *new_node = legion_new<CompositeNode>(logical_node,
                             (CompositeNode*)NULL/*parent*/, version_info);
         new_node->unpack_composite_tree(derez, source);
+        new_node->add_reference();
         FieldMask &mask = roots[new_node];
         derez.deserialize(mask);
         logical_node->column_source->transform_field_mask(mask, source);
@@ -29465,6 +29466,7 @@ namespace LegionRuntime {
         CompositeNode *new_node = legion_new<CompositeNode>(child_node, this,
                                                             version_info);
         ChildInfo &info = open_children[new_node];
+        new_node->add_reference();
         derez.deserialize<bool>(info.complete);
         derez.deserialize(info.open_fields);
         field_node->transform_field_mask(info.open_fields, source);
