@@ -1500,6 +1500,8 @@ namespace LegionRuntime {
       void unpack_version_info(Deserializer &derez);
       void make_local(std::set<Event> &preconditions,
                       RegionTreeForest *forest, ContextID ctx);
+      void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
+                              const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     protected:

@@ -5601,9 +5601,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
-      this->version_infos.resize(rhs->version_infos.size());
-      for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
-        this->version_infos[idx] = rhs->version_infos[idx];
       this->index_domain = d;
       this->must_parallelism = rhs->must_parallelism;
       this->sliced = !recurse;
@@ -5615,6 +5612,22 @@ namespace LegionRuntime {
       }
       // Take ownership of all the points
       rhs->assign_points(this, d);
+      // Copy over the version infos that we need, we can skip this if
+      // we are remote and locally mapped
+      if (!is_remote() || !is_locally_mapped())
+      {
+        this->version_infos.resize(rhs->version_infos.size());
+        // Only copy over the version infos that we need for our points
+        for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+              minimal_points.begin(); it != minimal_points.end(); it++)
+        {
+          for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
+          {
+            this->version_infos[idx].clone_version_info(runtime->forest,
+                it->second->find_logical_region(idx), rhs->version_infos[idx]);
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

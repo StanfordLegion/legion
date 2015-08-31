@@ -10175,6 +10175,37 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    void VersionInfo::clone_version_info(RegionTreeForest *context,
+                                   LogicalRegion handle, const VersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Copy over all the version infos from the logical region up to
+      // the upper bound node
+      RegionTreeNode *current = context->get_node(handle);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current != NULL);
+#endif
+      while (node_infos.find(current) == node_infos.end())
+      {
+        LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder =
+          rhs.node_infos.find(current);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != rhs.node_infos.end());
+#endif
+        node_infos.insert(*finder);
+        if (current == rhs.upper_bound_node)
+        {
+          upper_bound_node = current;
+          break;
+        }
+        current = current->get_parent();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(current != NULL);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::clone_from(const VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
