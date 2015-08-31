@@ -212,6 +212,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
       return ast.typed.ExprCall {
         fn = fn_node,
+        inline = "allow",
         args = args,
         expr_type = rval_type,
         span = node.span,
