@@ -27763,6 +27763,10 @@ namespace LegionRuntime {
           derez.deserialize(red_did);
           LogicalView *red_view = node->find_view(red_did);
           red_view->add_nested_resource_ref(did);
+          if (current_state != INACTIVE_STATE)
+            red_view->add_nested_gc_ref(did);
+          if (current_state == VALID_STATE)
+            red_view->add_nested_valid_ref(did);
 #ifdef DEBUG_HIGH_LEVEL
           assert(red_view->is_instance_view());
           assert(red_view->as_instance_view()->is_reduction_view());
