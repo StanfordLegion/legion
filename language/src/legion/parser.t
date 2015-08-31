@@ -176,6 +176,7 @@ function parser.expr_primary(p)
       expr = ast.unspecialized.ExprCall {
         fn = expr,
         args = args,
+        inline = "allow",
         span = ast.span(start, p),
       }
 
@@ -285,6 +286,27 @@ function parser.expr_simple(p)
       value = value,
       span = ast.span(start, p),
     }
+
+  elseif p:matches("__demand") or p:matches("__forbid") then
+    local inline = false
+    if p:nextif("__demand") then
+      inline = "demand"
+    elseif p:nextif("__forbid") then
+      inline = "forbid"
+    else
+      assert(false)
+    end
+
+    p:expect("(")
+    p:expect("__inline")
+    p:expect(",")
+    local call = p:expr()
+    if not call:is(ast.unspecialized.ExprCall) then
+      p:error("pragma '__demand(__inline, ...)' can only be used with calls")
+    end
+    call.inline = inline
+    p:expect(")")
+    return call
 
   elseif p:nextif("isnull") then
     p:expect("(")
@@ -538,7 +560,7 @@ function parser.stat_while(p)
   }
 end
 
-function parser.stat_for_num(p, start, name, type_expr, parallel)
+function parser.stat_for_num(p, start, name, type_expr)
   local values = p:expr_list()
 
   if #values < 2 or #values > 3 then
@@ -553,12 +575,12 @@ function parser.stat_for_num(p, start, name, type_expr, parallel)
     type_expr = type_expr,
     values = values,
     block = block,
-    parallel = parallel,
+    parallel = "allow",
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_for_list(p, start, name, type_expr, vectorize)
+function parser.stat_for_list(p, start, name, type_expr)
   local value = p:expr()
 
   p:expect("do")
@@ -569,34 +591,12 @@ function parser.stat_for_list(p, start, name, type_expr, vectorize)
     type_expr = type_expr,
     value = value,
     block = block,
-    vectorize = vectorize,
+    vectorize = "allow",
     span = ast.span(start, p),
   }
 end
 
 function parser.stat_for(p)
-  local parallel = "allow"
-  local vectorize = "allow"
-
-  local pragma = false
-  if p:nextif("__demand") then
-    pragma = "demand"
-  elseif p:nextif("__forbid") then
-    pragma = "forbid"
-  end
-
-  if pragma then
-    p:expect("(")
-    if p:nextif("__parallel") then
-      parallel = pragma
-    elseif p:nextif("__vectorize") then
-      vectorize = pragma
-    else
-      p:error("expected __parallel or __vectorize")
-    end
-    p:expect(")")
-  end
-
   local start = ast.save(p)
   p:expect("for")
 
@@ -609,9 +609,9 @@ function parser.stat_for(p)
   end
 
   if p:nextif("=") then
-    return p:stat_for_num(start, name, type_expr, parallel)
+    return p:stat_for_num(start, name, type_expr)
   elseif p:nextif("in") then
-    return p:stat_for_list(start, name, type_expr, vectorize)
+    return p:stat_for_list(start, name, type_expr)
   else
     p:error("expected = or in")
   end
@@ -786,6 +786,51 @@ function parser.stat_expr(p)
   end
 end
 
+function parser.stat_pragma(p)
+  local start = ast.save(p)
+  local parallel = "allow"
+  local vectorize = "allow"
+  local inline = "allow"
+
+  local pragma = false
+  if p:nextif("__demand") then
+    pragma = "demand"
+  elseif p:nextif("__forbid") then
+    pragma = "forbid"
+  end
+
+  p:expect("(")
+  if p:nextif("__parallel") then
+    parallel = pragma
+  elseif p:nextif("__vectorize") then
+    vectorize = pragma
+  elseif p:nextif("__inline") then
+    inline = pragma
+  else
+    p:error("expected __parallel, __vectorize, or __inline")
+  end
+
+  if p:matches(",") then
+    p:expect(",")
+    local call = p:expr()
+    p:expect(")")
+    if not call:is(ast.unspecialized.ExprCall) then
+      p:error("pragma can only be used with call expressions")
+    end
+    call.inline = inline
+    return ast.unspecialized.StatExpr {
+      expr = call,
+      span = call.span,
+    }
+  else
+    p:expect(")")
+    local for_stat = p:stat_for()
+    for_stat.parallel = parallel
+    for_stat.vectorize = vectorize
+    return for_stat
+  end
+end
+
 function parser.stat(p)
   if p:matches("if") then
     return p:stat_if()
@@ -793,10 +838,8 @@ function parser.stat(p)
   elseif p:matches("while") then
     return p:stat_while()
 
-  -- Technically this could be written anywhere but for now it only
-  -- applies to for loops.
   elseif p:matches("__demand") or p:matches("__forbid") then
-    return p:stat_for()
+    return p:stat_pragma()
 
   elseif p:matches("for") then
     return p:stat_for()

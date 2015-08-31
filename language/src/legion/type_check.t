@@ -437,6 +437,7 @@ function type_check.expr_call(cx, node)
 
   local result = ast.typed.ExprCall {
     fn = fn,
+    inline = node.inline,
     args = args,
     expr_type = expr_type,
     span = node.span,
