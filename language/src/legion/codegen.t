@@ -560,7 +560,7 @@ function value:get_index(cx, index, result_type)
   end
   local result = expr.just(quote [actions] end,
                            `([value_expr.value][ [index.value] ]))
-  return values.value(result, result_type, std.newtuple())
+  return values.rawref(result, &result_type, std.newtuple())
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
