@@ -28483,7 +28483,7 @@ namespace LegionRuntime {
     CompositeVersionInfo::~CompositeVersionInfo(void)
     //--------------------------------------------------------------------------
     {
-      version_info.clear();
+      version_info.release();
     }
 
     //--------------------------------------------------------------------------
