@@ -14252,10 +14252,21 @@ namespace LegionRuntime {
     void VersionState::notify_active(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       if (is_owner())
         assert(currently_active); // should be monotonic
 #endif
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        it->first->add_nested_gc_ref(did);
+      }
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        it->first->add_nested_gc_ref(did);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14285,9 +14296,20 @@ namespace LegionRuntime {
     void VersionState::notify_valid(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(currently_valid); // should be monotonic
 #endif
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        it->first->add_nested_valid_ref(did);
+      }
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        it->first->add_nested_valid_ref(did);
+      }
     }
 
     //--------------------------------------------------------------------------
