@@ -14253,7 +14253,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(currently_active); // should be monotonic
+      if (is_owner())
+        assert(currently_active); // should be monotonic
 #endif
     }
 
@@ -14264,7 +14265,8 @@ namespace LegionRuntime {
       // Do nothing we only care about valid references
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(currently_active);
+      if (is_owner())
+        assert(currently_active);
       currently_active = false;
 #endif
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
