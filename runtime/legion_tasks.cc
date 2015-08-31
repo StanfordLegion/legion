@@ -5617,16 +5617,24 @@ namespace LegionRuntime {
       if (!is_remote() || !is_locally_mapped())
       {
         this->version_infos.resize(rhs->version_infos.size());
-        // Only copy over the version infos that we need for our points
-        for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-              minimal_points.begin(); it != minimal_points.end(); it++)
+        for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
         {
-          for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
+          if (IS_NO_ACCESS(regions[idx]))
+            continue;
+          if (regions[idx].handle_type != SINGULAR)
           {
-            this->version_infos[idx].clone_version_info(runtime->forest,
-                                   it->second->find_logical_region(idx), 
-                         rhs->version_infos[idx], IS_WRITE(regions[idx]));
+            VersionInfo &local_info = this->version_infos[idx];
+            const VersionInfo &rhs_info = rhs->version_infos[idx];
+            for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
+                  minimal_points.begin(); it != minimal_points.end(); it++)
+            {
+              local_info.clone_version_info(runtime->forest, 
+                  it->second->find_logical_region(idx), rhs_info,
+                  IS_WRITE(regions[idx]));
+            }
           }
+          else // non-projection we can copy over the normal way
+            this->version_infos[idx] = rhs->version_infos[idx];
         }
       }
     }

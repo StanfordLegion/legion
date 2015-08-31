@@ -10215,7 +10215,7 @@ namespace LegionRuntime {
             for (std::set<ColorPoint>::const_iterator it = child_colors.begin();
                   it != child_colors.end(); it++)
             {
-              children.push_back(current->get_tree_child(*it));
+              children.push_back(child_node->get_tree_child(*it));
             }
             child_colors.clear();   
           }
