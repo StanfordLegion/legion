@@ -28113,7 +28113,10 @@ namespace LegionRuntime {
                             valid_mask, false/*register now*/);
       new_view->unpack_composite_view(derez, source);
       if (!target_node->register_logical_view(new_view))
-        legion_delete(new_view);
+      {
+        if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(new_view);
+      }
       else
         new_view->update_remote_instances(source);
     }
@@ -29806,7 +29809,10 @@ namespace LegionRuntime {
                                   target_node, false/*register now*/,
                                   fill_value);
       if (!target_node->register_logical_view(new_view))
-        legion_delete(new_view);
+      {
+        if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(new_view);
+      }
       else
         new_view->update_remote_instances(source);
     }
