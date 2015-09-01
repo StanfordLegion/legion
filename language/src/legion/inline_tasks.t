@@ -276,9 +276,7 @@ function inline_tasks.expr(cx, node)
         })
       end
       local function subst(node)
-        if rawget(node, "node_type") and node:is(ast.typed.StatVar) then
-          node.var_names:map(function(sym) expr_mapping[sym] = nil end)
-        elseif rawget(node, "expr_type") then
+        if rawget(node, "expr_type") then
           if node:is(ast.typed.ExprID) and expr_mapping[node.value] then
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
