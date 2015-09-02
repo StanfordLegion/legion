@@ -239,7 +239,9 @@ function inline_tasks.expr(cx, node)
     local return_var = terralib.newsymbol(task_ast.return_type)
     local return_var_expr = expr_id(return_var, node)
 
-    stats:insert(stat_var(return_var, nil, node))
+    if task_ast.return_type ~= terralib.types.unit then
+      stats:insert(stat_var(return_var, nil, node))
+    end
     local new_block
     do
       local stats = terralib.newlist()
