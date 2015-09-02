@@ -523,6 +523,12 @@ extern "C" {
                                       legion_color_t color,
                                       legion_domain_t domain);
 
+  /**
+   * @see LegionRuntime::HighLevel::DomainColoring
+   */
+  legion_domain_t
+  legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
+
   // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
