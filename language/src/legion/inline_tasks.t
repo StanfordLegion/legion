@@ -247,6 +247,7 @@ function inline_tasks.expr(cx, node)
       local type_mapping = {}
       local new_local_params = terralib.newlist()
       local new_local_param_types = terralib.newlist()
+      local new_args = terralib.newlist()
       std.zip(params, param_types, args):map(function(tuple)
         local param, param_type, arg = unpack(tuple)
         if check_rf(arg) then
@@ -260,6 +261,7 @@ function inline_tasks.expr(cx, node)
           expr_mapping[param] = new_var
           new_local_params:insert(new_var)
           new_local_param_types:insert(new_var.type)
+          new_args:insert(arg)
           if std.is_region(param_type) then
             type_mapping[param] = new_var
             type_mapping[param_type] = new_var.type
@@ -271,7 +273,7 @@ function inline_tasks.expr(cx, node)
         stats:insert(ast.typed.StatVar {
           symbols = new_local_params,
           types = new_local_param_types,
-          values = args,
+          values = new_args,
           span = node.span
         })
       end
