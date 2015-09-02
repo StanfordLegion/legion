@@ -171,7 +171,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args)
     setupArguments:insert(quote
       RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
     end)
-    offset = offset + 8
+    offset = offset + size
   end
 
   return quote
