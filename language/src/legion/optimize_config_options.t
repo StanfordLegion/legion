@@ -607,7 +607,7 @@ function analyze_inner.stat_index_launch(cx, node)
   return
     std.all(node.domain:map(function(value) return analyze_inner.expr(cx, value) end)) and
     analyze_inner.expr(cx, node.call) and
-    (node.reduce_lhs and analyze_inner.expr(cx, node.reduce_lhs))
+    (not node.reduce_lhs or analyze_inner.expr(cx, node.reduce_lhs))
 end
 
 function analyze_inner.stat_var(cx, node)
