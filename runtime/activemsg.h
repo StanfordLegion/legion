@@ -78,6 +78,11 @@ typedef std::vector<SpanListEntry> SpanList;
 //  single-node-only stubs
 #ifdef USE_GASNET
 
+// so OpenMPI borrowed gasnet's platform-detection code and didn't change
+//  the define names - work around it by undef'ing anything set via mpi.h
+//  before we include gasnet.h
+#undef __PLATFORM_COMPILER_GNU_VERSION_STR
+
 #define GASNET_PAR
 #include <gasnet.h>
 
