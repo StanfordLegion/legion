@@ -3226,6 +3226,7 @@ function codegen.stat_for_list(cx, node)
     for symbol, _ in pairs(undefined) do args:insert(symbol) end
     args:insert(base)
     args:insert(count)
+    args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
     local terra kernel([args])
       [ptr_init];
       [block]
