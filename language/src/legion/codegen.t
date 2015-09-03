@@ -3196,27 +3196,27 @@ function codegen.stat_for_list(cx, node)
       "multi-dimensional index spaces are not supported yet")
 
     -- wrap for-loop body as a terra function
+    local N = 2
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
     local base = terralib.newsymbol(uint32, "base")
     local count = terralib.newsymbol(c.size_t, "count")
+    local loop_var = terralib.newsymbol(c.size_t, "i")
     local ptr_init
     if ispace_type.dim == 0 then
       ptr_init = quote
-        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
+        if [loop_var] >= [count] + [base] then return end
         var [symbol] = [symbol.type] {
           __ptr = c.legion_ptr_t {
-            value = tid
+            value = [loop_var]
           }
         }
-        if tid >= [count] + [base] then return end
       end
     else
       ptr_init = quote
-        var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
-        var [symbol] = [symbol.type] { __ptr = tid }
-        if tid >= [count] + [base] then return end
+        if [loop_var] >= [count] + [base] then return end
+        var [symbol] = [symbol.type] { __ptr = [loop_var] }
       end
     end
     local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
@@ -3228,9 +3228,13 @@ function codegen.stat_for_list(cx, node)
     args:insert(count)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
     local terra kernel([args])
-      [ptr_init];
-      [block]
+      var tid = [base] + (threadIdX() + [N] * blockIdX() * blockDimX())
+      for [loop_var] = tid, tid + [N] * 32, 32 do
+        [ptr_init];
+        [block]
+      end
     end
+    --kernel:printpretty()
 
     local task = cx.task_meta
 
@@ -3238,7 +3242,7 @@ function codegen.stat_for_list(cx, node)
     local kernel_id = task:addcudakernel(kernel)
 
     -- kernel launch
-    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
+    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args, N)
 
     if ispace_type.dim == 0 then
       return quote
