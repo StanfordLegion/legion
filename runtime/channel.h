@@ -556,6 +556,8 @@ namespace LegionRuntime{
           next_XferDes->update_pre_bytes_write(bytes_write);
         }
       }*/
+
+      virtual void flush() = 0;
     };
 
     /*
@@ -623,6 +625,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       MemcpyRequest* requests;
@@ -663,6 +666,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       Request* requests;
@@ -702,6 +706,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       RemoteWriteRequest* requests;
@@ -743,6 +748,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       int fd;
@@ -784,6 +790,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       Request* requests;
@@ -823,6 +830,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       Request* requests;

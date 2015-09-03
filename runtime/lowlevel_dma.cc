@@ -2831,10 +2831,25 @@ namespace LegionRuntime {
               oasvec_src = oasvec;
               oasvec.clear();
             }
-            create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                 pre_buf, cur_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
-                                 100/*max_nr*/, priority, order,
-                                 kind, event, hdf_inst);
+            if (DIM == 0) {
+              // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
+              // First we should make sure destination instance space's index space match what we're copying
+              IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
+              assert(get_runtime()->get_instance_impl(dst_inst)->metadata.is_valid());
+              assert(ispace->me == get_runtime()->get_instance_impl(dst_inst)->metadata.is);
+              Realm::StaticAccess<IndexSpaceImpl> data(ispace);
+              assert(data->num_elmts > 0);
+              Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
+              Domain new_domain = Domain::from_rect<1>(new_rect);
+              create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
+                                   pre_buf, cur_buf, new_domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, order, kind, event, hdf_inst);
+            }
+            else {
+              create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
+                                   pre_buf, cur_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   100/*max_nr*/, priority, order, kind, event, hdf_inst);
+            }
             pre_buf = cur_buf;
             oasvec = oasvec_dst;
         }
@@ -3409,8 +3424,7 @@ namespace LegionRuntime {
       // <NEWDMA>
       switch (domain.get_dim()) {
       case 0:
-        fprintf(stderr, "Unstructed data is not supported at this moment\n");
-        assert(0);
+        perform_new_dma<0>(src_mem, dst_mem);
         break;
       case 1:
         perform_new_dma<1>(src_mem, dst_mem);

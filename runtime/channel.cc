@@ -380,6 +380,11 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
+      void MemcpyXferDes<DIM>::flush()
+      {
+      }
+
+      template<unsigned DIM>
       GASNetXferDes<DIM>::GASNetXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                                         XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
                                         const Buffer& _src_buf, const Buffer& _dst_buf,
@@ -535,6 +540,11 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
+      void GASNetXferDes<DIM>::flush()
+      {
+      }
+
+      template<unsigned DIM>
       RemoteWriteXferDes<DIM>::RemoteWriteXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                                                   XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
                                                   const Buffer& _src_buf, const Buffer& _dst_buf,
@@ -628,6 +638,11 @@ namespace LegionRuntime {
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
+      }
+
+      template<unsigned DIM>
+      void RemoteWriteXferDes<DIM>::flush()
+      {
       }
 
 #ifdef USE_DISK
@@ -789,6 +804,12 @@ namespace LegionRuntime {
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
         //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
+      }
+
+      template<unsigned DIM>
+      void DiskXferDes<DIM>::flush()
+      {
+        fsync(fd);
       }
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
@@ -1015,6 +1036,11 @@ namespace LegionRuntime {
         }
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
+      }
+
+      template<unsigned DIM>
+      void GPUXferDes<DIM>::flush()
+      {
       }
 #endif
 
@@ -1274,6 +1300,21 @@ namespace LegionRuntime {
             assert(0);
         }
         available_reqs.push(req);
+      }
+
+      template<unsigned DIM>
+      void HDFXferDes<DIM>::flush()
+      {
+        if (kind == XferDes::XFER_HDF_READ) {
+        } else {
+          assert(kind == XferDes::XFER_HDF_WRITE);
+          for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
+            off_t hdf_idx = fit->dst_offset;
+            hid_t dataset_id = hdf_metadata->dataset_ids[hdf_idx];
+            //TODO: I am not sure if we need a lock here to protect HDFflush
+            H5Fflush(dataset_id, H5F_SCOPE_LOCAL);
+          }
+        }
       }
 #endif
 
@@ -1835,6 +1876,8 @@ namespace LegionRuntime {
               XferDes *xd = finish_xferdes.back();
               finish_xferdes.pop_back();
               it->second->erase(xd);
+              // We flush all changes into destination before mark this XferDes as completed
+              xd->flush();
               bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
                 DmaRequest* dma_request = xd->dma_request;
