@@ -986,8 +986,8 @@ namespace Realm {
   {
     size_t req_offset = sizeof(Payload) + sizeof(size_t) * field_sizes.size();
     // TODO: unbreak once the serialization stuff is repaired
-    if(prs)
-      assert(prs->empty());
+    //if(prs)
+    //  assert(prs->empty());
     size_t payload_size = req_offset + 0;//reqs.compute_size();
     Payload *payload = (Payload *)malloc(payload_size);
 
