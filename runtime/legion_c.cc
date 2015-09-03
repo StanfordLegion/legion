@@ -261,6 +261,21 @@ legion_domain_coloring_color_domain(legion_domain_coloring_t dc_,
   (*dc)[color] = domain;
 }
 
+legion_domain_t
+legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
+{
+  DomainColoring *handle = CObjectWrapper::unwrap(handle_);
+  Color color_min = (Color)-1, color_max = 0;
+  for(std::map<Color,Domain>::iterator it = handle->begin(),
+        ie = handle->end(); it != ie; it++) {
+    color_min = std::min(color_min, it->first);
+    color_max = std::max(color_max, it->first);
+  }
+  printf("color space min %u max %u\n", color_min, color_max);
+  Domain domain = Domain::from_rect<1>(
+    Rect<1>(Point<1>(color_min), Point<1>(color_max)));
+  return CObjectWrapper::wrap(domain);
+}
 
 // -------------------------------------------------------
 // Index Space Operations
