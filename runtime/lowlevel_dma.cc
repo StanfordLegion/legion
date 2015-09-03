@@ -4223,7 +4223,7 @@ namespace Realm {
           args.size = it->size;
           args.before_fill = wait_on;
           args.after_fill = ev;
-          args.priority = 0;
+          //args.priority = 0;
 
           size_t msglen = r->compute_size();
           void *msgdata = malloc(msglen);
@@ -4316,7 +4316,7 @@ namespace LegionRuntime {
                                        args.size,
                                        args.before_fill,
                                        args.after_fill,
-                                       args.priority);
+                                       0 /* no room for args.priority */);
       r->check_readiness(false, dma_queue);
     }
 

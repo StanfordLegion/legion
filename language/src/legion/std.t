@@ -1761,6 +1761,7 @@ function std.partition(disjointness, region)
   end
 
   function st:subregion_constant(i)
+    assert(type(i) == "number" or terralib.issymbol(i))
     if not self.subregions[i] then
       self.subregions[i] = std.region(self:parent_region().fspace_type)
     end

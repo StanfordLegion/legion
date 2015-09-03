@@ -32,7 +32,7 @@ namespace LegionRuntime {
       RegionInstance inst;
       unsigned offset, size;
       Event before_fill, after_fill;
-      int priority;
+      //int priority;
     };
 
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
