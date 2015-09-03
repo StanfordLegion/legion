@@ -386,7 +386,7 @@ class Memory(object):
         previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             # First do the math for the previous interval
-            usage = float(current_size)/float(self.total_size)
+            usage = float(current_size)/float(self.total_size) if self.total_size <> 0 else 0
             if usage > max_usage:
                 max_usage = usage
             duration = point.time - previous_time
