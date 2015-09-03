@@ -86,6 +86,7 @@ local language = {
     "__runtime",
     "__inline",
     "__cuda",
+    "__unroll",
     "aliased", -- reserved for future use
     "cross_product",
     "disjoint", -- reserved for future use

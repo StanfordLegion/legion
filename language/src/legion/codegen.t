@@ -3195,8 +3195,9 @@ function codegen.stat_for_list(cx, node)
     legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
       "multi-dimensional index spaces are not supported yet")
 
+    local cuda_opts = cx.task_meta:getcuda()
     -- wrap for-loop body as a terra function
-    local N = 2
+    local N = cuda_opts.unrolling_factor
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
@@ -4404,12 +4405,13 @@ function codegen.stat_top(cx, node)
       std.register_task(cpu_task)
       return cpu_task
     else
+      local cuda_opts = node.cuda
       node.cuda = false
       local cpu_task = codegen.stat_task(cx, node)
       local cuda_task = cpu_task:make_variant()
-      cuda_task:setcuda(true)
+      cuda_task:setcuda(cuda_opts)
       local new_node = node {
-        cuda = true,
+        cuda = cuda_opts,
         prototype = cuda_task,
       }
       cuda_task = codegen.stat_task(cx, new_node)
