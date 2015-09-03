@@ -160,6 +160,7 @@ namespace Realm {
     UserEvent u;
     u.id = e.id;
     u.gen = e.gen;
+    log_event.info("user event created: event=" IDFMT "/%d", e.id, e.gen);
     return u;
   }
 
@@ -326,7 +327,7 @@ namespace Realm {
 	// save ID and generation because we can't reference finish_event after the
 	// decrement (unless last_trigger ends up being true)
 	ID::IDType id = finish_event->me.id();
-	Event::gen_t gen = finish_event->generation;
+	Event::gen_t gen = finish_event->generation + 1;
 
 	int count_left = __sync_fetch_and_add(&count_needed, -1);
 
@@ -400,11 +401,11 @@ namespace Realm {
 	  it != wait_for.end();
 	  it++) {
 	log_event.info("merged event " IDFMT "/%d waiting for " IDFMT "/%d",
-		  finish_event->me.id(), finish_event->generation, (*it).id, (*it).gen);
+		  e.id, e.gen, (*it).id, (*it).gen);
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             finish_event->me.id(), finish_event->generation,
+                             e.id, e.gen,
                              it->id, it->gen);
 #endif
       }
