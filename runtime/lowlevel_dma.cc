@@ -48,6 +48,9 @@ using namespace LegionRuntime::HighLevel::LegionProf;
 #include "atomics.h"
 
 #include "realm/timers.h"
+#include "realm/serialize.h"
+
+using namespace Realm::Serialization;
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -428,6 +431,11 @@ namespace LegionRuntime {
       //Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
+      size_t request_size = *reinterpret_cast<const size_t*>(idata);
+      idata += sizeof(size_t) / sizeof(IDType);
+      FixedBufferDeserializer deserializer(idata, request_size);
+      deserializer >> requests;
+      Realm::Operation::reconstruct_measurements();
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -493,6 +501,9 @@ namespace LegionRuntime {
       }
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
+      ByteCountSerializer counter;
+      counter << requests;
+      result += sizeof(size_t) + counter.bytes_used();
       return result;
     }
 
@@ -522,6 +533,12 @@ namespace LegionRuntime {
       //requests.serialize(msgptr); 
       // We sent this message remotely, so we need to clear the profiling
       // so it doesn't get sent accidentally
+      ByteCountSerializer counter;
+      counter << requests;
+      *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
+      msgptr += sizeof(size_t) / sizeof(IDType);
+      FixedBufferSerializer serializer(msgptr, counter.bytes_used());
+      serializer << requests;
       clear_profiling();
     }
 
@@ -3209,6 +3226,11 @@ namespace LegionRuntime {
       //Realm::Operation::reconstruct_measurements();
       // better have consumed exactly the right amount of data
       //assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
+      size_t request_size = *reinterpret_cast<const size_t*>(idata);
+      idata += sizeof(size_t) / sizeof(IDType);
+      FixedBufferDeserializer deserializer(idata, request_size);
+      deserializer >> requests;
+      Realm::Operation::reconstruct_measurements();
 
       log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
@@ -3277,6 +3299,9 @@ namespace LegionRuntime {
       result += sizeof(IDType); // for inst_lock_needed
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
+      ByteCountSerializer counter;
+      counter << requests;
+      result += sizeof(size_t) + counter.bytes_used();
       return result;
     }
 
@@ -3305,6 +3330,12 @@ namespace LegionRuntime {
       // TODO: unbreak once the serialization stuff is repaired
       //requests.serialize(msgptr);
       // We sent this request remotely so we need to clear it's profiling
+      ByteCountSerializer counter;
+      counter << requests;
+      *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
+      msgptr += sizeof(size_t) / sizeof(IDType);
+      FixedBufferSerializer serializer(msgptr, counter.bytes_used());
+      serializer << requests;
       clear_profiling();
     }
 
@@ -4133,9 +4164,31 @@ namespace LegionRuntime {
       return fill_size;
     }
 
+    class CopyCompletionProfiler : public EventWaiter {
+      public:
+        CopyCompletionProfiler(DmaRequest* _req) : req(_req) {}
+
+        virtual ~CopyCompletionProfiler(void) { }
+
+        virtual bool event_triggered(void)
+        {
+          req->mark_completed();
+          delete req;
+          return true;
+        }
+
+        virtual void print_info(FILE *f)
+        {
+          fprintf(f, "copy completion profiler - " IDFMT "/%d\n",
+              req->after_copy.id, req->after_copy.gen);
+        }
+      protected:
+        DmaRequest* req;
+    };
+
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
-    
+
     void DmaRequestQueue::worker_thread_loop(void)
     {
       log_dma.info("dma worker thread created");
@@ -4146,9 +4199,11 @@ namespace LegionRuntime {
 
 	if(r) {
           r->mark_started();
+
+	  // always mark completion once the copy's actually done
+	  EventImpl::add_waiter(r->after_copy, new CopyCompletionProfiler(r));
+
 	  r->perform_dma();
-          r->mark_completed();
-	  delete r;
 	}
       }
 
