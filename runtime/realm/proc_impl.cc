@@ -922,8 +922,9 @@ namespace Realm {
                  finish_event.id, finish_event.gen);
         enqueue_task(task);
       } else {
-        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
-                 func_id, start_event.id, start_event.gen);
+        log_task.info("deferring spawn: func=%d event=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
       }
     }
@@ -946,8 +947,9 @@ namespace Realm {
                  finish_event.id, finish_event.gen);
         enqueue_task(task);
       } else {
-        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
-                 func_id, start_event.id, start_event.gen);
+        log_task.info("deferring spawn: func=%d event=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
       }
     }
@@ -1243,8 +1245,9 @@ namespace Realm {
                  finish_event.id, finish_event.gen);
         enqueue_task(task);
       } else {
-        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
-                 func_id, start_event.id, start_event.gen);
+        log_task.info("deferring spawn: func=%d event=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
       }
     }
@@ -1267,8 +1270,9 @@ namespace Realm {
                  finish_event.id, finish_event.gen);
         enqueue_task(task);
       } else {
-        log_task.debug("deferring spawn: func=%d event=" IDFMT "/%d",
-                 func_id, start_event.id, start_event.gen);
+        log_task.info("deferring spawn: func=%d event=" IDFMT "/%d finish=" IDFMT "/%d",
+                 func_id, start_event.id, start_event.gen,
+                 finish_event.id, finish_event.gen);
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
       }
     }

@@ -822,10 +822,18 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
-  if coloring_type ~= std.c.legion_coloring_t then
-    log.error(node,
-      "type mismatch in argument 3: expected legion_coloring_t but got " ..
-        tostring(coloring_type))
+  if region_type:ispace().index_type:is_opaque() then
+    if coloring_type ~= std.c.legion_coloring_t then
+      log.error(node,
+                "type mismatch in argument 3: expected legion_coloring_t but got " ..
+                  tostring(coloring_type))
+    end
+  else
+    if coloring_type ~= std.c.legion_domain_coloring_t then
+      log.error(node,
+                "type mismatch in argument 3: expected legion_domain_coloring_t but got " ..
+                  tostring(coloring_type))
+    end
   end
 
   return ast.typed.ExprPartition {

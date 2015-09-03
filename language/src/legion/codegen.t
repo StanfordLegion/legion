@@ -2511,16 +2511,33 @@ function codegen.expr_partition(cx, node)
     [emit_debuginfo(node)]
   end
 
+  local index_partition_create
+  local args = terralib.newlist({
+      cx.runtime, cx.context,
+      `([region_expr.value].impl.index_space),
+  })
+  if partition_type:parent_region():ispace().index_type:is_opaque() then
+    index_partition_create = c.legion_index_partition_create_coloring
+  else
+    index_partition_create = c.legion_index_partition_create_domain_coloring
+    local color_space = terralib.newsymbol()
+    args:insert(color_space)
+    actions = quote
+      [actions]
+      var [color_space] = c.legion_domain_coloring_get_color_space([coloring_expr.value])
+    end
+  end
+  args:insertall({
+      coloring_expr.value,
+      node.disjointness == std.disjoint,
+      -1,
+  })
+
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var [ip] = c.legion_index_partition_create_coloring(
-      [cx.runtime], [cx.context],
-      [region_expr.value].impl.index_space,
-      [coloring_expr.value],
-      [node.disjointness == std.disjoint],
-      -1)
+    var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region_expr.value].impl, [ip])
   end

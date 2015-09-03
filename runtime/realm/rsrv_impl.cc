@@ -126,6 +126,7 @@ namespace Realm {
       //  don't build up continuation
       if(wait_on.has_triggered()) {
 	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive);
+        log_reservation.info("immediate acquire of " IDFMT " - event = " IDFMT "/%d", id, e.id, e.gen);
 	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
@@ -133,6 +134,7 @@ namespace Realm {
 	Event e = after_lock->current_event();
 	EventImpl::add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
 	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
+        log_reservation.info("deferred acquire of " IDFMT " - event = " IDFMT "/%d", id, e.id, e.gen);
 	return e;
       }
     }
