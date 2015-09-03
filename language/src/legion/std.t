@@ -625,6 +625,12 @@ function std.type_sub(t, mapping)
   elseif std.is_fspace_instance(t) then
     return t.fspace(unpack(t.args:map(
       function(arg) return std.type_sub(arg, mapping) end)))
+  elseif std.is_rawref(t) then
+    return std.rawref(std.type_sub(t.pointer_type, mapping))
+  elseif std.is_ref(t) then
+    return std.ref(std.type_sub(t.pointer_type, mapping), unpack(t.field_path))
+  elseif terralib.types.istype(t) and t:ispointer() then
+    return &std.type_sub(t.type, mapping)
   else
     return t
   end
@@ -1755,6 +1761,7 @@ function std.partition(disjointness, region)
   end
 
   function st:subregion_constant(i)
+    assert(type(i) == "number" or terralib.issymbol(i))
     if not self.subregions[i] then
       self.subregions[i] = std.region(self:parent_region().fspace_type)
     end

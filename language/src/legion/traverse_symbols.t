@@ -152,6 +152,13 @@ function traverse_symbols.expr(defined, undefined, node)
   elseif node:is(ast.typed.ExprFunction) then
     traverse_symbols.expr(defined, undefined, node.value)
 
+  elseif node:is(ast.typed.ExprDeref) then
+    local defined_local = defined:new_local_scope()
+    local code = codegen(node)
+    local actions = code.actions
+    traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
+    traverse_symbols.expr(defined, undefined, node.value)
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end

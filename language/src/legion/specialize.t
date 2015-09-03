@@ -352,6 +352,7 @@ function specialize.expr_call(cx, node)
   then
     return ast.specialized.ExprCall {
       fn = fn,
+      inline = node.inline,
       args = node.args:map(
         function(arg) return specialize.expr(cx, arg) end),
       span = node.span,

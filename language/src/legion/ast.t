@@ -147,6 +147,25 @@ function ast.traverse_node_postorder(fn, node)
   end
 end
 
+function ast.map_node_postorder(fn, node)
+  if ast.is_node(node) then
+    local tmp = {}
+    for k, child in pairs(node) do
+      if k ~= "node_type" then
+        tmp[k] = ast.map_node_postorder(fn, child)
+      end
+    end
+    return fn(node(tmp))
+  elseif terralib.islist(node) then
+    local tmp = terralib.newlist()
+    for _, child in ipairs(node) do
+      tmp:insert(ast.map_node_postorder(fn, child))
+    end
+    return tmp
+  end
+  return node
+end
+
 function ast.traverse_expr_postorder(fn, node)
   ast.traverse_node_postorder(
     function(child)
@@ -213,7 +232,7 @@ ast.unspecialized("ExprEscape", {"expr", "span"})
 ast.unspecialized("ExprFieldAccess", {"value", "field_names", "span"})
 ast.unspecialized("ExprIndexAccess", {"value", "index", "span"})
 ast.unspecialized("ExprMethodCall", {"value", "method_name", "args", "span"})
-ast.unspecialized("ExprCall", {"fn", "args", "span"})
+ast.unspecialized("ExprCall", {"fn", "args", "inline", "span"})
 ast.unspecialized("ExprCtor", {"fields", "span"})
 ast.unspecialized("ExprCtorListField", {"value", "span"})
 ast.unspecialized("ExprCtorRecField", {"name_expr", "value", "span"})
@@ -279,7 +298,7 @@ ast.specialized("ExprID", {"value", "span"})
 ast.specialized("ExprFieldAccess", {"value", "field_name", "span"})
 ast.specialized("ExprIndexAccess", {"value", "index", "span"})
 ast.specialized("ExprMethodCall", {"value", "method_name", "args", "span"})
-ast.specialized("ExprCall", {"fn", "args", "span"})
+ast.specialized("ExprCall", {"fn", "args", "inline", "span"})
 ast.specialized("ExprCast", {"fn", "args", "span"})
 ast.specialized("ExprCtor", {"fields", "named", "span"})
 ast.specialized("ExprCtorListField", {"value", "span"})
@@ -343,7 +362,7 @@ ast.typed("ExprID", {"value", "expr_type", "span"})
 ast.typed("ExprFieldAccess", {"value", "field_name", "expr_type", "span"})
 ast.typed("ExprIndexAccess", {"value", "index", "expr_type", "span"})
 ast.typed("ExprMethodCall", {"value", "method_name", "args", "expr_type", "span"})
-ast.typed("ExprCall", {"fn", "args", "expr_type", "span"})
+ast.typed("ExprCall", {"fn", "args", "expr_type", "inline", "span"})
 ast.typed("ExprCast", {"fn", "arg", "expr_type", "span"})
 ast.typed("ExprCtor", {"fields", "named", "expr_type", "span"})
 ast.typed("ExprCtorListField", {"value", "expr_type", "span"})

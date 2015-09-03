@@ -560,7 +560,7 @@ function value:get_index(cx, index, result_type)
   end
   local result = expr.just(quote [actions] end,
                            `([value_expr.value][ [index.value] ]))
-  return values.value(result, result_type, std.newtuple())
+  return values.rawref(result, &result_type, std.newtuple())
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
@@ -2732,6 +2732,7 @@ function codegen.expr_unary(cx, node)
         expr_type = task:gettype(),
         span = node.span,
       },
+      inline = "allow",
       fn_unspecialized = false,
       args = terralib.newlist({node.rhs}),
       expr_type = expr_type,
@@ -2764,6 +2765,7 @@ function codegen.expr_binary(cx, node)
         expr_type = task:gettype(),
       span = node.span,
       },
+      inline = "allow",
       fn_unspecialized = false,
       args = terralib.newlist({node.lhs, node.rhs}),
       expr_type = expr_type,
