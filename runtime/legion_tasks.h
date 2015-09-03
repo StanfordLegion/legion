@@ -455,6 +455,7 @@ namespace LegionRuntime {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
     public:
+      virtual void premap_task(void) = 0;
       virtual void resolve_false(void) = 0;
       virtual void launch_task(void);
       virtual bool early_map_task(void) = 0;
@@ -689,6 +690,7 @@ namespace LegionRuntime {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
     public:
+      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
@@ -784,6 +786,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
+      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
@@ -846,6 +849,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
+      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);

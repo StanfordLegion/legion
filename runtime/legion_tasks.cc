@@ -4286,7 +4286,11 @@ namespace LegionRuntime {
           // See if we have a must epoch in which case
           // we can simply record ourselves and we are done
           if (must_epoch != NULL)
+          {
+            if (!premapped)
+              premap_task();
             must_epoch->register_single_task(this, must_epoch_index);
+          }
           else
           {
             // See if this task is going to be sent
@@ -5210,8 +5214,6 @@ namespace LegionRuntime {
           }
         }
       }
-
-       
 
       // If this is a GPU processor and we are profiling, 
       // synchronize the stream for now
@@ -6407,6 +6409,36 @@ namespace LegionRuntime {
     {
       rerun_analysis_requirements.insert(idx);
     }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::premap_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!premapped);
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // Do the premapping if it is not already premapped or early mapped
+        if (!regions[idx].premapped && 
+            (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+        {
+          regions[idx].premapped = runtime->forest->premap_physical_region(
+                                       enclosing_physical_contexts[idx],
+                                       privilege_paths[idx], regions[idx], 
+                                       version_infos[idx], this, parent_ctx,
+                                       parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                       , idx, get_logging_name(), unique_op_id
+#endif
+                                       );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[idx].premapped);
+#endif
+        }
+      }
+      premapped = true;
+    }
     
     //--------------------------------------------------------------------------
     void IndividualTask::resolve_false(void)
@@ -6500,29 +6532,7 @@ namespace LegionRuntime {
       }
       // Do our premapping of all the regions before we do any mapper calls
       if (!premapped)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // Do the premapping if it is not already premapped or early mapped
-          if (!regions[idx].premapped && 
-              (early_mapped_regions.find(idx) == early_mapped_regions.end()))
-          {
-            regions[idx].premapped = runtime->forest->premap_physical_region(
-                                         enclosing_physical_contexts[idx],
-                                         privilege_paths[idx], regions[idx], 
-                                         version_infos[idx], this, parent_ctx,
-                                         parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                         , idx, get_logging_name(), unique_op_id
-#endif
-                                         );
-#ifdef DEBUG_HIGH_LEVEL
-            assert(regions[idx].premapped);
-#endif
-          }
-        }
-        premapped = true;
-      }
+        premap_task();
       // Before we try mapping the task, ask the mapper to pick a task variant
       runtime->invoke_mapper_select_variant(current_proc, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -7160,6 +7170,43 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::premap_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!premapped);
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+        {
+          const RegionRequirement &slice_req = slice_owner->regions[idx];
+          RegionTreePath mapping_path;
+          if (slice_req.handle_type == PART_PROJECTION)
+            initialize_mapping_path(mapping_path, regions[idx],
+                                    slice_req.partition);
+          else
+            initialize_mapping_path(mapping_path, regions[idx],
+                                    slice_req.region);
+          VersionInfo &version_info = slice_owner->get_version_info(idx);
+          regions[idx].premapped = runtime->forest->premap_physical_region(
+                                     enclosing_physical_contexts[idx],
+                                     mapping_path, regions[idx], 
+                                     version_info, this, parent_ctx,
+                                     parent_ctx->get_executing_processor()
+#ifdef DEBUG_HIGH_LEVEL
+                                     , idx, get_logging_name(), unique_op_id
+#endif
+                                     );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[idx].premapped);
+#endif
+        }
+      }
+      premapped = true;
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
@@ -7190,36 +7237,7 @@ namespace LegionRuntime {
       // Premap all the regions that are not early mapped before we
       // call the mapper
       if (!premapped)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
-          {
-            const RegionRequirement &slice_req = slice_owner->regions[idx];
-            RegionTreePath mapping_path;
-            if (slice_req.handle_type == PART_PROJECTION)
-              initialize_mapping_path(mapping_path, regions[idx],
-                                      slice_req.partition);
-            else
-              initialize_mapping_path(mapping_path, regions[idx],
-                                      slice_req.region);
-            VersionInfo &version_info = slice_owner->get_version_info(idx);
-            regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       enclosing_physical_contexts[idx],
-                                       mapping_path, regions[idx], 
-                                       version_info, this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
-#endif
-                                       );
-#ifdef DEBUG_HIGH_LEVEL
-            assert(regions[idx].premapped);
-#endif
-          }
-        }
-        premapped = true;
-      }
+        premap_task();
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
@@ -7508,6 +7526,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void WrapperTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperTask::premap_task(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10134,7 +10160,11 @@ namespace LegionRuntime {
         enumerate_points();
       must_epoch->register_slice_task(this);
       for (unsigned idx = 0; idx < points.size(); idx++)
-        must_epoch->register_single_task(points[idx], must_epoch_index);
+      {
+        PointTask *point = points[idx];
+        point->premap_task();
+        must_epoch->register_single_task(point, must_epoch_index);
+      }
     }
 
     //--------------------------------------------------------------------------
