@@ -3198,26 +3198,27 @@ function codegen.stat_for_list(cx, node)
     local cuda_opts = cx.task_meta:getcuda()
     -- wrap for-loop body as a terra function
     local N = cuda_opts.unrolling_factor
+    local T = 32
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
     local base = terralib.newsymbol(uint32, "base")
     local count = terralib.newsymbol(c.size_t, "count")
-    local loop_var = terralib.newsymbol(c.size_t, "i")
+    local tid = terralib.newsymbol(c.size_t, "tid")
     local ptr_init
     if ispace_type.dim == 0 then
       ptr_init = quote
-        if [loop_var] >= [count] + [base] then return end
+        if [tid] >= [count] + [base] then return end
         var [symbol] = [symbol.type] {
           __ptr = c.legion_ptr_t {
-            value = [loop_var]
+            value = [tid]
           }
         }
       end
     else
       ptr_init = quote
-        if [loop_var] >= [count] + [base] then return end
-        var [symbol] = [symbol.type] { __ptr = [loop_var] }
+        if [tid] >= [count] + [base] then return end
+        var [symbol] = [symbol.type] { __ptr = [tid] }
       end
     end
     local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
@@ -3228,14 +3229,22 @@ function codegen.stat_for_list(cx, node)
     args:insert(base)
     args:insert(count)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
-    local terra kernel([args])
-      var tid = [base] + (threadIdX() + [N] * blockIdX() * blockDimX())
-      for [loop_var] = tid, tid + [N] * 32, 32 do
+
+    local kernel_body = terralib.newlist()
+    kernel_body:insert(quote
+      var [tid] = [base] + (threadIdX() + [N] * blockIdX() * blockDimX())
+    end)
+    for i = 1, N do
+      kernel_body:insert(quote
         [ptr_init];
-        [block]
-      end
+        [block];
+        [tid] = [tid] + [T]
+      end)
     end
-    --kernel:printpretty()
+
+    local terra kernel([args])
+      [kernel_body]
+    end
 
     local task = cx.task_meta
 
@@ -3243,7 +3252,7 @@ function codegen.stat_for_list(cx, node)
     local kernel_id = task:addcudakernel(kernel)
 
     -- kernel launch
-    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args, N)
+    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
 
     if ispace_type.dim == 0 then
       return quote
