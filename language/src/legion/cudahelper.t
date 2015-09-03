@@ -166,12 +166,13 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args)
   local setupArguments = terralib.newlist()
 
   local offset = 0
-  for _, arg in ipairs(args) do
+  for i = 1, #args do
+    local arg =  args[i]
     local size = terralib.sizeof(arg.type)
     setupArguments:insert(quote
       RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
     end)
-    offset = offset + 8
+    offset = offset + size
   end
 
   return quote
