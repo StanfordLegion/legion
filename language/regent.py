@@ -62,7 +62,7 @@ terra_env = dict(os.environ.items() + [
     ('INCLUDE_PATH', ';'.join(include_path)),
 ])
 
-def legion(args, **kwargs):
+def regent(args, **kwargs):
     cmd = []
     if 'LAUNCHER' in os.environ:
         cmd = cmd + (os.environ['LAUNCHER'].split()
@@ -72,4 +72,4 @@ def legion(args, **kwargs):
         cmd, env = terra_env, **kwargs)
 
 if __name__ == '__main__':
-    sys.exit(legion(sys.argv[1:]).wait())
+    sys.exit(regent(sys.argv[1:]).wait())
