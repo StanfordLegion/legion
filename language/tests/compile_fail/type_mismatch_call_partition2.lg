@@ -17,9 +17,9 @@
 --   f(r, s, p)
 --   ^
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 task f(x : region(int), y : region(int), p : partition(disjoint, y)) end
 

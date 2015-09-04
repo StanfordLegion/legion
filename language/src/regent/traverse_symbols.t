@@ -12,8 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local ast = require("legion/ast")
-local symbol_table = require("legion/symbol_table")
+local ast = require("regent/ast")
+local symbol_table = require("regent/symbol_table")
 
 local traverse_symbols = {}
 local codegen

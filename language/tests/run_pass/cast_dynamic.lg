@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 function ptr_to_raw(t)
   return terra(x : t)
@@ -34,18 +34,18 @@ task main()
   var r1 = p[1]
 
   var x0 = dynamic_cast(ptr(int, r0), x)
-  legionlib.assert(not isnull(x0), "test failed")
+  regentlib.assert(not isnull(x0), "test failed")
 
   @x0 = 123
 
   var x1 = dynamic_cast(ptr(int, r1), x)
-  legionlib.assert(isnull(x1), "test failed")
+  regentlib.assert(isnull(x1), "test failed")
 
   var x01 = dynamic_cast(ptr(int, r0, r1), x)
-  legionlib.assert(not isnull(x01), "test failed")
+  regentlib.assert(not isnull(x01), "test failed")
 
-  legionlib.assert(@x01 == 123, "test failed")
+  regentlib.assert(@x01 == 123, "test failed")
 
   c.legion_coloring_destroy(rc)
 end
-legionlib.start(main)
+regentlib.start(main)

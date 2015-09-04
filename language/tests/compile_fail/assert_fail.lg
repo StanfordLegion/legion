@@ -15,11 +15,11 @@
 -- fails-with:
 -- assertion failed: test passed
 
-import "legion"
+import "regent"
 
 -- This is just as sanity check that assertions can actually fail.
 
 task main()
-  legionlib.assert(false, "test passed")
+  regentlib.assert(false, "test passed")
 end
-legionlib.start(main)
+regentlib.start(main)

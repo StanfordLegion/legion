@@ -17,7 +17,7 @@
 --    r[i] = i
 --    ^
 
-import "legion"
+import "regent"
 
 local i1d = index_type(int, "i1d")
 
@@ -31,4 +31,4 @@ task toplevel()
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

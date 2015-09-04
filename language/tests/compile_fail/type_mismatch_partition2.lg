@@ -17,7 +17,7 @@
 --   var p = partition(disjoint, r, 0)
 --                   ^
 
-import "legion"
+import "regent"
 
 task f() : int
   var r = region(ispace(ptr, 5), int)

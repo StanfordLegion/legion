@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f(x : bool)
   if x then
@@ -27,8 +27,8 @@ task g()
 end
 
 task main()
-  legionlib.assert(f(true) == 5.0, "test failed")
-  legionlib.assert(f(false) == 9.75, "test failed")
+  regentlib.assert(f(true) == 5.0, "test failed")
+  regentlib.assert(f(false) == 9.75, "test failed")
   g()
 end
-legionlib.start(main)
+regentlib.start(main)

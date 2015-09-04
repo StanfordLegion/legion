@@ -17,7 +17,7 @@
 --   var x = t { a = r, b = s }
 --           ^
 
-import "legion"
+import "regent"
 
 fspace t {
   a : region(int),

@@ -18,9 +18,9 @@
 --                 ^
 
 
-import 'legion'
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 fspace assert_disjoint {
   x : region(int),
@@ -31,4 +31,4 @@ task main()
   var t = region(ispace(ptr, 5), int)
   assert_disjoint { x = t, y = t }
 end
-legionlib.start(main)
+regentlib.start(main)

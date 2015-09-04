@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 fspace fs1
 {
@@ -58,8 +58,8 @@ task toplevel()
   end
   f(r)
   for e in r do
-    legionlib.assert(e.v1 == e.v2, "test failed")
+    regentlib.assert(e.v1 == e.v2, "test failed")
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

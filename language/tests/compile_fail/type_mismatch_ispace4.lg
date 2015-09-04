@@ -17,7 +17,7 @@
 --   var r = ispace(ptr, true)
 --                ^
 
-import "legion"
+import "regent"
 
 task f()
   var r = ispace(ptr, true)

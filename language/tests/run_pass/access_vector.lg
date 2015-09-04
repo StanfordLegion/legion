@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f(x : vector(int, 4)) : int
   return x[0] + x[3]
@@ -24,6 +24,6 @@ task g() : int
 end
 
 task main()
-  legionlib.assert(g() == 4001, "test failed")
+  regentlib.assert(g() == 4001, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

@@ -17,7 +17,7 @@
 --   var z = x + y
 --           ^
 
-import "legion"
+import "regent"
 
 task f(x : int, y : bool)
   var z = x + y

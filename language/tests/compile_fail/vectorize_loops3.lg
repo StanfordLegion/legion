@@ -17,7 +17,7 @@
 --     e.p1.v = e.p2.v
 --     ^
 
-import "legion"
+import "regent"
 
 fspace fs2
 {
@@ -62,4 +62,4 @@ task toplevel()
   f(r2, r1)
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

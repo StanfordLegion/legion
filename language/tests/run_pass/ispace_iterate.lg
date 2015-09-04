@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 local i1d = index_type(int, "i1d")
 struct i2 { x : int, y : int }
@@ -27,18 +27,18 @@ task main()
   for i0 in is0 do
     s0 += 1
   end
-  legionlib.assert(s0 == 0, "test failed")
+  regentlib.assert(s0 == 0, "test failed")
 
   var s1 = 0
   for i1 in is1 do
     s1 += 1
   end
-  legionlib.assert(s1 == 7, "test failed")
+  regentlib.assert(s1 == 7, "test failed")
 
   var s2 = 0
   for i2 in is2 do
     s2 += 1
   end
-  legionlib.assert(s2 == 4, "test failed")
+  regentlib.assert(s2 == 4, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

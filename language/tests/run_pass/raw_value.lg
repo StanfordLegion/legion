@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 terra test(is : c.legion_index_space_t,
            r : c.legion_logical_region_t,
@@ -36,4 +36,4 @@ task main()
 
   test(__raw(is), __raw(r), __raw(part0), __raw(prod))
 end
-legionlib.start(main)
+regentlib.start(main)

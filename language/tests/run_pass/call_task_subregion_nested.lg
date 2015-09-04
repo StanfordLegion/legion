@@ -12,12 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This tests that the compiler properly roots regions which are
 -- nested more than one level deep.
 
-local c = legionlib.c
+local c = regentlib.c
 
 task g(r : region(int)) : int
 where reads(r), writes(r) do
@@ -36,4 +36,4 @@ task main()
   var r00 = p0_disjoint[0]
   g(r00)
 end
-legionlib.start(main)
+regentlib.start(main)

@@ -17,7 +17,7 @@
 --   r[p] = 0
 --   ^
 
-import "legion"
+import "regent"
 
 local i1d = index_type(int, "i1d")
 

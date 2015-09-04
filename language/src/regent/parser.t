@@ -15,8 +15,8 @@
 -- Legion Parser
 
 local parsing = require("parsing")
-local ast = require("legion/ast")
-local std = require("legion/std")
+local ast = require("regent/ast")
+local std = require("regent/std")
 
 local parser = {}
 

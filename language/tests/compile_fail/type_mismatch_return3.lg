@@ -17,7 +17,7 @@
 --     return 5
 --          ^
 
-import "legion"
+import "regent"
 
 task f(x : bool)
   if x then

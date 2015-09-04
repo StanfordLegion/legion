@@ -12,12 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = legionlib.c
+local c = regentlib.c
 
 terra e(x : int) : int
   return 3
@@ -212,4 +212,4 @@ task main()
 
   with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
 end
-legionlib.start(main)
+regentlib.start(main)

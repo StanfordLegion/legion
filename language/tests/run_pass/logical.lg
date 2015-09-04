@@ -12,13 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task main()
-  legionlib.assert(true and true, "test failed")
-  legionlib.assert(true or false, "test failed")
-  legionlib.assert(not false, "test failed")
-  legionlib.assert(true and (not false), "test failed")
-  legionlib.assert(not (false and true), "test failed")
+  regentlib.assert(true and true, "test failed")
+  regentlib.assert(true or false, "test failed")
+  regentlib.assert(not false, "test failed")
+  regentlib.assert(true and (not false), "test failed")
+  regentlib.assert(not (false and true), "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

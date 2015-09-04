@@ -17,11 +17,11 @@
 --   var p = partition(disjoint, r, c)
 --                   ^
 
-import "legion"
+import "regent"
 
 task f() : int
   var r = 5
-  var c : legionlib.c.legion_coloring_t
+  var c : regentlib.c.legion_coloring_t
   var p = partition(disjoint, r, c)
 end
 f:compile()

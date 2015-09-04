@@ -17,7 +17,7 @@
 --   for x in 1 do end
 --     ^
 
-import "legion"
+import "regent"
 
 task f()
   for x in 1 do end

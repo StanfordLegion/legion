@@ -17,7 +17,7 @@
 --   var r = ispace(int1d, int1d(0), true)
 --                ^
 
-import "legion"
+import "regent"
 
 local int1d = index_type(int, "int1d")
 

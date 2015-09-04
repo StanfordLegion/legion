@@ -17,7 +17,7 @@
 --   var x = isnull(5)
 --                ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = isnull(5)

@@ -17,7 +17,7 @@
 --   var y = static_cast(ptr(int, r), x)
 --                     ^
 
-import "legion"
+import "regent"
 
 task f()
   var r = region(ispace(ptr, 5), int)

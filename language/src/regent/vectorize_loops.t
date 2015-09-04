@@ -17,10 +17,10 @@
 -- Attempts to vectorize the body of loops
 --
 
-local ast = require("legion/ast")
-local log = require("legion/log")
-local std = require("legion/std")
-local symbol_table = require("legion/symbol_table")
+local ast = require("regent/ast")
+local log = require("regent/log")
+local std = require("regent/std")
+local symbol_table = require("regent/symbol_table")
 
 local min = math.min
 

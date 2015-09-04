@@ -17,7 +17,7 @@
 --   g(x + y)
 --     ^
 
-import "legion"
+import "regent"
 
 task g(x : int) end
 

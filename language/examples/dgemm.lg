@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This code has not been optimized and is not high performance.
 
@@ -71,7 +71,7 @@ task test(l: int, m : int, n : int)
   dgemm(isa, a, isb, b, isc, c, isx)
 
   for ic in isc do
-    legionlib.assert(abs(c[ic] - l) < 0.00001, "test failed")
+    regentlib.assert(abs(c[ic] - l) < 0.00001, "test failed")
   end
 end
 
@@ -79,4 +79,4 @@ task main()
   test(3, 4, 5)
   test(10, 10, 20)
 end
-legionlib.start(main)
+regentlib.start(main)

@@ -17,9 +17,9 @@
 -- Attempts to determine which loops can be transformed into index
 -- space task launches.
 
-local ast = require("legion/ast")
-local log = require("legion/log")
-local std = require("legion/std")
+local ast = require("regent/ast")
+local log = require("regent/log")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context

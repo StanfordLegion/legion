@@ -17,7 +17,7 @@
 --   var x = p.b
 --           ^
 
-import "legion"
+import "regent"
 
 struct s {
   a : int

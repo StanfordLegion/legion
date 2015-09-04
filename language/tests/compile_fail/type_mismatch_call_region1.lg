@@ -17,7 +17,7 @@
 --   f(r, s)
 --   ^
 
-import "legion"
+import "regent"
 
 task f(x : region(double), y : region(int)) end
 
@@ -26,4 +26,4 @@ task g()
   var s = region(ispace(ptr, 5), double)
   f(r, s)
 end
-legionlib.start(g)
+regentlib.start(g)

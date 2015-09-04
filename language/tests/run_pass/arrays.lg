@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 task toplevel()
   var x : uint[10]
@@ -23,11 +23,11 @@ task toplevel()
   end
 
   for i = 0, 10 do
-    legionlib.assert(x[i] == 100 + i, "test failed")
+    regentlib.assert(x[i] == 100 + i, "test failed")
   end
 
   for i = 0, 4 do
-    legionlib.assert((array(1, 2, 3, 4))[i] == i + 1, "test failed")
+    regentlib.assert((array(1, 2, 3, 4))[i] == i + 1, "test failed")
   end
 end
-legionlib.start(toplevel)
+regentlib.start(toplevel)

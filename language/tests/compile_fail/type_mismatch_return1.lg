@@ -17,7 +17,7 @@
 --   return true
 --        ^
 
-import "legion"
+import "regent"
 
 task f() : int
   return true

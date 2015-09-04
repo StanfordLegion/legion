@@ -12,15 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task main()
   var r = region(ispace(ptr, 5), int)
   var x = null(ptr(int, r))
-  legionlib.assert(isnull(x), "test failed")
+  regentlib.assert(isnull(x), "test failed")
 
   var is = ispace(ptr, 5)
   var y = null(ptr(is))
-  legionlib.assert(isnull(y), "test failed")
+  regentlib.assert(isnull(y), "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

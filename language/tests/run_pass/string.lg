@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 cstdio = terralib.includec("stdio.h")
 
@@ -20,4 +20,4 @@ task main()
   var x = "hello, world!\n"
   [cstdio.printf](x)
 end
-legionlib.start(main)
+regentlib.start(main)

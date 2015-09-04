@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 local x = false
 
@@ -22,6 +22,6 @@ task f()
 end
 
 task main()
-  legionlib.assert(not f(), "test failed")
+  regentlib.assert(not f(), "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

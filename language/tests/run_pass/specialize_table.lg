@@ -12,11 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 cmath = terralib.includec("math.h")
 
 task main()
-  legionlib.assert(cmath.fmin(3, 5) == 3, "test failed")
+  regentlib.assert(cmath.fmin(3, 5) == 3, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

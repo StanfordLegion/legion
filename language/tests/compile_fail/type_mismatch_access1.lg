@@ -17,7 +17,7 @@
 --   var y = x[0]
 --           ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = 10

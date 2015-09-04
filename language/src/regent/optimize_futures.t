@@ -18,8 +18,8 @@
 -- futures. Wherever possible, this pass attempts to work with futures
 -- directly rather than blocking in order to obtain a concrete value.
 
-local ast = require("legion/ast")
-local std = require("legion/std")
+local ast = require("regent/ast")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context

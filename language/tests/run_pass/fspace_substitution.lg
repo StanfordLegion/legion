@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This test attempts to leverage the substitution principle of fspace
 -- types.
@@ -37,6 +37,6 @@ task g() : int
 end
 
 task main()
-  legionlib.assert(g() == 7, "test failed")
+  regentlib.assert(g() == 7, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

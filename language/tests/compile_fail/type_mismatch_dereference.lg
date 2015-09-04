@@ -17,7 +17,7 @@
 --   return @x
 --          ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = 5

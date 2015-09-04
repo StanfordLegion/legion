@@ -17,7 +17,7 @@
 --   for x : double = 1, 2 do end
 --     ^
 
-import "legion"
+import "regent"
 
 task f()
   for x : double = 1, 2 do end

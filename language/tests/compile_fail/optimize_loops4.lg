@@ -17,12 +17,12 @@
 --     var x = f(p_disjoint[i])
 --       ^
 
-import "legion"
+import "regent"
 
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = legionlib.c
+local c = regentlib.c
 
 terra e(x : int) : int
   return 3
@@ -69,4 +69,4 @@ task main()
     var x = f(p_disjoint[i])
   end
 end
-legionlib.start(main)
+regentlib.start(main)

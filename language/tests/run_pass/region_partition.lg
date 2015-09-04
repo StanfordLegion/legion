@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 task f() : int
   var r = region(ispace(ptr, 5), int)
@@ -48,7 +48,7 @@ task g() : int
 end
 
 task main()
-  legionlib.assert(f() == 5, "test failed")
-  legionlib.assert(g() == 5, "test failed")
+  regentlib.assert(f() == 5, "test failed")
+  regentlib.assert(g() == 5, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

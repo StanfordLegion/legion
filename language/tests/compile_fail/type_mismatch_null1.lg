@@ -17,7 +17,7 @@
 --   var x = null(int)
 --              ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = null(int)

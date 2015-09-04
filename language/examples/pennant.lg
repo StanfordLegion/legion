@@ -32,7 +32,7 @@
 
 -- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
-import "legion"
+import "regent"
 
 -- Compile and link pennant.cc
 local cpennant
@@ -62,7 +62,7 @@ do
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
-local c = legionlib.c
+local c = regentlib.c
 
 -- Include other headers
 local cmath = terralib.includec("math.h")
@@ -77,8 +77,8 @@ local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
 -- #################
 
 -- Import max/min for Terra
-local max = legionlib.fmax
-local min = legionlib.fmin
+local max = regentlib.fmax
+local min = regentlib.fmin
 
 terra abs(a : double) : double
   if a < 0 then
@@ -309,9 +309,9 @@ where
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)
-    legionlib.assert(not isnull(s.mapsp1), "dynamic_cast failed on mapsp1")
+    regentlib.assert(not isnull(s.mapsp1), "dynamic_cast failed on mapsp1")
     s.mapsp2 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp2)
-    legionlib.assert(not isnull(s.mapsp2), "dynamic_cast failed on mapsp2")
+    regentlib.assert(not isnull(s.mapsp2), "dynamic_cast failed on mapsp2")
   end
 end
 
@@ -550,7 +550,7 @@ do
       end
       nside += 1
 
-      legionlib.assert(sv > 0.0, "sv negative")
+      regentlib.assert(sv > 0.0, "sv negative")
     end
   end
 end
@@ -1015,8 +1015,8 @@ local function accessor_generic_get_base_pointer(field_type)
     var ok = c.legion_accessor_generic_get_soa_parameters(
       accessor, &base_pointer, &stride)
 
-    legionlib.assert(ok, "failed to get base pointer")
-    legionlib.assert(stride == terralib.sizeof(field_type),
+    regentlib.assert(ok, "failed to get base pointer")
+    regentlib.assert(stride == terralib.sizeof(field_type),
                      "stride does not match expected value")
 
     return [&field_type](base_pointer)
@@ -1198,7 +1198,7 @@ do
       end
       nside += 1
 
-      legionlib.assert(sv > 0.0, "sv negative")
+      regentlib.assert(sv > 0.0, "sv negative")
     end
   end
 end
@@ -2060,16 +2060,16 @@ terra read_input(runtime : c.legion_runtime_t,
   var zonecolors : &int64 = [&int64](c.malloc(zonecolors_size*sizeof(int64)))
   var zonespancolors : &int64 = [&int64](c.malloc(zonespancolors_size*sizeof(int64)))
 
-  legionlib.assert(pointpos_x ~= nil, "pointpos_x nil")
-  legionlib.assert(pointpos_y ~= nil, "pointpos_y nil")
-  legionlib.assert(pointcolors ~= nil, "pointcolors nil")
-  legionlib.assert(pointmcolors ~= nil, "pointmcolors nil")
-  legionlib.assert(pointspancolors ~= nil, "pointspancolors nil")
-  legionlib.assert(zonestart ~= nil, "zonestart nil")
-  legionlib.assert(zonesize ~= nil, "zonesize nil")
-  legionlib.assert(zonepoints ~= nil, "zonepoints nil")
-  legionlib.assert(zonecolors ~= nil, "zonecolors nil")
-  legionlib.assert(zonespancolors ~= nil, "zonespancolors nil")
+  regentlib.assert(pointpos_x ~= nil, "pointpos_x nil")
+  regentlib.assert(pointpos_y ~= nil, "pointpos_y nil")
+  regentlib.assert(pointcolors ~= nil, "pointcolors nil")
+  regentlib.assert(pointmcolors ~= nil, "pointmcolors nil")
+  regentlib.assert(pointspancolors ~= nil, "pointspancolors nil")
+  regentlib.assert(zonestart ~= nil, "zonestart nil")
+  regentlib.assert(zonesize ~= nil, "zonesize nil")
+  regentlib.assert(zonepoints ~= nil, "zonepoints nil")
+  regentlib.assert(zonecolors ~= nil, "zonecolors nil")
+  regentlib.assert(zonespancolors ~= nil, "zonespancolors nil")
 
   var nspans_zones : int64 = 0
   var nspans_points : int64 = 0
@@ -2106,21 +2106,21 @@ terra read_input(runtime : c.legion_runtime_t,
   do
     var rz_ispace = c.legion_physical_region_get_logical_region(rz_physical[0]).index_space
     var rz_alloc = c.legion_index_allocator_create(runtime, ctx, rz_ispace)
-    legionlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0, "rz_alloc returned non-zero pointer")
+    regentlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0, "rz_alloc returned non-zero pointer")
     c.legion_index_allocator_destroy(rz_alloc)
   end
 
   do
     var rp_ispace = c.legion_physical_region_get_logical_region(rp_physical[0]).index_space
     var rp_alloc = c.legion_index_allocator_create(runtime, ctx, rp_ispace)
-    legionlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0, "rp_alloc returned non-zero pointere")
+    regentlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0, "rp_alloc returned non-zero pointere")
     c.legion_index_allocator_destroy(rp_alloc)
   end
 
   do
     var rs_ispace = c.legion_physical_region_get_logical_region(rs_physical[0]).index_space
     var rs_alloc = c.legion_index_allocator_create(runtime, ctx, rs_ispace)
-    legionlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0, "rs_alloc returned non-zero pointer")
+    regentlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0, "rs_alloc returned non-zero pointer")
     c.legion_index_allocator_destroy(rs_alloc)
   end
 
@@ -2131,7 +2131,7 @@ terra read_input(runtime : c.legion_runtime_t,
 
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      legionlib.assert(zonesize[i] < 255, "zone has more than 255 sides")
+      regentlib.assert(zonesize[i] < 255, "zone has more than 255 sides")
       @[&uint8](c.legion_accessor_array_ref(rz_znump, p)) = uint8(zonesize[i])
     end
 
@@ -2358,12 +2358,12 @@ terra validate_output(runtime : c.legion_runtime_t,
   var solution_ze : &double = [&double](c.malloc(conf.nz*sizeof(double)))
   var solution_zp : &double = [&double](c.malloc(conf.nz*sizeof(double)))
 
-  legionlib.assert(solution_zr ~= nil, "solution_zr nil")
-  legionlib.assert(solution_ze ~= nil, "solution_ze nil")
-  legionlib.assert(solution_zp ~= nil, "solution_zp nil")
+  regentlib.assert(solution_zr ~= nil, "solution_zr nil")
+  regentlib.assert(solution_ze ~= nil, "solution_ze nil")
+  regentlib.assert(solution_zp ~= nil, "solution_zp nil")
 
   var input_filename = get_positional_arg()
-  legionlib.assert(input_filename ~= nil, "input_filename nil")
+  regentlib.assert(input_filename ~= nil, "input_filename nil")
 
   var solution_filename : int8[solution_filename_maxlen]
   do
@@ -2373,7 +2373,7 @@ terra validate_output(runtime : c.legion_runtime_t,
       c.abort()
     end
     var len : int64 = [int64](sep - input_filename)
-    legionlib.assert(len + 8 < solution_filename_maxlen, "solution_filename exceeds maximum length")
+    regentlib.assert(len + 8 < solution_filename_maxlen, "solution_filename exceeds maximum length")
     cstring.strncpy(solution_filename, input_filename, len)
     cstring.strncpy(solution_filename + len, ".xy.std", 8)
   end
@@ -2619,4 +2619,4 @@ end
 function _t3() end -- seems like I need this to break up the statements
 (terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 cpennant.register_mappers()
-legionlib.start(toplevel)
+regentlib.start(toplevel)

@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- Do each of these reductions multiple times so we know they're
 -- folding properly.
@@ -87,6 +87,6 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == -2668, "test failed")
+  regentlib.assert(f() == -2668, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

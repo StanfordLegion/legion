@@ -17,7 +17,7 @@
 --   xst = xts
 --     ^
 
-import "legion"
+import "regent"
 
 task f(s : region(int), t : region(int), xst : ptr(int, s, t), xts : ptr(int, t, s))
   xst = xts

@@ -14,20 +14,20 @@
 
 -- Legion Language Entry Point
 
-local ast = require("legion/ast")
-local builtins = require("legion/builtins")
-local codegen = require("legion/codegen")
-local optimize_config_options = require("legion/optimize_config_options")
-local optimize_divergence = require("legion/optimize_divergence")
-local optimize_futures = require("legion/optimize_futures")
-local optimize_inlines = require("legion/optimize_inlines")
-local optimize_loops = require("legion/optimize_loops")
-local parser = require("legion/parser")
-local specialize = require("legion/specialize")
-local std = require("legion/std")
-local type_check = require("legion/type_check")
-local vectorize_loops = require("legion/vectorize_loops")
-local inline_tasks = require("legion/inline_tasks")
+local ast = require("regent/ast")
+local builtins = require("regent/builtins")
+local codegen = require("regent/codegen")
+local optimize_config_options = require("regent/optimize_config_options")
+local optimize_divergence = require("regent/optimize_divergence")
+local optimize_futures = require("regent/optimize_futures")
+local optimize_inlines = require("regent/optimize_inlines")
+local optimize_loops = require("regent/optimize_loops")
+local parser = require("regent/parser")
+local specialize = require("regent/specialize")
+local std = require("regent/std")
+local type_check = require("regent/type_check")
+local vectorize_loops = require("regent/vectorize_loops")
+local inline_tasks = require("regent/inline_tasks")
 
 -- Add Language Builtins to Global Environment
 
@@ -38,7 +38,7 @@ end
 
 -- Add Interface to Helper Functions
 
-_G["legionlib"] = std
+_G["regentlib"] = std
 
 -- Compiler
 

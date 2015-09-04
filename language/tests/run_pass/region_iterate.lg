@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f() : int
   var r = region(ispace(ptr, 10), int)
@@ -38,6 +38,6 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 12345, "test failed")
+  regentlib.assert(f() == 12345, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

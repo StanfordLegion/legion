@@ -17,7 +17,7 @@
 --   var r = region(true, int)
 --                ^
 
-import "legion"
+import "regent"
 
 task f()
   var r = region(true, int)

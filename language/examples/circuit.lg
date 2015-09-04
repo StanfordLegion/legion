@@ -15,7 +15,7 @@
 -- runs-with:
 -- []
 
-import "legion"
+import "regent"
 
 -- Compile and link circuit.cc
 local ccircuit
@@ -45,7 +45,7 @@ do
   ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
-local c = legionlib.c
+local c = regentlib.c
 local std = terralib.includec("stdlib.h")
 local cstring = terralib.includec("string.h")
 rawset(_G, "drand48", std.drand48)
@@ -215,7 +215,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
       piece_node_ptrs[n] =
         [&c.legion_ptr_t](c.malloc(conf.nodes_per_piece * sizeof(c.legion_ptr_t)))
       for i = 0, conf.nodes_per_piece do
-        legionlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
+        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var node_ptr = c.legion_index_iterator_next(itr)
         --if i == 0 then
         --  first_nodes[n] = node_ptr
@@ -278,7 +278,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(ghost_node_map, n)
       for i = 0, conf.wires_per_piece do
-        legionlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
+        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var wire_ptr = c.legion_index_iterator_next(itr)
         if i == 0 then
           first_wires[n] = wire_ptr
@@ -337,7 +337,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(shared_node_map, n)
       for i = 0, conf.nodes_per_piece do
-        legionlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
+        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var node_ptr = c.legion_index_iterator_next(itr)
         if not c.legion_coloring_has_point(privacy_map, 0, node_ptr) then
           c.legion_coloring_delete_point(private_node_map, n, node_ptr)
@@ -947,4 +947,4 @@ task toplevel()
   c.free(colorings.first_wires)
 end
 ccircuit.register_mappers()
-legionlib.start(toplevel)
+regentlib.start(toplevel)

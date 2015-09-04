@@ -15,11 +15,11 @@
 -- fails-with:
 -- assertion failed: pointer ptr(int32, $r) is out-of-bounds
 
-import "legion"
+import "regent"
 
 -- This tests the compiler bounds checks for regions.
 
-local c = legionlib.c
+local c = regentlib.c
 
 local function raw_to_ptr(t)
   return terra(x : int)
@@ -32,4 +32,4 @@ task main()
   var x = [raw_to_ptr(ptr(int, r))](0)
   @x = 5
 end
-legionlib.start(main)
+regentlib.start(main)

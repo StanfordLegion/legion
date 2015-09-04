@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This tests various aspects of the inline mapping optimization.
 
@@ -36,7 +36,7 @@ task main()
   @x = 3
   f(r, x)
   f(r, x)
-  legionlib.assert(@x == 23, "test failed")
+  regentlib.assert(@x == 23, "test failed")
 
   if @x < 30 then
     f(r, x)
@@ -44,28 +44,28 @@ task main()
   elseif f(r, x) < 20 then
     @x += 3
   end
-  legionlib.assert(@x == 43, "test failed")
+  regentlib.assert(@x == 43, "test failed")
 
   while true do
     f(r, x)
     @x += 100
     break
   end
-  legionlib.assert(@x == 153, "test failed")
+  regentlib.assert(@x == 153, "test failed")
 
   for i = 0, @x, 100 do
     f(r, x)
   end
-  legionlib.assert(@x == 173, "test failed")
+  regentlib.assert(@x == 173, "test failed")
 
   repeat
     f(r, x)
     @x += 100
   until @x > 200
-  legionlib.assert(@x == 283, "test failed")
+  regentlib.assert(@x == 283, "test failed")
 
   @x = 7
   g(r, x)
-  legionlib.assert(@x == 4037, "test failed")
+  regentlib.assert(@x == 4037, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

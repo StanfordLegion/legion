@@ -17,9 +17,9 @@
 --   assert_disjoint { x = t0, y = t1 }
 --                 ^
 
-import 'legion'
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 fspace assert_disjoint {
   x : region(int),
@@ -40,4 +40,4 @@ task main()
 
   c.legion_coloring_destroy(colors)
 end
-legionlib.start(main)
+regentlib.start(main)

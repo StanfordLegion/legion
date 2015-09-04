@@ -12,12 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 x = false
 
 function g(y)
-  legionlib.assert(y == 5, "test failed")
+  regentlib.assert(y == 5, "test failed")
   x = true
 end
 
@@ -29,6 +29,6 @@ task main()
   f(5)
 end
 
-legionlib.assert(not x, "test failed")
-legionlib.start(main)
-legionlib.assert(x, "test failed")
+regentlib.assert(not x, "test failed")
+regentlib.start(main)
+regentlib.assert(x, "test failed")

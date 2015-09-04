@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f() : int
   var x : double = 4.4
@@ -21,7 +21,7 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 4, "test failed")
+  regentlib.assert(f() == 4, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)
 

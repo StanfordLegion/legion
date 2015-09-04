@@ -17,7 +17,7 @@
 --   xs = xt
 --    ^
 
-import "legion"
+import "regent"
 
 task f()
   var s = region(ispace(ptr, 5), int)

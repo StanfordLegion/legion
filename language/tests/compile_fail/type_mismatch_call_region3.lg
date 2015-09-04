@@ -17,7 +17,7 @@
 --   f(r, s, u)
 --   ^
 
-import "legion"
+import "regent"
 
 task f(x : region(int), y : region(int), z : ptr(int, x)) end
 

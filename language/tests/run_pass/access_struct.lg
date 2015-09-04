@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 struct point {
   x : int,
@@ -29,6 +29,6 @@ terra g() : point
 end
 
 task main()
-  legionlib.assert(f(g()) == 321, "test failed")
+  regentlib.assert(f(g()) == 321, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

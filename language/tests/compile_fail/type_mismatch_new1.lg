@@ -17,7 +17,7 @@
 --   var x = new(int)
 --             ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = new(int)

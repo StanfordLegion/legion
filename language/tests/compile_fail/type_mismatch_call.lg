@@ -17,7 +17,7 @@
 --   f(y, x)
 --   ^
 
-import "legion"
+import "regent"
 
 terra null_rawptr() : &int
   return [&int](0)

@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 terra f(a : int, b : int) : int
   return a + b
@@ -23,6 +23,6 @@ task g(a : int, b : int) : int
 end
 
 task main()
-  legionlib.assert(g(1, 10) == 11, "test failed")
+  regentlib.assert(g(1, 10) == 11, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

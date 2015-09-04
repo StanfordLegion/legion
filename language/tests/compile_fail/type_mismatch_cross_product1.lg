@@ -17,11 +17,11 @@
 --   var cp = cross_product(p1)
 --                        ^
 
-import "legion"
+import "regent"
 
 task f() : int
   var r = region(ispace(ptr, 5), int)
-  var c : legionlib.c.legion_coloring_t
+  var c : regentlib.c.legion_coloring_t
   var p1 = partition(disjoint, r, c)
   var cp = cross_product(p1)
 end

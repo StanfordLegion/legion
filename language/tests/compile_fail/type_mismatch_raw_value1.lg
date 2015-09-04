@@ -17,7 +17,7 @@
 --   var x = __raw(5)
 --               ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = __raw(5)

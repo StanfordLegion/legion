@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 struct vec2
 {
@@ -99,9 +99,9 @@ task toplevel()
   end
   f(r2, r1)
   for e in r1 do
-    legionlib.assert(e.v1.x == e.v2.x, "test failed")
-    legionlib.assert(e.v1.y == e.v2.y, "test failed")
+    regentlib.assert(e.v1.x == e.v2.x, "test failed")
+    regentlib.assert(e.v1.y == e.v2.y, "test failed")
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

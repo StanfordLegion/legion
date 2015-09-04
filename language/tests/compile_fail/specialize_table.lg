@@ -17,7 +17,7 @@
 --   var x = t
 --           ^
 
-import "legion"
+import "regent"
 
 local t = {}
 

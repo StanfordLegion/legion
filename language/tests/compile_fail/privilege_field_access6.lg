@@ -17,7 +17,7 @@
 --     p.px.x = p.px0.x + dth*(p.pu.x + p.pu0.x)
 --                             ^
 
-import "legion"
+import "regent"
 
 struct vec2 {
   x : double,

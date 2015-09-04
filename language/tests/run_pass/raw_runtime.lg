@@ -12,14 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-terra test(ctx : legionlib.c.legion_runtime_t)
-  legionlib.assert(ctx.impl ~= nil, "test failed")
+terra test(ctx : regentlib.c.legion_runtime_t)
+  regentlib.assert(ctx.impl ~= nil, "test failed")
 end
 
 task main()
   var ctx = __runtime()
   test(ctx)
 end
-legionlib.start(main)
+regentlib.start(main)

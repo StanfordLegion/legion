@@ -17,7 +17,7 @@
 --    e.v1 = e.v2
 --    ^
 
-import "legion"
+import "regent"
 
 struct vec2
 {
@@ -40,4 +40,4 @@ task toplevel()
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

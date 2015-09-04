@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task eq(a : int, b : int) : bool
   return a == b
@@ -39,23 +39,23 @@ task ge(a : int, b : int) : bool
 end
 
 task main()
-  legionlib.assert(false == eq(5, 3), "test failed")
-  legionlib.assert(eq(5, 5), "test failed")
-  legionlib.assert(false == eq(3, 5), "test failed")
-  legionlib.assert(ne(5, 3), "test failed")
-  legionlib.assert(false == ne(5, 5), "test failed")
-  legionlib.assert(ne(3, 5), "test failed")
-  legionlib.assert(false == lt(5, 3), "test failed")
-  legionlib.assert(false == lt(5, 5), "test failed")
-  legionlib.assert(lt(3, 5), "test failed")
-  legionlib.assert(false == le(5, 3), "test failed")
-  legionlib.assert(le(5, 5), "test failed")
-  legionlib.assert(le(3, 5), "test failed")
-  legionlib.assert(gt(5, 3), "test failed")
-  legionlib.assert(false == gt(5, 5), "test failed")
-  legionlib.assert(false == gt(3, 5), "test failed")
-  legionlib.assert(ge(5, 3), "test failed")
-  legionlib.assert(ge(5, 5), "test failed")
-  legionlib.assert(false == ge(3, 5), "test failed")
+  regentlib.assert(false == eq(5, 3), "test failed")
+  regentlib.assert(eq(5, 5), "test failed")
+  regentlib.assert(false == eq(3, 5), "test failed")
+  regentlib.assert(ne(5, 3), "test failed")
+  regentlib.assert(false == ne(5, 5), "test failed")
+  regentlib.assert(ne(3, 5), "test failed")
+  regentlib.assert(false == lt(5, 3), "test failed")
+  regentlib.assert(false == lt(5, 5), "test failed")
+  regentlib.assert(lt(3, 5), "test failed")
+  regentlib.assert(false == le(5, 3), "test failed")
+  regentlib.assert(le(5, 5), "test failed")
+  regentlib.assert(le(3, 5), "test failed")
+  regentlib.assert(gt(5, 3), "test failed")
+  regentlib.assert(false == gt(5, 5), "test failed")
+  regentlib.assert(false == gt(3, 5), "test failed")
+  regentlib.assert(ge(5, 3), "test failed")
+  regentlib.assert(ge(5, 5), "test failed")
+  regentlib.assert(false == ge(3, 5), "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

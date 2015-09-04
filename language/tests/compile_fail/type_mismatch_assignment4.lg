@@ -17,7 +17,7 @@
 --   ks = kt
 --    ^
 
-import "legion"
+import "regent"
 
 fspace k(a : region(int)) {}
 

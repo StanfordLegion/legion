@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task fib(n : int) : int
   if n <= 1 then
@@ -22,13 +22,13 @@ task fib(n : int) : int
 end
 
 task main()
-  legionlib.assert(fib(0) == 1, "test failed")
-  legionlib.assert(fib(1) == 1, "test failed")
-  legionlib.assert(fib(2) == 2, "test failed")
-  legionlib.assert(fib(3) == 3, "test failed")
-  legionlib.assert(fib(4) == 5, "test failed")
-  legionlib.assert(fib(5) == 8, "test failed")
-  legionlib.assert(fib(6) == 13, "test failed")
-  legionlib.assert(fib(7) == 21, "test failed")
+  regentlib.assert(fib(0) == 1, "test failed")
+  regentlib.assert(fib(1) == 1, "test failed")
+  regentlib.assert(fib(2) == 2, "test failed")
+  regentlib.assert(fib(3) == 3, "test failed")
+  regentlib.assert(fib(4) == 5, "test failed")
+  regentlib.assert(fib(5) == 8, "test failed")
+  regentlib.assert(fib(6) == 13, "test failed")
+  regentlib.assert(fib(7) == 21, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

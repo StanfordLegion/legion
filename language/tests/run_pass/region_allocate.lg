@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f()
   var r = region(ispace(ptr, 5), int)
@@ -22,4 +22,4 @@ end
 task main()
   f()
 end
-legionlib.start(main)
+regentlib.start(main)

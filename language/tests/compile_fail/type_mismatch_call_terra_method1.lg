@@ -17,7 +17,7 @@
 --   x:f()
 --   ^
 
-import "legion"
+import "regent"
 
 struct s {}
 

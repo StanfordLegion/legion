@@ -17,7 +17,7 @@
 --   x = t {}
 --   ^
 
-import "legion"
+import "regent"
 
 struct s {}
 struct t {}

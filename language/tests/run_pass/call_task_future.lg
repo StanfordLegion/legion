@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This tests that tasks can accept parameters via either task
 -- arguments or futures.
@@ -26,14 +26,14 @@ task g(x : int, y : int, z : int)
 end
 
 task main()
-  legionlib.assert(g(1, 20, 300) == 321, "test failed")
-  legionlib.assert(g(1, 20, f(100)) == 521, "test failed")
-  legionlib.assert(g(1, f(10), 300) == 351, "test failed")
-  legionlib.assert(g(1, f(10), f(100)) == 551, "test failed")
-  legionlib.assert(g(f(1), 20, 300) == 325, "test failed")
-  legionlib.assert(g(f(1), 20, f(100)) == 525, "test failed")
-  legionlib.assert(g(f(1), f(10), 300) == 355, "test failed")
-  legionlib.assert(g(f(1), f(10), f(100)) == 555, "test failed")
+  regentlib.assert(g(1, 20, 300) == 321, "test failed")
+  regentlib.assert(g(1, 20, f(100)) == 521, "test failed")
+  regentlib.assert(g(1, f(10), 300) == 351, "test failed")
+  regentlib.assert(g(1, f(10), f(100)) == 551, "test failed")
+  regentlib.assert(g(f(1), 20, 300) == 325, "test failed")
+  regentlib.assert(g(f(1), 20, f(100)) == 525, "test failed")
+  regentlib.assert(g(f(1), f(10), 300) == 355, "test failed")
+  regentlib.assert(g(f(1), f(10), f(100)) == 555, "test failed")
 
   do
     var x = 0
@@ -42,13 +42,13 @@ task main()
       -- This should not concretize because every point is the same.
       x += f(y)
     end
-    legionlib.assert(x == 500, "test failed")
+    regentlib.assert(x == 500, "test failed")
   end
 
   var x = -f(5)
-  legionlib.assert(x == -25, "test failed")
+  regentlib.assert(x == -25, "test failed")
 
   var y = f(10) + f(100)
-  legionlib.assert(y == 550, "test failed")
+  regentlib.assert(y == 550, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

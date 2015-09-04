@@ -17,7 +17,7 @@
 --   b.{x, y, z} = f(a.{x, y, z})
 --   ^
 
-import "legion"
+import "regent"
 
 struct foo
 {
@@ -35,4 +35,4 @@ task main()
   a = foo { x = 1, y = 2, z = 3 }
   b.{x, y, z} = f(a.{x, y, z})
 end
-legionlib.start(main)
+regentlib.start(main)

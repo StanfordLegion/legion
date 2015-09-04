@@ -17,12 +17,12 @@
 --   for i = 0, n do
 --     ^
 
-import "legion"
+import "regent"
 
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = legionlib.c
+local c = regentlib.c
 
 terra e(x : int) : int
   return 3
@@ -70,4 +70,4 @@ task main()
     f(p_disjoint[i])
   end
 end
-legionlib.start(main)
+regentlib.start(main)

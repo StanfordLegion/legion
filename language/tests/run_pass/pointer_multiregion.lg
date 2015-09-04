@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f(r : region(int), s : region(int), t : region(ptr(int, r, s)))
 where
@@ -31,4 +31,4 @@ task main()
 
   f(r, s, t)
 end
-legionlib.start(main)
+regentlib.start(main)

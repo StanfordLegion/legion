@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 function raw(t)
   return terra(x : t) return x.__ptr end
@@ -78,9 +78,9 @@ task main()
 
   var s = 0
   for x in r do
-    legionlib.assert(@x == 1, "test failed")
+    regentlib.assert(@x == 1, "test failed")
     s += @x
   end
-  legionlib.assert(s == 4, "test failed")
+  regentlib.assert(s == 4, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

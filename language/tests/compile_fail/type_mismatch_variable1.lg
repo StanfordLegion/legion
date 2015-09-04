@@ -17,7 +17,7 @@
 --   var x : int = true
 --     ^
 
-import "legion"
+import "regent"
 
 task f()
   var x : int = true

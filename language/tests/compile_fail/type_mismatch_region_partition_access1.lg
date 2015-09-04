@@ -17,9 +17,9 @@
 --   var r0 = p[true]
 --            ^
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 task f()
   var r = region(ispace(ptr, 5), int)

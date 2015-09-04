@@ -17,12 +17,12 @@
 --     f(p_disjoint[e_bad(__runtime())])
 --     ^
 
-import "legion"
+import "regent"
 
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = legionlib.c
+local c = regentlib.c
 
 terra e(x : int) : int
   return 3
@@ -73,4 +73,4 @@ task main()
     f(p_disjoint[e_bad(__runtime())])
   end
 end
-legionlib.start(main)
+regentlib.start(main)

@@ -14,10 +14,10 @@
 
 -- Legion Type Checker
 
-local ast = require("legion/ast")
-local log = require("legion/log")
-local std = require("legion/std")
-local symbol_table = require("legion/symbol_table")
+local ast = require("regent/ast")
+local log = require("regent/log")
+local std = require("regent/std")
+local symbol_table = require("regent/symbol_table")
 
 local type_check = {}
 
@@ -360,7 +360,7 @@ function type_check.expr_call(cx, node)
       if valid then
         fn_type = result_type
       else
-        local func_name = string.gsub(fn.value.name, "^std[.]", "legionlib.")
+        local func_name = string.gsub(fn.value.name, "^std[.]", "regentlib.")
         log.error(node, "no applicable overloaded function " .. tostring(func_name) ..
                   " for arguments " .. arg_types:mkstring(", "))
       end

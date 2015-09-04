@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 x = 5 -- Specialize constant
 i = int -- Specialize type
@@ -35,7 +35,7 @@ end
 xp2 = local_scope()
 
 task main()
-  legionlib.assert(xp1() == 6, "test failed")
-  legionlib.assert(xp2() == 3.6, "test failed")
+  regentlib.assert(xp1() == 6, "test failed")
+  regentlib.assert(xp2() == 3.6, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

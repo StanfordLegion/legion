@@ -18,7 +18,7 @@
 --           ^
 
 
-import "legion"
+import "regent"
 
 fspace t(a : region(int)) {
   b : region(int),

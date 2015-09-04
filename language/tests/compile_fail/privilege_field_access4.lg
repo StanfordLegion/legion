@@ -17,7 +17,7 @@
 --   p.a = 0
 --   ^
 
-import "legion"
+import "regent"
 
 struct s {
   a : int,

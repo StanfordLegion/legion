@@ -17,7 +17,7 @@
 --   f(r, s, t)
 --   ^
 
-import "legion"
+import "regent"
 
 fspace list(a : region(list(a))) {}
 

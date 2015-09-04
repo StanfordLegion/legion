@@ -17,7 +17,7 @@
 --   var y = x.f
 --           ^
 
-import "legion"
+import "regent"
 
 struct p {}
 

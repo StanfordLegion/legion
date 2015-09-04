@@ -12,11 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This tests a crash in conflicting reduction privileges.
 
-local c = legionlib.c
+local c = regentlib.c
 
 task g2b(s : region(int)) : int
 where reads(s) do
@@ -65,4 +65,4 @@ task main()
 
   with_partitions(r1, p1_disjoint, n)
 end
-legionlib.start(main)
+regentlib.start(main)

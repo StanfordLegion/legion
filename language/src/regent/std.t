@@ -14,15 +14,15 @@
 
 -- Legion Standard Library
 
-local config = require("legion/config")
-local log = require("legion/log")
+local config = require("regent/config")
+local log = require("regent/log")
 local cudahelper
 
 local std = {}
 
 std.config, std.args = config.parse_args()
 
-if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 -- #####################################
 -- ## Legion Bindings

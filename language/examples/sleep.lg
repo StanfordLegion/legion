@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 local c = terralib.includecstring([[
 #include <stdio.h>
@@ -20,20 +20,20 @@ local c = terralib.includecstring([[
 ]])
 
 task sleep(x : int)
-  var start = legionlib.c.legion_get_current_time_in_micros()
+  var start = regentlib.c.legion_get_current_time_in_micros()
   c.printf("subtask %d starting sleep at %llu\n", x, start)
   c.usleep(100000)
-  var stop = legionlib.c.legion_get_current_time_in_micros()
+  var stop = regentlib.c.legion_get_current_time_in_micros()
   c.printf("subtask %d stopping sleep at %llu, total %llu\n", x, stop, stop - start)
 end
 
 task main()
-  var start = legionlib.c.legion_get_current_time_in_micros()
+  var start = regentlib.c.legion_get_current_time_in_micros()
   c.printf("main starting to launch subtasks at %llu\n", start)
   for i = 0, 4 do
     sleep(i)
   end
-  var stop = legionlib.c.legion_get_current_time_in_micros()
+  var stop = regentlib.c.legion_get_current_time_in_micros()
   c.printf("main finished launching subtasks at %llu\n", stop)
 end
-legionlib.start(main)
+regentlib.start(main)

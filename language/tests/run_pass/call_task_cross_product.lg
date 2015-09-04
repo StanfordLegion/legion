@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 function raw(t)
   return terra(x : t) return x.__ptr end
@@ -116,9 +116,9 @@ task main()
   var prod = cross_product(part0, part1, part2)
   for x in r do @x = 1 end
 
-  legionlib.assert(f(r, part0, part1, part2, prod) == 11111111, "test failed")
-  legionlib.assert(
+  regentlib.assert(f(r, part0, part1, part2, prod) == 11111111, "test failed")
+  regentlib.assert(
     g(r, prod[0], prod[0].partition, part2, prod[0].product) == 1111,
     "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

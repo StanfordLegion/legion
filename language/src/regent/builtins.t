@@ -14,7 +14,7 @@
 
 -- Legion Builtins
 
-local std = require("legion/std")
+local std = require("regent/std")
 
 local builtins = {}
 

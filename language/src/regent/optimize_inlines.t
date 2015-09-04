@@ -16,8 +16,8 @@
 --
 -- Attempts to place map/unmap calls to avoid thrashing inlines.
 
-local ast = require("legion/ast")
-local std = require("legion/std")
+local ast = require("regent/ast")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context

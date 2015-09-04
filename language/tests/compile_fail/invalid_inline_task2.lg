@@ -17,7 +17,7 @@
 -- task f(x : int)
 --    ^
 
-import "legion"
+import "regent"
 
 __demand(__inline)
 task f(x : int)
@@ -31,4 +31,4 @@ task main()
   f(1)
 end
 
-legionlib.start(main)
+regentlib.start(main)

@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f(s : region(int)) : ptr(int, s)
   return new(ptr(int, s))
@@ -31,6 +31,6 @@ task h() : int
 end
 
 task main()
-  legionlib.assert(h() == 5, "test failed")
+  regentlib.assert(h() == 5, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

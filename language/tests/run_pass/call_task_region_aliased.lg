@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import 'legion'
+import "regent"
 
 -- This to prove that passing aliased regions (even when known to be
 -- aliased at compile time) works as long as at most one region has
@@ -26,4 +26,4 @@ task main()
   var r = region(ispace(ptr, 5), int)
   f(r, r)
 end
-legionlib.start(main)
+regentlib.start(main)

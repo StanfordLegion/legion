@@ -15,7 +15,7 @@
 -- fails-with:
 -- assertion failed: array access to int32[5] is out-of-bounds
 
-import "legion"
+import "regent"
 
 -- This tests the compiler bounds checks for Terra arrays.
 
@@ -24,4 +24,4 @@ task main()
   var x = new(ptr(int[5], r))
   (@x)[5] = 5
 end
-legionlib.start(main)
+regentlib.start(main)

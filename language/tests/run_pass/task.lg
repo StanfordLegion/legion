@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f() : int
   return 5
@@ -23,6 +23,6 @@ local task g() : int
 end
 
 task main()
-  legionlib.assert(f() == g(), "test failed")
+  regentlib.assert(f() == g(), "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

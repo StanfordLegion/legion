@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 -- This tests the way in which default partitions in placed into the
 -- environment, particularly with respect to the order that regions
@@ -84,6 +84,6 @@ task g() : int
 end
 
 task main()
-  legionlib.assert(g() == 246, "test failed")
+  regentlib.assert(g() == 246, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

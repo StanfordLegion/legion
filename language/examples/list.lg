@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 fspace list(a : region(list(a))) {
   data : int,
@@ -53,4 +53,4 @@ end
 task main()
   assert(top() == 15)
 end
-legionlib.start(main)
+regentlib.start(main)

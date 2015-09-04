@@ -17,7 +17,7 @@
 --   c.x = a.{z, y, x}
 --   ^
 
-import "legion"
+import "regent"
 
 struct foo
 {
@@ -38,4 +38,4 @@ end
 task main()
   f()
 end
-legionlib.start(main)
+regentlib.start(main)

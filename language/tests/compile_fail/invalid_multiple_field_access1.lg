@@ -17,7 +17,7 @@
 --   c.{x, y, z} = a.{x, y} * b.{z, y, x}
 --   ^
 
-import "legion"
+import "regent"
 
 struct foo
 {
@@ -36,4 +36,4 @@ end
 task main()
   f()
 end
-legionlib.start(main)
+regentlib.start(main)

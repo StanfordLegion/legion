@@ -14,10 +14,10 @@
 
 -- Regent Task Inliner
 
-local ast = require("legion/ast")
-local std = require("legion/std")
-local log = require("legion/log")
-local symbol_table = require("legion/symbol_table")
+local ast = require("regent/ast")
+local std = require("regent/std")
+local log = require("regent/log")
+local symbol_table = require("regent/symbol_table")
 
 local inline_tasks = {}
 

@@ -14,11 +14,11 @@
 
 -- Legion Code Generation
 
-local ast = require("legion/ast")
-local log = require("legion/log")
-local std = require("legion/std")
-local symbol_table = require("legion/symbol_table")
-local traverse_symbols = require("legion/traverse_symbols")
+local ast = require("regent/ast")
+local log = require("regent/log")
+local std = require("regent/std")
+local symbol_table = require("regent/symbol_table")
+local traverse_symbols = require("regent/traverse_symbols")
 local cudahelper
 
 -- Configuration Variables
@@ -45,7 +45,7 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- accessors.
 local bounds_checks = std.config["bounds-checks"]
 
-if std.config["cuda"] then cudahelper = require("legion/cudahelper") end
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 local codegen = {}
 
@@ -2389,7 +2389,7 @@ function codegen.expr_ispace(cx, node)
     if start then
       actions = quote
         [actions]
-        legionlib.assert([start_value] == 0, "opaque ispaces must start at 0 right now")
+        std.assert([start_value] == 0, "opaque ispaces must start at 0 right now")
       end
     end
     actions = quote
@@ -3190,9 +3190,9 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    legionlib.assert(std.config["cuda"],
+    std.assert(std.config["cuda"],
       "cuda should be enabled to generate cuda kernels")
-    legionlib.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
+    std.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
       "multi-dimensional index spaces are not supported yet")
 
     -- wrap for-loop body as a terra function

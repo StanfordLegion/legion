@@ -17,7 +17,7 @@
 --   @y = 0
 --   ^
 
-import "legion"
+import "regent"
 
 fspace k (r : region(int)) {
   s : region(int),

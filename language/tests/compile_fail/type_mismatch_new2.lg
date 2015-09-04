@@ -17,7 +17,7 @@
 --   var x = new(ptr(int, r, s))
 --             ^
 
-import "legion"
+import "regent"
 
 task f()
   var r = region(ispace(ptr, 5), int)

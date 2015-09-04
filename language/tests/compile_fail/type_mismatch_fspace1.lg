@@ -17,7 +17,7 @@
 --   walk(rd, re, le)
 --      ^
 
-import "legion"
+import "regent"
 
 fspace list(ra : region(list(ra))) {
   data : int,

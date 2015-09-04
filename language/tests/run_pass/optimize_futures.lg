@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f() : int
   return 5
@@ -52,25 +52,25 @@ task main()
   var x = 10
   var y = 20
   y = x
-  legionlib.assert(y == 10, "test failed")
+  regentlib.assert(y == 10, "test failed")
 
   var z = f()
   y = z
-  legionlib.assert(y == 5, "test failed")
+  regentlib.assert(y == 5, "test failed")
 
   y += 30
-  legionlib.assert(y == 35, "test failed")
+  regentlib.assert(y == 35, "test failed")
 
   f()
 
   var a = g()
   var b : t
   b = a
-  legionlib.assert(b.a4 == 50000, "test failed")
+  regentlib.assert(b.a4 == 50000, "test failed")
 
   var d = 1e99
   var e = h()
   e = d
-  legionlib.assert(e == d, "test failed")
+  regentlib.assert(e == d, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

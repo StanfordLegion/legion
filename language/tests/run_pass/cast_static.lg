@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 task main()
   var r = region(ispace(ptr, 5), int)
@@ -47,13 +47,13 @@ task main()
 
   @x = 123
 
-  legionlib.assert(@x0 == 123, "test failed")
-  legionlib.assert(@x00 == 123, "test failed")
-  legionlib.assert(@x00_01 == 123, "test failed")
-  legionlib.assert(@x01_00 == 123, "test failed")
-  legionlib.assert(@x00_01_10_11 == 123, "test failed")
-  legionlib.assert(@x01_10_11_00 == 123, "test failed")
+  regentlib.assert(@x0 == 123, "test failed")
+  regentlib.assert(@x00 == 123, "test failed")
+  regentlib.assert(@x00_01 == 123, "test failed")
+  regentlib.assert(@x01_00 == 123, "test failed")
+  regentlib.assert(@x00_01_10_11 == 123, "test failed")
+  regentlib.assert(@x01_10_11_00 == 123, "test failed")
 
   c.legion_coloring_destroy(rc)
 end
-legionlib.start(main)
+regentlib.start(main)

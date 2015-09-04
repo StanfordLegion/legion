@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 task f(x : double) : int
   return [int](x)
@@ -27,7 +27,7 @@ struct t {
 }
 
 s.metamethods.__cast = function(from, to, expr)
-  legionlib.assert(from == s and to == t, "test failed")
+  regentlib.assert(from == s and to == t, "test failed")
   return `(t { y = [expr].x })
 end
 
@@ -37,7 +37,7 @@ task g(x : double) : int
 end
 
 task main()
-  legionlib.assert(f(4.1) == 4, "test failed")
-  legionlib.assert(g(5.7) == 5, "test failed")
+  regentlib.assert(f(4.1) == 4, "test failed")
+  regentlib.assert(g(5.7) == 5, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

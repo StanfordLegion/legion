@@ -19,9 +19,9 @@
 -- derefs are marked to facilitate dynamic branch elision in code
 -- generation.
 
-local ast = require("legion/ast")
-local std = require("legion/std")
-local union_find = require("legion/union_find")
+local ast = require("regent/ast")
+local std = require("regent/std")
+local union_find = require("regent/union_find")
 
 local context = {}
 context.__index = context

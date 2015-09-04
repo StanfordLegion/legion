@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
-local c = legionlib.c
+local c = regentlib.c
 
 fspace k (r : region(int)) {
   s : region(int),
@@ -51,6 +51,6 @@ task h() : int
 end
 
 task main()
-  legionlib.assert(h() == 37, "test failed")
+  regentlib.assert(h() == 37, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

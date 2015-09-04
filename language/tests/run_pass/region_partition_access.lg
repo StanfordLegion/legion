@@ -12,14 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 -- This test ensures that the compiler scopes regions properly. In
 -- general, the compiler caches regions by type, and if it finds a
 -- match, it skips codegen the second time. However, caching should
 -- respect scope boundaries.
 
-local c = legionlib.c
+local c = regentlib.c
 
 task f() : int
   var r = region(ispace(ptr, 5), int)
@@ -92,6 +92,6 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 987654321, "test failed")
+  regentlib.assert(f() == 987654321, "test failed")
 end
-legionlib.start(main)
+regentlib.start(main)

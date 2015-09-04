@@ -17,7 +17,7 @@
 --    if e.v > 1 then e.v = 0 end
 --     ^
 
-import "legion"
+import "regent"
 
 fspace fs
 {
@@ -33,4 +33,4 @@ task toplevel()
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)

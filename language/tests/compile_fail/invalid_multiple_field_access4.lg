@@ -17,7 +17,7 @@
 --   v2.{x, y} = f:apply(v1.{x, y})
 --    ^
 
-import "legion"
+import "regent"
 
 struct adder
 {
@@ -43,4 +43,4 @@ task main()
   --v2.x = f:apply(v1.x)
   --v2.y = f:apply(v1.y)
 end
-legionlib.start(main)
+regentlib.start(main)

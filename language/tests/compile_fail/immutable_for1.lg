@@ -17,7 +17,7 @@
 --     i = 2
 --     ^
 
-import "legion"
+import "regent"
 
 task f()
   for i = 0, 3 do

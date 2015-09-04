@@ -17,7 +17,7 @@
 --   var y : int = x
 --                 ^
 
-import "legion"
+import "regent"
 
 task f() : int
   var y : int = x

@@ -17,7 +17,7 @@
 --   var y = dynamic_cast(int, x)
 --                      ^
 
-import "legion"
+import "regent"
 
 task f()
   var x = 5

@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-import "legion"
+import "regent"
 
 struct vec2
 {
@@ -33,18 +33,18 @@ fspace fs1(ra : region(fs2), rb : region(fs2))
   p : ptr(fs2, ra, rb),
 }
 
-local ceil = legionlib.ceil(float)
-local log2 = legionlib.log2(float)
-local log10 = legionlib.log10(float)
-local log = legionlib.log(float)
-local cos = legionlib.cos(float)
-local sin = legionlib.sin(float)
-local exp2 = legionlib.exp2(float)
-local fabs = legionlib.fabs(float)
-local trunc = legionlib.trunc(float)
-local floor = legionlib.floor(float)
-local sqrt = legionlib.sqrt(float)
-local exp = legionlib.exp(float)
+local ceil = regentlib.ceil(float)
+local log2 = regentlib.log2(float)
+local log10 = regentlib.log10(float)
+local log = regentlib.log(float)
+local cos = regentlib.cos(float)
+local sin = regentlib.sin(float)
+local exp2 = regentlib.exp2(float)
+local fabs = regentlib.fabs(float)
+local trunc = regentlib.trunc(float)
+local floor = regentlib.floor(float)
+local sqrt = regentlib.sqrt(float)
+local exp = regentlib.exp(float)
 
 task f(ra : region(fs2), rb : region(fs2), r : region(fs1(ra, rb)))
 where
@@ -105,11 +105,11 @@ task toplevel()
   f(ra, rb, r1)
 
   for e in r1 do
-    legionlib.assert(e.p.v1.x == e.p.v2.x, "test failed")
-    legionlib.assert(e.p.v1.y == e.p.v2.y, "test failed")
-    legionlib.assert(e.v1.x == e.v2.x, "test failed")
-    legionlib.assert(e.v1.y == e.v2.y, "test failed")
+    regentlib.assert(e.p.v1.x == e.p.v2.x, "test failed")
+    regentlib.assert(e.p.v1.y == e.p.v2.y, "test failed")
+    regentlib.assert(e.v1.x == e.v2.x, "test failed")
+    regentlib.assert(e.v1.y == e.v2.y, "test failed")
   end
 end
 
-legionlib.start(toplevel)
+regentlib.start(toplevel)
