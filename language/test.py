@@ -140,7 +140,7 @@ def run_all_tests(thread_count, verbose):
                         path
                         for name in sorted(names)
                         for path in [os.path.join(dirname, name)]
-                        if os.path.isfile(path) and os.path.splitext(path)[1] in ('.lg', '.md')),
+                        if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md')),
                     ())
 
         for test_path in test_paths:
