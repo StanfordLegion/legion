@@ -6,14 +6,15 @@ below for instructions for installing and running the compiler.
 ## Prerequisites
 
   * Terra-compatible LLVM installation on PATH (tested successfully
-    with LLVM 3.4 and 3.5).
+    with LLVM 3.5).
       * Or you can install Terra yourself; see below for instructions.
 
 ## Installing
 
 Run the following command from the `language` directory:
 
-    ./install.py [-h] [--debug] [--with-terra TERRA]
+    ./install.py [-h] [--with-terra TERRA] [--debug] [--general] [--gasnet]
+                 [--cuda] [-j [THREAD_COUNT]]
 
 This command:
 
@@ -25,6 +26,11 @@ This command:
 Notes:
 
   * If you want a debug build Legion, pass `--debug` to `install.py`.
+  * By default, this script will install Legion's shared-memory
+    low-level runtime. For the general-purpose low-level runtime
+    (required for CUDA and GASNet), pass `--gasnet`.
+  * If you want to use CUDA and/or GASNet, pass `--cuda` and
+    `--gasnet`, respectively. (Requires `--general`.)
   * If you want to build with your own copy of Terra, pass the path to
     the Terra directory via the `--with-terra` flag. You will be
     responsible for building Terra yourself if you do this.
@@ -58,4 +64,4 @@ Legion code.
 
 To run the test suite, run:
 
-    ./test.py
+    ./test.py [-h] [-j [THREAD_COUNT]] [-v]
