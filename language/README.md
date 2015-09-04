@@ -1,6 +1,6 @@
-# Legion Language Compiler
+# Regent Compiler
 
-This directory contains the compiler for the Legion language. See
+This directory contains the compiler for the Regent language. See
 below for instructions for installing and running the compiler.
 
 ## Prerequisites
@@ -25,7 +25,7 @@ This command:
 
 Notes:
 
-  * If you want a debug build Legion, pass `--debug` to `install.py`.
+  * If you want a debug build of Legion, pass `--debug` to `install.py`.
   * By default, this script will install Legion's shared-memory
     low-level runtime. For the general-purpose low-level runtime
     (required for CUDA and GASNet), pass `--gasnet`.
@@ -37,7 +37,7 @@ Notes:
 
 ## Running
 
-To use Legion, run:
+To use Regent, run:
 
     ./legion.py [SCRIPT]
 
@@ -51,14 +51,14 @@ you can either:
 
 ## Using
 
-From the Legion shell, run the following command to import the
+From the Regent shell, run the following command to import the
 language:
 
     import "legion"
 
-This imports the Legion compiler into scope and adds hooks to the
-Legion compiler to the Terra parser so that you can start writing
-Legion code.
+This imports the Regent compiler into scope and adds hooks to the
+Regent compiler to the Terra parser so that you can start writing
+Regent code.
 
 ## Tests
 
