@@ -2217,7 +2217,8 @@ namespace LegionRuntime {
                                 TreeStateLogger *logger);
     public:
       void add_persistent_view(MaterializedView *view);
-      void capture_persistent_views(PhysicalState *target,
+      void capture_persistent_views(
+                            LegionMap<LogicalView*,FieldMask>::aligned &views,
                                     const FieldMask &capture_mask);
       void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:

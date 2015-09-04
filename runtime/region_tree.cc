@@ -13109,8 +13109,6 @@ namespace LegionRuntime {
     void PhysicalState::capture_state(bool path_only, bool close_top)
     //--------------------------------------------------------------------------
     {
-      FieldMask space_mask;
-      const bool capture_persistent = manager->has_persistent_views();
       if (close_top)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13129,8 +13127,6 @@ namespace LegionRuntime {
           {
             it->first->update_close_top_state(this, it->second);
           }
-          if (capture_persistent)
-            space_mask |= info.valid_fields;
         }
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
               vit = advance_states.begin(); vit != advance_states.end(); vit++)
@@ -13141,8 +13137,6 @@ namespace LegionRuntime {
           {
             it->first->update_open_children_state(this, it->second);
           }
-          if (capture_persistent)
-            space_mask |= info.valid_fields;
         }
       }
       else if (path_only)
@@ -13155,17 +13149,6 @@ namespace LegionRuntime {
                 info.states.begin(); it != info.states.end(); it++)
           {
             it->first->update_path_only_state(this, it->second);
-          }
-          if (capture_persistent)
-            space_mask |= info.valid_fields;
-        }
-        if (capture_persistent && !advance_states.empty())
-        {
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = advance_states.begin(); 
-                vit != advance_states.end(); vit++)
-          {
-            space_mask |= vit->second.valid_fields;
           }
         }
       }
@@ -13180,22 +13163,8 @@ namespace LegionRuntime {
           {
             it->first->update_physical_state(this, it->second);
           }
-          if (capture_persistent)
-            space_mask |= info.valid_fields;
-        }
-        if (capture_persistent && !advance_states.empty())
-        {
-          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-                vit = advance_states.begin(); 
-                vit != advance_states.end(); vit++)
-          {
-            space_mask |= vit->second.valid_fields;
-          }
         }
       }
-      // Check to see if we have any persistent views to include
-      if (capture_persistent && !!space_mask)
-        manager->capture_persistent_views(this, space_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -16123,7 +16092,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::capture_persistent_views(PhysicalState *target,
+    void VersionManager::capture_persistent_views(
+                        LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                                   const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
@@ -16136,10 +16106,10 @@ namespace LegionRuntime {
         if ((*it)->has_space(capture_mask))
         {
           LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-            target->valid_views.find(*it);
+            valid_views.find(*it);
           // Only need to add it if it is not already there
-          if (finder == target->valid_views.end())
-            target->valid_views[*it] = empty_mask;
+          if (finder == valid_views.end())
+            valid_views[*it] = empty_mask;
         }
       }
     }
@@ -19019,6 +18989,9 @@ namespace LegionRuntime {
         else
           finder->second |= overlap;
       }
+      // Now see if we have any persistent views to capture
+      if (needs_space && state->manager->has_persistent_views())
+        state->manager->capture_persistent_views(valid_views, space_mask);
     }
 
     //--------------------------------------------------------------------------
