@@ -200,6 +200,45 @@ namespace LegionRuntime {
     std::stringstream ss;
   };
 
+    // we will track the completion of the (asynchronous) kernel execution on the GPU by
+    //  enqueuing a callback request on the correct stream, and registering that an
+    //  AsyncWorkItem on the Task
+
+    class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      GPUWorkFence(Task *task);
+      
+      virtual void request_cancellation(void);
+
+      void enqueue_on_stream(CUstream stream);
+
+    protected:
+      static void cuda_callback(CUstream stream, CUresult res, void *data);
+    };
+
+    GPUWorkFence::GPUWorkFence(Task *task)
+      : Realm::Operation::AsyncWorkItem(task)
+    {}
+
+    void GPUWorkFence::request_cancellation(void)
+    {
+      // ignored - no way to shoot down CUDA work
+    }
+
+    void GPUWorkFence::enqueue_on_stream(CUstream stream)
+    {
+      CHECK_CU( cuStreamAddCallback(stream, &cuda_callback, (void *)this, 0) );
+    }
+
+    /*static*/ void GPUWorkFence::cuda_callback(CUstream stream, CUresult res, void *data)
+    {
+      GPUWorkFence *me = (GPUWorkFence *)data;
+
+      assert(res == CUDA_SUCCESS);
+      me->mark_finished();
+    }
+
+
     // we want to subclass the scheduler to replace the execute_task method, but we also want to
     //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
     //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
@@ -248,20 +287,17 @@ namespace LegionRuntime {
 
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
-#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CUstream s = 
-#endif
-	gpu->switch_to_next_task_stream();
+      CUstream s = gpu->switch_to_next_task_stream();
 
-      // TODO: decide how we want to show deferred execution in profiler
-      //CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
-      //			    (void*)this, 0) );
+      // we'll use a "work fence" to track when the kernels launched by this task actually
+      //  finish - this must be added to the task _BEFORE_ we execute
+      GPUWorkFence *fence = new GPUWorkFence(task);
+      task->add_async_work_item(fence);
 
       bool ok = T::execute_task(task);
 
-      // TODO: decide how we want to show deferred execution in profiler
-      //CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_finish, 
-      //                              (void*)this, 0) );
+      // now enqueue the fence on the local stream
+      fence->enqueue_on_stream(s);
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE

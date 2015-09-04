@@ -103,12 +103,14 @@ void response_task(const void *args, size_t arglen, Processor p)
 
   if(pr.has_measurement<OperationTimeline>()) {
     OperationTimeline *op_timeline = pr.get_measurement<OperationTimeline>();
-    printf("op timeline = %llu %llu %llu (%lld %lld)\n",
+    printf("op timeline = %llu %llu %llu %llu (%lld %lld %lld)\n",
 	   op_timeline->ready_time,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
+	   op_timeline->complete_time,
 	   op_timeline->start_time - op_timeline->ready_time,
-	   op_timeline->end_time - op_timeline->start_time);
+	   op_timeline->end_time - op_timeline->start_time,
+	   op_timeline->complete_time - op_timeline->end_time);
     delete op_timeline;
   } else
     printf("no timeline\n");

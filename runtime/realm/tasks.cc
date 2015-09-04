@@ -82,7 +82,7 @@ namespace Realm {
     // and clear the TLS when we're done
     ThreadLocal::current_processor = Processor::NO_PROC;
 
-    mark_completed();
+    mark_finished();
 
     log_task.info("thread finished running task %p for proc " IDFMT "",
 		  this, proc.id);
@@ -337,8 +337,6 @@ namespace Realm {
 
 	  bool ok = execute_task(task);
 	  assert(ok);  // no fault recovery yet
-	  // TODO: let operation table manage lifetime eventually
-	  delete task;
 
 	  lock.lock();
 

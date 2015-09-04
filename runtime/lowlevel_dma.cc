@@ -4164,17 +4164,18 @@ namespace LegionRuntime {
       return fill_size;
     }
 
-    class CopyCompletionProfiler : public EventWaiter {
+    class CopyCompletionProfiler : public EventWaiter, public Realm::Operation::AsyncWorkItem {
       public:
-        CopyCompletionProfiler(DmaRequest* _req) : req(_req) {}
+        CopyCompletionProfiler(DmaRequest* _req)
+	  : Realm::Operation::AsyncWorkItem(_req), req(_req)
+        { }
 
         virtual ~CopyCompletionProfiler(void) { }
 
         virtual bool event_triggered(void)
         {
-          req->mark_completed();
-          delete req;
-          return true;
+          mark_finished();
+          return false;
         }
 
         virtual void print_info(FILE *f)
@@ -4182,6 +4183,12 @@ namespace LegionRuntime {
           fprintf(f, "copy completion profiler - " IDFMT "/%d\n",
               req->after_copy.id, req->after_copy.gen);
         }
+
+        virtual void request_cancellation(void)
+        {
+	  // ignored for now
+	}
+
       protected:
         DmaRequest* req;
     };
@@ -4200,10 +4207,17 @@ namespace LegionRuntime {
 	if(r) {
           r->mark_started();
 
-	  // always mark completion once the copy's actually done
-	  EventImpl::add_waiter(r->after_copy, new CopyCompletionProfiler(r));
+	  // create a CopyCompletionProfiler to track the async work of the copy
+	  CopyCompletionProfiler *ccp = new CopyCompletionProfiler(r);
+
+	  r->add_async_work_item(ccp);
+
+	  // use the copy's finish event for now
+	  EventImpl::add_waiter(r->after_copy, ccp);
 
 	  r->perform_dma();
+
+	  r->mark_finished();
 	}
       }
 

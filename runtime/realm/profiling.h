@@ -74,18 +74,21 @@ namespace Realm {
         create_time(INVALID_TIMESTAMP),
         ready_time(INVALID_TIMESTAMP),
         start_time(INVALID_TIMESTAMP),
-        end_time(INVALID_TIMESTAMP)
+        end_time(INVALID_TIMESTAMP),
+	complete_time(INVALID_TIMESTAMP)
       { }
 
-      timestamp_t create_time; // when was operation created?
-      timestamp_t ready_time;  // when was operation ready to proceed?
-      timestamp_t start_time;  // when did operation start?
-      timestamp_t end_time;    // when did operation end?
+      timestamp_t create_time;   // when was operation created?
+      timestamp_t ready_time;    // when was operation ready to proceed?
+      timestamp_t start_time;    // when did operation start?
+      timestamp_t end_time;      // when did operation end (on processor)?
+      timestamp_t complete_time; // when was all work for operation complete?
 
       inline void record_create_time(void);
       inline void record_ready_time(void);
       inline void record_start_time(void);
       inline void record_end_time(void);
+      inline void record_complete_time(void);
       inline bool is_valid(void);
     };
 

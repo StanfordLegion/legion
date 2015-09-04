@@ -17,27 +17,14 @@
 
 namespace Realm {
 
-  Operation::Operation(void)
-  {
-    timeline.record_create_time();
-  }
-
-  Operation::Operation(const ProfilingRequestSet &reqs)
-    : requests(reqs)
-  {
-    measurements.import_requests(reqs); 
-    timeline.record_create_time();
-  }
-
   Operation::~Operation(void)
   {
-    // always send profiling responses, even if no measurements were made
-    if(requests.request_count() > 0) {
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
-	measurements.add_measurement(timeline);
-
-      measurements.send_responses(requests);
-    }
+    // delete all of the async work items we were given to track
+    for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
+	it != all_work_items.end();
+	it++)
+      delete *it;
+    all_work_items.clear();
   }
 
   void Operation::mark_ready(void)
@@ -50,9 +37,31 @@ namespace Realm {
     timeline.record_start_time();
   }
 
-  void Operation::mark_completed(void)
+  void Operation::mark_finished(void)
   {
     timeline.record_end_time();
+
+    // do an atomic decrement of the work counter to see if we're also complete
+    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+
+    if(remaining == 0)
+      mark_completed();    
+  }
+
+  void Operation::mark_completed(void)
+  {
+    timeline.record_complete_time();
+
+    // once complete, we can send profiling responses
+    if(requests.request_count() > 0) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
+	measurements.add_measurement(timeline);
+
+      measurements.send_responses(requests);
+    }
+
+    // we delete ourselves for now - eventually the OperationTable will do this
+    delete this;
   }
 
   void Operation::clear_profiling(void)
