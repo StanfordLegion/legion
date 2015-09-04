@@ -54,7 +54,7 @@ you can either:
 From the Regent shell, run the following command to import the
 language:
 
-    import "legion"
+    import "regent"
 
 This imports the Regent compiler into scope and adds hooks to the
 Regent compiler to the Terra parser so that you can start writing
