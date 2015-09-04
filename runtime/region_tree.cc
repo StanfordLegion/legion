@@ -25031,7 +25031,7 @@ namespace LegionRuntime {
     bool MaterializedView::has_space(const FieldMask &space_mask) const
     //--------------------------------------------------------------------------
     {
-      return !(manager->layout->allocated_fields * space_mask);
+      return !(space_mask - manager->layout->allocated_fields);
     }
 
     //--------------------------------------------------------------------------
