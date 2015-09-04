@@ -21,7 +21,7 @@ This command:
   * Downloads and builds Terra.
   * Builds a dynamic library with Legion and Lua bindings.
   * (OS X) Patches said dynamic library to avoid hard-coded absolute paths.
-  * Sets everything up to run from `legion.py`.
+  * Sets everything up to run from `regent.py`.
 
 Notes:
 
@@ -39,7 +39,7 @@ Notes:
 
 To use Regent, run:
 
-    ./legion.py [SCRIPT]
+    ./regent.py [SCRIPT]
 
 This starts a Terra shell with the Legion dynamic library on
 LD_LIBRARY_PATH (or DYLD_LIBRARY_PATH on Max OS X). From this shell,
@@ -54,7 +54,7 @@ you can either:
 From the Regent shell, run the following command to import the
 language:
 
-    import "legion"
+    import "regent"
 
 This imports the Regent compiler into scope and adds hooks to the
 Regent compiler to the Terra parser so that you can start writing
