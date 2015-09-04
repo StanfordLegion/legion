@@ -13159,6 +13159,15 @@ namespace LegionRuntime {
           if (capture_persistent)
             space_mask |= info.valid_fields;
         }
+        if (capture_persistent && !advance_states.empty())
+        {
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = advance_states.begin(); 
+                vit != advance_states.end(); vit++)
+          {
+            space_mask |= vit->second.valid_fields;
+          }
+        }
       }
       else
       {
@@ -13174,9 +13183,18 @@ namespace LegionRuntime {
           if (capture_persistent)
             space_mask |= info.valid_fields;
         }
+        if (capture_persistent && !advance_states.empty())
+        {
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = advance_states.begin(); 
+                vit != advance_states.end(); vit++)
+          {
+            space_mask |= vit->second.valid_fields;
+          }
+        }
       }
       // Check to see if we have any persistent views to include
-      if (capture_persistent)
+      if (capture_persistent && !!space_mask)
         manager->capture_persistent_views(this, space_mask);
     }
 
