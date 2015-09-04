@@ -4184,10 +4184,11 @@ namespace LegionRuntime {
 
 	if(r) {
           r->mark_started();
-          if (r->perform_capture())
+          bool perform_capture = r->perform_capture();
+          if (perform_capture)
             EventImpl::add_waiter(r->after_copy, new CopyCompletionProfiler(r));
 	  r->perform_dma();
-          if (!r->perform_capture())
+          if (!perform_capture)
           {
             r->mark_completed();
             delete r;
