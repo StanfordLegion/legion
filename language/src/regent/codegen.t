@@ -3198,7 +3198,7 @@ function codegen.stat_for_list(cx, node)
     local cuda_opts = cx.task_meta:getcuda()
     -- wrap for-loop body as a terra function
     local N = cuda_opts.unrolling_factor
-    local T = 32
+    local T = 256
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
     local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
