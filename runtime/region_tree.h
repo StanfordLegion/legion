@@ -418,9 +418,10 @@ namespace LegionRuntime {
                               const RegionRequirement &req,
                               AttachOp *attach_op,
                               VersionInfo &version_info);
-      void detach_file(RegionTreeContext ctx, 
-                       const RegionRequirement &req,
-                       const InstanceRef &ref);
+      Event detach_file(RegionTreeContext ctx, 
+                        const RegionRequirement &req,
+                        DetachOp *detach_op,
+                        const InstanceRef &ref);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -2208,6 +2209,7 @@ namespace LegionRuntime {
       void filter_states(const FieldMask &filter_mask);
       void check_init(void);
       void clear(void);
+      void clear(const FieldMask &clear_mask);
       void sanity_check(void);
       inline bool has_persistent_views(void) const { return has_persistent; }
     public:
@@ -2217,10 +2219,10 @@ namespace LegionRuntime {
                                 TreeStateLogger *logger);
     public:
       void add_persistent_view(MaterializedView *view);
+      void remove_persistent_view(MaterializedView *view);
       void capture_persistent_views(
                             LegionMap<LogicalView*,FieldMask>::aligned &views,
                                     const FieldMask &capture_mask);
-      void detach_instance(const FieldMask &mask, PhysicalManager *target);
     protected:
       void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
       void filter_current_states(VersionID vid, const FieldMask &filter_mask);
@@ -2523,11 +2525,10 @@ namespace LegionRuntime {
       void initialize_physical_state(ContextID ctx);
       // Entry
       void invalidate_physical_state(ContextID ctx);
-      // Entry
-      void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
-                                 PhysicalManager *target);
       void clear_physical_states(const FieldMask &mask);
+    public:
       void add_persistent_view(ContextID ctx, MaterializedView *persist_view);
+      void remove_persistent_view(ContextID ctx,MaterializedView *persist_view);
     public:
       bool register_logical_view(LogicalView *view);
       void unregister_logical_view(LogicalView *view);
@@ -2805,8 +2806,6 @@ namespace LegionRuntime {
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
-      void detach_file(ContextID ctx, const FieldMask &detach_mask,
-                       PhysicalManager *detach_target);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -3191,25 +3190,6 @@ namespace LegionRuntime {
         { node->clear_physical_states(to_clear); return true; }
     protected:
       FieldMask to_clear;
-    };
-
-    /**
-     * \class PhysicalDetacher
-     * A class for detaching physical instances normally associated
-     * with files that have been attached.
-     */
-    class PhysicalDetacher : public NodeTraverser {
-    public:
-      PhysicalDetacher(ContextID ctx, const FieldMask &detach_mask,
-                       PhysicalManager *to_detach);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-      const FieldMask &detach_mask;
-      PhysicalManager *const target;
     };
 
     /**
@@ -3763,6 +3743,7 @@ namespace LegionRuntime {
         bool single;
       };
     public:
+      template<bool MAKE>
       struct PersistenceFunctor {
       public:
         PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
@@ -3808,6 +3789,8 @@ namespace LegionRuntime {
       bool is_persistent(void) const;
       void make_persistent(SingleTask *parent_ctx, unsigned parent_idx,
                            AddressSpaceID source, UserEvent to_trigger);
+      void unmake_persistent(SingleTask *parent_ctx, unsigned parent_idx,
+                             AddressSpaceID source, UserEvent to_trigger);
     public:
       void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
     public:
@@ -3958,6 +3941,8 @@ namespace LegionRuntime {
                                      AddressSpaceID source);
       static void handle_make_persistent(Runtime *runtime, Deserializer &derez,
                                          AddressSpaceID source);
+      static void handle_unmake_persistent(Runtime *runtime, 
+                                   Deserializer &derez, AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;

@@ -9327,14 +9327,41 @@ namespace LegionRuntime {
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
                                                         requirement, this,
                                                         version_info);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result.has_ref());
+#endif
       version_info.apply_mapping(physical_ctx.get_id());
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
       complete_mapping();
-      complete_execution();
+      Event acquired_event = result.get_ready_event();
+      if (!acquired_event.has_triggered())
+      {
+        // Issue a deferred trigger on our completion event
+        // and mark that we are no longer responsible for
+        // triggering our completion event.
+        completion_event.trigger(acquired_event);
+        need_completion_trigger = false;
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, acquired_event);
+      }
+      else
+        complete_execution();
       // Should always succeed
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9683,12 +9710,36 @@ namespace LegionRuntime {
         assert(!requirement.premapped);
 #endif
       }
-      runtime->forest->detach_file(physical_ctx, requirement, reference);
+      Event detach_event = 
+        runtime->forest->detach_file(physical_ctx, requirement, this,reference);
       version_info.apply_mapping(physical_ctx.get_id());
       complete_mapping();
-      complete_execution();
+      if (!detach_event.has_triggered())
+      {
+        // Issue a deferred trigger on our completion event
+        // and mark that we are no longer responsible for
+        // triggering our completion event.
+        completion_event.trigger(detach_event);
+        need_completion_trigger = false;
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_complete_args,
+                                         sizeof(deferred_complete_args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, detach_event);
+      }
+      else
+        complete_execution();
       // This should always succeed
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------

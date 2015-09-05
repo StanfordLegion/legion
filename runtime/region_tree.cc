@@ -2609,9 +2609,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::detach_file(RegionTreeContext ctx,
-                                       const RegionRequirement &req,
-                                       const InstanceRef &ref)
+    Event RegionTreeForest::detach_file(RegionTreeContext ctx,
+                                        const RegionRequirement &req,
+                                        DetachOp *detach_op,
+                                        const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2620,11 +2621,12 @@ namespace LegionRuntime {
       RegionNode *detach_node = get_node(req.region);
       FieldMask detach_mask = 
         detach_node->column_source->get_field_mask(req.privilege_fields);
-      PhysicalManager *manager = ref.get_manager();
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!manager->is_reduction_manager()); 
-#endif
-      detach_node->detach_file(ctx.get_id(), detach_mask, manager); 
+      MaterializedView *detach_view = ref.get_materialized_view();
+      UserEvent done_event = UserEvent::create_user_event();
+      detach_view->unmake_persistent(detach_op->get_parent(),
+                                     detach_op->find_parent_index(0),
+                                     runtime->address_space, done_event);
+      return done_event;
     }
 
     //--------------------------------------------------------------------------
@@ -11230,41 +11232,6 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
-    // PhysicalDetacher 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    PhysicalDetacher::PhysicalDetacher(ContextID c, const FieldMask &m,
-                                       PhysicalManager *t)
-      : ctx(c), detach_mask(m), target(t)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    bool PhysicalDetacher::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalDetacher::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->detach_instance_views(ctx, detach_mask, target);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalDetacher::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->detach_instance_views(ctx, detach_mask, target);
-      return true;
-    }
-
-    /////////////////////////////////////////////////////////////
     // ReductionCloser 
     /////////////////////////////////////////////////////////////
 
@@ -16016,6 +15983,118 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::clear(const FieldMask &clear_mask)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock when doing this kind of clear
+      AutoLock v_lock(version_lock);
+      if (!current_version_infos.empty())
+      {
+        std::vector<VersionID> to_delete_versions;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator vit = 
+              current_version_infos.begin(); vit != 
+              current_version_infos.end(); vit++)
+        {
+          VersionStateInfo &info = vit->second;
+          if (info.valid_fields * clear_mask)
+            continue;
+          std::vector<VersionState*> to_delete;
+          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->second -= clear_mask;
+            if (!!it->second)
+              continue;
+            to_delete.push_back(it->first);
+            if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+              legion_delete(it->first);
+          }
+          if (to_delete.size() < info.states.size())
+          {
+            for (std::vector<VersionState*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              info.states.erase(*it);
+            }
+            info.valid_fields -= clear_mask;
+          }
+          else
+            to_delete_versions.push_back(vit->first);   
+        }
+        if (!to_delete_versions.empty())
+        {
+          for (std::vector<VersionID>::const_iterator it = 
+                to_delete_versions.begin(); it != 
+                to_delete_versions.end(); it++)
+          {
+            current_version_infos.erase(*it);
+          }
+        }
+      }
+      if (!previous_version_infos.empty())
+      {
+        std::vector<VersionID> to_delete_versions;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator vit = 
+              previous_version_infos.begin(); vit != 
+              previous_version_infos.end(); vit++)
+        {
+          VersionStateInfo &info = vit->second;
+          if (info.valid_fields * clear_mask)
+            continue;
+          std::vector<VersionState*> to_delete;
+          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->second -= clear_mask;
+            if (!!it->second)
+              continue;
+            to_delete.push_back(it->first);
+            if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+              legion_delete(it->first);
+          }
+          if (to_delete.size() < info.states.size())
+          {
+            for (std::vector<VersionState*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              info.states.erase(*it);
+            }
+            info.valid_fields -= clear_mask;
+          }
+          else
+            to_delete_versions.push_back(vit->first);
+        }
+        if (!to_delete_versions.empty())
+        {
+          for (std::vector<VersionID>::const_iterator it = 
+                to_delete_versions.begin(); it !=
+                to_delete_versions.end(); it++)
+          {
+            previous_version_infos.erase(*it);
+          }
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      std::vector<VersionID> to_delete;
+      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
+            observed.begin(); it != observed.end(); it++)
+      {
+        it->second -= clear_mask;
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<VersionID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          observed.erase(*it);
+        }
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::sanity_check(void)
     //--------------------------------------------------------------------------
     {
@@ -16092,6 +16171,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::remove_persistent_view(MaterializedView *view)
+    //--------------------------------------------------------------------------
+    {
+      // First see if we need to make the lock
+      if (!persistent_lock.exists())
+      {
+        // Take the version lock just to be sure
+        AutoLock v_lock(version_lock);
+        if (!persistent_lock.exists())
+          persistent_lock = Reservation::create_reservation();
+      }
+      bool remove_reference = false;
+      {
+        AutoLock p_lock(persistent_lock);
+        std::set<MaterializedView*>::iterator finder = 
+          persistent_views.find(view);
+        if (finder != persistent_views.end())
+        {
+          persistent_views.erase(finder);
+          remove_reference = true;
+        }
+      }
+      if (remove_reference && view->remove_base_valid_ref(PERSISTENCE_REF))
+        legion_delete(view);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::capture_persistent_views(
                         LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                                   const FieldMask &capture_mask)
@@ -16112,18 +16218,6 @@ namespace LegionRuntime {
             valid_views[*it] = empty_mask;
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::detach_instance(const FieldMask &mask, 
-                                         PhysicalManager *target)
-    //--------------------------------------------------------------------------
-    {
-#ifdef UNIMPLEMENTED_VERSIONING
-
-#else
-      assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20010,34 +20104,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::detach_instance_views(ContextID ctx,
-                                               const FieldMask &detach_mask,
-                                               PhysicalManager *target)
-    //--------------------------------------------------------------------------
-    {
-      if (!version_managers.has_entry(ctx))
-        return;
-      VersionManager *manager = version_managers.lookup_entry(ctx, this);
-      manager->detach_instance(detach_mask, target);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::clear_physical_states(const FieldMask &clear_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef UNIMPLEMENTED_VERSIONING
-      for (size_t idx = 0; idx < physical_states.max_entries(); idx++)
+      for (size_t idx = 0; idx < version_managers.max_entries(); idx++)
       {
-        if (physical_states.has_entry(idx))
-        {
-          PhysicalState *state = acquire_physical_state(idx, true/*exclusive*/);
-          invalidate_physical_state(state, clear_mask, true/*force*/);
-          release_physical_state(state);
-        }
+        if (!version_managers.has_entry(idx))
+          return;
+        VersionManager *manager = version_managers.lookup_entry(idx, this);
+        manager->clear(clear_mask);
       }
-#else
-      assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20047,6 +20123,15 @@ namespace LegionRuntime {
     {
       VersionManager *manager = version_managers.lookup_entry(ctx, this);
       manager->add_persistent_view(persistent_view);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::remove_persistent_view(ContextID ctx,
+                                              MaterializedView *persistent_view)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager *manager = version_managers.lookup_entry(ctx, this);
+      manager->remove_persistent_view(persistent_view);
     }
 
     //--------------------------------------------------------------------------
@@ -21432,24 +21517,16 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
+      // Add this as a persistent view
+      UserEvent ready_event = UserEvent::create_user_event();
+      view->make_persistent(attach_op->get_parent(), 
+                            attach_op->find_parent_index(0),
+                            context->runtime->address_space, ready_event);
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(ctx, version_info);
       update_valid_views(state, attach_mask, false/*dirty*/, view);
       // Return the resulting instance
-      return InstanceRef(Event::NO_EVENT, view);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::detach_file(ContextID ctx, const FieldMask &detach_mask,
-                                 PhysicalManager *detach_target)
-    //--------------------------------------------------------------------------
-    {
-      // Detach any instance views from this node down
-      PhysicalDetacher detacher(ctx, detach_mask, detach_target);
-      visit_node(&detacher);
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_instance_deletion(detach_target->get_instance().id);
-#endif
+      return InstanceRef(ready_event, view);
     }
 
     //--------------------------------------------------------------------------
@@ -25106,7 +25183,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::PersistenceFunctor::apply(AddressSpaceID target)
+    template<bool MAKE>
+    void MaterializedView::PersistenceFunctor<MAKE>::apply(
+                                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (target != source)
@@ -25121,7 +25200,10 @@ namespace LegionRuntime {
           rez.serialize(parent_idx);
           rez.serialize(to_trigger);
         }
-        runtime->send_make_persistent(target, rez);
+        if (MAKE)
+          runtime->send_make_persistent(target, rez);
+        else
+          runtime->send_unmake_persistent(target, rez);
         done_events.insert(to_trigger);
       }
     }
@@ -25138,10 +25220,25 @@ namespace LegionRuntime {
         // Mark that we are persistent, then figure out who else needs updates
         if (!persistent_view)
         {
-          persistent_view = true;
-          RegionTreeContext local_ctx = 
-            parent_ctx->find_enclosing_physical_context(parent_idx);
-          logical_node->add_persistent_view(local_ctx.get_id(), this);
+          // Retake the lock and see if we lost the race
+          AutoLock v_lock(view_lock);
+          if (!persistent_view)
+          {
+            persistent_view = true;
+            RegionTreeContext local_ctx = 
+              parent_ctx->find_enclosing_physical_context(parent_idx);
+            logical_node->add_persistent_view(local_ctx.get_id(), this);
+          }
+          else
+          {
+            to_trigger.trigger();
+            return;
+          }
+        }
+        else
+        {
+          to_trigger.trigger();
+          return;
         }
         if (is_owner())
         {
@@ -25151,7 +25248,7 @@ namespace LegionRuntime {
           // We're the owner, so send out any notifications to other
           // views to inform them that this instance is now persistent
           std::set<Event> done_events;
-          PersistenceFunctor functor(source, runtime, parent_ctx,
+          PersistenceFunctor<true> functor(source, runtime, parent_ctx,
                                      logical_node->as_region_node()->handle,
                                      did, parent_idx, done_events);
           map_over_remote_instances(functor);
@@ -25184,6 +25281,75 @@ namespace LegionRuntime {
       }
       else
         parent->make_persistent(parent_ctx, parent_idx, source, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::unmake_persistent(SingleTask *parent_ctx, 
+               unsigned parent_idx, AddressSpaceID source, UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      if (parent == NULL)
+      {
+        if (persistent_view)
+        {
+          // Retake the lock and see if we lost the race
+          AutoLock v_lock(view_lock);
+          if (persistent_view)
+          {
+            persistent_view = false;
+            RegionTreeContext local_ctx = 
+              parent_ctx->find_enclosing_physical_context(parent_idx);
+            logical_node->remove_persistent_view(local_ctx.get_id(), this);
+          }
+          else
+          {
+            to_trigger.trigger();
+            return;
+          }
+        }
+        else
+        {
+          to_trigger.trigger();
+          return;
+        }
+        if (is_owner())
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(logical_node->is_region());
+#endif
+          // We're the owner, so send out any notifications to other
+          // views to inform them that this instance is now persistent
+          std::set<Event> done_events;
+          PersistenceFunctor<false> functor(source, runtime, parent_ctx,
+                                     logical_node->as_region_node()->handle,
+                                     did, parent_idx, done_events);
+          map_over_remote_instances(functor);
+          to_trigger.trigger(Event::merge_events(done_events));
+        }
+        else if (source != owner_space)
+        {
+          // If we are not the owner and the request didn't come from 
+          // the owner then, send a request to the owner
+          // to make all the views persistent
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            parent_ctx->pack_remote_ctx_info(rez);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(logical_node->is_region());
+#endif
+            rez.serialize(logical_node->as_region_node()->handle);
+            rez.serialize(did);
+            rez.serialize(parent_idx);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_unmake_persistent(owner_space, rez);
+        }
+        else
+          to_trigger.trigger();
+      }
+      else
+        parent->unmake_persistent(parent_ctx, parent_idx, source, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -27330,6 +27496,38 @@ namespace LegionRuntime {
       mat_view->make_persistent(parent_ctx, parent_idx, source, to_trigger);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_unmake_persistent(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID remote_owner_uid;
+      derez.deserialize(remote_owner_uid);
+      SingleTask *remote_ctx;
+      derez.deserialize(remote_ctx);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      DistributedID did;
+      derez.deserialize(did);
+      unsigned parent_idx;
+      derez.deserialize(parent_idx);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      SingleTask *parent_ctx = runtime->find_remote_context(remote_owner_uid,
+                                                            remote_ctx);
+      RegionTreeNode *node = runtime->forest->get_node(handle);
+      LogicalView *view = node->find_view(did);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view->is_instance_view());
+      assert(view->as_instance_view()->is_materialized_view());
+#endif
+      MaterializedView *mat_view = 
+        view->as_instance_view()->as_materialized_view();
+      mat_view->unmake_persistent(parent_ctx, parent_idx, source, to_trigger);
+    }
+
     /////////////////////////////////////////////////////////////
     // DeferredView 
     /////////////////////////////////////////////////////////////
@@ -28378,11 +28576,9 @@ namespace LegionRuntime {
         }
         // Add the new view to the target
         target->update_instance_views(result, flatten_mask); 
-#ifdef UNIMPLEMENTED_VERSIONING
         // TODO: As an optimization, send the new composite view to all the 
         // known locations of this view so we can avoid duplicate sends of the 
         // meta-data for all the constituent views
-#endif
       }
     }
 

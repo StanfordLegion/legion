@@ -3500,6 +3500,11 @@ namespace LegionRuntime {
               runtime->handle_make_persistent(derez, remote_address_space);
               break;
             }
+          case SEND_UNMAKE_PERSISTENT:
+            {
+              runtime->handle_unmake_persistent(derez, remote_address_space);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -11232,6 +11237,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_unmake_persistent(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_UNMAKE_PERSISTENT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11877,6 +11890,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       MaterializedView::handle_make_persistent(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_unmake_persistent(Deserializer &derez,
+                                           AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_unmake_persistent(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

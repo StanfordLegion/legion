@@ -1432,6 +1432,7 @@ namespace LegionRuntime {
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
+      void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_index_space_semantic_request(AddressSpaceID target, 
@@ -1542,6 +1543,7 @@ namespace LegionRuntime {
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
+      void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_index_space_semantic_request(Deserializer &derez,

@@ -1729,6 +1729,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     public:
@@ -1773,6 +1774,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     protected:
