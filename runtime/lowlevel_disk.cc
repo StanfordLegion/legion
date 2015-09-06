@@ -21,8 +21,8 @@
 #include <unistd.h>
 #include <errno.h>
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
+
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
@@ -192,7 +192,7 @@ namespace LegionRuntime {
       else
         flags = H5F_ACC_RDWR;
       new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
-      for (IDType idx = 0; idx < path_names.size(); idx ++) {
+      for (ID::IDType idx = 0; idx < path_names.size(); idx ++) {
         new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx], H5P_DEFAULT));
         new_hdf->datatype_ids.push_back(H5Dget_type(new_hdf->dataset_ids[idx]));
       }
@@ -239,7 +239,7 @@ namespace LegionRuntime {
       assert(0);
     }
 
-    void HDFMemory::get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
+    void HDFMemory::get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
@@ -262,7 +262,7 @@ namespace LegionRuntime {
       assert(0);
     }
 
-    void HDFMemory::put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
+    void HDFMemory::put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
@@ -295,5 +295,5 @@ namespace LegionRuntime {
       return gasnet_mynode();
     }
 #endif
-  }
+
 }

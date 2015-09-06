@@ -17,9 +17,10 @@
 
 #include <stdio.h>
 
+GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
+
 namespace LegionRuntime {
   namespace LowLevel {
-    GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
 
     extern Logger::Category log_gpu;
 #ifdef EVENT_GRAPH_TRACE
@@ -1427,7 +1428,8 @@ namespace LegionRuntime {
       CUfunction f;
       std::map<const void*,CUfunction>::const_iterator finder = 
         device_functions.find(func);
-      if (finder != device_functions.end()) f = finder->second; else f = (CUfunction)func;
+      assert(finder != device_functions.end());
+      f = finder->second;
       void *args[] = { 
         CU_LAUNCH_PARAM_BUFFER_POINTER, kernel_arg_buffer,
         CU_LAUNCH_PARAM_BUFFER_SIZE, (void*)&kernel_arg_size,

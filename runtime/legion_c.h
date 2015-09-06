@@ -290,6 +290,32 @@ extern "C" {
       legion_context_t /* ctx */,
       legion_runtime_t /* runtime */);
 
+  /**
+   * Interface for a Legion C projection functor (Logical Region
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_region_t)(
+      legion_runtime_t /* runtime */,
+      legion_context_t /* context */,
+      legion_task_t /* task */,
+      unsigned /* index */,
+      legion_logical_region_t /* upper_bound */,
+      legion_domain_point_t /* point */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Partition
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
+      legion_runtime_t /* runtime */,
+      legion_context_t /* context */,
+      legion_task_t /* task */,
+      unsigned /* index */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */);
+
   // -----------------------------------------------------------------------
   // Pointer Operations
   // -----------------------------------------------------------------------
@@ -497,6 +523,12 @@ extern "C" {
                                       legion_color_t color,
                                       legion_domain_t domain);
 
+  /**
+   * @see LegionRuntime::HighLevel::DomainColoring
+   */
+  legion_domain_t
+  legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
+
   // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
@@ -626,6 +658,21 @@ extern "C" {
     legion_domain_coloring_t coloring,
     bool disjoint,
     int part_color /* = -1 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_partition_by_field
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_field(legion_runtime_t runtime,
+                                         legion_context_t ctx,
+                                         legion_logical_region_t handle,
+                                         legion_logical_region_t parent,
+                                         legion_field_id_t fid,
+                                         legion_domain_t color_space,
+                                         int color /* = AUTO_GENERATE_ID */,
+                                         bool allocable /* = false */);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -2111,6 +2158,15 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_uint64_t task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_projection_id_t id,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
 
   // -----------------------------------------------------------------------
   // Timing Operations

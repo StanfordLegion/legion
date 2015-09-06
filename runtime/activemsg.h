@@ -24,6 +24,43 @@
 #include <stdlib.h>
 #include <vector>
 
+    enum ActiveMessageIDs {
+      FIRST_AVAILABLE = 140,
+      NODE_ANNOUNCE_MSGID,
+      SPAWN_TASK_MSGID,
+      LOCK_REQUEST_MSGID,
+      LOCK_RELEASE_MSGID,
+      LOCK_GRANT_MSGID,
+      EVENT_SUBSCRIBE_MSGID,
+      EVENT_TRIGGER_MSGID,
+      REMOTE_MALLOC_MSGID,
+      REMOTE_MALLOC_RPLID,
+      CREATE_ALLOC_MSGID,
+      CREATE_ALLOC_RPLID,
+      CREATE_INST_MSGID,
+      CREATE_INST_RPLID,
+      VALID_MASK_REQ_MSGID,
+      VALID_MASK_DATA_MSGID,
+      ROLL_UP_TIMER_MSGID,
+      ROLL_UP_DATA_MSGID,
+      CLEAR_TIMER_MSGID,
+      DESTROY_INST_MSGID,
+      REMOTE_WRITE_MSGID,
+      REMOTE_REDUCE_MSGID,
+      REMOTE_WRITE_FENCE_MSGID,
+      DESTROY_LOCK_MSGID,
+      REMOTE_REDLIST_MSGID,
+      MACHINE_SHUTDOWN_MSGID,
+      BARRIER_ADJUST_MSGID,
+      BARRIER_SUBSCRIBE_MSGID,
+      BARRIER_TRIGGER_MSGID,
+      METADATA_REQUEST_MSGID,
+      METADATA_RESPONSE_MSGID, // should really be a reply
+      METADATA_INVALIDATE_MSGID,
+      METADATA_INVALIDATE_ACK_MSGID,
+    };
+
+
 enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_KEEP, // use payload pointer, guaranteed to be stable
        PAYLOAD_FREE, // take ownership of payload, free when done
@@ -41,6 +78,11 @@ typedef std::vector<SpanListEntry> SpanList;
 //  single-node-only stubs
 #ifdef USE_GASNET
 
+// so OpenMPI borrowed gasnet's platform-detection code and didn't change
+//  the define names - work around it by undef'ing anything set via mpi.h
+//  before we include gasnet.h
+#undef __PLATFORM_COMPILER_GNU_VERSION_STR
+
 #define GASNET_PAR
 #include <gasnet.h>
 
@@ -54,8 +96,6 @@ GASNETT_THREADKEY_DECLARE(in_handler);
 // eliminate GASNet warnings for unused static functions
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
-
-#include "utilities.h"
 
 #include <vector>
 
@@ -735,8 +775,9 @@ typedef struct {
   size_t size;
 } gasnet_seginfo_t;
 
-static void *fake_gasnet_mem_base = 0;
-static size_t fake_gasnet_mem_size = 0;
+// define these somewhere so you only get one copy...
+extern void *fake_gasnet_mem_base;
+extern size_t fake_gasnet_mem_size;
 
 inline void gasnet_init(int*, char ***) {}
 inline void gasnet_getSegmentInfo(gasnet_seginfo_t *seginfos, gasnet_node_t count)
@@ -814,8 +855,9 @@ inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int registered_mem_size_in_mb,
                            int argc, const char *argv[])
 {
-  // allocate a fake gasnet memory
-  fake_gasnet_mem_size = gasnet_mem_size_in_mb << 20;
+  // just use malloc to obtain "gasnet" and/or "registered" memory
+  fake_gasnet_mem_size = (gasnet_mem_size_in_mb + 
+			  registered_mem_size_in_mb) << 20;
   fake_gasnet_mem_base = malloc(fake_gasnet_mem_size);
 }
 
@@ -827,5 +869,39 @@ inline void do_some_polling(void) {}
 inline size_t get_lmb_size(int target_node) { return 0; }
 
 #endif // ifdef USE_GASNET
+
+    template <typename LT>
+    class AutoLock {
+    public:
+      AutoLock(LT &mutex) : mutex(mutex), held(true)
+      { 
+	mutex.lock();
+      }
+
+      ~AutoLock(void) 
+      {
+	if(held)
+	  mutex.unlock();
+      }
+
+      void release(void)
+      {
+	assert(held);
+	mutex.unlock();
+	held = false;
+      }
+
+      void reacquire(void)
+      {
+	assert(!held);
+	mutex.lock();
+	held = true;
+      }
+    protected:
+      LT &mutex;
+      bool held;
+    };
+
+    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
 #endif

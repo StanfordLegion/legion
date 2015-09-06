@@ -25,7 +25,6 @@
 #include "legion.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
-#include "garbage_collection.h"
 
 // Apple can go screw itself
 #ifndef __MACH__
@@ -33,6 +32,9 @@
 #else
 #ifdef __SSE2__
 #include <emmintrin.h>
+#endif
+#ifdef __SSE4_1__
+#include <smmintrin.h>
 #endif
 #if defined(__AVX__) || defined(__AVX2__)
 #include <immintrin.h>
@@ -334,6 +336,9 @@ namespace LegionRuntime {
         return point;
       }
       inline void clear(void) { valid = false; }
+    public:
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     private:
       DomainPoint point;
       bool valid;
@@ -385,6 +390,7 @@ namespace LegionRuntime {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void serialize(const ColorPoint &point);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -454,6 +460,7 @@ namespace LegionRuntime {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void deserialize(ColorPoint &color);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -551,6 +558,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const BitMask &rhs) const;
@@ -628,6 +636,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const TLBitMask &rhs) const;
@@ -698,6 +707,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -767,6 +777,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -840,6 +851,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
@@ -912,6 +924,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
@@ -972,6 +985,79 @@ namespace LegionRuntime {
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
     } __attribute__((aligned(32)));
 #endif // __AVX__
+
+    template<typename BITMASK>
+    class CompoundBitMask {
+    public:
+      explicit CompoundBitMask(uint64_t init = 0);
+      CompoundBitMask(const CompoundBitMask &rhs);
+      ~CompoundBitMask(void);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
+      inline void clear(void);
+    public:
+      inline bool operator==(const CompoundBitMask &rhs) const;
+      inline bool operator<(const CompoundBitMask &rhs) const;
+      inline bool operator!=(const CompoundBitMask &rhs) const;
+    public:
+      inline CompoundBitMask& operator=(const CompoundBitMask &rhs);
+    public:
+      inline CompoundBitMask operator~(void) const;
+      inline CompoundBitMask operator|(const CompoundBitMask &rhs) const;
+      inline CompoundBitMask operator&(const CompoundBitMask &rhs) const;
+      inline CompoundBitMask operator^(const CompoundBitMask &rhs) const;
+    public:
+      inline CompoundBitMask& operator|=(const CompoundBitMask &rhs);
+      inline CompoundBitMask& operator&=(const CompoundBitMask &rhs);
+      inline CompoundBitMask& operator^=(const CompoundBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const CompoundBitMask &rhs) const;
+      // Set difference
+      inline CompoundBitMask operator-(const CompoundBitMask &rhs) const;
+      inline CompoundBitMask& operator-=(const CompoundBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline CompoundBitMask operator<<(unsigned shift) const;
+      inline CompoundBitMask operator>>(unsigned shift) const;
+    public:
+      inline CompoundBitMask& operator<<=(unsigned shift);
+      inline CompoundBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const CompoundBitMask<BITMASK> &mask);
+    public:
+      enum ComplexTag {
+        COMPOUND_NONE,
+        COMPOUND_SINGLE,
+        COMPOUND_SPARSE,
+        COMPOUND_DENSE,
+      };
+      // Make the maximum sparse size as many elements
+      // as the average number of operations needed 
+      // for a dense mask.
+      static const size_t MAX_SPARSE_SIZE = 
+                            sizeof(BITMASK) / sizeof(uint64_t);
+    protected:
+      union {
+        unsigned index;
+        std::set<unsigned> *sparse;
+        BITMASK *dense;
+      } mask;
+      ComplexTag tag;
+    };
 
     /////////////////////////////////////////////////////////////
     // Bit Permutation 
@@ -1075,6 +1161,8 @@ namespace LegionRuntime {
       inline bool contains(IT index) const;
       inline void add(IT index);
       inline void remove(IT index);
+      inline IT find_first_set(void) const;
+      inline IT find_index_set(int index) const;
       // The functor class must have an 'apply' method that
       // take one argument of type IT. This method will map
       // the functor over all the entries in the set.
@@ -1138,11 +1226,40 @@ namespace LegionRuntime {
         for (size_t i = 0; i < SIZE; i++)
         {
           if (elems[i] != 0)
-            legion_delete(elems[i]);
+            delete elems[i];
         }
       }
     public:
       DynamicTableNode& operator=(const DynamicTableNode &rhs)
+        { assert(false); return *this; }
+    public:
+      ET *elems[SIZE];
+    };
+
+    template<typename ET, size_t _SIZE, typename IT>
+    struct LeafTableNode : public DynamicTableNodeBase<IT> {
+    public:
+      static const size_t SIZE = _SIZE;
+    public:
+      LeafTableNode(int _level, IT _first_index, IT _last_index)
+        : DynamicTableNodeBase<IT>(_level, _first_index, _last_index) 
+      { 
+        for (size_t i = 0; i < SIZE; i++)
+          elems[i] = 0;
+      }
+      LeafTableNode(const LeafTableNode &rhs) { assert(false); }
+      virtual ~LeafTableNode(void)
+      {
+        for (size_t i = 0; i < SIZE; i++)
+        {
+          if (elems[i] != 0)
+          {
+            legion_delete(elems[i]);
+          }
+        }
+      }
+    public:
+      LeafTableNode& operator=(const LeafTableNode &rhs)
         { assert(false); return *this; }
     public:
       ET *elems[SIZE];
@@ -1187,7 +1304,7 @@ namespace LegionRuntime {
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<IT>,
                                1 << INNER_BITS, IT> INNER_TYPE;
-      typedef DynamicTableNode<ET, 1 << LEAF_BITS, IT> LEAF_TYPE;
+      typedef LeafTableNode<ET, 1 << LEAF_BITS, IT> LEAF_TYPE;
 
       static LEAF_TYPE* new_leaf_node(IT first_index, IT last_index)
       {
@@ -1197,7 +1314,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     // Give the implementations here so the templates get instantiated
-    //--------------------------------------------------------------------------
+    //-------------------------------------------------------------------------- 
 
     //--------------------------------------------------------------------------
     inline Serializer& Serializer::operator=(const Serializer &rhs)
@@ -1294,6 +1411,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       int_set.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const ColorPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      point.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
@@ -1452,6 +1576,13 @@ namespace LegionRuntime {
     {
       int_set.deserialize(*this);
     }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(ColorPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      point.deserialize(*this);
+    }
       
     //--------------------------------------------------------------------------
     inline void Deserializer::deserialize(void *dst, size_t bytes)
@@ -1524,6 +1655,32 @@ namespace LegionRuntime {
       context_bytes += bytes;
 #endif
       index += bytes;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ColorPoint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(valid);
+      if (valid)
+      {
+        rez.serialize(point.dim);
+        for (int idx = 0; idx < point.dim; idx++)
+          rez.serialize(point.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ColorPoint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(valid);
+      if (valid)
+      {
+        derez.deserialize(point.dim);
+        for (int idx = 0; idx < point.dim; idx++)
+          derez.deserialize(point.point_data[idx]);
+      }
     }
 
     // There is an interesting design decision about how to break up the 32 bit
@@ -1855,6 +2012,33 @@ namespace LegionRuntime {
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -2472,6 +2656,33 @@ namespace LegionRuntime {
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -3114,14 +3325,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -3692,14 +3930,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -4233,14 +4498,15 @@ namespace LegionRuntime {
     /*static*/ inline uint64_t SSETLBitMask<MAX>::extract_mask(__m128i value)
     //-------------------------------------------------------------------------
     {
-      uint64_t left, right;
-      right = _mm_cvtsi128_si32(value);
-      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 1));
-      uint64_t result = (left << 32) | right;
-      right = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 2));
-      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 3));
-      result |= (left << 32) | right;
-      return result;
+#ifdef __SSE4_1__
+      uint64_t left = _mm_extract_epi64(value, 0);
+      uint64_t right = _mm_extract_epi64(value, 1);
+#else
+      // Assume we have sse 2
+      uint64_t left = _mm_cvtsi128_si64(value);
+      uint64_t right = _mm_cvtsi128_si64(_mm_shuffle_epi32(value, 7));
+#endif
+      return (left | right);
     }
 #undef BIT_ELMTS
 #undef SSE_ELMTS
@@ -4336,14 +4602,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE + j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -5003,14 +5296,41 @@ namespace LegionRuntime {
       {
         if (bits.bit_vector[idx])
         {
-          for (unsigned j = 0; j < 64; j++)
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
             if (bits.bit_vector[idx] & (1UL << j))
             {
-              return (idx*64 + j);
+              return (idx*ELEMENT_SIZE+ j);
             }
           }
         }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
       }
       return -1;
     }
@@ -5664,6 +5984,1596 @@ namespace LegionRuntime {
 #endif // __AVX__
 
     //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    CompoundBitMask<BITMASK>::CompoundBitMask(uint64_t init)
+    //-------------------------------------------------------------------------
+    {
+      if (init == 0)
+      {
+        mask.index = init;
+        tag = COMPOUND_NONE;
+      }
+      else
+      {
+        mask.dense = legion_new<BITMASK>(init);
+        tag = COMPOUND_DENSE;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    CompoundBitMask<BITMASK>::CompoundBitMask(const CompoundBitMask &rhs)
+      : tag(rhs.tag)
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_NONE:
+        case COMPOUND_SINGLE:
+          {
+            mask.index = rhs.index;
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            mask.sparse = new std::set<unsigned>(rhs.mask.sparse);
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    CompoundBitMask<BITMASK>::~CompoundBitMask(void) 
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SPARSE:
+          {
+            delete mask.sparse;
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            legion_delete(mask.dense);
+            break;
+          }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_NONE:
+          {
+            mask.index = bit;
+            tag = COMPOUND_SINGLE;
+            break;
+          }
+        case COMPOUND_SINGLE:
+          {
+            if (mask.index != bit)
+            {
+              std::set<unsigned> *next = new std::set<unsigned>();
+              next->insert(mask.index);
+              next->insert(bit);
+              mask.sparse = next;
+              tag = COMPOUND_SPARSE;
+            }
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            if ((mask.sparse->size()+1) > MAX_SPARSE_SIZE) 
+            {
+              BITMASK *next = legion_new<BITMASK>();
+              for (std::set<unsigned>::const_iterator it = 
+                    mask.sparse->begin(); it != mask.sparse->end(); it++)
+              {
+                next->set_bit(*it);
+              }
+              delete mask.sparse;
+              mask.dense = next;
+              tag = COMPOUND_DENSE;
+            }
+            else
+              mask.sparse->insert(bit);
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            mask.dense->set_bit(bit);
+            break;
+          }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          {
+            if (mask.index == bit)
+              tag = COMPOUND_NONE;
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            mask.sparse->erase(bit);
+            if (mask.sparse->empty())
+            {
+              delete mask.sparse;
+              tag = COMPOUND_NONE;
+            }
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            mask.dense->unset_bit(bit);
+            if (!(*mask.dense))
+            {
+              legion_delete(mask.dense);
+              tag = COMPOUND_NONE;
+            }
+            break;
+          }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          return (mask.index == bit);
+        case COMPOUND_SPARSE:
+          return (mask.sparse->find(bit) != mask.sparse->end());
+        case COMPOUND_DENSE:
+          return mask.dense->is_set(bit);
+      }
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline int CompoundBitMask<BITMASK>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          return mask.index;
+        case COMPOUND_SPARSE:
+          return *(mask.sparse->begin());
+        case COMPOUND_DENSE:
+          return mask.dense->find_first_set();
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline int CompoundBitMask<BITMASK>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(index == 0);
+#endif
+            return mask.index;
+          }
+        case COMPOUND_SPARSE:
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(index < mask.sparse->size());
+#endif
+            std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin();
+            while ((index--) > 0)
+              it++;
+            return *it;
+          }
+        case COMPOUND_DENSE:
+          return mask.dense->find_index_set(index);
+      }
+      return -1;
+    }
+    
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SPARSE:
+          {
+            delete mask.sparse;
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            legion_delete(mask.dense);
+            break;
+          }
+      }
+      tag = COMPOUND_NONE;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::operator==(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (tag != rhs.tag)
+      {
+        if ((tag == COMPOUND_NONE) || (rhs.tag == COMPOUND_NONE) ||
+            (tag == COMPOUND_SINGLE) || (rhs.tag == COMPOUND_SINGLE))
+          return false;
+        if (tag == COMPOUND_SPARSE)
+        {
+          // RHS must be dense
+          if (BITMASK::pop_count(*rhs.mask.dense) != mask.sparse->size())
+            return false;
+          for (std::set<unsigned>::const_iterator it = 
+                mask.sparse->begin(); it != mask.sparse->end(); it++)
+          {
+            if (!rhs.mask.dense->is_set(*it))
+              return false;
+          }
+          return true;
+        }
+        else
+        {
+          // RHS must be sparse
+          if (BITMASK::pop_count(*mask.dense) !=
+              rhs.mask.sparse->size())
+            return false;
+          for (std::set<unsigned>::const_iterator it = 
+                rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+          {
+            if (!mask.dense->is_set(*it))
+              return false;
+          }
+          return true;
+        }
+      }
+      else
+      {
+        switch (tag)
+        {
+          case COMPOUND_NONE:
+            return true;
+          case COMPOUND_SINGLE:
+            return (mask.index == rhs.index);
+          case COMPOUND_SPARSE:
+            {
+              if (mask.sparse->size() != rhs.sparse->size())
+                return false;
+              for (std::set<unsigned>::const_iterator it = 
+                    mask.sparse->begin(); it != mask.sparse.end(); it++)
+              {
+                if (rhs.mask.sparse->find(*it) == rhs.mark.sparse->end())
+                  return false;
+              }
+              return true;
+            }
+          case COMPOUND_DENSE:
+            return ((*mask.dense) == (*rhs.mask.dense));
+        }
+      }
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::operator<(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (tag < rhs.tag)
+        return true;
+      if (tag > rhs.tag)
+        return false;
+      switch (tag)
+      {
+        case COMPOUND_NONE:
+          return false; // both equal
+        case COMPOUND_SINGLE:
+          return (mask.index < rhs.mask.index);
+        case COMPOUND_SPARSE:
+          return (*mask.sparse < *rhs.mask.sparse);
+        case COMPOUND_DENSE:
+          return (*mask.dense < *rhs.mask.dense);
+      }
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::operator!=(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator=(
+                                                    const CompoundBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (tag != rhs.tag)
+      {
+        // Free up any space
+        if (tag == COMPOUND_SPARSE)
+          delete mask.sparse;
+        else if (tag == COMPOUND_DENSE)
+          delete mask.dense;
+        // Now copy over
+        switch (rhs.tag)
+        {
+          case COMPOUND_SINGLE:
+            {
+              mask.index = rhs.mask.index;
+              break;
+            }
+          case COMPOUND_SPARSE:
+            {
+              mask.sparse = new std::set<unsigned>(rhs.mask.sparse);
+              break;
+            }
+          case COMPOUND_DENSE:
+            {
+              mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+              break;
+            }
+        }
+        tag = rhs.tag;
+      }
+      else
+      {
+        switch (tag)
+        {
+          case COMPOUND_SINGLE:
+            {
+              mask.index = rhs.mask.index;
+              break;
+            }
+          case COMPOUND_SPARSE:
+            {
+              *mask.sparse = *rhs.mask.sparse;
+              break;
+            }
+          case COMPOUND_DENSE:
+            {
+              *mask.dense = *rhs.dense.mask;
+              break;
+            }
+        }
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> 
+                                CompoundBitMask<BITMASK>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      switch (tag)
+      {
+        case COMPOUND_NONE:
+          {
+            result.tag = COMPOUND_DENSE;
+            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            break;
+          }
+        case COMPOUND_SINGLE:
+          {
+            result.tag = COMPOUND_DENSE;
+            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense->unset_bit(mask.index);
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            result.tag = COMPOUND_DENSE;
+            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              result.mask.dense->unset_bit(*it);
+            }
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            result.tag = COMPOUND_DENSE;
+            result.mask.dense = legion_new<BITMASK>(~(*mask.dense));
+            break;
+          }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> CompoundBitMask<BITMASK>::operator|(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      if (tag != rhs.tag)
+      {
+        if (tag == COMPOUND_DENSE)
+        {
+          result.tag = COMPOUND_DENSE;
+          result.mask.dense = legion_new<BITMASK>(*mask.dense);
+          if (rhs.tag == COMPOUND_SPARSE)
+          {
+            for (std::set<unsigned>::const_iterator it = 
+                  rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+            {
+              result.mask.dense->set_bit(*it);
+            }
+          }
+          else if (rhs.tag == COMPOUND_SINGLE)
+            result.mask.dense->set_bit(rhs.mask.index);
+        }
+        else if (rhs.tag == COMPOUND_DENSE)
+        {
+          result.tag = COMPOUND_DENSE;
+          result.mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          if (tag == COMPOUND_SPARSE)
+          {
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              result.mask.dense->set_bit(*it);
+            }
+          }
+          else if (tag == COMPOUND_SINGLE)
+            result.mask.dense->set_bit(mask.index);
+        }
+        else if (tag == COMPOUND_SPARSE)
+        {
+          result.tag = COMPOUND_SPARSE;
+          result.mask.sparse = new std::set<unsigned>(*mask.sparse);
+          if (rhs.tag == COMPOUND_SINGLE)
+            result.mask.sparse->insert(rhs.mask.index);
+        }
+        else if (rhs.tag == COMPOUND_SPARSE)
+        {
+          result.tag = COMPOUND_SPARSE;
+          result.mask.sparse = new std::set<unsigned>(*rhs.mask.sparse);
+          if (tag == COMPOUND_SINGLE)
+            result.mask.sparse->insert(mask.index);
+        }
+        else
+        {
+          result.tag = COMPOUND_SINGLE;
+          if (tag == COMPOUND_SINGLE)
+            result.mask.index = mask.index;
+          else
+            result.mask.index = rhs.mask.index;
+        }
+      }
+      else
+      {
+        switch (tag)
+        {
+          case COMPOUND_NONE:
+            {
+              result.tag = COMPOUND_NONE;
+              break;
+            }
+          case COMPOUND_SINGLE:
+            {
+              if (mask.index == rhs.mask.index)
+              {
+                result.tag = COMPOUND_SINGLE;
+                result.mask.index = mask.index;
+              }
+              else
+              {
+                result.tag = COMPOUND_SPARSE;
+                result.mask.sparse = new std::set<unsigned>();
+                result.mask.sparse->insert(mask.index);
+                result.mask.sparse->insert(rhs.mask.index);
+              }
+              break;
+            }
+          case COMPOUND_SPARSE:
+            {
+              if ((mask.sparse->size() + 
+                    rhs.mask.sparse->size()) > MAX_SPARSE_SIZE)
+              {
+                result.tag = COMPOUND_DENSE;
+                result.mask.dense = legion_new<BITMASK>();
+                for (std::set<unsigned>::const_iterator it = 
+                      mask.sparse->begin(); it != mask.sparse->end(); it++)
+                {
+                  result.mask.dense->set_bit(*it);
+                }
+                for (std::set<unsigned>::const_iterator it = 
+                      rhs.mask.sparse->begin(); it != 
+                      rhs.mask.sparse->end(); it++)
+                {
+                  result.mask.dense->set_bit(*it);
+                }
+              }
+              else
+              {
+                result.tag = COMPOUND_SPARSE;
+                result.mask.sparse = new std::set<unsigned>();
+                result.mask.sparse->insert(mask.sparse->begin(),
+                                           mask.sparse->end());
+                result.mask.sparse->insert(rhs.mask.sparse->begin(),
+                                           rhs.mask.sparse->end());
+              }
+              break;
+            }
+          case COMPOUND_DENSE:
+            {
+              result.tag = COMPOUND_DENSE;
+              result.mask.dense = 
+                legion_new<BITMASK>(*mask.dense | *rhs.mask.dense);
+              break;
+            }
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> CompoundBitMask<BITMASK>::operator&(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      if ((tag == COMPOUND_NONE) || (rhs.tag == COMPOUND_NONE))
+        result.tag = COMPOUND_NONE;
+      else if (tag == COMPOUND_SINGLE)
+      {
+        if (rhs.tag == COMPOUND_SINGLE)
+        {
+          if (mask.index == rhs.mask.index)
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.mask.index = mask.index;
+          }
+          else
+            result.tag = COMPOUND_NONE;
+        }
+        else if (rhs.tag == COMPOUND_SPARSE)
+        {
+          if (rhs.mask.sparse->find(mask.index) !=
+              rhs.mask.sparse->end())
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.mask.index = mask.index;
+          }
+          else
+            result.tag = COMPOUND_NONE;
+        }
+        else
+        {
+          if (rhs.mask.dense->is_set(mask.index))
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.mask.index = mask.index;
+          }
+          else
+            result.tag = COMPOUND_NONE;
+        }
+      }
+      else if (rhs.tag == COMPOUND_SINGLE)
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          if (mask.sparse->find(rhs.mask.index) !=
+              mask.sparse->end())
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.mask.index = rhs.mask.index;
+          }
+          else
+            result.tag = COMPOUND_NONE;
+        }
+        else
+        {
+          if (mask.dense->is_set(rhs.mask.index))
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.mask.index = rhs.mask.index;
+          }
+        }
+      }
+      else if (tag != rhs.tag)
+      {
+        std::set<unsigned> temp; 
+        if (tag == COMPOUND_SPARSE)
+        {
+          for (std::set<unsigned>::const_iterator it = 
+                mask.sparse->begin(); it != mask.sparse->end(); it++)
+          {
+            if (rhs.mask.dense->is_set(*it))
+              temp.insert(*it);
+          }
+        }
+        else
+        {
+          for (std::set<unsigned>::const_iterator it = 
+                rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+          {
+            if (mask.dense->is_set(*it))
+              temp.insert(*it);
+          }
+        }
+        if (temp.empty())
+          result.tag = COMPOUND_NONE;
+        else if (temp.size() == 1)
+        {
+          result.tag = COMPOUND_SINGLE;
+          result.mask.index = *(temp.begin());
+        }
+        else
+        {
+          result.tag = COMPOUND_SPARSE;
+          result.mask.sparse = new std::set<unsigned>(temp);
+        }
+      }
+      else
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          std::set<unsigned> temp;
+          if (mask.sparse->size() < rhs.mask.sparse->size())
+          {
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              if (rhs.mask.sparse->find(*it) !=
+                  rhs.mask.sparse->end())
+                temp.insert(*it);
+            }
+          }
+          else
+          {
+            for (std::set<unsigned>::const_iterator it = 
+                  rhs.mask.sparse->begin(); it != 
+                  rhs.mask.sparse->end(); it++)
+            {
+              if (mask.sparse->find(*it) !=
+                  mask.sparse->end())
+                temp.insert(*it);
+            }
+          }
+          if (temp.empty())
+            result.tag = COMPOUND_NONE; 
+          else if (temp.size() == 1)
+          {
+            result.tag = COMPOUND_SINGLE;
+            result.index = *(temp.begin());
+          }
+          else
+          {
+            result.tag = COMPOUND_SPARSE;
+            result.mask.sparse = new std::set<unsigned>(temp);
+          }
+        }
+        else
+        {
+          result.tag = COMPOUND_DENSE;
+          result.mask.dense = 
+            legion_new<BITMASK>(*mask.dense & *rhs.mask.dense);
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> CompoundBitMask<BITMASK>::operator^(
+                                              const CompoundBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      if (tag == COMPOUND_NONE)       
+        result = rhs;
+      else if (rhs.tag == COMPOUND_NONE)
+        result = *this;
+      else if (tag == COMPOUND_SINGLE)
+      {
+        result = rhs;
+        if (result.is_set(mask.index))
+          result.unset_bit(mask.index);
+        else
+          result.set_bit(mask.index);
+      }
+      else if (rhs.tag == COMPOUND_SINGLE)
+      {
+        result = *this;
+        if (result.is_set(rhs.mask.index))
+          result.unset_bit(rhs.mask.index);
+        else
+          result.set_bit(rhs.mask.index);
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        result = rhs;
+        for (std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin(); it != mask.sparse->end(); it++)
+        {
+          if (result.is_set(*it))
+            result.unset_bit(*it);
+          else
+            result.set_bit(*it);
+        }
+      }
+      else if (rhs.tag == COMPOUND_SPARSE)
+      {
+        result = *this;
+        for (std::set<unsigned>::const_iterator it = 
+              rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+        {
+          if (result.is_set(*it))
+            result.unset_bit(*it);
+          else
+            result.set_bit(*it);
+        }
+      }
+      else // Both dense
+      {
+        result.tag = COMPOUND_DENSE;
+        result.mask.dense = 
+          legion_new<BITMASK>((*mask.dense) ^ (*rhs.mask.dense));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator|=(
+                                                    const CompoundBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (tag == COMPOUND_NONE)
+        (*this) = rhs;
+      else if (rhs.tag == COMPOUND_NONE)
+        return *this;
+      else if (tag == COMPOUND_DENSE)
+      {
+        if (rhs.tag == COMPOUND_SINGLE)
+          mask.dense.set_bit(rhs.mask.index);
+        else if (rhs.tag == COMPOUND_SPARSE)
+        {
+          for (std::set<unsigned>::const_iterator it = 
+                rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+          {
+            mask.dense->set_bit(*it); 
+          }
+        }
+        else if (rhs.tag == COMPOUND_DENSE)
+          *mask.dense |= rhs.maks.dense;
+      }
+      else if (rhs.tag == COMPOUND_DENSE)
+      {
+        if (tag == COMPOUND_SINGLE)
+        {
+          unsigned index_copy = mask.index;
+          tag = COMPOUND_DENSE;
+          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          mask.dense->set_bit(index_copy);
+        }
+        else if (tag == COMPOUND_SPARSE)
+        {
+          std::set<unsigned> *copy_sparse = mask.sparse;
+          tag = COMPOUND_DENSE;
+          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          for (std::set<unsigned>::const_iterator it = 
+                copy_sparse->begin(); it != copy_sparse->end(); it++)
+          {
+            mask.dense->set_bit(*it); 
+          }
+          delete copy_sparse;
+        }
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        if (rhs.tag == COMPOUND_SINGLE)
+        {
+          mask.sparse->insert(rhs.mask.index);     
+        }
+        else
+        {
+          // rhs must be compound sparse
+          mask.sparse->insert(rhs.mask.sparse->begin(),
+                              rhs.mask.sparse->end());
+        }
+      }
+      else if (rhs.tag == COMPOUND_SPARSE)
+      {
+        // must be single 
+        std::set<unsigned> *next = new std::set<unsigned>(rhs.mask.sparse);
+        next->insert(mask.index);
+        mask.sparse = next;
+        tag = COMPOUND_SPARSE;
+      }
+      else // both single
+      {
+        if (mask.index != rhs.mask.index)
+        {
+          std::set<unsigned> *next = new std::set<unsigned>();
+          next->insert(mask.index);
+          next->insert(rhs.mask.index);
+          mask.sparse = next;
+          tag = COMPOUND_SPARSE;
+        }
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator&=(
+                                                    const CompoundBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (tag == COMPOUND_NONE)
+        return *this;
+      else if (rhs.tag == COMPOUND_NONE)
+      {
+        if (tag == COMPOUND_SPARSE)
+          delete mask.sparse;
+        else if (tag == COMPOUND_DENSE)
+          legion_delete(mask.dense);
+        tag = COMPOUND_NONE;
+      }
+      else if (tag == COMPOUND_SINGLE)
+      {
+        if (!rhs.is_set(mask.index))
+          tag = COMPOUND_NONE;
+      }
+      else if (rhs.tag == COMPOUND_SINGLE)
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          std::set<unsigned> *old = mask.sparse;
+          if (old->find(rhs.mask.index) != old->end())
+          {
+            mask.index = rhs.mask.index; 
+            tag = COMPOUND_SINGLE;
+          }
+          else
+            tag = COMPOUND_NONE;
+          delete old;
+        }
+        else
+        {
+          // tag is compound dense
+          if (mask.dense->is_set(rhs.mask.index))
+          {
+            legion_delete(mask.dense);
+            mask.index = rhs.mask.index;
+            tag = COMPOUND_SINGLE;
+          }
+          else
+          {
+            legion_delete(mask.dense);
+            tag = COMPOUND_NONE;
+          }
+        }
+      }
+      else if (tag != rhs.tag)
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          std::vector<unsigned> to_delete;
+          for (std::set<unsigned>::const_iterator it = 
+                mask.sparse->begin(); it != mask.sparse->end(); it++)
+          {
+            if (!rhs.mask.dense->is_set(*it))
+              to_delete.push_back(*it);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<unsigned>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              mask.sparse->erase(*it);
+            if (mask.sparse->empty())
+            {
+              delete mask.sparse;
+              tag = COMPOUND_NONE;
+            }
+            else if (mask.sparse->size() == 1)
+            {
+              unsigned index = *(mask.sparse->begin());
+              delete mask.sparse;
+              mask.index = index;
+              tag = COMPOUND_SINGLE;
+            }
+          }
+        }
+        else
+        {
+          // rhs tag is compound dense
+          for (std::set<unsigned>::const_iterator it = 
+                rhs.mask.sparse->begin(); it != rhs.mask.sparse->end(); it++)
+            mask.dense->unset_bit(*it);
+          if (!(*mask.dense))
+          {
+            legion_delete(mask.dense);
+            tag = COMPOUND_NONE;
+          }
+          else if (BITMASK::pop_count(*mask.dense) == 1)
+          {
+            unsigned index = mask.dense->find_first_set();
+            legion_delete(mask.dense);
+            mask.index = index;
+            tag = COMPOUND_SINGLE;
+          }
+        }
+      }
+      else
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          // both sparse
+          std::vector<unsigned> to_delete;
+          for (std::set<unsigned>::const_iterator it = 
+                mask.sparse->begin(); it != mask.sparse->end(); it++)
+          {
+            if (rhs.mask.sparse->find(*it) == rhs.mask.sparse->end())
+              to_delete.push_back(*it);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<unsigned>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              mask.sparse->erase(*it);
+            if (mask.sparse->empty())
+            {
+              delete mask.sparse;
+              tag = COMPOUND_NONE;
+            }
+            else if (mask.sparse->size() == 1)
+            {
+              unsigned index = *(mask.sparse->begin());
+              delete mask.sparse;
+              mask.index = index;
+              tag = COMPOUND_SINGLE;
+            }
+          }
+        }
+        else
+        {
+          // both dense
+          (*mask.dense) &= (*rhs.mask.dense);
+          if (!(*mask.dense))
+          {
+            legion_delete(mask.dense);
+            tag = COMPOUND_NONE;
+          }
+          else if (BITMASK::pop_count(*mask.dense) == 1)
+          {
+            unsigned index = mask.dense->find_first_set();
+            legion_delete(mask.dense);
+            mask.index = index;
+            tag = COMPOUND_SINGLE;
+          }
+        }
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator^=(
+                                                    const CompoundBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (tag == COMPOUND_NONE)
+        *this = rhs;
+      else if (rhs.tag == COMPOUND_NONE)
+        return *this;
+      else if (tag == COMPOUND_SINGLE)
+      {
+        if (rhs.tag == COMPOUND_SINGLE)
+        {
+          if (mask.index == rhs.mask.index)
+            tag = COMPOUND_NONE;
+          else
+          {
+            std::set<unsigned> *next = new std::set<unsigned>();
+            next->insert(mask.index);
+            next->insert(rhs.mask.index);
+            mask.sparse = next;
+            tag = COMPOUND_SPARSE;
+          }
+        }
+        else if (rhs.tag == COMPOUND_SPARSE)
+        {
+          std::set<unsigned> *next = new std::set<unsigned>(rhs.mask.sparse);
+          if (next->find(mask.index) == next->end())
+          {
+            next->insert(mask.index);
+            mask.sparse = next;
+            tag = COMPOUND_SPARSE;
+          }
+          else
+          {
+            next->erase(mask.index);
+            if (next->size() == 1)
+            {
+              mask.index = *(next->begin());
+              delete next;
+              tag = COMPOUND_SINGLE;
+            }
+            else
+            {
+              mask.sparse = next;
+              tag = COMPOUND_SPARSE;
+            }
+          }
+        }
+        else
+        {
+          // rhs tag is compound dense
+          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          if (!next->is_set(mask.index))
+          {
+            mask.dense = next;
+            tag = COMPOUND_DENSE;
+          }
+          else
+          {
+            next->unset_bit(mask.index);
+            if (BITMASK::pop_count(*next) == 1)
+            {
+              mask.index = next->find_first_set();
+              legion_delete(next);
+              tag = COMPOUND_SINGLE;
+            }
+            else
+            {
+              mask.dense = next;
+              tag = COMPOUND_DENSE;
+            }
+          }
+        }
+      }
+      else if (rhs.tag == COMPOUND_SINGLE)
+      {
+        if (tag == COMPOUND_SPARSE)
+        {
+          if (mask.sparse->find(rhs.mask.index) ==
+              mask.sparse->end())
+          {
+            mask.sparse->insert(rhs.mask.index);
+          }
+          else
+          {
+            mask.sparse->erase(rhs.mask.index);
+            if (mask.sparse->size() == 1)
+            {
+              unsigned index = *(mask.sparse->begin());
+              delete mask.sparse;
+              mask.index = index;
+              tag = COMPOUND_SINGLE;
+            }
+          }
+        }
+        else
+        {
+          // compound dense
+          if (mask.dense->is_set(rhs.mask.index))
+            mask.dense->unset_bit(rhs.mask.index);
+          else
+            mask.dense->set_bit(rhs.mask.index);
+        }
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        if (rhs.tag == COMPOUND_SPARSE)
+        {
+          for (std::set<unsigned>::const_iterator it = rhs.mask.sparse->begin();
+                it != rhs.mask.sparse->end(); it++)
+          {
+            std::set<unsigned>::iterator finder = mask.sparse->find(*it);
+            if (finder != mask.sparse->end())
+              mask.sparse->erase(finder);
+            else
+              mask.sparse->insert(*it);
+          }
+          if (mask.sparse->empty())
+          {
+            delete mask.sparse;
+            tag = COMPOUND_NONE;
+          }
+          else if (mask.sparse->size() == 1)
+          {
+            unsigned index = *(mask.sparse->begin());
+            delete mask.sparse;
+            mask.index = index;
+            tag = COMPOUND_SINGLE;
+          }
+        }
+        else
+        {
+          // rhs is dense
+          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
+                it != mask.sparse->end(); it++)
+          {
+            if (next->is_set(*it))
+              mask.unset_bit(*it);
+            else
+              mask.set_bit(*it);
+          }
+          delete mask.sparse;
+          if (!(*next))
+          {
+            legion_delete(next);
+            tag = COMPOUND_NONE;
+          }
+          else if (BITMASK::pop_count(*next) == 1)
+          {
+            mask.index = next->find_first_set();
+            legion_delete(next);
+            tag = COMPOUND_SINGLE;
+          }
+          else
+          {
+            mask.dense = next;
+            tag = COMPOUND_DENSE;
+          }
+        }
+      }
+      else if (rhs.tag == COMPOUND_SPARSE)
+      {
+        // this is dense
+        for (std::set<unsigned>::const_iterator it = rhs.mask.sparse->begin();
+              it != rhs.mask.sparse->end(); it++)
+        {
+          if (mask.dense->is_set(*it))
+            mask.dense->unset_bit(*it);
+          else
+            mask.dense->set_bit(*it);
+        }
+        if (!(*mask.dense))
+        {
+          legion_delete(mask.dense);    
+          tag = COMPOUND_NONE;
+        }
+        else if (BITMASK::pop_count(*mask.dense) == 1)
+        {
+          unsigned index = mask.dense->find_first_set();
+          legion_delete(mask.dense);
+          mask.index = index;
+          tag = COMPOUND_SINGLE;
+        }
+      }
+      else
+      {
+        // both dense;
+        (*mask.dense) ^= (*rhs.mask.dense);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::operator*(
+                                              const CompoundBitMask &rhs) const 
+    //-------------------------------------------------------------------------
+    {
+      if ((tag == COMPOUND_NONE) || (rhs.tag == COMPOUND_NONE))
+        return true;
+      if (tag == COMPOUND_SINGLE)
+        return !rhs.is_set(mask.index);
+      if (rhs.tag == COMPOUND_SINGLE)
+        return !is_set(rhs.mask.index);
+      if (tag == COMPOUND_SPARSE)
+      {
+        for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
+              it != mask.sparse->end(); it++)
+        {
+          if (rhs.is_set(*it))
+            return false;
+        }
+        return true;
+      }
+      if (rhs.tag == COMPOUND_SPARSE)
+      {
+        for (std::set<unsigned>::const_iterator it = rhs.mask.sparse->begin();
+              it != rhs.mask.sparse->end(); it++)
+        {
+          if (is_set(*it))
+            return false;
+        }
+        return true;
+      }
+      return ((*mask.dense) * (*rhs.mask.dense)); 
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline bool CompoundBitMask<BITMASK>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return (tag == COMPOUND_NONE);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> CompoundBitMask<BITMASK>::operator<<(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      if (tag == COMPOUND_SINGLE)
+      {
+        unsigned index = mask.index + shift;
+        if (index < (BITMASK::ELEMENTS*BITMASK::ELEMENT_SIZE))
+        {
+          result.mask.index = index;
+          result.tag = COMPOUND_SINGLE;
+        }
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        std::set<unsigned> *new_set = new std::set<unsigned>();
+        for (std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin(); it != mask.sparse->end(); it++)
+        {
+          unsigned index = (*it) + shift;
+          if (index < (BITMASK::ELEMENTS*BITMASK::ELEMENT_SIZE))
+            new_set->insert(index);
+        }
+        if (new_set->size() > 1)
+        {
+          result.mask.sparse = new_set;
+          result.tag = COMPOUND_SPARSE;
+        }
+        else if (new_set->size() == 1)
+        {
+          result.mask.index = *(new_set->begin());
+          result.tag = COMPOUND_SINGLE;
+          delete new_set;
+        }
+        else
+          delete new_set;
+      }
+      else if (tag == COMPOUND_DENSE)
+      {
+        result.mask.dense = legion_new<BITMASK>((*mask.dense) << shift);
+        result.tag = COMPOUND_DENSE; 
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK> CompoundBitMask<BITMASK>::operator>>(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<BITMASK> result;
+      if (tag == COMPOUND_SINGLE)
+      {
+        if (mask.index >= shift)
+        {
+          result.mask.index = mask.index - shift;
+          result.tag = COMPOUND_SINGLE;
+        }
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        std::set<unsigned> *new_set = new std::set<unsigned>();
+        for (std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin(); it != mask.sparse->end(); it++)
+        {
+          if ((*it) >= shift)
+            new_set->insert((*it) - shift);
+        }
+        if (new_set->size() > 1)
+        {
+          result.mask.sparse = new_set;
+          result.tag = COMPOUND_SPARSE;
+        }
+        else if (new_set->size() == 1)
+        {
+          result.mask.index = *(new_set->begin());
+          result.tag = COMPOUND_SINGLE;
+          delete new_set;
+        }
+        else
+          delete new_set;
+      }
+      else if (tag == COMPOUND_DENSE)
+      {
+        result.mask.dense = legion_new<BITMASK>((*mask.dense) >> shift);
+        result.tag = COMPOUND_DENSE;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator<<=(
+                                                                unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      if (tag == COMPOUND_SINGLE)
+      {
+        unsigned index = mask.index + shift;
+        if (index < (BITMASK::ELEMENTS*BITMASK::ELEMENT_SIZE))
+          mask.index = index;
+        else
+          tag = COMPOUND_NONE;
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        std::set<unsigned> next;
+        for (std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin(); it != mask.sparse->end(); it++)
+        {
+          unsigned index = (*it) + shift;
+          if (index < (BITMASK::ELEMENTS*BITMASK::ELEMENT_SIZE))
+            next.insert(index);
+        }
+        if (next.empty())
+        {
+          delete mask.sparse;
+          tag = COMPOUND_NONE;
+        }
+        else if (next.size() == 1)
+        {
+          unsigned index = *(next.begin());
+          delete mask.sparse;
+          mask.index = index;
+          tag = COMPOUND_SINGLE;
+        }
+        else
+          (*mask.sparse) = next;
+      }
+      else if (tag == COMPOUND_DENSE)
+      {
+        (*mask.dense) <<= shift; 
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline CompoundBitMask<BITMASK>& CompoundBitMask<BITMASK>::operator>>=(
+                                                                unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      if (tag == COMPOUND_SINGLE)
+      {
+        if (mask.index >= shift)
+          mask.index -= shift ;
+        else
+          tag = COMPOUND_NONE;
+      }
+      else if (tag == COMPOUND_SPARSE)
+      {
+        std::set<unsigned> next;
+        for (std::set<unsigned>::const_iterator it = 
+              mask.sparse->begin(); it != mask.sparse->end(); it++)
+        {
+          if ((*it) >= shift)
+            next.insert((*it) - shift);
+        }
+        if (next.empty())
+        {
+          delete mask.sparse;
+          tag = COMPOUND_NONE;
+        }
+        else if (next.size() == 1)
+        {
+          unsigned index = *(next.begin());
+          delete mask.sparse;
+          mask.index = index;
+          tag = COMPOUND_SINGLE;
+        }
+        else
+          (*mask.sparse) = next;
+      }
+      else if (tag == COMPOUND_DENSE)
+      {
+        (*mask.dense) >>= shift; 
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline uint64_t CompoundBitMask<BITMASK>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      uint64_t result = 0;
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          {
+            result = (1UL << (mask.index % 64));
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              result |= (1UL << ((*it) % 64));
+            }
+            break;
+          }
+        case COMPOUND_DENSE:
+          return mask.dense->get_hash_key();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(tag);
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          {
+            rez.serialize(mask.index);
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            rez.serialize<size_t>(mask.sparse->size());
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              rez.serialize(*it);
+            }
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            mask.dense->serialize(rez);
+            break;
+          }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline void CompoundBitMask<BITMASK>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(tag);
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+          {
+            derez.deserialize(mask.index);
+            break;
+          }
+        case COMPOUND_SPARSE:
+          {
+            size_t count;
+            derez.deserialize(count);
+            mask.sparse = new std::set<unsigned>();
+            for (unsigned idx = 0; idx < count; idx++)
+            {
+              unsigned index;
+              derez.deserialize(index);
+              mask.sparse->insert(index);
+            }
+            break;
+          }
+        case COMPOUND_DENSE:
+          {
+            mask.dense = legion_new<BITMASK>();
+            mask.dense->deserialize(derez);
+            break;
+          }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline char* CompoundBitMask<BITMASK>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_NONE:
+          return strdup("Compound Empty");
+        case COMPOUND_SINGLE:
+          {
+            char *result = (char*)malloc(128*sizeof(char)); 
+            springf(result,"Compound Single: %d", mask.index);
+            return result;
+          }
+        case COMPOUND_SPARSE:
+          {
+            char *result = (char*)malloc(1024*sizeof(char));
+            sprintf(result,"Compound Sparse %ld:", mask.sparse->size());
+            for (std::set<unsigned>::const_iterator it = 
+                  mask.sparse->begin(); it != mask.sparse->end(); it++)
+            {
+              char temp[64];
+              sprintf(temp," %d", *it);
+              strcat(result,temp);
+            }
+            return result;
+          }
+        case COMPOUND_DENSE:
+          return mask.dense->to_string();
+      }
+      return NULL;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    /*static*/ inline int CompoundBitMask<BITMASK>::pop_count(
+                                                   const CompoundBitMask &mask)
+    //-------------------------------------------------------------------------
+    {
+      switch (mask.tag)
+      {
+        case COMPOUND_SINGLE:
+          return 1;
+        case COMPOUND_SPARSE:
+          return mask.sparse->size();
+        case COMPOUND_DENSE:
+          return BITMASK::pop_count(*mask.dense);
+      }
+      return 0;
+    }
+
+    //-------------------------------------------------------------------------
     template<typename BITMASK, unsigned LOG2MAX>
     BitPermutation<BITMASK,LOG2MAX>::BitPermutation(void)
       : dirty(false), identity(true)
@@ -6061,6 +7971,52 @@ namespace LegionRuntime {
       }
       else
         set_ptr.sparse->erase(index);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IT IntegerSet<IT,DT,BIDIR>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!set_ptr.sparse->empty());
+#endif
+        return *(set_ptr.sparse->begin());
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!!(set_ptr.dense->set));
+#endif
+        return set_ptr.dense->set.find_first_set();
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IT IntegerSet<IT,DT,BIDIR>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index >= 0);
+      assert(index < int(size()));
+#endif
+      if (index == 0)
+        return find_first_set();
+      if (sparse)
+      {
+        typename std::set<IT>::const_iterator it = set_ptr.sparse->begin();
+        while (index > 0)
+        {
+          it++;
+          index--;
+        }
+        return *it;
+      }
+      else
+        return set_ptr.dense->set.find_index_set(index);
     }
 
     //-------------------------------------------------------------------------

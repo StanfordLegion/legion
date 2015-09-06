@@ -1,0 +1,6 @@
+*.dSYM
+librealm.a
+serializing
+test_profiling
+ctxswitch
+barrier_reduce

@@ -2263,9 +2263,6 @@ namespace LegionRuntime {
 #endif
     public:
       static unsigned num_profiling_nodes;
-    public:
-      // The baseline time for profiling
-      static const long long init_time;
     };
 
   }; // namespace HighLevel

@@ -18,6 +18,7 @@
 #ifndef _ARRAYS_H
 #define _ARRAYS_H
 
+#include <string.h>
 #include <vector>
 #include <map>
 
@@ -593,7 +594,13 @@ namespace LegionRuntime {
       }
 
       operator bool(void) const { return any_left; }
-      GenericPointInRectIterator& operator++(int /*i am postfix*/) { step(); return *this; }
+      GenericPointInRectIterator& operator++(/*i am prefix*/) { step(); return *this; }
+      GenericPointInRectIterator operator++(int /*i am postfix*/)
+      { 
+	GenericPointInRectIterator<DIM> orig = *this; 
+	step();
+	return orig;
+      }
     };
   
     template <typename T>

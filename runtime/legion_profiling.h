@@ -284,7 +284,7 @@ namespace LegionRuntime {
             init_time(0) { }
         ProcessorProfiler(Processor p, bool util, Processor::Kind k)
           : proc(p), utility(util), kind(k), dumped(0),
-            init_time(TimeStamp::get_current_time_in_micros()) { }
+            init_time(Realm::Clock::current_time_in_microseconds()) { }
       public:
         inline void add_event(const ProfilingEvent &event)
                           { proc_events.push_back(event); }
@@ -347,7 +347,7 @@ namespace LegionRuntime {
 
       static inline void init_timestamp()
       {
-        legion_prof_init_time = TimeStamp::get_current_time_in_micros();
+        legion_prof_init_time = Realm::Clock::current_time_in_microseconds();
       }
 
       static inline ProcessorProfiler& get_profiler(Processor proc)
@@ -544,7 +544,7 @@ namespace LegionRuntime {
         if (profiling_enabled)
         {
           CopyProfiler &copy_prof = get_copy_profiler();
-          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          unsigned long long time = Realm::Clock::current_time_in_microseconds();
           copy_prof.add_event(ProfilingEvent(kind, uid, time));
         }
       }
@@ -553,7 +553,7 @@ namespace LegionRuntime {
       {
         if (profiling_enabled)
         {
-          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          unsigned long long time = Realm::Clock::current_time_in_microseconds();
           Processor proc = Processor::get_executing_processor();
           get_profiler(proc).add_event(ProfilingEvent(kind, uid, time));
         }
@@ -602,7 +602,7 @@ namespace LegionRuntime {
       {
         if (profiling_enabled)
         {
-          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          unsigned long long time = Realm::Clock::current_time_in_microseconds();
           Processor proc = Processor::get_executing_processor();
           get_profiler(proc).add_event(MemoryEvent(inst_id, memory,
                                         redop, blocking_factor, fields, time));
@@ -613,7 +613,7 @@ namespace LegionRuntime {
       {
         if (profiling_enabled)
         {
-          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          unsigned long long time = Realm::Clock::current_time_in_microseconds();
           Processor proc = Processor::get_executing_processor();
           get_profiler(proc).add_event(MemoryEvent(inst_id, time));
         }

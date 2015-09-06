@@ -17,7 +17,7 @@
 
 import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, traceback
 from collections import OrderedDict
-import legion
+import regent
 
 class TestFailure(Exception):
     def __init__(self, command, output):
@@ -28,7 +28,7 @@ class TestFailure(Exception):
 def run(filename, verbose, flags):
     args = [os.path.basename(filename)] + flags + (
         [] if verbose else ['-level', '5'])
-    proc = legion.legion(
+    proc = regent.regent(
         args,
         stdout = None if verbose else subprocess.PIPE,
         stderr = None if verbose else subprocess.STDOUT,
@@ -114,9 +114,10 @@ class Counter:
         self.failed = 0
 
 tests = [
-    ('compile_fail', (test_compile_fail, ([],)),
+    # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
+    ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'],)),
      (os.path.join('tests', 'compile_fail'),)),
-    ('run_pass', (test_run_pass, ([],)),
+    ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],)),
      (os.path.join('tests', 'run_pass'),
       os.path.join('examples'),
      )),
@@ -139,7 +140,7 @@ def run_all_tests(thread_count, verbose):
                         path
                         for name in sorted(names)
                         for path in [os.path.join(dirname, name)]
-                        if os.path.isfile(path) and os.path.splitext(path)[1] in ('.lg', '.md')),
+                        if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md')),
                     ())
 
         for test_path in test_paths:
@@ -209,7 +210,7 @@ def run_all_tests(thread_count, verbose):
         sys.exit(1)
 
 def test_driver(argv):
-    parser = argparse.ArgumentParser(description = 'Legion compiler test suite')
+    parser = argparse.ArgumentParser(description = 'Regent compiler test suite')
     parser.add_argument('-j',
                         nargs = '?',
                         type = int,

@@ -20,6 +20,8 @@
 
 #include "lowlevel_config.h"
 
+#include "event.h"
+
 namespace Realm {
 
     class Reservation {

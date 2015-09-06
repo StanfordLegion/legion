@@ -26,7 +26,7 @@ from spy_analysis import *
 temp_dir = ".cent/"
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -s -v -P] <file_name>"
+    print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -s -v -P -D -Q] <file_name>"
     print "  -l : perform logical analyses"
     print "  -c : perform physical analyses"
     print "  -p : make task pictures"
@@ -34,14 +34,16 @@ def usage():
     print "  -s : generate simplified graphs"
     print "  -v : verbose"
     print "  -P : make partition graphs"
+    print "  -D : make dataflow graphs"
     print "  -i : make instance graphs"
+    print "  -Q : dump event paths between every two operations in the event graph"
     sys.exit(1)
 
 def main():
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lipckrmvsP')
+    opts, args = getopt(sys.argv[1:],'lipckrmvsPDQ')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -50,6 +52,7 @@ def main():
     logical_checks = False
     physical_checks = False
     make_pictures = False
+    make_dataflow_graphs = False
     keep_temp_files = False
     print_instances = False
     print_processor_graphs = False 
@@ -57,6 +60,7 @@ def main():
     simplify_graphs = False 
     verbose = False
     make_partition_graphs = False
+    dump_event_paths = False
     for opt in opts:
         if opt == '-l':
             logical_checks = True
@@ -88,6 +92,11 @@ def main():
         if opt == '-P':
             make_partition_graphs = True
             continue
+        if opt == '-D':
+            make_dataflow_graphs = True
+            continue
+        if opt == '-Q':
+            dump_event_paths = True
 
     state = State(verbose)
 
@@ -120,8 +129,14 @@ def main():
     #if verbose:
     #    state.print_instances()
     if make_partition_graphs:
-        print "Print partition graphs..."
+        print "Printing partition graphs..."
         state.print_partition_graphs(temp_dir, simplify_graphs)
+    if make_dataflow_graphs:
+        print "Printing dataflow graphs..."
+        state.print_dataflow_graphs(temp_dir, simplify_graphs)
+    if dump_event_paths:
+        print "Dumping event paths..."
+        state.dump_event_paths()
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:

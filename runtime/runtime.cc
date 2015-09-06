@@ -5968,9 +5968,15 @@ namespace LegionRuntime {
           }
         }
         // Now make the index space and save the information
+#ifdef ASSUME_UNALLOCABLE
+        LowLevel::IndexSpace child_space = 
+          LowLevel::IndexSpace::create_index_space(
+              parent_dom.get_index_space(), child_mask, false/*allocable*/);
+#else
         LowLevel::IndexSpace child_space = 
           LowLevel::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask);
+#endif
         new_index_spaces[DomainPoint::from_point<1>(
             Arrays::Point<1>(finder->first))] = Domain(child_space);
       }
@@ -6364,16 +6370,28 @@ namespace LegionRuntime {
           LowLevel::IndexSpace child_space;
           if (finder != child_masks.end())
           {
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              LowLevel::IndexSpace::create_index_space(
+                parent_dom.get_index_space(), finder->second, false);
+#else
             child_space = 
               LowLevel::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), finder->second);
+#endif
           }
           else
           {
             LowLevel::ElementMask empty_mask;
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              LowLevel::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), empty_mask, false);
+#else
             child_space = 
               LowLevel::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask);
+#endif
           }
           new_index_spaces[DomainPoint::from_point<1>(
               Arrays::Point<1>(c))] = Domain(child_space);
@@ -15443,8 +15461,6 @@ namespace LegionRuntime {
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ const long long Runtime::init_time = 
-                                      TimeStamp::get_current_time_in_micros();
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
     /*static*/ unsigned Runtime::initial_task_window_hysteresis =
@@ -16384,6 +16400,13 @@ namespace LegionRuntime {
       Machine machine = Machine::get_machine();
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
+      // not having any processors at all is a fatal error
+      if (all_procs.empty())
+      {
+	log_run.error("Machine model contains no processors!");
+	assert(false);
+	exit(ERROR_NO_PROCESSORS);
+      }
       Processor::Kind proc_kind = p.kind();
       // Make separate runtime instances if they are requested,
       // otherwise only make a runtime instances for each of the

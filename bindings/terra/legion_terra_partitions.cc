@@ -72,7 +72,7 @@ private:
 
     if (global) {
 #if !USE_TLS
-      AutoLock guard(global_lock);
+      LegionRuntime::HighLevel::AutoLock guard(global_lock);
 #endif
       std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >::iterator it =
         global_cache.find(space);
@@ -95,7 +95,7 @@ private:
 #if USE_TLS
       global_cache[space] = spans;
 #else
-      AutoLock guard(global_lock);
+      LegionRuntime::HighLevel::AutoLock guard(global_lock);
       if (!global_cache.count(space)) {
         global_cache[space] = spans;
       }
