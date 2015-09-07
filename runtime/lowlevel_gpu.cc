@@ -29,9 +29,8 @@ namespace LegionRuntime {
     extern Logger::Category log_event_graph;
 #endif
 
-    GPUMemcpy::GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-                         GPUMemcpyKind _kind)
-        : GPUJob(_gpu), kind(_kind), finish_event(_finish_event)
+    GPUMemcpy::GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind)
+        : gpu(_gpu), kind(_kind)
     {
       if (kind == GPU_MEMCPY_HOST_TO_DEVICE)
         local_stream = gpu->host_to_device_stream;
@@ -45,10 +44,11 @@ namespace LegionRuntime {
         assert(false); // who does host to host here?!?
     } 
 
+#if 0
     bool GPUMemcpy::event_triggered(void)
     {
       log_gpu.info("gpu job %p now runnable", this);
-      gpu->enqueue_copy(this);
+      enqueue_copy(this);
       // don't delete
       return false;
     }
@@ -63,7 +63,7 @@ namespace LegionRuntime {
     {
       if(start_event.has_triggered()) {
         log_gpu.info("job %p can start right away!?", this);
-        gpu->enqueue_copy(this);
+        enqueue_copy(this);
       } else {
         log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
 	EventImpl::add_waiter(start_event, this);
@@ -90,6 +90,7 @@ namespace LegionRuntime {
       GPUMemcpy *copy = static_cast<GPUMemcpy*>(data);
       copy->gpu->handle_complete_job(copy);
     }
+#endif
 
     void GPUMemcpy1D::do_span(off_t pos, size_t len)
     {
@@ -150,7 +151,6 @@ namespace LegionRuntime {
       } else {
         do_span(0, 1);
       }
-      post_execute();  
       log_gpu.info("gpu memcpy complete: dst=%p src=%p bytes=%zd kind=%d",
                    dst, src, elmt_size, kind);
     }
@@ -185,7 +185,6 @@ namespace LegionRuntime {
       copy_info.WidthInBytes = bytes;
       copy_info.Height = lines;
       CHECK_CU( cuMemcpy2DAsync(&copy_info, local_stream) );
-      post_execute();
       log_gpu.info("gpu memcpy 2d complete: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
@@ -206,7 +205,7 @@ namespace LegionRuntime {
 
     class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
     public:
-      GPUWorkFence(Task *task);
+      GPUWorkFence(Realm::Operation *op);
       
       virtual void request_cancellation(void);
 
@@ -216,8 +215,8 @@ namespace LegionRuntime {
       static void cuda_callback(CUstream stream, CUresult res, void *data);
     };
 
-    GPUWorkFence::GPUWorkFence(Task *task)
-      : Realm::Operation::AsyncWorkItem(task)
+    GPUWorkFence::GPUWorkFence(Realm::Operation *op)
+      : Realm::Operation::AsyncWorkItem(op)
     {}
 
     void GPUWorkFence::request_cancellation(void)
@@ -394,123 +393,152 @@ namespace LegionRuntime {
       return fbmem_size;
     }
 
-    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
-				  Event start_event, Event finish_event)
+    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-       src, bytes, GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+       src, bytes, GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src,
-				  const ElementMask *mask, size_t elmt_size,
-				  Event start_event, Event finish_event)
+				  const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-       src, mask, elmt_size, GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+       src, mask, elmt_size, GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
-    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
-				    Event start_event, Event finish_event)
+    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       bytes, GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+       bytes, GPU_MEMCPY_DEVICE_TO_HOST));
     } 
 
     void GPUProcessor::copy_from_fb(void *dst, off_t src_offset,
-				    const ElementMask *mask, size_t elmt_size,
-				    Event start_event, Event finish_event)
+				    const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_HOST));
     }
 
     void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      size_t bytes,
-				      Event start_event, Event finish_event)
+				      size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
        ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       bytes, GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+       bytes, GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      const ElementMask *mask, size_t elmt_size,
-				      Event start_event, Event finish_event)
+				      const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
        ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_fb_2d(off_t dst_offset, const void *src, 
                                      off_t dst_stride, off_t src_stride,
-                                     size_t bytes, size_t lines,
-                                     Event start_event, Event finish_event)
+                                     size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)fbmem_gpu_base)+
                         (fbmem_reserve + dst_offset),
                         src, dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+                        GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
     void GPUProcessor::copy_from_fb_2d(void *dst, off_t src_offset,
                                        off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-                                       Event start_event, Event finish_event)
+                                       size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event, dst,
+      enqueue_copy(new GPUMemcpy2D(this, dst,
                        ((char*)fbmem_gpu_base)+
                         (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+                        GPU_MEMCPY_DEVICE_TO_HOST));
     }
 
     void GPUProcessor::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                                          off_t dst_stride, off_t src_stride,
-                                         size_t bytes, size_t lines,
-                                         Event start_event, Event finish_event)
+                                         size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)fbmem_gpu_base) + 
                         (fbmem_reserve + dst_offset),
                        ((char*)fbmem_gpu_base) + 
                         (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+                        GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_peer(GPUProcessor *dst, off_t dst_offset,
-                                    off_t src_offset, size_t bytes,
-                                    Event start_event, Event finish_event)
+                                    off_t src_offset, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
               ((char*)dst->fbmem_gpu_base) + 
                       (dst->fbmem_reserve + dst_offset),
               ((char*)fbmem_gpu_base) + 
                       (fbmem_reserve + src_offset),
-              bytes, GPU_MEMCPY_PEER_TO_PEER))->run_or_wait(start_event);
+              bytes, GPU_MEMCPY_PEER_TO_PEER));
     }
 
     void GPUProcessor::copy_to_peer_2d(GPUProcessor *dst,
                                        off_t dst_offset, off_t src_offset,
                                        off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-                                       Event start_event, Event finish_event)
+                                       size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)dst->fbmem_gpu_base) +
                                 (dst->fbmem_reserve + dst_offset),
                        ((char*)fbmem_gpu_base) +
                                 (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_PEER_TO_PEER))->run_or_wait(start_event);
+                        GPU_MEMCPY_PEER_TO_PEER));
+    }
+
+    void GPUProcessor::fence_to_fb(Realm::Operation *op)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(host_to_device_stream);
+    }
+
+    void GPUProcessor::fence_from_fb(Realm::Operation *op)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(device_to_host_stream);
+    }
+
+    void GPUProcessor::fence_within_fb(Realm::Operation *op)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(device_to_device_stream);
+    }
+
+    void GPUProcessor::fence_to_peer(Realm::Operation *op, GPUProcessor *dst)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(peer_to_peer_stream);
     }
 
     void GPUProcessor::register_host_memory(void *base, size_t size)
@@ -541,12 +569,13 @@ namespace LegionRuntime {
       return (peer_gpus.find(peer) != peer_gpus.end());
     }
 
-    void GPUProcessor::handle_complete_job(GPUJob *job)
+#if 0
+    void GPUProcessor::handle_complete_copy(GPUMemcpy *copy)
     {
       // If we have a GPU DMA worker, see if it is
       // one of the DMA streams and then notify the worker
       if (gpu_worker) {
-        gpu_worker->handle_complete_job(this, job);
+        gpu_worker->handle_complete_copy(this, copy);
       } else {
 	assert(0);
 #if 0
@@ -575,6 +604,7 @@ namespace LegionRuntime {
 #endif
       }
     }
+#endif
 
     CUstream GPUProcessor::get_current_task_stream(void)
     {
@@ -692,20 +722,22 @@ namespace LegionRuntime {
       cuCtxPopCurrent(&proc_ctx);
     }
 
-    void GPUProcessor::finish_jobs(const std::deque<GPUJob*> &to_complete)
+#if 0
+    void GPUProcessor::finish_copies(const std::deque<GPUMemcpy*> &to_complete)
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!to_complete.empty());
 #endif
       cuCtxPushCurrent(proc_ctx);
-      for (std::deque<GPUJob*>::const_iterator it = to_complete.begin();
+      for (std::deque<GPUMemcpy*>::const_iterator it = to_complete.begin();
             it != to_complete.end(); it++)
       {
-        (*it)->finish_job();
+        (*it)->finish_copy();
         delete (*it);
       }
       cuCtxPopCurrent(&proc_ctx);
     }
+#endif
     
     /*static*/ GPUProcessor** GPUProcessor::node_gpus;
     /*static*/ size_t GPUProcessor::num_node_gpus;
@@ -755,6 +787,7 @@ namespace LegionRuntime {
       worker_cond.signal();
     }
 
+#if 0
     void GPUWorker::handle_complete_job(GPUProcessor *proc, GPUJob *job)
     {
       AutoHSLLock a(worker_lock);
@@ -763,11 +796,12 @@ namespace LegionRuntime {
       jobs_empty = false;
       worker_cond.signal();
     }
+#endif
 
     void GPUWorker::thread_main(void)
     {
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > ready_copies;
-      std::map<GPUProcessor*,std::deque<GPUJob*> > to_complete;
+      //std::map<GPUProcessor*,std::deque<GPUJob*> > to_complete;
       while (true) 
       {
         {
@@ -788,6 +822,7 @@ namespace LegionRuntime {
               it->second.clear();
             }
             copies_empty = true;
+#if 0
             for (std::map<GPUProcessor*,std::deque<GPUJob*> >::iterator
                   it = complete_jobs.begin(); it != complete_jobs.end(); it++)
             {
@@ -797,6 +832,7 @@ namespace LegionRuntime {
               it->second.clear();
             }
             jobs_empty = true;
+#endif
           }
         }
         // Now that we've released the lock, handle everything
@@ -807,6 +843,7 @@ namespace LegionRuntime {
             it->first->issue_copies(it->second);
           it->second.clear();
         }
+#if 0
         for (std::map<GPUProcessor*,std::deque<GPUJob*> >::iterator
               it = to_complete.begin(); it != to_complete.end(); it++)
         {
@@ -814,6 +851,7 @@ namespace LegionRuntime {
             it->first->finish_jobs(it->second);
           it->second.clear();
         }
+#endif
       }
     }
 
@@ -850,20 +888,15 @@ namespace LegionRuntime {
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      Event e = GenEventImpl::create_genevent()->current_event();
-      gpu->copy_from_fb(dst, offset, size, Event::NO_EVENT, e);
-      e.wait();
+      gpu->copy_from_fb(dst, offset, size);
+      CHECK_CU( cuStreamSynchronize(gpu->device_to_host_stream) );
     }
 
     void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      Event e = GenEventImpl::create_genevent()->current_event();
-      gpu->copy_to_fb(offset, src, size, Event::NO_EVENT, e);
-      // this is called by the remote write AM handler, which is not allowed to
-      //  wait on an event, so just stall until write is complete
-      // the right answer is for the AM handler to not call this method
-      e.external_wait();
+      gpu->copy_to_fb(offset, src, size);
+      CHECK_CU( cuStreamSynchronize(gpu->host_to_device_stream) );
     }
 
     // zerocopy memory

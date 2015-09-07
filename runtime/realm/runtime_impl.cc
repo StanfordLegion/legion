@@ -415,6 +415,7 @@ namespace Realm {
       hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
       hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
       hcount += RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
+      hcount += RemoteWriteFenceAckMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence Ack AM");
       hcount += DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
       hcount += RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
       hcount += RuntimeShutdownMessage::Message::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");

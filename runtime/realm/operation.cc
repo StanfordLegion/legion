@@ -15,6 +15,8 @@
 
 #include "operation.h"
 
+#include "runtime_impl.h"
+
 namespace Realm {
 
   Operation::~Operation(void)
@@ -60,8 +62,18 @@ namespace Realm {
       measurements.send_responses(requests);
     }
 
+    // trigger the finish event last
+    trigger_finish_event();
+
     // we delete ourselves for now - eventually the OperationTable will do this
     delete this;
+  }
+
+  void Operation::trigger_finish_event(void)
+  {
+    if(finish_event.exists())
+      get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
+                                                              gasnet_mynode());
   }
 
   void Operation::clear_profiling(void)

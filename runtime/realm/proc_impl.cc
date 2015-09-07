@@ -299,11 +299,10 @@ namespace Realm {
   // class DeferredTaskSpawn
   //
 
-      bool DeferredTaskSpawn::event_triggered(void)
+    bool DeferredTaskSpawn::event_triggered(void)
     {
-      log_task.debug("deferred task now ready: func=%d finish=" IDFMT "/%d",
-                 task->func_id, 
-                 task->finish_event.id, task->finish_event.gen);
+      log_task.debug() << "deferred task now ready: func=" << task->func_id
+                       << " finish=" << task->get_finish_event();
       proc->enqueue_task(task);
       return true;
     }
@@ -311,7 +310,7 @@ namespace Realm {
     void DeferredTaskSpawn::print_info(FILE *f)
     {
       fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
-             task->func_id, task->proc.id, task->finish_event.id, task->finish_event.gen);
+             task->func_id, task->proc.id, task->get_finish_event().id, task->get_finish_event().gen);
     }
 
 

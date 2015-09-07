@@ -69,6 +69,7 @@ namespace LegionRuntime {
     // Forard declaration
     class GPUProcessor;
 
+#if 0
     class GPUJob : public EventWaiter {
     public:
       GPUJob(GPUProcessor *_gpu)
@@ -83,14 +84,16 @@ namespace LegionRuntime {
     public:
       GPUProcessor *const gpu;
     };
+#endif
 
     // An abstract base class for all GPU memcpy operations
-    class GPUMemcpy : public GPUJob {
+    class GPUMemcpy { //: public GPUJob {
     public:
-      GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-                GPUMemcpyKind _kind);
+      GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind);
       virtual ~GPUMemcpy(void) { }
     public:
+      virtual void execute(void) = 0;
+#if 0
       virtual bool event_triggered(void);
       virtual void print_info(FILE *f);
       virtual void run_or_wait(Event start_event);
@@ -101,23 +104,25 @@ namespace LegionRuntime {
     public:
       // Helper method for handling a callback
       static void handle_finish(CUstream stream, CUresult res, void *data);
+#endif
+    public:
+      GPUProcessor *const gpu;
     protected:
       GPUMemcpyKind kind;
       CUstream local_stream;
-      Event finish_event;
     };
 
     class GPUMemcpy1D : public GPUMemcpy {
     public:
-      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy1D(GPUProcessor *_gpu,
 		void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src), 
+	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
 	  mask(0), elmt_size(_bytes) { }
-      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy1D(GPUProcessor *_gpu,
 		void *_dst, const void *_src, 
 		const ElementMask *_mask, size_t _elmt_size,
 		GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
 	  mask(_mask), elmt_size(_elmt_size) { }
       virtual ~GPUMemcpy1D(void) { }
     public:
@@ -132,12 +137,12 @@ namespace LegionRuntime {
 
     class GPUMemcpy2D : public GPUMemcpy {
     public:
-      GPUMemcpy2D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy2D(GPUProcessor *_gpu,
                   void *_dst, const void *_src,
                   off_t _dst_stride, off_t _src_stride,
                   size_t _bytes, size_t _lines,
                   GPUMemcpyKind _kind)
-        : GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+        : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
           dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
           src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
           bytes(_bytes), lines(_lines) { }
@@ -159,7 +164,7 @@ namespace LegionRuntime {
       void shutdown(void);
     public:
       void enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy);
-      void handle_complete_job(GPUProcessor *proc, GPUJob *job);
+      void handle_complete_copy(GPUProcessor *proc, GPUMemcpy *copy);
     public:
       void thread_main(void);
     public:
@@ -169,7 +174,7 @@ namespace LegionRuntime {
     protected:
       // Keep these sorted by processors
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
-      std::map<GPUProcessor*,std::deque<GPUJob*> > complete_jobs;
+      std::map<GPUProcessor*,std::deque<GPUMemcpy*> > complete_copies;
       bool copies_empty, jobs_empty;
       GASNetHSL worker_lock;
       GASNetCondVar worker_cond;
@@ -199,54 +204,53 @@ namespace LegionRuntime {
       size_t get_zcmem_size(void) const;
       size_t get_fbmem_size(void) const;
     public:
-      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
-		      Event start_event, Event finish_event);
+      // copy operations are asynchronous - use a fence (of the right type)
+      //   after all of your copies
+      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes);
 
-      void copy_from_fb(void *dst, off_t src_offset, size_t bytes,
-			Event start_event, Event finish_event);
+      void copy_from_fb(void *dst, off_t src_offset, size_t bytes);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  size_t bytes,
-			  Event start_event, Event finish_event);
+			  size_t bytes);
 
       void copy_to_fb_2d(off_t dst_offset, const void *src,
                          off_t dst_stride, off_t src_stride,
-                         size_t bytes, size_t lines,
-                         Event start_event, Event finish_event);
+                         size_t bytes, size_t lines);
+
       void copy_from_fb_2d(void *dst, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines,
-                           Event start_event, Event finish_event);
+                           size_t bytes, size_t lines);
+
       void copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                              off_t dst_stride, off_t src_stride,
-                             size_t bytes, size_t lines,
-                             Event start_event, Event finish_event);
+                             size_t bytes, size_t lines);
 
       void copy_to_peer(GPUProcessor *dst, off_t dst_offset, 
-                        off_t src_offset, size_t bytes,
-                        Event start_event, Event finish_event);
+                        off_t src_offset, size_t bytes);
+
       void copy_to_peer_2d(GPUProcessor *dst, off_t dst_offset, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines,
-                           Event start_event, Event finish_event);
+                           size_t bytes, size_t lines);
 
       void copy_to_fb(off_t dst_offset, const void *src,
-		      const ElementMask *mask, size_t elmt_size,
-		      Event start_event, Event finish_event);
+		      const ElementMask *mask, size_t elmt_size);
 
       void copy_from_fb(void *dst, off_t src_offset,
-			const ElementMask *mask, size_t elmt_size,
-			Event start_event, Event finish_event);
+			const ElementMask *mask, size_t elmt_size);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  const ElementMask *mask, size_t elmt_size,
-			  Event start_event, Event finish_event);
+			  const ElementMask *mask, size_t elmt_size);
+
+      void fence_to_fb(Realm::Operation *op);
+      void fence_from_fb(Realm::Operation *op);
+      void fence_within_fb(Realm::Operation *op);
+      void fence_to_peer(Realm::Operation *op, GPUProcessor *dst);
     public:
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);
       void handle_peer_access(CUcontext peer_ctx);
       bool can_access_peer(GPUProcessor *peer) const;
-      void handle_complete_job(GPUJob *job);
+      void handle_complete_copy(GPUMemcpy *copy);
       CUstream get_current_task_stream(void);
     public:
       void load_context(void);
@@ -255,7 +259,7 @@ namespace LegionRuntime {
       void enqueue_copy(GPUMemcpy *copy);
     public:
       void issue_copies(const std::deque<GPUMemcpy*> &to_issue);
-      void finish_jobs(const std::deque<GPUJob*> &to_complete);
+      //void finish_copies(const std::deque<GPUMemcpy*> &to_complete);
     private:
       static GPUProcessor **node_gpus;
       static size_t num_node_gpus;
@@ -270,7 +274,7 @@ namespace LegionRuntime {
       Realm::CoreReservation *core_rsrv;
     protected:
       std::deque<GPUMemcpy*> copies;
-      std::deque<GPUJob*> complete_jobs;
+      std::deque<GPUMemcpy*> complete_jobs;
 
       std::set<GPUProcessor*> peer_gpus;
 

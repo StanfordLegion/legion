@@ -25,17 +25,13 @@ namespace Realm {
   // class Operation
   //
 
-  inline Operation::Operation(void)
-    : pending_work_items(1 /* i.e. the main work item */)
-  {
-    timeline.record_create_time();
-  }
-
-  inline Operation::Operation(const ProfilingRequestSet &reqs)
-    : requests(reqs)
+  inline Operation::Operation(Event _finish_event,
+                              const ProfilingRequestSet &_requests)
+    : finish_event(_finish_event)
+    , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
   {
-    measurements.import_requests(reqs); 
+    measurements.import_requests(requests); 
     timeline.record_create_time();
   }
 

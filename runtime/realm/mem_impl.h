@@ -480,7 +480,6 @@ namespace Realm {
 	off_t offset;
 	unsigned sender;
 	unsigned sequence_id;
-	Event event;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -501,7 +500,6 @@ namespace Realm {
 	//bool red_fold;
 	unsigned sender;
 	unsigned sequence_id;
-	Event event;
       };
       
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -531,13 +529,20 @@ namespace Realm {
 			       const void *data, size_t datalen, int payload_mode);
     };
     
+    class RemoteWriteFence : public Operation::AsyncWorkItem {
+    public:
+      RemoteWriteFence(Operation *op);
+
+      virtual void request_cancellation(void);
+    };
+
     struct RemoteWriteFenceMessage {
       struct RequestArgs {
 	Memory mem;
 	unsigned sender;
 	unsigned sequence_id;
 	unsigned num_writes;
-	Event event;
+	RemoteWriteFence *fence;
       };
        
       static void handle_request(RequestArgs args);
@@ -548,7 +553,23 @@ namespace Realm {
 
       static void send_request(gasnet_node_t target, Memory memory,
 			       unsigned sequence_id, unsigned num_writes,
-			       Event event);
+			       RemoteWriteFence *fence);
+    };
+    
+    struct RemoteWriteFenceAckMessage {
+      struct RequestArgs {
+	RemoteWriteFence *fence;
+        // TODO: success/failure
+      };
+       
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_ACK_MSGID,
+				        RequestArgs,
+				        handle_request> Message;
+
+      static void send_request(gasnet_node_t target,
+			       RemoteWriteFence *fence);
     };
     
     // remote memory writes
@@ -556,33 +577,33 @@ namespace Realm {
     extern unsigned do_remote_write(Memory mem, off_t offset,
 				    const void *data, size_t datalen,
 				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
+				    bool make_copy = false);
 
     extern unsigned do_remote_write(Memory mem, off_t offset,
 				    const void *data, size_t datalen,
 				    off_t stride, size_t lines,
 				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
+				    bool make_copy = false);
     
     extern unsigned do_remote_write(Memory mem, off_t offset,
 				    const SpanList& spans, size_t datalen,
 				    unsigned sequence_id,
-				    Event event, bool make_copy = false);
+				    bool make_copy = false);
 
     extern unsigned do_remote_reduce(Memory mem, off_t offset,
 				     ReductionOpID redop_id, bool red_fold,
 				     const void *data, size_t count,
 				     off_t src_stride, off_t dst_stride,
 				     unsigned sequence_id,
-				     Event event, bool make_copy = false);				     
+				     bool make_copy = false);				     
 
     extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
 					     ReductionOpID redopid,
 					     const void *data, size_t datalen,
-					     unsigned sequence_id,
-					     Event event);
+					     unsigned sequence_id);
 
-    extern void do_remote_fence(Memory mem, unsigned sequence_id, unsigned count, Event event);    
+    extern void do_remote_fence(Memory mem, unsigned sequence_id,
+                                unsigned count, RemoteWriteFence *fence);
     
 }; // namespace Realm
 

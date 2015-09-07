@@ -23,9 +23,11 @@
 namespace Realm {
 
   class Operation {
-  public:
-    Operation(void);
-    Operation(const ProfilingRequestSet &reqs);
+  protected:
+    // must be subclassed
+    Operation(Event _finish_event, const ProfilingRequestSet &_requests);
+
+  protected:
     virtual ~Operation(void);
   public:
     virtual void mark_ready(void);
@@ -60,6 +62,14 @@ namespace Realm {
 
     void clear_profiling(void);
     void reconstruct_measurements();
+
+  private: // for now to eliminate old references
+    void trigger_finish_event(void);
+
+    Event finish_event;
+  public:
+    Event get_finish_event(void) const { return finish_event; }
+  protected:
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
     ProfilingRequestSet requests; 

@@ -46,7 +46,6 @@ namespace Realm {
       Processor proc;
       Processor::TaskFuncID func_id;
       ByteArray args;
-      Event finish_event;
       int priority;
     };
 

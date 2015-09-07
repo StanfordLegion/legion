@@ -33,8 +33,8 @@ namespace Realm {
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
 	     Event _finish_event, int _priority)
-    : Operation(reqs), proc(_proc), func_id(_func_id), args(_args, _arglen),
-      finish_event(_finish_event), priority(_priority)
+    : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
+      args(_args, _arglen), priority(_priority)
   {
   }
 
@@ -97,9 +97,6 @@ namespace Realm {
     log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 	     "task end: %d (%p) (%s)", func_id, fptr, argstr);
 #endif
-    if(finish_event.exists())
-      get_runtime()->get_genevent_impl(finish_event)->
-	trigger(finish_event.gen, gasnet_mynode());
   }
 
 
