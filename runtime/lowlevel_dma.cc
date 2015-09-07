@@ -1835,6 +1835,7 @@ namespace LegionRuntime {
       bool fold;
     };
      
+#if 0
     // a MemPairCopier that keeps a list of events for component copies and doesn't trigger
     //  the completion event until they're all done
     class DelayedMemPairCopierX : public MemPairCopier {
@@ -1876,6 +1877,7 @@ namespace LegionRuntime {
     protected:
       std::set<Event> events;
     };
+#endif
 
 #ifdef USE_CUDA     
     class GPUtoFBMemPairCopier : public MemPairCopier {
