@@ -80,7 +80,8 @@ namespace Realm {
     (*fptr)(args.base(), args.size(), p);
 
     // and clear the TLS when we're done
-    ThreadLocal::current_processor = Processor::NO_PROC;
+    // TODO: get this right when using user threads
+    //ThreadLocal::current_processor = Processor::NO_PROC;
 
     mark_finished();
 
