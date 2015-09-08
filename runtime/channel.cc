@@ -40,13 +40,17 @@ namespace LegionRuntime {
         return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
       }
 
-      // we use a single queue for all xferDes
+
+#endif /*USE_DISK*/
+
+#if defined(USE_DISK) || defined(USE_HDF)
+          // we use a single queue for all xferDes
       static XferDesQueue *xferDes_queue = 0;
 
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
 
-#endif /*USE_DISK*/
+#endif
       static inline int min(int a, int b) { return (a < b) ? a : b; }
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
