@@ -81,6 +81,26 @@ void top_level_task(const Task *task,
           num_elements, num_steps);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
+  // we're going to use a must epoch launcher, so we need at least as many
+  //  processors in our system as we have subregions - check that now
+  std::set<Processor> all_procs;
+  Realm::Machine::get_machine().get_all_processors(all_procs);
+  int num_loc_procs = 0;
+  for(std::set<Processor>::const_iterator it = all_procs.begin();
+      it != all_procs.end();
+      it++)
+    if((*it).kind() == Processor::LOC_PROC)
+      num_loc_procs++;
+
+  if(num_loc_procs < num_subregions) {
+    printf("FATAL ERROR: This test uses a must epoch launcher, which requires\n");
+    printf("  a separate Realm processor for each subregion.  %d of the necessary\n",
+	   num_loc_procs);
+    printf("  %d are available.  Please rerun with '-ll:cpu %d'.\n",
+	   num_subregions, num_subregions);
+    exit(1);
+  }
+
   // For this example we'll create a single index space tree, but we
   // will make different logical regions from this index space.  The
   // index space will have two levels of partitioning.  One level for
@@ -262,7 +282,11 @@ void top_level_task(const Task *task,
       DomainPoint point(color);
       must_epoch_launcher.add_single_task(point, spmd_launcher);
     }
-    runtime->execute_must_epoch(ctx, must_epoch_launcher);
+    FutureMap fm = runtime->execute_must_epoch(ctx, must_epoch_launcher);
+    // wait for completion at least
+    fm.wait_all_results();
+
+    printf("Test completed.\n");
   }
 
   // Clean up our mess when we are done

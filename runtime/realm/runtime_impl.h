@@ -35,6 +35,8 @@
 
 #include "machine_impl.h"
 
+#include "threads.h"
+
 #if __cplusplus >= 201103L
 #define typeof decltype
 #endif
@@ -47,25 +49,6 @@ namespace Realm {
   class ProcessorImpl;
   class RegionInstanceImpl;
   class Module;
-
-#ifdef USE_GASNET 
-    class HandlerThread : public PreemptableThread {
-    public:
-      HandlerThread(IncomingMessageManager *m) : manager(m) { }
-      virtual ~HandlerThread(void) { }
-    public:
-      virtual Processor get_processor(void) const 
-        { assert(false); return Processor::NO_PROC; }
-    public:
-      virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for);
-    public:
-      void join(void);
-    private:
-      IncomingMessage *current_msg, *next_msg;
-      IncomingMessageManager *const manager;
-    };
-#endif
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
@@ -191,6 +174,11 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
+      volatile bool shutdown_requested;
+      GASNetHSL shutdown_mutex;
+      GASNetCondVar shutdown_condvar;
+
+      CoreReservationSet core_reservations;
     };
 
     extern RuntimeImpl *runtime_singleton;

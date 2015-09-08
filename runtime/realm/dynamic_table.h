@@ -25,6 +25,7 @@ namespace Realm {
     struct DynamicTableNodeBase {
     public:
       DynamicTableNodeBase(int _level, IT _first_index, IT _last_index);
+      virtual ~DynamicTableNodeBase(void);
 
       int level;
       IT first_index, last_index;
@@ -37,6 +38,7 @@ namespace Realm {
       static const size_t SIZE = _SIZE;
 
       DynamicTableNode(int _level, IT _first_index, IT _last_index);
+      virtual ~DynamicTableNode(void);
 
       ET elems[SIZE];
     };

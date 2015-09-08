@@ -15,6 +15,8 @@
 
 #include "lowlevel_gpu.h"
 
+#include "realm/tasks.h"
+
 #include <stdio.h>
 
 GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
@@ -27,119 +29,8 @@ namespace LegionRuntime {
     extern Logger::Category log_event_graph;
 #endif
 
-    GPUTask::GPUTask(GPUProcessor *_gpu, Task *_task)
-      : GPUJob(_gpu), task(_task)
-    {
-    }
-
-    GPUTask::~GPUTask(void)
-    {
-      if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-        delete task;
-    }
-
-    bool GPUTask::event_triggered(void)
-    {
-      // Should never be called
-      assert(false);
-      return false;
-    }
-
-    void GPUTask::print_info(FILE *f)
-    {
-      // should never be called
-      assert(false);
-    }
-
-    void GPUTask::run_or_wait(Event start_event)
-    {
-      // should never be called
-      assert(false);
-    }
-
-    void GPUTask::execute(void)
-    {
-      Processor::TaskFuncPtr fptr = get_runtime()->task_table[task->func_id];
-      //char argstr[100];
-      //argstr[0] = 0;
-      //for(size_t i = 0; (i < arglen) && (i < 40); i++)
-      //	sprintf(argstr+2*i, "%02x", ((unsigned char *)args)[i]);
-      //if(arglen > 40) strcpy(argstr+80, "...");
-      //log_gpu.debug("task start: %d (%p) (%s)", func_id, fptr, argstr);
-
-      // make sure CUDA driver's state is ok before we start
-      //assert(cudaGetLastError() == cudaSuccess);
-#ifdef EVENT_GRAPH_TRACE
-      assert(task->finish_event.exists());
-      start_enclosing(task->finish_event); 
-      unsigned long long start = TimeStamp::get_current_time_in_micros();
-#endif
-      if (task->perform_capture()) {
-        CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_start,
-                                      (void*)this, 0) );
-      }
-      (*fptr)(task->args, task->arglen, gpu->me);
-      if (task->capture_proc)
-        task->proc = gpu->me;
-#ifdef EVENT_GRAPH_TRACE
-      unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      finish_enclosing();
-      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-                            task->finish_event.id, task->finish_event.gen,
-                            (stop - start));
-#endif
-      // Mark that we recor
-      // Add a callback for when the event has triggered
-      CHECK_CU( cuStreamAddCallback(local_stream, GPUTask::handle_finish, 
-                                    (void*)this, 0) );
-      // A useful debugging macro
-#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( cuStreamSynchronize(local_stream) );
-#endif
-      // check for any uncaught driver errors after the task finishes
-#if 0
-      {
-	cudaError_t result = cudaGetLastError();
-	if (result != cudaSuccess) {
-	  log_gpu.error("CUDA: uncaught driver error in task %d: %d (%s)",
-			func_id, result, cudaGetErrorString(result));
-	}
-      }
-#endif
-      //log_gpu.debug("task end: %d (%p) (%s)", func_id, fptr, argstr);
-    }
-
-    void GPUTask::finish_job(void)
-    {
-      // Clear out all our modules that we created
-      for (std::set<void**>::const_iterator it = modules.begin();
-            it != modules.end(); it++)
-      {
-        gpu->internal_unregister_fat_binary(*it);
-      }
-      // If we have a finish event then trigger it
-      if (task->finish_event.exists())
-        get_runtime()->get_genevent_impl(task->finish_event)->
-          trigger(task->finish_event.gen, gasnet_mynode());
-    }
-
-    /*static*/ void GPUTask::handle_start(CUstream stream, CUresult res, void *data)
-    {
-      GPUTask *task = static_cast<GPUTask*>(data);
-      task->task->mark_started();
-    }
-
-    /*static*/ void GPUTask::handle_finish(CUstream stream, CUresult res, void *data)
-    {
-      GPUTask *task = static_cast<GPUTask*>(data);
-      if (task->task->perform_capture())
-        task->task->mark_completed();
-      task->gpu->handle_complete_job(task);
-    }
-
-    GPUMemcpy::GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-                         GPUMemcpyKind _kind)
-        : GPUJob(_gpu), kind(_kind), finish_event(_finish_event)
+    GPUMemcpy::GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind)
+        : gpu(_gpu), kind(_kind)
     {
       if (kind == GPU_MEMCPY_HOST_TO_DEVICE)
         local_stream = gpu->host_to_device_stream;
@@ -153,10 +44,11 @@ namespace LegionRuntime {
         assert(false); // who does host to host here?!?
     } 
 
+#if 0
     bool GPUMemcpy::event_triggered(void)
     {
       log_gpu.info("gpu job %p now runnable", this);
-      gpu->enqueue_copy(this);
+      enqueue_copy(this);
       // don't delete
       return false;
     }
@@ -171,7 +63,7 @@ namespace LegionRuntime {
     {
       if(start_event.has_triggered()) {
         log_gpu.info("job %p can start right away!?", this);
-        gpu->enqueue_copy(this);
+        enqueue_copy(this);
       } else {
         log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
 	EventImpl::add_waiter(start_event, this);
@@ -198,6 +90,7 @@ namespace LegionRuntime {
       GPUMemcpy *copy = static_cast<GPUMemcpy*>(data);
       copy->gpu->handle_complete_job(copy);
     }
+#endif
 
     void GPUMemcpy1D::do_span(off_t pos, size_t len)
     {
@@ -258,7 +151,6 @@ namespace LegionRuntime {
       } else {
         do_span(0, 1);
       }
-      post_execute();  
       log_gpu.info("gpu memcpy complete: dst=%p src=%p bytes=%zd kind=%d",
                    dst, src, elmt_size, kind);
     }
@@ -293,44 +185,136 @@ namespace LegionRuntime {
       copy_info.WidthInBytes = bytes;
       copy_info.Height = lines;
       CHECK_CU( cuMemcpy2DAsync(&copy_info, local_stream) );
-      post_execute();
       log_gpu.info("gpu memcpy 2d complete: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
     }
 
-    GPUThread::GPUThread(GPUProcessor *gpu)
-      : LocalThread(gpu), gpu_proc(gpu)
+  class stringbuilder {
+  public:
+    operator std::string(void) const { return ss.str(); }
+    template <typename T>
+    stringbuilder& operator<<(T data) { ss << data; return *this; }
+  protected:
+    std::stringstream ss;
+  };
+
+    // we will track the completion of the (asynchronous) kernel execution on the GPU by
+    //  enqueuing a callback request on the correct stream, and registering that an
+    //  AsyncWorkItem on the Task
+
+    class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      GPUWorkFence(Realm::Operation *op);
+      
+      virtual void request_cancellation(void);
+
+      void enqueue_on_stream(CUstream stream);
+
+    protected:
+      static void cuda_callback(CUstream stream, CUresult res, void *data);
+    };
+
+    GPUWorkFence::GPUWorkFence(Realm::Operation *op)
+      : Realm::Operation::AsyncWorkItem(op)
+    {}
+
+    void GPUWorkFence::request_cancellation(void)
+    {
+      // ignored - no way to shoot down CUDA work
+    }
+
+    void GPUWorkFence::enqueue_on_stream(CUstream stream)
+    {
+      CHECK_CU( cuStreamAddCallback(stream, &cuda_callback, (void *)this, 0) );
+    }
+
+    /*static*/ void GPUWorkFence::cuda_callback(CUstream stream, CUresult res, void *data)
+    {
+      GPUWorkFence *me = (GPUWorkFence *)data;
+
+      assert(res == CUDA_SUCCESS);
+      me->mark_finished();
+    }
+
+
+    // we want to subclass the scheduler to replace the execute_task method, but we also want to
+    //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
+    //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
+    //  have the same prototypes)
+
+    template <typename T>
+    class GPUTaskScheduler : public T {
+    public:
+      GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv, GPUProcessor *_gpu);
+
+      virtual ~GPUTaskScheduler(void);
+
+    protected:
+      virtual bool execute_task(Task *task);
+
+      // might also need to override the thread-switching methods to keep TLS up to date
+
+      GPUProcessor *gpu;
+    };
+
+    template <typename T>
+    GPUTaskScheduler<T>::GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
+					  GPUProcessor *_gpu)
+      : T(_proc, _core_rsrv), gpu(_gpu)
+    {
+      // nothing else
+    }
+
+    template <typename T>
+    GPUTaskScheduler<T>::~GPUTaskScheduler(void)
     {
     }
 
-    GPUThread::~GPUThread(void)
+    namespace ThreadLocal {
+      static __thread GPUProcessor *current_gpu_proc = 0;
+    };
+
+    template <typename T>
+    bool GPUTaskScheduler<T>::execute_task(Task *task)
     {
+      // use TLS to make sure that the task can find the current GPU processor when it makes
+      //  CUDA RT calls
+      // TODO: either eliminate these asserts or do TLS swapping when using user threads
+      assert(ThreadLocal::current_gpu_proc == 0);
+      ThreadLocal::current_gpu_proc = gpu;
+
+      // bump the current stream
+      // TODO: sanity-check whether this even works right when GPU tasks suspend
+      CUstream s = gpu->switch_to_next_task_stream();
+
+      // we'll use a "work fence" to track when the kernels launched by this task actually
+      //  finish - this must be added to the task _BEFORE_ we execute
+      GPUWorkFence *fence = new GPUWorkFence(task);
+      task->add_async_work_item(fence);
+
+      bool ok = T::execute_task(task);
+
+      // now enqueue the fence on the local stream
+      fence->enqueue_on_stream(s);
+
+      // A useful debugging macro
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CHECK_CU( cuStreamSynchronize(s) );
+#endif
+
+      assert(ThreadLocal::current_gpu_proc == gpu);
+      ThreadLocal::current_gpu_proc = 0;
+
+      return ok;
     }
 
-    void GPUThread::thread_main(void)
-    {
-      gasnett_threadkey_set(gpu_thread_ptr, gpu_proc);
-      // Load the context
-      gpu_proc->load_context();
-      if (initialize)
-        proc->initialize_processor();
-      while (true)
-      {
-        assert(state == RUNNING_STATE);
-        bool quit = gpu_proc->execute_gpu(this);
-        if (quit) break;
-      }
-      if (finalize)
-        proc->finalize_processor();
-    }
-
-    GPUProcessor::GPUProcessor(Processor _me, Processor::Kind _kind, 
-                               const char *_name, int _gpu_index, 
+    GPUProcessor::GPUProcessor(Processor _me, Realm::CoreReservationSet& crs, 
+			       int _gpu_index, 
                                size_t _zcmem_size, size_t _fbmem_size, 
                                size_t _stack_size, GPUWorker *worker/*can be 0*/,
-                               int streams, int _core_id /*= -1*/)
-      : LocalProcessor(_me, _kind, _stack_size, _name, _core_id),
+                               int streams)
+      : LocalTaskProcessor(_me, Processor::TOC_PROC),
         gpu_index(_gpu_index), zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
         zcmem_reserve(16 << 20), fbmem_reserve(32 << 20), gpu_worker(worker),
         current_stream(0)
@@ -359,11 +343,34 @@ namespace LegionRuntime {
       kernel_arg_size = 0;
       CHECK_CU( cuMemAllocHost((void**)&kernel_arg_buffer, kernel_buffer_size) );
       
+      initialize_cuda_stuff();
+
       CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+
+      Realm::CoreReservationParameters params;
+      params.set_num_cores(1);
+      params.set_alu_usage(params.CORE_USAGE_SHARED);
+      params.set_fpu_usage(params.CORE_USAGE_SHARED);
+      params.set_ldst_usage(params.CORE_USAGE_SHARED);
+      params.set_max_stack_size(_stack_size);
+
+      std::string name = stringbuilder() << "GPU proc " << _me;
+
+      core_rsrv = new Realm::CoreReservation(name, crs, params);
+
+#ifdef REALM_USE_USER_THREADS_FOR_GPU
+      Realm::UserThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::UserThreadTaskScheduler>(me, *core_rsrv, this);
+      // no config settings we want to tweak yet
+#else
+      Realm::KernelThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::KernelThreadTaskScheduler>(me, *core_rsrv, this);
+      // no config settings we want to tweak yet
+#endif
+      set_scheduler(sched);
     }
 
     GPUProcessor::~GPUProcessor(void)
     {
+      delete core_rsrv;
     }
 
     void* GPUProcessor::get_zcmem_cpu_base(void) const
@@ -386,137 +393,157 @@ namespace LegionRuntime {
       return fbmem_size;
     }
 
-    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
-				  Event start_event, Event finish_event)
+    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-       src, bytes, GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+       src, bytes, GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src,
-				  const ElementMask *mask, size_t elmt_size,
-				  Event start_event, Event finish_event)
+				  const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-       src, mask, elmt_size, GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+       src, mask, elmt_size, GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
-    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
-				    Event start_event, Event finish_event)
+    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       bytes, GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+       bytes, GPU_MEMCPY_DEVICE_TO_HOST));
     } 
 
     void GPUProcessor::copy_from_fb(void *dst, off_t src_offset,
-				    const ElementMask *mask, size_t elmt_size,
-				    Event start_event, Event finish_event)
+				    const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_HOST));
     }
 
     void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      size_t bytes,
-				      Event start_event, Event finish_event)
+				      size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
        ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       bytes, GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+       bytes, GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      const ElementMask *mask, size_t elmt_size,
-				      Event start_event, Event finish_event)
+				      const ElementMask *mask, size_t elmt_size)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
        ((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
        ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+       mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_fb_2d(off_t dst_offset, const void *src, 
                                      off_t dst_stride, off_t src_stride,
-                                     size_t bytes, size_t lines,
-                                     Event start_event, Event finish_event)
+                                     size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)fbmem_gpu_base)+
                         (fbmem_reserve + dst_offset),
                         src, dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_HOST_TO_DEVICE))->run_or_wait(start_event);
+                        GPU_MEMCPY_HOST_TO_DEVICE));
     }
 
     void GPUProcessor::copy_from_fb_2d(void *dst, off_t src_offset,
                                        off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-                                       Event start_event, Event finish_event)
+                                       size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event, dst,
+      enqueue_copy(new GPUMemcpy2D(this, dst,
                        ((char*)fbmem_gpu_base)+
                         (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_DEVICE_TO_HOST))->run_or_wait(start_event);
+                        GPU_MEMCPY_DEVICE_TO_HOST));
     }
 
     void GPUProcessor::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                                          off_t dst_stride, off_t src_stride,
-                                         size_t bytes, size_t lines,
-                                         Event start_event, Event finish_event)
+                                         size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)fbmem_gpu_base) + 
                         (fbmem_reserve + dst_offset),
                        ((char*)fbmem_gpu_base) + 
                         (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_DEVICE_TO_DEVICE))->run_or_wait(start_event);
+                        GPU_MEMCPY_DEVICE_TO_DEVICE));
     }
 
     void GPUProcessor::copy_to_peer(GPUProcessor *dst, off_t dst_offset,
-                                    off_t src_offset, size_t bytes,
-                                    Event start_event, Event finish_event)
+                                    off_t src_offset, size_t bytes)
     {
-      (new GPUMemcpy1D(this, finish_event,
+      enqueue_copy(new GPUMemcpy1D(this,
               ((char*)dst->fbmem_gpu_base) + 
                       (dst->fbmem_reserve + dst_offset),
               ((char*)fbmem_gpu_base) + 
                       (fbmem_reserve + src_offset),
-              bytes, GPU_MEMCPY_PEER_TO_PEER))->run_or_wait(start_event);
+              bytes, GPU_MEMCPY_PEER_TO_PEER));
     }
 
     void GPUProcessor::copy_to_peer_2d(GPUProcessor *dst,
                                        off_t dst_offset, off_t src_offset,
                                        off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-                                       Event start_event, Event finish_event)
+                                       size_t bytes, size_t lines)
     {
-      (new GPUMemcpy2D(this, finish_event,
+      enqueue_copy(new GPUMemcpy2D(this,
                        ((char*)dst->fbmem_gpu_base) +
                                 (dst->fbmem_reserve + dst_offset),
                        ((char*)fbmem_gpu_base) +
                                 (fbmem_reserve + src_offset),
                         dst_stride, src_stride, bytes, lines,
-                        GPU_MEMCPY_PEER_TO_PEER))->run_or_wait(start_event);
+                        GPU_MEMCPY_PEER_TO_PEER));
     }
 
-    /*static*/ Processor GPUProcessor::get_processor(void)
+    void GPUProcessor::fence_to_fb(Realm::Operation *op)
     {
-      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
-      // If this happens there is a case we're not handling
-      assert(tls_val != NULL);
-      GPUProcessor *gpu = (GPUProcessor*)tls_val;
-      return gpu->me;
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(host_to_device_stream);
+    }
+
+    void GPUProcessor::fence_from_fb(Realm::Operation *op)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(device_to_host_stream);
+    }
+
+    void GPUProcessor::fence_within_fb(Realm::Operation *op)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(device_to_device_stream);
+    }
+
+    void GPUProcessor::fence_to_peer(Realm::Operation *op, GPUProcessor *dst)
+    {
+      GPUWorkFence *f = new GPUWorkFence(op);
+
+      // this must be done before we enqueue the callback with CUDA
+      op->add_async_work_item(f);
+
+      f->enqueue_on_stream(peer_to_peer_stream);
     }
 
     void GPUProcessor::register_host_memory(void *base, size_t size)
     {
-      if (!shutdown)
+      if (true /*SJT: why this? !shutdown*/)
       {
         CHECK_CU( cuCtxPushCurrent(proc_ctx) );
         CHECK_CU( cuMemHostRegister(base, size, CU_MEMHOSTREGISTER_PORTABLE) ); 
@@ -542,13 +569,16 @@ namespace LegionRuntime {
       return (peer_gpus.find(peer) != peer_gpus.end());
     }
 
-    void GPUProcessor::handle_complete_job(GPUJob *job)
+#if 0
+    void GPUProcessor::handle_complete_copy(GPUMemcpy *copy)
     {
       // If we have a GPU DMA worker, see if it is
       // one of the DMA streams and then notify the worker
       if (gpu_worker) {
-        gpu_worker->handle_complete_job(this, job);
+        gpu_worker->handle_complete_copy(this, copy);
       } else {
+	assert(0);
+#if 0
         // Otherwise see if we need to wake up a thread
         LocalThread *to_wake = 0;
         LocalThread *to_start = 0;
@@ -571,11 +601,21 @@ namespace LegionRuntime {
           to_wake->awake();
         if (to_start)
           to_start->start_thread(stack_size, core_id, processor_name);
+#endif
       }
     }
+#endif
 
     CUstream GPUProcessor::get_current_task_stream(void)
     {
+      return task_streams[current_stream];
+    }
+
+    CUstream GPUProcessor::switch_to_next_task_stream(void)
+    {
+      current_stream++;
+      if(current_stream >= task_streams.size())
+	current_stream = 0;
       return task_streams[current_stream];
     }
 
@@ -585,135 +625,7 @@ namespace LegionRuntime {
       CHECK_CU( cuCtxPushCurrent(proc_ctx) );
     }
 
-    bool GPUProcessor::execute_gpu(GPUThread *thread)
-    {
-      mutex.lock();
-      // Sanity check, we should be the running thread if we are in here
-      assert(thread == running_thread);
-      // First check to see if there are any resumable threads
-      // If there are then we will switch onto those
-      if (!resumable_threads.empty())
-      {
-        // Move this thread on to the available threads and wake
-        // up one of the resumable threads
-        thread->prepare_to_sleep();
-        available_threads.push_back(thread);
-        // Pull the first thread off the resumable threads
-        LocalThread *to_resume = resumable_threads.front();
-        resumable_threads.pop_front();
-        // Make this the running thread
-        running_thread = to_resume;
-        // Release the lock
-	mutex.unlock();
-        // Wake up the resumable thread
-        to_resume->resume();
-        // Put ourselves to sleep
-        thread->sleep();
-      }
-      else if (task_queue.empty() &&
-               (gpu_worker || (copies.empty() && complete_jobs.empty())))
-      {
-        // If there is nothing to do then we should go to sleep
-        thread->prepare_to_sleep();
-        available_threads.push_back(thread);
-        running_thread = NULL;
-	mutex.unlock();
-        thread->sleep();
-      }
-      else
-      {
-        std::vector<GPUMemcpy*> ready_copies;
-        std::vector<GPUJob*> to_complete;
-        if (!gpu_worker)
-        {
-          if (!ready_copies.empty()) {
-            ready_copies.insert(ready_copies.end(),copies.begin(),copies.end()); 
-            copies.clear();
-          }
-          if (!complete_jobs.empty()) {
-            to_complete.insert(to_complete.end(),
-                               complete_jobs.begin(),complete_jobs.end());
-            complete_jobs.clear();
-          }
-        }
-        GPUTask *gpu_task = 0;
-        if (!task_queue.empty()) {
-          Task *task = task_queue.pop();  
-          // If this is the kill pill, then do a 
-          // little extra work before releasing the lock
-          if (task->func_id == 0) {
-            finished();
-            // Mark that we received the shutdown trigger
-            shutdown_trigger = true;
-	    condvar.signal();
-	    mutex.unlock();
-            // Trigger the completion task
-            if (__sync_fetch_and_add(&(task->run_count),1) == 0)
-              get_runtime()->get_genevent_impl(task->finish_event)->
-                            trigger(task->finish_event.gen, gasnet_mynode());
-            // Delete the task
-            if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-              delete task;
-          } else {
-	    mutex.unlock();
-            // Figure out if we are going to execute this task, if so we
-            // need to add it to our list of pending tasks on the current stream
-            // before we release the lock and run the task
-            if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
-              // Wrap this task up in a GPUTask
-              gpu_task = new GPUTask(this, task);
-            } else {
-              // Remove our delete reference
-              if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
-                delete task;
-            }
-          }
-        } else {
-          // Still have to release the lock
-	  mutex.unlock();
-        }
-        // Launch any ready copies
-        if (!ready_copies.empty())
-        {
-          // Launch all the copies first since we know that they
-          // are going to be asynchronous on streams that won't block tasks
-          // These calls well enqueue the copies on the right queue.
-          for (std::vector<GPUMemcpy*>::const_iterator it = ready_copies.begin();
-                it != ready_copies.end(); it++)
-          {
-            (*it)->execute();
-          }
-        }
-        if (gpu_task)
-        {
-          gpu_task->set_local_stream(task_streams[current_stream]);
-          //printf("executing job %p\n", job);
-          assert(task_modules.empty());
-          gpu_task->execute();
-          // When we are done, tell the task about all the modules
-          // it needs to unload
-          gpu_task->record_modules(task_modules);
-          task_modules.clear();
-          // Update the current stream
-          current_stream++;
-          if ((size_t)current_stream >= task_streams.size())
-            current_stream = 0;
-        }
-        // Handle any complete jobs that we have
-        if (!to_complete.empty())
-        {
-          for (std::vector<GPUJob*>::const_iterator it = 
-                to_complete.begin(); it != to_complete.end(); it++)
-          {
-            (*it)->finish_job();
-            delete (*it);
-          }
-        }
-      }
-      return shutdown;
-    }
-
-    void GPUProcessor::initialize_processor(void)
+    void GPUProcessor::initialize_cuda_stuff(void)
     {
       // load any modules, functions, and variables that we deferred
       const std::map<void*,void**> &deferred_modules = get_deferred_modules();
@@ -770,23 +682,19 @@ namespace LegionRuntime {
 
       log_gpu.info("gpu initialized: zcmem=%p/%p fbmem=%p",
               zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
-
-      // now do the normal initialization
-      LocalProcessor::initialize_processor();
     }
 
-    void GPUProcessor::finalize_processor(void)
+    void GPUProcessor::shutdown(void)
     {
       log_gpu.info("shutting down");
-      // do the normal finalization 
-      LocalProcessor::finalize_processor();
-      // Synchronize the device so we can flush any printf buffers
-      CHECK_CU( cuCtxSynchronize() );
-    }
 
-    LocalThread* GPUProcessor::create_new_thread(void)
-    {
-      return new GPUThread(this);
+      // Synchronize the device so we can flush any printf buffers
+      CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+      CHECK_CU( cuCtxSynchronize() );
+      CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+
+      // shut down threads/scheduler
+      LocalTaskProcessor::shutdown();
     }
 
     void GPUProcessor::enqueue_copy(GPUMemcpy *copy)
@@ -796,27 +704,7 @@ namespace LegionRuntime {
       if (gpu_worker) {
         gpu_worker->enqueue_copy(this, copy);
       } else {
-        LocalThread *to_wake = 0;
-        LocalThread *to_start = 0;
-	mutex.lock();
-        copies.push_back(copy);
-        // If there is no worker, we need to make sure a thread
-        // is awake and running to handle the copies
-        if (running_thread == NULL) {
-          if (!available_threads.empty()) {
-            to_wake = available_threads.back();
-            available_threads.pop_back();
-            running_thread = to_wake;
-          } else {
-            to_start = create_new_thread(); 
-            running_thread = to_start;
-          }
-        }
-	mutex.unlock();
-        if (to_wake)
-          to_wake->awake();
-        if (to_start)
-          to_start->start_thread(stack_size, core_id, processor_name);
+	assert(0);
       }
     }
 
@@ -834,41 +722,60 @@ namespace LegionRuntime {
       cuCtxPopCurrent(&proc_ctx);
     }
 
-    void GPUProcessor::finish_jobs(const std::deque<GPUJob*> &to_complete)
+#if 0
+    void GPUProcessor::finish_copies(const std::deque<GPUMemcpy*> &to_complete)
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!to_complete.empty());
 #endif
       cuCtxPushCurrent(proc_ctx);
-      for (std::deque<GPUJob*>::const_iterator it = to_complete.begin();
+      for (std::deque<GPUMemcpy*>::const_iterator it = to_complete.begin();
             it != to_complete.end(); it++)
       {
-        (*it)->finish_job();
+        (*it)->finish_copy();
         delete (*it);
       }
       cuCtxPopCurrent(&proc_ctx);
     }
+#endif
     
     /*static*/ GPUProcessor** GPUProcessor::node_gpus;
     /*static*/ size_t GPUProcessor::num_node_gpus;
     static std::vector<pthread_t> dma_threads;
 
+    /*static*/ GPUWorker *GPUWorker::worker_singleton = 0;
 
-    GPUWorker::GPUWorker(void)
+    GPUWorker::GPUWorker(Realm::CoreReservationSet& crs, size_t stack_size)
       : copies_empty(true), jobs_empty(true),
-	worker_cond(worker_lock), worker_shutdown_requested(false)
+	worker_cond(worker_lock), worker_shutdown_requested(false),
+	core_rsrv("GPU worker thread", crs, Realm::CoreReservationParameters())
     {
+      Realm::ThreadLaunchParameters tlp;
+
+      worker_thread = Realm::Thread::create_kernel_thread<GPUWorker,
+							  &GPUWorker::thread_main>(this,
+										   tlp,
+										   core_rsrv,
+										   0);
     }
 
     GPUWorker::~GPUWorker(void)
     {
+      // shutdown should have already been called
+      assert(worker_thread == 0);
     }
 
     void GPUWorker::shutdown(void)
     {
-      AutoHSLLock a(worker_lock);
-      worker_shutdown_requested = true;
-      worker_cond.signal();
+      {
+	AutoHSLLock a(worker_lock);
+	worker_shutdown_requested = true;
+	worker_cond.signal();
+      }
+
+      worker_thread->join();
+      delete worker_thread;
+      worker_thread = 0;
     }
 
     void GPUWorker::enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy)
@@ -880,6 +787,7 @@ namespace LegionRuntime {
       worker_cond.signal();
     }
 
+#if 0
     void GPUWorker::handle_complete_job(GPUProcessor *proc, GPUJob *job)
     {
       AutoHSLLock a(worker_lock);
@@ -888,18 +796,12 @@ namespace LegionRuntime {
       jobs_empty = false;
       worker_cond.signal();
     }
-
-    Processor GPUWorker::get_processor(void) const
-    {
-      // should never be called
-      assert(false);
-      return Processor::NO_PROC;
-    }
+#endif
 
     void GPUWorker::thread_main(void)
     {
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > ready_copies;
-      std::map<GPUProcessor*,std::deque<GPUJob*> > to_complete;
+      //std::map<GPUProcessor*,std::deque<GPUJob*> > to_complete;
       while (true) 
       {
         {
@@ -920,6 +822,7 @@ namespace LegionRuntime {
               it->second.clear();
             }
             copies_empty = true;
+#if 0
             for (std::map<GPUProcessor*,std::deque<GPUJob*> >::iterator
                   it = complete_jobs.begin(); it != complete_jobs.end(); it++)
             {
@@ -929,6 +832,7 @@ namespace LegionRuntime {
               it->second.clear();
             }
             jobs_empty = true;
+#endif
           }
         }
         // Now that we've released the lock, handle everything
@@ -939,6 +843,7 @@ namespace LegionRuntime {
             it->first->issue_copies(it->second);
           it->second.clear();
         }
+#if 0
         for (std::map<GPUProcessor*,std::deque<GPUJob*> >::iterator
               it = to_complete.begin(); it != to_complete.end(); it++)
         {
@@ -946,36 +851,25 @@ namespace LegionRuntime {
             it->first->finish_jobs(it->second);
           it->second.clear();
         }
+#endif
       }
     }
 
-    void GPUWorker::sleep_on_event(Event wait_for)
-    {
-      // should never be called
-      assert(false);
-    }
-
     /*static*/
-    GPUWorker* GPUWorker::start_gpu_worker_thread(size_t stack_size)
+    GPUWorker* GPUWorker::start_gpu_worker_thread(Realm::CoreReservationSet& crs,
+						  size_t stack_size)
     {
-      GPUWorker *&the_gpu_worker = get_worker();
-      the_gpu_worker = new GPUWorker();
-      the_gpu_worker->start_thread(stack_size, -1, "GPU worker");
-      return the_gpu_worker;
+      worker_singleton = new GPUWorker(crs, stack_size);
+      return worker_singleton;
     }
 
     /*static*/ void GPUWorker::stop_gpu_worker_thread(void)
     {
-      GPUWorker *worker = get_worker();
-      if (worker != NULL)
-        get_worker()->shutdown(); 
-    }
-
-    /*static*/
-    GPUWorker*& GPUWorker::get_worker(void)
-    {
-      static GPUWorker *worker = NULL;
-      return worker;
+      if(worker_singleton) {
+	worker_singleton->shutdown();
+	delete worker_singleton;
+	worker_singleton = 0;
+      }
     }
 
     // framebuffer memory
@@ -994,17 +888,15 @@ namespace LegionRuntime {
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      Event e = GenEventImpl::create_genevent()->current_event();
-      gpu->copy_from_fb(dst, offset, size, Event::NO_EVENT, e);
-      e.wait();
+      gpu->copy_from_fb(dst, offset, size);
+      CHECK_CU( cuStreamSynchronize(gpu->device_to_host_stream) );
     }
 
     void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      Event e = GenEventImpl::create_genevent()->current_event();
-      gpu->copy_to_fb(offset, src, size, Event::NO_EVENT, e);
-      e.wait();
+      gpu->copy_to_fb(offset, src, size);
+      CHECK_CU( cuStreamSynchronize(gpu->host_to_device_stream) );
     }
 
     // zerocopy memory
@@ -1040,13 +932,7 @@ namespace LegionRuntime {
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::find_local_gpu(void)
     {
-      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
-      // This can return NULL during start-up
-      if (tls_val == NULL)
-        return NULL;
-      assert(tls_val != NULL);
-      GPUProcessor *local = (GPUProcessor*)tls_val;
-      return local;
+      return ThreadLocal::current_gpu_proc;
     }
 
     /*static*/ std::map<void*,void**>& GPUProcessor::get_deferred_modules(void)
@@ -1308,7 +1194,7 @@ namespace LegionRuntime {
         }
         log_gpu.error("Failed to load CUDA module! Error log: %s", 
                 log_error_buffer);
-#if __CUDA_API_VERSION >= 6050
+#if CUDA_VERSION >= 6050
         const char *name, *str;
         CHECK_CU( cuGetErrorName(result, &name) );
         CHECK_CU( cuGetErrorString(result, &str) );

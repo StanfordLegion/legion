@@ -15,57 +15,69 @@
 
 #include "operation.h"
 
+#include "runtime_impl.h"
+
 namespace Realm {
-
-  Operation::Operation(void)
-    : capture_timeline(false)
-  {
-  }
-
-  Operation::Operation(const ProfilingRequestSet &reqs)
-    : requests(reqs)
-  {
-    measurements.import_requests(reqs); 
-    capture_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
-    if(capture_timeline)
-      timeline.record_create_time();
-  }
 
   Operation::~Operation(void)
   {
-    if(requests.request_count() > 0) {
-      // send profiling requests only when the timeline is valid
-      if(capture_timeline && timeline.is_valid()) {
-        measurements.add_measurement(timeline);
-        measurements.send_responses(requests);
-      }
-      else if(!capture_timeline) {
-        measurements.send_responses(requests);
-      }
-    }
+    // delete all of the async work items we were given to track
+    for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
+	it != all_work_items.end();
+	it++)
+      delete *it;
+    all_work_items.clear();
   }
 
   void Operation::mark_ready(void)
   {
-    if(capture_timeline)
-      timeline.record_ready_time();
+    timeline.record_ready_time();
   }
 
   void Operation::mark_started(void)
   {
-    if(capture_timeline)
-      timeline.record_start_time();
+    timeline.record_start_time();
+  }
+
+  void Operation::mark_finished(void)
+  {
+    timeline.record_end_time();
+
+    // do an atomic decrement of the work counter to see if we're also complete
+    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+
+    if(remaining == 0)
+      mark_completed();    
   }
 
   void Operation::mark_completed(void)
   {
-    if(capture_timeline)
-      timeline.record_end_time();
+    timeline.record_complete_time();
+
+    // once complete, we can send profiling responses
+    if(requests.request_count() > 0) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
+	measurements.add_measurement(timeline);
+
+      measurements.send_responses(requests);
+    }
+
+    // trigger the finish event last
+    trigger_finish_event();
+
+    // we delete ourselves for now - eventually the OperationTable will do this
+    delete this;
+  }
+
+  void Operation::trigger_finish_event(void)
+  {
+    if(finish_event.exists())
+      get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
+                                                              gasnet_mynode());
   }
 
   void Operation::clear_profiling(void)
   {
-    capture_timeline = false;
     requests.clear();
     measurements.clear();
   }
@@ -73,9 +85,7 @@ namespace Realm {
   void Operation::reconstruct_measurements()
   {
     measurements.import_requests(requests);
-    capture_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
-    if(capture_timeline)
-      timeline.record_create_time();
+    timeline.record_create_time();
   }
 
 }; // namespace Realm

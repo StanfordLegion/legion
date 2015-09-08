@@ -2137,7 +2137,10 @@ namespace LegionRuntime {
             task->usage.proc = proc;
           func(task->args, task->arglen, proc);
           if (task->capture_timeline)
+	  {
             task->timeline.record_end_time();
+	    task->timeline.record_complete_time();
+	  }
         } else {
           process_kill();
         }
@@ -6221,7 +6224,10 @@ namespace LegionRuntime {
             op->timeline.record_start_time();
           op->perform();
           if (op->capture_timeline)
+	  {
             op->timeline.record_end_time();
+	    op->timeline.record_complete_time();
+	  }
           delete op;
         }
       }
@@ -6244,8 +6250,11 @@ namespace LegionRuntime {
         if (op->capture_timeline)
           op->timeline.record_start_time();
         op->perform();
-        if (op->capture_timeline)
+        if (op->capture_timeline) 
+	{
           op->timeline.record_end_time();
+	  op->timeline.record_complete_time();
+	}
         delete op;
       }
     }
