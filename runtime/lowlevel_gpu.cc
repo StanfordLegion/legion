@@ -284,6 +284,9 @@ namespace LegionRuntime {
       assert(ThreadLocal::current_gpu_proc == 0);
       ThreadLocal::current_gpu_proc = gpu;
 
+      // push the CUDA context for this GPU onto this thread
+      CHECK_CU( cuCtxPushCurrent(gpu->proc_ctx) );
+
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
       CUstream s = gpu->switch_to_next_task_stream();
@@ -302,6 +305,11 @@ namespace LegionRuntime {
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( cuStreamSynchronize(s) );
 #endif
+
+      // pop the CUDA context for this GPU back off
+      CUcontext popped;
+      CHECK_CU( cuCtxPopCurrent(&popped) );
+      assert(popped == gpu->proc_ctx);
 
       assert(ThreadLocal::current_gpu_proc == gpu);
       ThreadLocal::current_gpu_proc = 0;
