@@ -242,9 +242,11 @@ void init_field_task(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
   int extent = *(const int*) task->args;
- 
+  
+#ifdef IOTESTER_VERBOSE
   std::cout << "init_field_task extent is: " << extent << " domain point is:[" << task->index_point[0] << "," <<
     task->index_point[1] << "]" << " linearization is: " << task->index_point[0]*extent+task->index_point[1]*extent <<  std::endl;
+#endif
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
   RegionAccessor<AccessorType::Generic, double> acc_temp = 
@@ -287,6 +289,13 @@ void check_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, HighLevelRuntime *runtime)
 {
+#ifdef TESTERIO_TIMERS
+  struct timespec ts;
+  current_utc_time(&ts);   
+  std::cout << "domain point: " << task->index_point
+            << "; read ends & Check begins at:  seconds: " << ts.tv_sec
+            << " nanos: " << ts.tv_nsec << std::endl; 
+#endif
   assert(task->regions.size() == 2);
   assert(task->regions[0].instance_fields.size() ==
          task->regions[1].instance_fields.size());

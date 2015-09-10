@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 
-LG_RT_DIR=../legion/runtime/
+LG_RT_DIR=../../runtime/
 
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols
@@ -25,7 +25,7 @@ USE_GASNET=1
 USE_CUDA	=0 # no cuda thank you
 
 GASNET		:= /opt/local
-CONDUI		:= udp
+CONDUIT		:= udp
 # Put the binary file name here
 OUTFILE		:= tester_io
 # List all the application source files here
@@ -35,7 +35,7 @@ USE_HDF 	= 1
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:= -I/opt/local/include/ 
-CC_FLAGS	?= -g -Wno-array-bounds
+CC_FLAGS	:= -g -Wno-array-bounds $(DEBUG_FLAGS)
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:= -L/opt/local/lib -lhdf5
