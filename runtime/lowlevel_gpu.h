@@ -278,10 +278,10 @@ namespace LegionRuntime {
 
       std::set<GPUProcessor*> peer_gpus;
 
+    public:
       // Our CUDA context that we will create
       CUdevice  proc_dev;
       CUcontext proc_ctx;
-    public:
       // Streams for different copy types
       CUstream host_to_device_stream;
       CUstream device_to_host_stream;
