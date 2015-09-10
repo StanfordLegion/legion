@@ -2368,6 +2368,7 @@ class Fence(object):
         self.logical_marked = False
         self.op_instances = set()
         self.op_instances.add(self)
+        self.node_name = 'fence_node_'+str(self.uid)
 
     def get_name(self):
         return "Fence "+str(self.uid)
@@ -2414,6 +2415,12 @@ class Fence(object):
 
     def check_data_flow(self):
         pass
+
+    def print_logical_node(self, printer):
+        printer.println(self.node_name+' [style=filled,label="'+\
+                'Fence\\nUnique\ ID\ '+str(self.uid)+\
+                '",fillcolor=darkorchid2,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
 
 class Copy(object):
     def __init__(self, state, srcman, dstman, start_event, term_event,
