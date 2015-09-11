@@ -86,7 +86,7 @@ namespace Realm {
     mark_finished();
 
     log_task.info("thread finished running task %p for proc " IDFMT "",
-		  this, proc.id);
+		  this, p.id);
 #ifdef EVENT_GRAPH_TRACE
     unsigned long long stop = TimeStamp::get_current_time_in_micros();
     finish_enclosing();
