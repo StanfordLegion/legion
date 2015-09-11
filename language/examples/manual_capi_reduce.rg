@@ -51,7 +51,8 @@ terra sub_task(task : c.legion_task_t,
   var a1 = c.legion_physical_region_get_accessor_generic(
     regions[0])
 
-  c.reduce_plus_int32(a1, p1, 123)
+  -- FIMXE: This has privilege problems.
+  -- c.reduce_plus_int32(a1, p1, 123)
 
   c.legion_accessor_generic_destroy(a1)
 end
