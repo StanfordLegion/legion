@@ -43,6 +43,12 @@ namespace Realm {
 	      (serdez & s.error_details));
     }
 
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct OperationTimeLine
+    //
+
     inline void OperationTimeline::record_create_time(void)
     {
       create_time = Clock::current_time_in_nanoseconds();
@@ -63,13 +69,25 @@ namespace Realm {
       end_time = Clock::current_time_in_nanoseconds();
     }
 
+    inline void OperationTimeline::record_complete_time(void)
+    {
+      complete_time = Clock::current_time_in_nanoseconds();
+    }
+
     inline bool OperationTimeline::is_valid(void)
     {
-      return create_time != INVALID_TIMESTAMP &&
-        ready_time != INVALID_TIMESTAMP &&
-        start_time != INVALID_TIMESTAMP &&
-        end_time != INVALID_TIMESTAMP;
+      return ((create_time != INVALID_TIMESTAMP) &&
+	      (ready_time != INVALID_TIMESTAMP) &&
+	      (start_time != INVALID_TIMESTAMP) &&
+	      (end_time != INVALID_TIMESTAMP) &&
+	      (complete_time != INVALID_TIMESTAMP));
     }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct InstanceTimeLine
+    //
 
     inline void InstanceTimeline::record_create_time(void)
     {

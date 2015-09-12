@@ -117,7 +117,8 @@ namespace LegionRuntime {
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
-      info.stop = timeline->end_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
     }
 
     //--------------------------------------------------------------------------
@@ -137,7 +138,8 @@ namespace LegionRuntime {
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
-      info.stop = timeline->end_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
     }
 
     //--------------------------------------------------------------------------
@@ -157,7 +159,8 @@ namespace LegionRuntime {
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
-      info.stop = timeline->end_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
     }
 
     //--------------------------------------------------------------------------
@@ -176,7 +179,8 @@ namespace LegionRuntime {
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
-      info.stop = timeline->end_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
     }
 
     //--------------------------------------------------------------------------

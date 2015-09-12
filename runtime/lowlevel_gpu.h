@@ -21,6 +21,7 @@
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
 #include "cuda_runtime.h"
+#include "realm/threads.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -32,7 +33,7 @@
 } while(0)
 
 // Need CUDA 6.5 or later for good error reporting
-#if __CUDA_API_VERSION >= 6050
+#if CUDA_VERSION >= 6050
 #define CHECK_CU(cmd) do { \
   CUresult ret = (cmd); \
   if(ret != CUDA_SUCCESS) { \
@@ -68,6 +69,7 @@ namespace LegionRuntime {
     // Forard declaration
     class GPUProcessor;
 
+#if 0
     class GPUJob : public EventWaiter {
     public:
       GPUJob(GPUProcessor *_gpu)
@@ -82,38 +84,16 @@ namespace LegionRuntime {
     public:
       GPUProcessor *const gpu;
     };
-
-    // This just wraps up a normal task
-    class GPUTask : public GPUJob {
-    public:
-      GPUTask(GPUProcessor *_gpu, Task *_task);
-      virtual ~GPUTask(void);
-    public:
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
-      virtual void run_or_wait(Event start_event);
-      virtual void execute(void);
-      virtual void finish_job(void);
-    public:
-      void set_local_stream(CUstream s) { local_stream = s; }
-      void record_modules(const std::set<void**> &m) { modules = m; }
-    public:
-      // Helper methods for handling a callback
-      static void handle_start(CUstream stream, CUresult res, void *data);
-      static void handle_finish(CUstream stream, CUresult res, void *data);
-    public:
-      Task *task;
-      CUstream local_stream;
-      std::set<void**> modules;
-    };
+#endif
 
     // An abstract base class for all GPU memcpy operations
-    class GPUMemcpy : public GPUJob {
+    class GPUMemcpy { //: public GPUJob {
     public:
-      GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-                GPUMemcpyKind _kind);
+      GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind);
       virtual ~GPUMemcpy(void) { }
     public:
+      virtual void execute(void) = 0;
+#if 0
       virtual bool event_triggered(void);
       virtual void print_info(FILE *f);
       virtual void run_or_wait(Event start_event);
@@ -124,23 +104,25 @@ namespace LegionRuntime {
     public:
       // Helper method for handling a callback
       static void handle_finish(CUstream stream, CUresult res, void *data);
+#endif
+    public:
+      GPUProcessor *const gpu;
     protected:
       GPUMemcpyKind kind;
       CUstream local_stream;
-      Event finish_event;
     };
 
     class GPUMemcpy1D : public GPUMemcpy {
     public:
-      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy1D(GPUProcessor *_gpu,
 		void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src), 
+	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
 	  mask(0), elmt_size(_bytes) { }
-      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy1D(GPUProcessor *_gpu,
 		void *_dst, const void *_src, 
 		const ElementMask *_mask, size_t _elmt_size,
 		GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
 	  mask(_mask), elmt_size(_elmt_size) { }
       virtual ~GPUMemcpy1D(void) { }
     public:
@@ -155,12 +137,12 @@ namespace LegionRuntime {
 
     class GPUMemcpy2D : public GPUMemcpy {
     public:
-      GPUMemcpy2D(GPUProcessor *_gpu, Event _finish_event,
+      GPUMemcpy2D(GPUProcessor *_gpu,
                   void *_dst, const void *_src,
                   off_t _dst_stride, off_t _src_stride,
                   size_t _bytes, size_t _lines,
                   GPUMemcpyKind _kind)
-        : GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+        : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
           dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
           src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
           bytes(_bytes), lines(_lines) { }
@@ -174,122 +156,110 @@ namespace LegionRuntime {
       size_t bytes, lines;
     };
 
-    class GPUWorker : public PreemptableThread {
+    class GPUWorker {
     public:
-      GPUWorker(void);
+      GPUWorker(Realm::CoreReservationSet& crs, size_t stack_size);
       virtual ~GPUWorker(void);
     public:
       void shutdown(void);
     public:
       void enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy);
-      void handle_complete_job(GPUProcessor *proc, GPUJob *job);
+      void handle_complete_copy(GPUProcessor *proc, GPUMemcpy *copy);
     public:
-      virtual Processor get_processor(void) const;
-      virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for);
+      void thread_main(void);
     public:
-      static GPUWorker* start_gpu_worker_thread(size_t stack_size);
+      static GPUWorker* start_gpu_worker_thread(Realm::CoreReservationSet& crs,
+						size_t stack_size);
       static void stop_gpu_worker_thread(void);
-    private:
-      static GPUWorker*& get_worker(void);
     protected:
       // Keep these sorted by processors
       std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
-      std::map<GPUProcessor*,std::deque<GPUJob*> > complete_jobs;
+      std::map<GPUProcessor*,std::deque<GPUMemcpy*> > complete_copies;
       bool copies_empty, jobs_empty;
       GASNetHSL worker_lock;
       GASNetCondVar worker_cond;
       bool worker_shutdown_requested;
+      Realm::CoreReservation core_rsrv;
+      Realm::Thread *worker_thread;
+      static GPUWorker *worker_singleton;
     };
 
-    class GPUThread : public LocalThread {
+    class GPUProcessor : public Realm::LocalTaskProcessor {
     public:
-      GPUThread(GPUProcessor *proc);
-      virtual ~GPUThread(void);
-    public:
-      virtual void thread_main(void);
-    public:
-      GPUProcessor *const gpu_proc;
-    };
-
-    class GPUProcessor : public LocalProcessor {
-    public:
-      GPUProcessor(Processor _me, Processor::Kind _kind, 
-                   const char *name, int _gpu_index, 
+      GPUProcessor(Processor _me, Realm::CoreReservationSet& crs,
+		   int _gpu_index, 
 		   size_t _zcmem_size, size_t _fbmem_size, 
                    size_t _stack_size, GPUWorker *worker/*can be 0*/,
-                   int _streams, int core_id = -1);
+                   int _streams);
       virtual ~GPUProcessor(void);
+
+    protected:
+      void initialize_cuda_stuff(void);
+
     public:
+      virtual void shutdown(void);
+
       void *get_zcmem_cpu_base(void) const;
       void *get_fbmem_gpu_base(void) const;
       size_t get_zcmem_size(void) const;
       size_t get_fbmem_size(void) const;
     public:
-      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
-		      Event start_event, Event finish_event);
+      // copy operations are asynchronous - use a fence (of the right type)
+      //   after all of your copies
+      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes);
 
-      void copy_from_fb(void *dst, off_t src_offset, size_t bytes,
-			Event start_event, Event finish_event);
+      void copy_from_fb(void *dst, off_t src_offset, size_t bytes);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  size_t bytes,
-			  Event start_event, Event finish_event);
+			  size_t bytes);
 
       void copy_to_fb_2d(off_t dst_offset, const void *src,
                          off_t dst_stride, off_t src_stride,
-                         size_t bytes, size_t lines,
-                         Event start_event, Event finish_event);
+                         size_t bytes, size_t lines);
+
       void copy_from_fb_2d(void *dst, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines,
-                           Event start_event, Event finish_event);
+                           size_t bytes, size_t lines);
+
       void copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                              off_t dst_stride, off_t src_stride,
-                             size_t bytes, size_t lines,
-                             Event start_event, Event finish_event);
+                             size_t bytes, size_t lines);
 
       void copy_to_peer(GPUProcessor *dst, off_t dst_offset, 
-                        off_t src_offset, size_t bytes,
-                        Event start_event, Event finish_event);
+                        off_t src_offset, size_t bytes);
+
       void copy_to_peer_2d(GPUProcessor *dst, off_t dst_offset, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines,
-                           Event start_event, Event finish_event);
+                           size_t bytes, size_t lines);
 
       void copy_to_fb(off_t dst_offset, const void *src,
-		      const ElementMask *mask, size_t elmt_size,
-		      Event start_event, Event finish_event);
+		      const ElementMask *mask, size_t elmt_size);
 
       void copy_from_fb(void *dst, off_t src_offset,
-			const ElementMask *mask, size_t elmt_size,
-			Event start_event, Event finish_event);
+			const ElementMask *mask, size_t elmt_size);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  const ElementMask *mask, size_t elmt_size,
-			  Event start_event, Event finish_event);
-    public:
-      // Helper method for getting a thread's processor value
-      static Processor get_processor(void); 
+			  const ElementMask *mask, size_t elmt_size);
+
+      void fence_to_fb(Realm::Operation *op);
+      void fence_from_fb(Realm::Operation *op);
+      void fence_within_fb(Realm::Operation *op);
+      void fence_to_peer(Realm::Operation *op, GPUProcessor *dst);
     public:
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);
       void handle_peer_access(CUcontext peer_ctx);
       bool can_access_peer(GPUProcessor *peer) const;
-      void handle_complete_job(GPUJob *job);
+      void handle_complete_copy(GPUMemcpy *copy);
       CUstream get_current_task_stream(void);
     public:
       void load_context(void);
-      bool execute_gpu(GPUThread *thread);
     public:
-      virtual void initialize_processor(void);
-      virtual void finalize_processor(void);
-      virtual LocalThread* create_new_thread(void);
     public:
       void enqueue_copy(GPUMemcpy *copy);
     public:
       void issue_copies(const std::deque<GPUMemcpy*> &to_issue);
-      void finish_jobs(const std::deque<GPUJob*> &to_complete);
+      //void finish_copies(const std::deque<GPUMemcpy*> &to_complete);
     private:
       static GPUProcessor **node_gpus;
       static size_t num_node_gpus;
@@ -301,23 +271,26 @@ namespace LegionRuntime {
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
+      Realm::CoreReservation *core_rsrv;
     protected:
       std::deque<GPUMemcpy*> copies;
-      std::deque<GPUJob*> complete_jobs;
+      std::deque<GPUMemcpy*> complete_jobs;
 
       std::set<GPUProcessor*> peer_gpus;
 
+    public:
       // Our CUDA context that we will create
       CUdevice  proc_dev;
       CUcontext proc_ctx;
-    public:
       // Streams for different copy types
       CUstream host_to_device_stream;
       CUstream device_to_host_stream;
       CUstream device_to_device_stream;
       CUstream peer_to_peer_stream;
+
+      CUstream switch_to_next_task_stream(void);
     protected:
-      unsigned current_stream;
+      size_t current_stream;
       std::vector<CUstream> task_streams;
     public:
       // Our helper cuda calls

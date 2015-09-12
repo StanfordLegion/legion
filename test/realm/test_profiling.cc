@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <csignal>
 
 #include <time.h>
 #include <unistd.h>
@@ -19,6 +20,13 @@ enum {
   CHILD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
   RESPONSE_TASK,
 };
+
+// we're going to use alarm() as a watchdog to detect hangs
+void sigalrm_handler(int sig)
+{
+  fprintf(stderr, "HELP!  Alarm triggered - likely hang!\n");
+  exit(1);
+}
 
 // some of the code in here needs the fault-tolerance stuff in Realm to show up
 #define NO_TRACK_MACHINE_UPDATES
@@ -70,6 +78,9 @@ void child_task(const void *args, size_t arglen, Processor p)
   printf("ending task on processor " IDFMT "\n", p.id);
 }
 
+Barrier response_counter;
+int expected_responses_remaining;
+
 void response_task(const void *args, size_t arglen, Processor p)
 {
   printf("got profiling response - %zd bytes\n", arglen);
@@ -92,12 +103,14 @@ void response_task(const void *args, size_t arglen, Processor p)
 
   if(pr.has_measurement<OperationTimeline>()) {
     OperationTimeline *op_timeline = pr.get_measurement<OperationTimeline>();
-    printf("op timeline = %llu %llu %llu (%lld %lld)\n",
+    printf("op timeline = %llu %llu %llu %llu (%lld %lld %lld)\n",
 	   op_timeline->ready_time,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
+	   op_timeline->complete_time,
 	   op_timeline->start_time - op_timeline->ready_time,
-	   op_timeline->end_time - op_timeline->start_time);
+	   op_timeline->end_time - op_timeline->start_time,
+	   op_timeline->complete_time - op_timeline->end_time);
     delete op_timeline;
   } else
     printf("no timeline\n");
@@ -110,6 +123,14 @@ void response_task(const void *args, size_t arglen, Processor p)
     printf(" )\n");
   } else
     printf("no user data\n");
+
+  if(__sync_add_and_fetch(&expected_responses_remaining, -1) < 0) {
+    printf("HELP!  Too many responses received!\n");
+    exit(1);
+  }
+
+  // signal that we got a response
+  response_counter.arrive();
 }
 
 void top_level_task(const void *args, size_t arglen, Processor p)
@@ -156,12 +177,19 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     .add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>();
 
+  // we expect (exactly) three responses
+  response_counter = Barrier::create_barrier(3);
+  expected_responses_remaining = 3;
+
   bool inject_fault = false;
   Event e1 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs);
   inject_fault = true;
   Event e2 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e1);
   inject_fault = false;
   Event e3 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e2);
+
+  // give ourselves 5 seconds for the tasks, and their profiling responses, to finish
+  alarm(5);
 
   bool poisoned = false;
 #ifdef TEST_FAULTS
@@ -171,20 +199,11 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 #endif
   printf("done! (poisoned=%d)\n", poisoned);
 
-  sleep(10);
-  // shutdown the runtime - this should implicitly wait for the report task to run
-  {
-    std::set<Processor> all_procs;
-    machine.get_all_processors(all_procs);
-    for (std::set<Processor>::const_iterator it = all_procs.begin();
-          it != all_procs.end(); it++)
-    {
-      // Damn you C++ and your broken const qualifiers
-      Processor handle_copy = *it;
-      // Send the kill pill
-      handle_copy.spawn(0,NULL,0);
-    }
-  }
+  printf("waiting for profiling responses...\n");
+  response_counter.wait();
+  printf("all profiling responses received\n");
+
+  Runtime::get_runtime().shutdown();
 }
 
 int main(int argc, char **argv)
@@ -197,12 +216,13 @@ int main(int argc, char **argv)
   rt.register_task(CHILD_TASK, child_task);
   rt.register_task(RESPONSE_TASK, response_task);
 
+  signal(SIGALRM, sigalrm_handler);
+
   // Start the machine running
   // Control never returns from this call
   // Note we only run the top level task on one processor
   // You can also run the top level task on all processors or one processor per node
   rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
 
-  rt.shutdown();
-  return -1;
+  return 0;
 }

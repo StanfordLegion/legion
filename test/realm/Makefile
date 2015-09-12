@@ -39,6 +39,11 @@ LD_FLAGS	:=
 
 CXX ?= g++
 
+# we're going to include runtime.mk to get variable settings, but then
+#  do our own build steps
+NO_BUILD_RULES=1
+include $(LG_RT_DIR)/runtime.mk
+
 # since we're just doing Realm and not Legion, we need to strip out a few
 #  things that might have come in from CC_FLAGS that require Legion goo
 override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
@@ -46,15 +51,11 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-# we're going to include runtime.mk to get variable settings, but then
-#  do our own build steps
-NO_BUILD_RULES=1
-include $(LG_RT_DIR)/runtime.mk
-
-TESTS := serializing test_profiling ctxswitch barrier_reduce
+TESTS := serializing test_profiling ctxswitch proc_group barrier_reduce
 
 # can set arguments to be passed to a test when running
-TESTARGS_ctxswitch := -ll:io 1 -t 20
+TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
+TESTARGS_proc_group := -ll:cpu 4
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))

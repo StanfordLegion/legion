@@ -3848,7 +3848,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::launch(int priority)
+    Event GarbageCollectionEpoch::launch(int priority)
     //--------------------------------------------------------------------------
     {
       // Set remaining to the total number of collections
@@ -3856,6 +3856,7 @@ namespace LegionRuntime {
       GarbageCollectionArgs args;
       args.hlr_id = HLR_DEFERRED_COLLECT_ID;
       args.epoch = this;
+      std::set<Event> events;
       for (std::map<LogicalView*,std::set<Event> >::const_iterator it =
             collections.begin(); it != collections.end(); /*nothing*/)
       {
@@ -3865,12 +3866,14 @@ namespace LegionRuntime {
         // before launching the task
         it++;
         bool done = (it == collections.end());
-        runtime->issue_runtime_meta_task(&args, sizeof(args), 
+        Event e = runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                          HLR_DEFERRED_COLLECT_ID, NULL,
                                          precondition, priority);
+        events.insert(e);
         if (done)
           break;
       }
+      return Event::merge_events(events);
     }
 
     //--------------------------------------------------------------------------
@@ -13122,8 +13125,10 @@ namespace LegionRuntime {
       {
         it->second->notify_pending_shutdown();
       }
-      // Launch our last garbage collection epoch
-      current_gc_epoch->launch(0/*priority*/);
+      // Launch our last garbage collection epoch and wait for it to
+      // finish so that we know all messages have been enqueued
+      Event gc_done = current_gc_epoch->launch(0/*priority*/);
+      gc_done.wait();
       // Make sure any messages that we have sent anywhere are handled
       std::set<Event> shutdown_preconditions;
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)

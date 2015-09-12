@@ -786,7 +786,7 @@ namespace LegionRuntime {
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
       void add_collection(LogicalView *view, Event term_event);
-      void launch(int priority);
+      Event launch(int priority);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;
