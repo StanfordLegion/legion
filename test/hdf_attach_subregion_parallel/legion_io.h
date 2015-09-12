@@ -19,10 +19,10 @@ enum TaskIDs {
 
 enum FieldIDs {
   FID_TEMP,
-  FID_SAL,
-  FID_KE,
-  FID_VOR,
-  FID_PERS,
+  //  FID_SAL,
+  //  FID_KE,
+  //  FID_VOR,
+  //  FID_PERS,
 };
 
 

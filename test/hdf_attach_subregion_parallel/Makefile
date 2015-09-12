@@ -24,8 +24,8 @@ USE_GASNET=1
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 USE_CUDA	=0 # no cuda thank you
 
-GASNET		:= /opt/local
-CONDUIT		:= udp
+GASNET		:= ${HOME}/local
+CONDUIT		:= ibv
 # Put the binary file name here
 OUTFILE		:= tester_io
 # List all the application source files here

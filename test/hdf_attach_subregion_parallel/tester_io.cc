@@ -117,9 +117,9 @@ void top_level_task(const Task *task,
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(double),FID_TEMP);
-    allocator.allocate_field(sizeof(double),FID_SAL);
-    allocator.allocate_field(sizeof(double),FID_KE);
-    allocator.allocate_field(sizeof(double),FID_VOR);
+    //    allocator.allocate_field(sizeof(double),FID_SAL);
+    //    allocator.allocate_field(sizeof(double),FID_KE);
+    //    allocator.allocate_field(sizeof(double),FID_VOR);
   }
 
   FieldSpace persistent_fs = runtime->create_field_space(ctx);
@@ -205,7 +205,8 @@ void top_level_task(const Task *task,
   
   ocean_pr.write_persistent_subregions(ctx, ocean_lr, ocean_lp);
 
-  LogicalRegion ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
+  LogicalRegion 
+ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
   LogicalPartition ocean_check_lp = runtime->get_logical_partition(ctx, ocean_check_lr, ip);
 
   ocean_pr.read_persistent_subregions(ctx, ocean_check_lr, ocean_check_lp);
