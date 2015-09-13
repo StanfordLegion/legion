@@ -89,10 +89,11 @@ void copy_values_task(const Task *task,
 #ifdef TESTERIO_TIMERS 
   struct timespec ts;
   current_utc_time(&ts);   
-
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
   if(task_args.copy_write) {
     
-    std::cout << "domain point: " << piece.dp
+    std::cout << hostname << " domain point: " << piece.dp
               << "; write begins at:  seconds: " << ts.tv_sec
               << " nanos: " << ts.tv_nsec << std::endl; 
   } else {

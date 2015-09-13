@@ -75,6 +75,9 @@ void top_level_task(const Task *task,
       elem_rect_hi_val = std::ceil(std::pow(num_elements, 1/3.0)) - 1;
       color_hi_val = std::ceil(std::pow(sub_regions, 1/3.0)) - 1;
       patch_val = std::ceil(std::pow(num_elements / sub_regions, 1/3.0));
+      std::cout << "num_elements: " << num_elements << " subregions: " << sub_regions 
+		<< " patch_val: " << patch_val << " color_hi_val: " <<  color_hi_val 
+		<< std::endl; 
       assert(num_elements == (std::pow(patch_val, 3) * std::pow(color_hi_val+1, 3)));
       assert(num_elements == std::pow(elem_rect_hi_val+1, 3));
       break;
@@ -245,7 +248,10 @@ void init_field_task(const Task *task,
   int extent = *(const int*) task->args;
   
 #ifdef IOTESTER_VERBOSE
-  std::cout << "init_field_task extent is: " << extent << " domain point is:[" << task->index_point[0] << "," <<
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
+
+  std::cout << hostname << " init_field_task extent is: " << extent << " domain point is:[" << task->index_point[0] << "," <<
     task->index_point[1] << "]" << " linearization is: " << task->index_point[0]*extent+task->index_point[1]*extent <<  std::endl;
 #endif
 
@@ -356,6 +362,12 @@ void check_task(const Task *task,
   
 int main(int argc, char **argv)
 {
+#ifdef TESTERIO_TIMERS 
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
+  std::cout << hostname << " in main prior to task registrion " << std::endl; 
+#endif
+
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
     Processor::LOC_PROC, true/*single*/, false/*index*/);
