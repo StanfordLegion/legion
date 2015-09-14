@@ -201,8 +201,6 @@ namespace LegionRuntime {
                                   const std::vector<size_t> &sizes,
                                   const std::vector<unsigned> &indexes,
                                   AddressSpaceID source);
-      void invalidate_field_index(const std::set<RegionNode*> &regions,
-                                  unsigned field_idx);
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
@@ -260,18 +258,23 @@ namespace LegionRuntime {
                   LogicalRegion handle, Operation *op, LogicalRegion region);
       void analyze_destroy_logical_partition(RegionTreeContext ctx,
                   LogicalPartition handle, Operation *op, LogicalRegion region);
-      void initialize_logical_context(RegionTreeContext ctx, 
-                                      LogicalRegion handle);
-      void invalidate_logical_context(RegionTreeContext ctx,
-                                      LogicalRegion handle);
-      void restrict_user_coherence(SingleTask *parent_ctx,
+      void restrict_user_coherence(RegionTreeContext ctx,
+                                   SingleTask *parent_ctx,
                                    LogicalRegion handle,
                                    const std::set<FieldID> &fields);
-      void acquire_user_coherence(SingleTask *parent_ctx,
+      void acquire_user_coherence(RegionTreeContext ctx,
                                   LogicalRegion handle,
                                   const std::set<FieldID> &fields);
       bool has_restrictions(LogicalRegion handle, const RestrictInfo &info,
                             const std::set<FieldID> &fields);
+    public:
+      InstanceRef initialize_current_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, PhysicalManager *manager,
+                    Event term_event, Processor local_proc, unsigned depth,
+                    std::map<PhysicalManager*,InstanceView*> &top_views);
+      void invalidate_current_context(RegionTreeContext ctx,
+                                      LogicalRegion handle,
+                                      bool logical_users_only);
     public:
       // Physical analysis methods
       bool premap_physical_region(RegionTreeContext ctx,
@@ -338,12 +341,6 @@ namespace LegionRuntime {
                                            , UniqueID uid
 #endif
                                            );
-      InstanceRef initialize_physical_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, Processor local_proc, unsigned depth,
-                    std::map<PhysicalManager*,InstanceView*> &top_views);
-      void invalidate_physical_context(RegionTreeContext ctx,
-                                       LogicalRegion handle);
       bool perform_close_operation(RegionTreeContext ctx,
                                    RegionRequirement &req,
                                    SingleTask *parent_ctx,
@@ -681,8 +678,6 @@ namespace LegionRuntime {
       FILTER_PREV_EPOCH_CALL,
       FILTER_CURR_EPOCH_CALL,
       FILTER_CLOSE_CALL,
-      INITIALIZE_LOGICAL_CALL,
-      INVALIDATE_LOGICAL_CALL,
       REGISTER_LOGICAL_DEPS_CALL,
       CLOSE_PHYSICAL_NODE_CALL,
       SELECT_CLOSE_TARGETS_CALL,
@@ -700,8 +695,8 @@ namespace LegionRuntime {
       UPDATE_VALID_VIEWS_CALL,
       UPDATE_REDUCTION_VIEWS_CALL,
       FLUSH_REDUCTIONS_CALL,
-      INITIALIZE_PHYSICAL_STATE_CALL,
-      INVALIDATE_PHYSICAL_STATE_CALL,
+      INITIALIZE_CURRENT_STATE_CALL,
+      INVALIDATE_CURRENT_STATE_CALL,
       PERFORM_DEPENDENCE_CHECKS_CALL,
       PERFORM_CLOSING_CHECKS_CALL,
       REMAP_REGION_CALL,
@@ -1506,10 +1501,7 @@ namespace LegionRuntime {
       void recapture_state(void);
       void sanity_check(RegionTreeNode *node);
     public:
-      PhysicalState* find_physical_state(RegionTreeNode *node); 
-      PhysicalState* create_physical_state(RegionTreeNode *node,
-                                           VersionManager *manager,
-                                           bool capture);
+      PhysicalState* find_physical_state(RegionTreeNode *node, bool capture); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
@@ -1712,27 +1704,76 @@ namespace LegionRuntime {
     }; 
 
     /**
-     * \struct LogicalState
-     * Track the version states for a given logical
-     * region as well as the previous and current
-     * epoch users and any close operations that
-     * needed to be performed.
+     * \struct VersionStateInfo
+     * A small helper class for tracking collections of 
+     * version state objects and their sets of fields
      */
-    struct LogicalState {
+    struct VersionStateInfo {
     public:
-      static const AllocationType alloc_type = LOGICAL_STATE_ALLOC;
+      FieldMask valid_fields;
+      LegionMap<VersionState*,FieldMask>::aligned states;
+    };
+
+    /**
+     * \class CurrentState 
+     * Track all the information about the current state
+     * of a logical region from a given context. This
+     * is effectively all the information at the analysis
+     * wavefront for this particular logical region.
+     */
+    struct CurrentState {
     public:
-      LogicalState(RegionTreeNode *owner, ContextID ctx);
-      LogicalState(const LogicalState &state);
-      ~LogicalState(void);
+      static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
+      static const VersionID init_version = 1;
     public:
-      LogicalState& operator=(const LogicalState &rhs);
+      CurrentState(RegionTreeNode *owner, ContextID ctx);
+      CurrentState(const CurrentState &state);
+      ~CurrentState(void);
+    public:
+      CurrentState& operator=(const CurrentState &rhs);
       void* operator new(size_t count);
       void* operator new[](size_t count);
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
+      void check_init(void);
+      void clear_logical_users(void);
       void reset(void);
+      void sanity_check(void);
+    public:
+      void initialize_state(LogicalView *view, Event term_event,
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask);
+      void record_version_numbers(const FieldMask &mask,
+                                  const LogicalUser &user,
+                                  VersionInfo &version_info,
+                                  bool capture_previous, bool path_only, 
+                                  bool need_final, bool close_top, 
+                                  bool report_unversioned);
+      void advance_version_numbers(const FieldMask &mask);
+    public:
+      VersionState* create_new_version_state(VersionID vid, 
+                                             const FieldMask &mask);
+      VersionState* create_remote_version_state(VersionID vid, 
+                              DistributedID did, AddressSpaceID owner_space,
+                              const FieldMask &mask);
+      VersionState* find_remote_version_state(VersionID vid, DistributedID did,
+                                              AddressSpaceID source,
+                                              const FieldMask &mask);
+    public:
+      inline bool has_persistent_views(void) const { return has_persistent; }
+      void add_persistent_view(MaterializedView *view);
+      void remove_persistent_view(MaterializedView *view);
+      void capture_persistent_views(
+                            LegionMap<LogicalView*,FieldMask>::aligned &views,
+                                    const FieldMask &capture_mask);
+    public:
+      void print_physical_state(RegionTreeNode *node,
+                                const FieldMask &capture_mask,
+                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                                TreeStateLogger *logger);
+    public:
+      RegionTreeNode *const owner;
     public:
       LegionList<FieldState,
                  LOGICAL_FIELD_STATE_ALLOC>::track_aligned field_states;
@@ -1740,8 +1781,8 @@ namespace LegionRuntime {
                                                             curr_epoch_users;
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
-      LegionMap<VersionID,FieldMask,VERSION_ID_ALLOC>::track_aligned
-                                                            field_versions;
+      LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
+      LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
       // Fields for which we have outstanding local reductions
       FieldMask outstanding_reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
@@ -1750,9 +1791,14 @@ namespace LegionRuntime {
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask restricted_fields;
+    protected:
+      Reservation state_lock; 
+    protected:
+      bool has_persistent;
+      std::set<MaterializedView*> persistent_views;
     };
 
-    typedef DynamicTableAllocator<LogicalState, 10, 8> LogicalStateAllocator;
+    typedef DynamicTableAllocator<CurrentState, 10, 8> CurrentStateAllocator;
  
     /**
      * \struct LogicalCloser
@@ -1807,9 +1853,9 @@ namespace LegionRuntime {
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
-      void record_version_numbers(RegionTreeNode *node, LogicalState &state,
+      void record_version_numbers(RegionTreeNode *node, CurrentState &state,
                                   const FieldMask &local_mask, bool leave_open);
-      void record_top_version_numbers(RegionTreeNode *node, LogicalState &state);
+      void record_top_version_numbers(RegionTreeNode *node, CurrentState &state);
       void merge_version_info(VersionInfo &target, const FieldMask &merge_mask);
     protected:
       static void compute_close_sets(
@@ -1945,18 +1991,7 @@ namespace LegionRuntime {
     public:
       FieldMask set_mask;
       std::set<Event> preconditions;
-    };
-
-    /**
-     * \struct VersionStateInfo
-     * A small helper class for tracking collections of 
-     * version state objects and their sets of fields
-     */
-    struct VersionStateInfo {
-    public:
-      FieldMask valid_fields;
-      LegionMap<VersionState*,FieldMask>::aligned states;
-    };
+    }; 
     
     /**
      * \class PhysicalState
@@ -1970,9 +2005,9 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
-      PhysicalState(VersionManager *manager);
+      PhysicalState(CurrentState *manager);
 #ifdef DEBUG_HIGH_LEVEL
-      PhysicalState(VersionManager *manager, RegionTreeNode *node);
+      PhysicalState(CurrentState *manager, RegionTreeNode *node);
 #endif
       PhysicalState(const PhysicalState &rhs);
       ~PhysicalState(void);
@@ -2002,7 +2037,7 @@ namespace LegionRuntime {
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     public:
-      VersionManager *const manager;
+      CurrentState *const manager;
     public:
       // Fields which have dirty data
       FieldMask dirty_mask;
@@ -2064,7 +2099,7 @@ namespace LegionRuntime {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   VersionManager *manager, const FieldMask &mask); 
+                   CurrentState *manager, const FieldMask &mask); 
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2143,7 +2178,7 @@ namespace LegionRuntime {
                               Deserializer &derez, AddressSpaceID source);
     public:
       const VersionID version_number;
-      VersionManager *const manager;
+      CurrentState *const manager;
     protected:
       Reservation state_lock;
       // Fields which have been directly written to
@@ -2180,88 +2215,6 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class VersionManager
-     * This class tracks all the different versioned physical
-     * state objects from the perspective of a logical region.
-     * The version manager only keeps track of the most recent
-     * versions for each field. Once a version state is no longer
-     * valid for any fields then it releases its reference and
-     * the version state objection can be collected once no
-     * additional operations need to have access to it.
-     */
-    class VersionManager { 
-    public:
-      static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
-    public:
-      VersionManager(RegionTreeNode *owner);
-      VersionManager(const VersionManager &rhs);
-      ~VersionManager(void);
-    public:
-      VersionManager& operator=(const VersionManager &rhs);
-    public:
-      PhysicalState* construct_state(RegionTreeNode *node,
-          const LegionMap<VersionID,FieldMask>::aligned &versions, 
-          const FieldMask &advance_mask,
-          bool path_only, bool close_top, bool capture);
-      void initialize_state(LogicalView *view, Event term_event,
-                            const RegionUsage &usage,
-                            const FieldMask &user_mask);
-      void filter_states(const FieldMask &filter_mask);
-      void check_init(void);
-      void clear(void);
-      void clear(const FieldMask &clear_mask);
-      void sanity_check(void);
-      inline bool has_persistent_views(void) const { return has_persistent; }
-    public:
-      void print_physical_state(RegionTreeNode *node,
-                                const FieldMask &capture_mask,
-                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                                TreeStateLogger *logger);
-    public:
-      void add_persistent_view(MaterializedView *view);
-      void remove_persistent_view(MaterializedView *view);
-      void capture_persistent_views(
-                            LegionMap<LogicalView*,FieldMask>::aligned &views,
-                                    const FieldMask &capture_mask);
-    protected:
-      void filter_previous_states(VersionID vid, const FieldMask &filter_mask);
-      void filter_current_states(VersionID vid, const FieldMask &filter_mask);
-      void capture_previous_states(VersionID vid, const FieldMask &capture_mask,
-                                   PhysicalState *state);
-      void capture_previous_states(VersionID vid, const FieldMask &capture_mask,
-                                   PhysicalState *state, FieldMask &to_create);
-      void capture_current_states(VersionID vid, const FieldMask &capture_mask,
-                                  PhysicalState *state, FieldMask &to_create,
-                                  bool advance);
-    protected:
-      VersionState* create_new_version_state(VersionID vid, 
-                                             const FieldMask &mask);
-      VersionState* create_remote_version_state(VersionID vid, 
-                              DistributedID did, AddressSpaceID owner_space,
-                              const FieldMask &mask);
-    public:
-      VersionState* find_remote_version_state(VersionID vid, DistributedID did,
-                                              AddressSpaceID source,
-                                              const FieldMask &mask);
-    public:
-      RegionTreeNode *const owner;
-    protected:
-      Reservation version_lock;
-      LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
-      LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
-#ifdef DEBUG_HIGH_LEVEL
-      // Debug only since this can grow unbounded
-      LegionMap<VersionID,FieldMask>::aligned observed;
-#endif
-    protected:
-      bool has_persistent;
-      Reservation persistent_lock;
-      std::set<MaterializedView*> persistent_views;
-    };
-
-    typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
-
-    /**
      * \class RegionTreeNode
      * A generic region tree node from which all
      * other kinds of region tree nodes inherit.  Notice
@@ -2274,30 +2227,24 @@ namespace LegionRuntime {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
-      LogicalState& get_logical_state(ContextID ctx);
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state
-        PhysicalState *result = info.find_physical_state(this);  
-        if (result != NULL)
-          return result;
-        // If it didn't have it then we need to make it
-        VersionManager *manager = version_managers.lookup_entry(ctx, this);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(manager != NULL);
-#endif
-        // Now have the version info create a physical state with the manager
-        result = info.create_physical_state(this, manager, capture);
+        PhysicalState *result = info.find_physical_state(this, capture);  
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
         return result;
       }
-      inline VersionManager* get_version_manager(ContextID ctx)
+      inline CurrentState& get_current_state(ContextID ctx)
       {
-        return version_managers.lookup_entry(ctx, this);
+        return *(current_states.lookup_entry(ctx, this, ctx));
+      }
+      inline CurrentState* get_current_state_ptr(ContextID ctx)
+      {
+        return current_states.lookup_entry(ctx, this, ctx);
       }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -2313,10 +2260,11 @@ namespace LegionRuntime {
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
-                                 VersionInfo &version_info,
+                                VersionInfo &version_info,
                                  RestrictInfo &restrict_info,
                                  const TraceInfo &trace_info,
-                                 const bool projecting);
+                                 const bool projecting,
+                                 const bool report_uninitialized = false);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
@@ -2329,7 +2277,8 @@ namespace LegionRuntime {
                                      FatTreePath *fat_path,
                                      VersionInfo &version_info,
                                      RestrictInfo &restrict_info,
-                                     const TraceInfo &trace_info);
+                                     const TraceInfo &trace_info,
+                                     const bool report_uninitialized = false);
       void open_logical_fat_path(ContextID ctx,
                                  const LogicalUser &user,
                                  FatTreePath *fat_path,
@@ -2344,7 +2293,7 @@ namespace LegionRuntime {
                               const FieldMask &closing_mask,
                               bool permit_leave_open);
       void siphon_logical_children(LogicalCloser &closer,
-                                   LogicalState &state,
+                                   CurrentState &state,
                                    const FieldMask &closing_mask,
                                    bool record_close_operations,
                                    const ColorPoint &next_child,
@@ -2359,23 +2308,19 @@ namespace LegionRuntime {
                                     bool record_close_operations,
                                    LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &need_open);
-      void merge_new_field_state(LogicalState &state, 
+      void merge_new_field_state(CurrentState &state, 
                                  const FieldState &new_state);
-      void merge_new_field_states(LogicalState &state, 
+      void merge_new_field_states(CurrentState &state, 
                             const LegionDeque<FieldState>::aligned &new_states);
-      void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
-      void record_version_numbers(LogicalState &state, const FieldMask &mask,
-                              VersionInfo &info, bool capture_previous,
-                              bool path_only, bool needs_final, bool close_top);
-      void advance_version_numbers(LogicalState &state, const FieldMask &mask);
-      void record_logical_reduction(LogicalState &state, ReductionOpID redop,
+      void filter_prev_epoch_users(CurrentState &state, const FieldMask &mask);
+      void filter_curr_epoch_users(CurrentState &state, const FieldMask &mask);
+      void report_uninitialized_usage(const LogicalUser &user,
+                                    const FieldMask &uninitialized);
+      void record_logical_reduction(CurrentState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
-      void clear_logical_reduction_fields(LogicalState &state,
+      void clear_logical_reduction_fields(CurrentState &state,
                                           const FieldMask &cleared_mask);
-      void sanity_check_logical_state(LogicalState &state);
-      void initialize_logical_state(ContextID ctx);
-      void invalidate_logical_state(ContextID ctx);
+      void sanity_check_logical_state(CurrentState &state);
       template<bool DOMINATE>
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
@@ -2383,6 +2328,9 @@ namespace LegionRuntime {
       void release_restriction(ContextID ctx, const FieldMask &restricted_mask);
       void record_logical_restrictions(ContextID ctx, RestrictInfo &info,
                                        const FieldMask &mask);
+    public:
+      void initialize_current_state(ContextID ctx);
+      void invalidate_current_state(ContextID ctx, bool logical_users_only);
     public:
       // Physical traversal operations
       // Entry
@@ -2521,11 +2469,6 @@ namespace LegionRuntime {
                                   ReductionView *new_view);
       void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
                             const MappableInfo &info,CopyTracker *tracker=NULL);
-      // Entry
-      void initialize_physical_state(ContextID ctx);
-      // Entry
-      void invalidate_physical_state(ContextID ctx);
-      void clear_physical_states(const FieldMask &mask);
     public:
       void add_persistent_view(ContextID ctx, MaterializedView *persist_view);
       void remove_persistent_view(ContextID ctx,MaterializedView *persist_view);
@@ -2639,8 +2582,7 @@ namespace LegionRuntime {
       NodeSet creation_set;
       NodeSet destruction_set;
     protected:
-      DynamicTable<LogicalStateAllocator> logical_states;
-      DynamicTable<VersionManagerAllocator> version_managers;
+      DynamicTable<CurrentStateAllocator> current_states;
     protected:
       Reservation node_lock;
       // While logical states and version managers have dense keys
@@ -2762,7 +2704,7 @@ namespace LegionRuntime {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
-      void print_logical_state(LogicalState &state,
+      void print_logical_state(CurrentState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
@@ -2923,7 +2865,7 @@ namespace LegionRuntime {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
-      void print_logical_state(LogicalState &state,
+      void print_logical_state(CurrentState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
@@ -3087,16 +3029,16 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class LogicalInitializer
-     * A class for initializing logical contexts
+     * \class CurrentInitializer 
+     * A class for initializing current states 
      */
-    class LogicalInitializer : public NodeTraverser {
+    class CurrentInitializer : public NodeTraverser {
     public:
-      LogicalInitializer(ContextID ctx);
-      LogicalInitializer(const LogicalInitializer &rhs);
-      ~LogicalInitializer(void);
+      CurrentInitializer(ContextID ctx);
+      CurrentInitializer(const CurrentInitializer &rhs);
+      ~CurrentInitializer(void);
     public:
-      LogicalInitializer& operator=(const LogicalInitializer &rhs);
+      CurrentInitializer& operator=(const CurrentInitializer &rhs);
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
@@ -3106,22 +3048,23 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class LogicalInvalidator
-     * A class for invalidating logical contexts
+     * \class CurrentInvalidator 
+     * A class for invalidating current states 
      */
-    class LogicalInvalidator : public NodeTraverser {
+    class CurrentInvalidator : public NodeTraverser {
     public:
-      LogicalInvalidator(ContextID ctx);
-      LogicalInvalidator(const LogicalInvalidator &rhs);
-      ~LogicalInvalidator(void);
+      CurrentInvalidator(ContextID ctx, bool logical_users_only);
+      CurrentInvalidator(const CurrentInvalidator &rhs);
+      ~CurrentInvalidator(void);
     public:
-      LogicalInvalidator& operator=(const LogicalInvalidator &rhs);
+      CurrentInvalidator& operator=(const CurrentInvalidator &rhs);
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
+      const bool logical_users_only;
     };
 
     /**
@@ -3140,57 +3083,6 @@ namespace LegionRuntime {
       const ContextID ctx;
       const FieldMask &restrict_mask;
     }; 
-
-    /**
-     * \class PhysicalInitializer
-     * A class for initializing physical contexts
-     */
-    class PhysicalInitializer : public NodeTraverser {
-    public:
-      PhysicalInitializer(ContextID ctx);
-      PhysicalInitializer(const PhysicalInitializer &rhs);
-      ~PhysicalInitializer(void);
-    public:
-      PhysicalInitializer& operator=(const PhysicalInitializer &rhs);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-    };
-
-    /**
-     * \class PhysicalInvalidator
-     * A class for invalidating physical contexts
-     */
-    class PhysicalInvalidator : public NodeTraverser {
-    public:
-      PhysicalInvalidator(ContextID ctx);
-      PhysicalInvalidator(const PhysicalInvalidator &rhs);
-      ~PhysicalInvalidator(void);
-    public:
-      PhysicalInvalidator& operator=(const PhysicalInvalidator &rhs);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-    };
-
-    class FieldInvalidator : public NodeTraverser {
-    public:
-      FieldInvalidator(unsigned idx) { to_clear.set_bit(idx); }
-    public:
-      virtual bool visit_only_valid(void) const { return false; }
-      virtual bool visit_region(RegionNode *node) 
-        { node->clear_physical_states(to_clear); return true; }
-      virtual bool visit_partition(PartitionNode *node) 
-        { node->clear_physical_states(to_clear); return true; }
-    protected:
-      FieldMask to_clear;
-    };
 
     /**
      * \class ReductionCloser

@@ -14457,14 +14457,12 @@ namespace LegionRuntime {
           return "State Directory";
         case DENSE_INDEX_ALLOC:
           return "Dense Index Set";
-        case LOGICAL_STATE_ALLOC:
-          return "Logical State";
+        case CURRENT_STATE_ALLOC:
+          return "Current State";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
         case VERSION_STATE_ALLOC:
           return "Version State";
-        case VERSION_MANAGER_ALLOC:
-          return "Version Manager";
         default:
           assert(false); // should never get here
       }

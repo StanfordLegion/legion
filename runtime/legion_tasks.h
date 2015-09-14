@@ -185,7 +185,7 @@ namespace LegionRuntime {
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
     protected:
-      std::deque<RegionTreeContext> enclosing_physical_contexts;
+      std::deque<RegionTreeContext> enclosing_contexts;
       std::vector<unsigned> parent_req_indexes;
     protected:
       std::set<LogicalRegion>                   created_regions;
@@ -467,7 +467,7 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
-      virtual RemoteTask* find_outermost_physical_context(void) = 0;
+      virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
@@ -475,7 +475,7 @@ namespace LegionRuntime {
                                           RemoteTask *remote_ctx) = 0;
     public:
       // Has a base implementation but can override
-      virtual RegionTreeContext find_enclosing_physical_context(unsigned idx);
+      virtual RegionTreeContext find_enclosing_context(unsigned idx);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void);
@@ -704,7 +704,7 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RemoteTask* find_outermost_physical_context(void);
+      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -799,7 +799,7 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RemoteTask* find_outermost_physical_context(void);
+      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -857,7 +857,7 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
-      virtual RemoteTask* find_outermost_physical_context(void) = 0;
+      virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
@@ -910,8 +910,8 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual RegionTreeContext find_enclosing_physical_context(unsigned idx);
-      virtual RemoteTask* find_outermost_physical_context(void);
+      virtual RegionTreeContext find_enclosing_context(unsigned idx);
+      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -960,7 +960,7 @@ namespace LegionRuntime {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
     public:
-      virtual RemoteTask* find_outermost_physical_context(void);
+      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);

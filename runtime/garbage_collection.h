@@ -25,6 +25,7 @@ namespace LegionRuntime {
     enum ReferenceSource {
       FUTURE_HANDLE_REF,
       DEFERRED_TASK_REF,
+      CURRENT_STATE_REF,
       PHYSICAL_STATE_REF,
       VERSION_MANAGER_REF,
       PENDING_GC_REF,
@@ -47,8 +48,8 @@ namespace LegionRuntime {
     const char *const names[LAST_SOURCE_REF] = {    \
       "Future Handle Reference",                    \
       "Deferred Task Reference",                    \
+      "Current State Reference",                    \
       "Physical State Reference",                   \
-      "Version Manager Reference",                  \
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \

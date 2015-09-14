@@ -398,13 +398,12 @@ namespace LegionRuntime {
     class PremapTraverser;
     template<bool RESTRICTED>
     class MappingTraverser;
-    class VersionInfo;
     class RestrictInfo;
 
-    struct LogicalState;
+    class CurrentState;
     class PhysicalState;
     class VersionState;
-    class VersionManager;
+    class VersionInfo;
 
     class DistributedCollectable;
     class LayoutDescription;

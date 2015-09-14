@@ -1865,7 +1865,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -1887,7 +1887,7 @@ namespace LegionRuntime {
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
       if (!requirement.premapped)
@@ -2745,14 +2745,14 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < src_versions.size(); idx++)
       {
         RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_physical_context(src_parent_indexes[idx]);
+          parent_ctx->find_enclosing_context(src_parent_indexes[idx]);
         src_versions[idx].make_local(preconditions, runtime->forest, 
                                      physical_ctx.get_id());
       }
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
       {
         RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_physical_context(dst_parent_indexes[idx]);
+          parent_ctx->find_enclosing_context(dst_parent_indexes[idx]);
         dst_versions[idx].make_local(preconditions, runtime->forest, 
                                      physical_ctx.get_id());
       }
@@ -2809,7 +2809,7 @@ namespace LegionRuntime {
       Processor local_proc = parent_ctx->get_executing_processor();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        src_contexts[idx] = parent_ctx->find_enclosing_physical_context(
+        src_contexts[idx] = parent_ctx->find_enclosing_context(
                                                   src_parent_indexes[idx]);
         if (!src_requirements[idx].premapped)
         {
@@ -2829,7 +2829,7 @@ namespace LegionRuntime {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        dst_contexts[idx] = parent_ctx->find_enclosing_physical_context(
+        dst_contexts[idx] = parent_ctx->find_enclosing_context(
                                                   dst_parent_indexes[idx]);
         if (!dst_requirements[idx].premapped)
         {
@@ -4316,7 +4316,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(find_parent_index(0));
+        parent_ctx->find_enclosing_context(find_parent_index(0));
       std::set<Event> preconditions;
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -4533,7 +4533,7 @@ namespace LegionRuntime {
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor(); 
       // Never need to premap close operations
       Event close_event = Event::NO_EVENT;
@@ -4779,7 +4779,7 @@ namespace LegionRuntime {
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_idx);
+        parent_ctx->find_enclosing_context(parent_idx);
       Processor local_proc = parent_ctx->get_executing_processor();
       // We never need to premap close operations 
 
@@ -4962,9 +4962,7 @@ namespace LegionRuntime {
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
       parent_region = launcher.parent_region;
-      fields = launcher.fields;
-      // First compute the parent index
-      compute_parent_index();
+      fields = launcher.fields; 
       // Mark the requirement restricted
       region = launcher.physical_region;
       grants = launcher.grants;
@@ -5053,6 +5051,8 @@ namespace LegionRuntime {
     void AcquireOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     { 
+      // First compute the parent index
+      compute_parent_index();
       begin_dependence_analysis();
       // Register a dependence on our predicate
       register_predicate_dependence();
@@ -5063,7 +5063,9 @@ namespace LegionRuntime {
                                                    restrict_info,
                                                    privilege_path);
       // Now tell the forest that we have user-level coherence
-      runtime->forest->acquire_user_coherence(parent_ctx, requirement.region,
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(parent_req_index);
+      runtime->forest->acquire_user_coherence(ctx, requirement.region,
                                               requirement.privilege_fields);
       end_dependence_analysis();
     }
@@ -5073,7 +5075,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -5114,7 +5116,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
       if (!requirement.premapped)
@@ -5554,9 +5556,7 @@ namespace LegionRuntime {
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
       parent_region = launcher.parent_region;
-      fields = launcher.fields;
-      // First compute the parent index
-      compute_parent_index();
+      fields = launcher.fields; 
       region = launcher.physical_region;
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -5644,6 +5644,8 @@ namespace LegionRuntime {
     void ReleaseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     { 
+      // First compute the parent index
+      compute_parent_index();
       begin_dependence_analysis();
       // Register a dependence on our predicate
       register_predicate_dependence();
@@ -5654,7 +5656,10 @@ namespace LegionRuntime {
                                                    restrict_info,
                                                    privilege_path);
       // Now tell the forest that we are relinquishing user-level coherence
-      runtime->forest->restrict_user_coherence(parent_ctx, requirement.region,
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(parent_req_index);
+      runtime->forest->restrict_user_coherence(ctx, parent_ctx, 
+                                               requirement.region,
                                                requirement.privilege_fields);
       end_dependence_analysis();
     }
@@ -5664,7 +5669,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -5705,7 +5710,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
       if (!requirement.premapped)
@@ -8362,7 +8367,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -8377,7 +8382,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
       if (!requirement.premapped)
@@ -8830,7 +8835,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -8873,7 +8878,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       if (!requirement.premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
@@ -8938,7 +8943,7 @@ namespace LegionRuntime {
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       runtime->forest->fill_fields(physical_ctx, requirement, 
                                    result, result_size, version_info);
       version_info.apply_mapping(physical_ctx.get_id());
@@ -9276,7 +9281,10 @@ namespace LegionRuntime {
       }
       // After we are done with our dependence analysis, then we 
       // need to add restricted coherence on the logical region 
-      runtime->forest->restrict_user_coherence(parent_ctx, requirement.region,
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(parent_req_index);
+      runtime->forest->restrict_user_coherence(ctx, parent_ctx, 
+                                               requirement.region,
                                                requirement.privilege_fields);
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
@@ -9293,7 +9301,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -9308,7 +9316,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       if (!requirement.premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
@@ -9658,7 +9666,9 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       // Before we do our dependence analysis, we can remove the 
       // restricted coherence on the logical region
-      runtime->forest->acquire_user_coherence(parent_ctx, requirement.region,
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(parent_req_index);
+      runtime->forest->acquire_user_coherence(ctx, requirement.region,
                                               requirement.privilege_fields);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
@@ -9680,7 +9690,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<Event> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
@@ -9695,7 +9705,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_physical_context(parent_req_index);
+        parent_ctx->find_enclosing_context(parent_req_index);
       if (!requirement.premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
