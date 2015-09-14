@@ -75,6 +75,9 @@ void top_level_task(const Task *task,
       elem_rect_hi_val = std::ceil(std::pow(num_elements, 1/3.0)) - 1;
       color_hi_val = std::ceil(std::pow(sub_regions, 1/3.0)) - 1;
       patch_val = std::ceil(std::pow(num_elements / sub_regions, 1/3.0));
+      std::cout << "num_elements: " << num_elements << " subregions: " << sub_regions 
+		<< " patch_val: " << patch_val << " color_hi_val: " <<  color_hi_val 
+		<< std::endl; 
       assert(num_elements == (std::pow(patch_val, 3) * std::pow(color_hi_val+1, 3)));
       assert(num_elements == std::pow(elem_rect_hi_val+1, 3));
       break;
@@ -117,9 +120,9 @@ void top_level_task(const Task *task,
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(double),FID_TEMP);
-    allocator.allocate_field(sizeof(double),FID_SAL);
-    allocator.allocate_field(sizeof(double),FID_KE);
-    allocator.allocate_field(sizeof(double),FID_VOR);
+    //    allocator.allocate_field(sizeof(double),FID_SAL);
+    //    allocator.allocate_field(sizeof(double),FID_KE);
+    //    allocator.allocate_field(sizeof(double),FID_VOR);
   }
 
   FieldSpace persistent_fs = runtime->create_field_space(ctx);
@@ -205,7 +208,8 @@ void top_level_task(const Task *task,
   
   ocean_pr.write_persistent_subregions(ctx, ocean_lr, ocean_lp);
 
-  LogicalRegion ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
+  LogicalRegion 
+ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
   LogicalPartition ocean_check_lp = runtime->get_logical_partition(ctx, ocean_check_lr, ip);
 
   ocean_pr.read_persistent_subregions(ctx, ocean_check_lr, ocean_check_lp);
@@ -242,9 +246,14 @@ void init_field_task(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
   int extent = *(const int*) task->args;
- 
-  std::cout << "init_field_task extent is: " << extent << " domain point is:[" << task->index_point[0] << "," <<
+  
+#ifdef IOTESTER_VERBOSE
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
+
+  std::cout << hostname << " init_field_task extent is: " << extent << " domain point is:[" << task->index_point[0] << "," <<
     task->index_point[1] << "]" << " linearization is: " << task->index_point[0]*extent+task->index_point[1]*extent <<  std::endl;
+#endif
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
   RegionAccessor<AccessorType::Generic, double> acc_temp = 
@@ -287,6 +296,13 @@ void check_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, HighLevelRuntime *runtime)
 {
+#ifdef TESTERIO_TIMERS
+  struct timespec ts;
+  current_utc_time(&ts);   
+  std::cout << "domain point: " << task->index_point
+            << "; read ends & Check begins at:  seconds: " << ts.tv_sec
+            << " nanos: " << ts.tv_nsec << std::endl; 
+#endif
   assert(task->regions.size() == 2);
   assert(task->regions[0].instance_fields.size() ==
          task->regions[1].instance_fields.size());
@@ -346,6 +362,12 @@ void check_task(const Task *task,
   
 int main(int argc, char **argv)
 {
+#ifdef TESTERIO_TIMERS 
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
+  std::cout << hostname << " in main prior to task registrion " << std::endl; 
+#endif
+
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
     Processor::LOC_PROC, true/*single*/, false/*index*/);

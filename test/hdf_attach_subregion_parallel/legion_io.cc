@@ -1,5 +1,29 @@
 #include "legion_io.h"
 #include "hdf5.h"
+#include <time.h>
+#include <sys/time.h>
+#include <stdio.h>
+
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
+
+void current_utc_time(struct timespec *ts) {
+
+#ifdef __MACH__ // OS X does not have clock_gettime, use clock_get_time
+  clock_serv_t cclock;
+  mach_timespec_t mts;
+  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+  clock_get_time(cclock, &mts);
+  mach_port_deallocate(mach_task_self(), cclock);
+  ts->tv_sec = mts.tv_sec;
+  ts->tv_nsec = mts.tv_nsec;
+  #else
+  clock_gettime(CLOCK_REALTIME, ts);
+  #endif
+
+}
 
 struct task_args_t{
   bool copy_write;
@@ -13,18 +37,43 @@ void copy_values_task(const Task *task,
                        const std::vector<PhysicalRegion> &regions,
                        Context ctx, HighLevelRuntime *runtime);
 
+#ifdef TESTERIO_PHASER_TIMERS
+void timer_task(const Task *task,
+                const std::vector<PhysicalRegion> &regions,
+                Context ctx, HighLevelRuntime *runtime);
+#endif
+
 void split_path_file(char** p, char** f, const char *pf);
 
 
 void PersistentRegion_init() {
-    HighLevelRuntime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
-                                                              Processor::LOC_PROC, true /*single*/, true /*index*/);
+  HighLevelRuntime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
+                                                           Processor::LOC_PROC,
+                                                           true /*single*/, true /*index*/);
+  
+#ifdef TESTERIO_PHASER_TIMERS
+  HighLevelRuntime::register_legion_task<timer_task>(TIMER_TASK_ID,
+                                                     Processor::LOC_PROC,
+                                                     true /*single*/, false /*index*/);
+#endif
     
 }
         
 PersistentRegion::PersistentRegion(HighLevelRuntime * runtime) {
     this->runtime = runtime; 
 }
+
+#ifdef TESTERIO_PHASER_TIMERS
+void timer_task(const Task *task,
+                const std::vector<PhysicalRegion> &regions,
+                Context ctx, HighLevelRuntime *runtime)
+{
+  struct timespec ts;
+  current_utc_time(&ts);   
+  std::cout << ((const char*) task->args) << " seconds: " << ts.tv_sec
+            << " nanos: " << ts.tv_nsec << std::endl; 
+}
+#endif
 
 void copy_values_task(const Task *task,
                       const std::vector<PhysicalRegion> &regions,
@@ -35,8 +84,25 @@ void copy_values_task(const Task *task,
   
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
-  assert(piece.child_lr == regions[0].get_logical_region()); 
-
+  assert(piece.child_lr == regions[0].get_logical_region());
+  
+#ifdef TESTERIO_TIMERS 
+  struct timespec ts;
+  current_utc_time(&ts);   
+  char hostname[128];
+  gethostname(hostname, sizeof hostname);
+  if(task_args.copy_write) {
+    
+    std::cout << hostname << " domain point: " << piece.dp
+              << "; write begins at:  seconds: " << ts.tv_sec
+              << " nanos: " << ts.tv_nsec << std::endl; 
+  } else {
+    std::cout << "domain point: " << piece.dp
+              << "; write ends & read begins at:  seconds: " << ts.tv_sec
+              << " nanos: " << ts.tv_nsec << std::endl; 
+  }
+#endif
+  
   std::map<FieldID, std::string> field_string_map;
   Realm::Serialization::FixedBufferDeserializer fdb(task_args.field_map_serial,
       task_args.field_map_size);
@@ -62,10 +128,11 @@ void copy_values_task(const Task *task,
     field_map.insert(std::make_pair(it->first, it->second.c_str()));
   }
   
+
+#ifdef IOTESTER_VERBOSE
   Domain dom = runtime->get_index_space_domain(ctx,
       piece.child_lr.get_index_space());
 
-#ifdef IOTESTER_VERBOSE
   std::cout << "In write_values_task and found my piece!" << std::endl;
   std::cout<< "In write_value_task "  << std::endl;
   
@@ -127,16 +194,29 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
   task_args.copy_write = true;
   task_args.field_map_size = this->field_map_size;
   memcpy(task_args.field_map_serial, this->field_map_serial, this->field_map_size);
-
+#ifdef TESTERIO_PHASER_TIMERS
+  char  start_message[]  = "phaser! write_persistent_subregions: start"; 
+  TaskLauncher timer_launcher_start(TIMER_TASK_ID, TaskArgument(start_message, 40));
+  char end_message[] = "phaser! write_persistent_subregions: end"; 
+  TaskLauncher timer_launcher_end(TIMER_TASK_ID, TaskArgument(end_message, 40));
+#endif
+  
   IndexLauncher write_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&task_args, sizeof(task_args)-4096+task_args.field_map_size), arg_map);
+    TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
     Piece piece = *itr;
     arg_map.set_point(piece.dp, TaskArgument(&piece, sizeof(Piece)));
   }
+
   
+#ifdef TESTERIO_PHASER_TIMERS
+  timer_launcher_start.add_arrival_barrier(this->pb_timer);
+  runtime->execute_task(ctx, timer_launcher_start);
+  write_launcher.add_wait_barrier(this->pb_timer);  
+  write_launcher.add_arrival_barrier(this->pb_write);
+#endif
   
   write_launcher.add_region_requirement(
     RegionRequirement(this->lp,
@@ -154,7 +234,13 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
     write_launcher.region_requirements[0].add_field(fid, false /* no instance required */);
     write_launcher.region_requirements[1].add_field(fid);
   }
-  runtime->execute_index_space(ctx, write_launcher); 
+  runtime->execute_index_space(ctx, write_launcher);
+
+#ifdef TESTERIO_PHASER_TIMERS
+  this->pb_write = runtime->advance_phase_barrier(ctx, this->pb_write);
+  timer_launcher_end.add_wait_barrier(this->pb_write);
+  runtime->execute_task(ctx, timer_launcher_end);
+#endif
 }
 
 						   
@@ -171,7 +257,7 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
   //std::cout << "task_args size is: " << sizeof(task_args) << std::endl;
   
   IndexLauncher read_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&task_args, sizeof(task_args)-4096+task_args.field_map_size), arg_map);
+           		       TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -214,7 +300,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
   this->parent_lr = parent_lr;
   this->field_map = field_map;
   this->dom = dom; 
-
+  
   std::map<FieldID, std::string> field_map_des;
 
   Realm::Serialization::DynamicBufferSerializer dbs(0);
@@ -381,6 +467,13 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
     i++;
   }
   H5Fclose(link_file_id);
+  
+#ifdef TESTERIO_PHASER_TIMERS
+  // Create phase barriers used for timing info 
+  this->pb_write = this->runtime->create_phase_barrier(ctx, i);
+  this->pb_timer = this->runtime->create_phase_barrier(ctx, 1); 
+  this->pb_read = this->runtime->create_phase_barrier(ctx, i);
+#endif
 }
 
 

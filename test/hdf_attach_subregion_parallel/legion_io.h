@@ -4,6 +4,7 @@
 
 #include "legion.h"
 
+void current_utc_time(struct timespec *ts);
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -11,14 +12,17 @@ enum TaskIDs {
   STENCIL_TASK_ID,
   CHECK_TASK_ID,
   COPY_VALUES_TASK_ID,
+#ifdef TESTERIO_PHASER_TIMERS
+  TIMER_TASK_ID,
+#endif
 };
 
 enum FieldIDs {
   FID_TEMP,
-  FID_SAL,
-  FID_KE,
-  FID_VOR,
-  FID_PERS,
+  //  FID_SAL,
+  //  FID_KE,
+  //  FID_VOR,
+  //  FID_PERS,
 };
 
 
@@ -33,7 +37,6 @@ public:
   PhysicalRegion pr;
   DomainPoint dp;
   char shard_name[40];
-
 private:
   
 }; 
@@ -67,6 +70,11 @@ class PersistentRegion {
   std::map<FieldID, std::string> field_map;
   void * field_map_serial;
   size_t field_map_size; 
+#ifdef TESTERIO_PHASER_TIMERS
+  PhaseBarrier pb_write;
+  PhaseBarrier pb_timer; 
+  PhaseBarrier pb_read;
+#endif
     
 };
 
