@@ -27,8 +27,10 @@ void current_utc_time(struct timespec *ts) {
 
 struct task_args_t{
   bool copy_write;
+#ifdef TESTERIO_SERIALIZE
   size_t field_map_size; 
   char field_map_serial[4096];
+#endif
 };
 
 
@@ -104,6 +106,7 @@ void copy_values_task(const Task *task,
 #endif
   
   std::map<FieldID, std::string> field_string_map;
+#ifdef TESTERIO_SERIALIZE
   Realm::Serialization::FixedBufferDeserializer fdb(task_args.field_map_serial,
       task_args.field_map_size);
 
@@ -111,6 +114,9 @@ void copy_values_task(const Task *task,
   if(!ok) {
     std::cout << "ERROR in copy_values_task, can't deserialize " << std::endl;
   }
+#else 
+  field_string_map.insert(std::make_pair(FID_TEMP, "bam/baz"));
+#endif
 
 #ifdef IOTESTER_VERBOSE
   std::cout << "field_map_size is : " <<task_args.field_map_size << std::endl;
@@ -192,8 +198,11 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
   ArgumentMap arg_map;
   struct task_args_t task_args;
   task_args.copy_write = true;
+#ifdef TESTERIO_SERIALIZE
   task_args.field_map_size = this->field_map_size;
   memcpy(task_args.field_map_serial, this->field_map_serial, this->field_map_size);
+#endif 
+
 #ifdef TESTERIO_PHASER_TIMERS
   char  start_message[]  = "phaser! write_persistent_subregions: start"; 
   TaskLauncher timer_launcher_start(TIMER_TASK_ID, TaskArgument(start_message, 40));
@@ -202,7 +211,7 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
 #endif
   
   IndexLauncher write_launcher(COPY_VALUES_TASK_ID, this->dom,
-    TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map);
+    TaskArgument(&task_args, sizeof(task_args)), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -251,13 +260,14 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
 
   struct task_args_t task_args;
   task_args.copy_write = false;
+#ifdef TESTERIO_SERIALIZE
   task_args.field_map_size = this->field_map_size;
 //  std::cout << "write_persistent_subregions: setting field_map_size to: " << this->field_map_size << std::endl;
   memcpy(task_args.field_map_serial, this->field_map_serial, this->field_map_size);
   //std::cout << "task_args size is: " << sizeof(task_args) << std::endl;
-  
+#endif
   IndexLauncher read_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map);
+           		       TaskArgument(&task_args, sizeof(task_args)), arg_map);
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -301,12 +311,13 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
   this->field_map = field_map;
   this->dom = dom; 
   
-  std::map<FieldID, std::string> field_map_des;
-
+  //std::map<FieldID, std::string> field_map_des;
+#ifdef TESTERIO_SERIALIZE
   Realm::Serialization::DynamicBufferSerializer dbs(0);
   dbs << field_map;
   this->field_map_size = dbs.bytes_used();
   this->field_map_serial = dbs.detach_buffer();
+#endif
   //  Realm::Serialization::FixedBufferDeserializer fbd(this->field_map_serial, this->field_map_size);
   //  bool ok = fbd >> field_map_des;
   //  if(ok) { 
