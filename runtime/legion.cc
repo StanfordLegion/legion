@@ -60,20 +60,6 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef OLD_LEGION_PROF
-    namespace LegionProf {
-      Logger::Category log_prof("legion_prof");
-      unsigned long long legion_prof_init_time;
-      ProcessorProfiler *legion_prof_table = 
-        new ProcessorProfiler[MAX_NUM_PROCS + 1];
-      bool profiling_enabled;
-      pthread_key_t copy_profiler_key;
-      pthread_mutex_t copy_profiler_mutex = PTHREAD_MUTEX_INITIALIZER;
-      int copy_profiler_dumped = 0;
-      std::list<CopyProfiler*> copy_prof_list;
-    };
-#endif
-
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
 
@@ -3807,27 +3793,18 @@ namespace LegionRuntime {
     /*static*/ void HighLevelRuntime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef OLD_LEGION_PROF
-      LegionProf::enable_profiling();
-#endif
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void HighLevelRuntime::disable_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef OLD_LEGION_PROF
-      LegionProf::disable_profiling();
-#endif
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void HighLevelRuntime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
-#ifdef OLD_LEGION_PROF
-      LegionProf::dump_profiling();
-#endif
     }
 
     /////////////////////////////////////////////////////////////

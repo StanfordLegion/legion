@@ -1646,9 +1646,6 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
                                        unique_op_id);
@@ -1712,9 +1709,6 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
                                        unique_op_id);
@@ -1767,9 +1761,6 @@ namespace LegionRuntime {
                                          requirement.prop,
                                          requirement.redop,
                                          requirement.privilege_fields);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_map(unique_op_id, parent_ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(), 
@@ -1839,9 +1830,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS); 
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // First compute our parent region requirement
       compute_parent_index();  
       begin_dependence_analysis();
@@ -1854,9 +1842,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 
@@ -1882,9 +1867,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
@@ -2022,9 +2004,6 @@ namespace LegionRuntime {
           Processor::get_executing_processor(),
           result.get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
       // Log an implicit dependence on the parent's start event
@@ -2606,10 +2585,6 @@ namespace LegionRuntime {
                                         req.privilege_fields);
       }
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_copy(unique_op_id,
-                                parent_ctx->get_unique_task_id());
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_copy_operation(parent_ctx->get_unique_task_id(),
                                     unique_op_id);
@@ -2702,9 +2677,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // First compute the parent indexes
       compute_parent_indexes(); 
       begin_dependence_analysis();
@@ -2731,9 +2703,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 
@@ -2797,9 +2766,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       bool map_success = true;
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
@@ -3106,9 +3072,6 @@ namespace LegionRuntime {
         LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                         unique_op_id, END_MAPPING);
 #endif
-#ifdef OLD_LEGION_PROF
-        LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
-#endif
         // Launch the complete task if necessary 
         Event copy_complete_event = 
           Event::merge_events(copy_complete_events);
@@ -3202,9 +3165,6 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef OLD_LEGION_PROF
-        LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
-#endif
         // We failed to map, so notify the mapper
         runtime->invoke_mapper_failed_mapping(local_proc, this);
         // Clear our our instances that did map so we start
@@ -4260,10 +4220,6 @@ namespace LegionRuntime {
                                          requirement.redop,
                                          requirement.privilege_fields);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_close(unique_op_id, 
-                                 parent_ctx->get_unique_task_id());
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_close_operation(parent_ctx->get_unique_task_id(),
                                      unique_op_id,
@@ -4330,21 +4286,13 @@ namespace LegionRuntime {
     void CloseOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
-#if defined(OLD_LEGION_PROF) || defined(LEGION_LOGGING)
-      UniqueID local_id = unique_op_id;
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(local_id, PROF_BEGIN_POST);
-#endif
 #ifdef LEGION_LOGGING
+      UniqueID local_id = unique_op_id;
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
                                       BEGIN_POST_EXEC);
 #endif
       complete_execution();
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(local_id, PROF_END_POST);
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
@@ -4529,9 +4477,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
-#endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor(); 
@@ -4587,9 +4532,6 @@ namespace LegionRuntime {
       LegionLogging::log_physical_user(
           Processor::get_executing_processor(),
           reference.get_manager()->get_instance(), unique_op_id, 0/*idx*/);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
       if (target.has_ref())
@@ -4734,9 +4676,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // This stage is only done for close operations issued
       // at the end of the task as dependence analysis for other
       // close operations is done inline in the region tree traversal
@@ -4759,9 +4698,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4774,9 +4710,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
@@ -4805,9 +4738,6 @@ namespace LegionRuntime {
       LegionLogging::log_physical_user(
           Processor::get_executing_processor(),
           reference.get_manager()->get_instance(), unique_op_id, 0/*idx*/);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
 #endif
 #ifdef LEGION_SPY
       // Log an implicit dependence on the parent's start event
@@ -8804,9 +8734,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // First compute the parent index
       compute_parent_index();
       begin_dependence_analysis();
@@ -8824,9 +8751,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 
@@ -9252,9 +9176,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // First compute the parent index
       compute_parent_index();
       begin_dependence_analysis();
@@ -9290,9 +9211,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 
@@ -9658,9 +9576,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
       // First compute the parent index
       compute_parent_index();
       begin_dependence_analysis();
@@ -9679,9 +9594,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 

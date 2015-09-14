@@ -39,11 +39,6 @@ using namespace LegionRuntime::Accessor;
 
 using namespace LegionRuntime::HighLevel::LegionLogging;
 #endif
-#ifdef OLD_LEGION_PROF
-#include "legion_profiling.h"
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::LegionProf;
-#endif
 
 #include "atomics.h"
 
@@ -2786,29 +2781,6 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef OLD_LEGION_PROF
-    class CopyCompletionProfiler : public EventWaiter {
-      public:
-        CopyCompletionProfiler(Event _event) : event(_event) {}
-
-        virtual ~CopyCompletionProfiler(void) { }
-
-        virtual bool event_triggered(void)
-        {
-          register_copy_event(event.id, PROF_END_COPY);
-          return true;
-        }
-
-        virtual void print_info(FILE *f)
-        {
-	        fprintf(f, "copy completion profiler - " IDFMT "/%d\n",
-              event.id, event.gen);
-        }
-      protected:
-        Event event;
-    };
-#endif
-
     void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
@@ -2820,11 +2792,6 @@ namespace LegionRuntime {
       //  to log the completion
       EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
 #endif
-#ifdef OLD_LEGION_PROF
-      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
-      EventImpl::add_waiter(after_copy, new CopyCompletionProfiler(after_copy));
-#endif
-
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // create a copier for the memory used by all of these instance pairs
@@ -3553,11 +3520,6 @@ namespace LegionRuntime {
       //  to log the completion
       EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
 #endif
-#ifdef OLD_LEGION_PROF
-      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
-      EventImpl::add_waiter(after_copy, new CopyCompletionProfiler(after_copy));
-#endif
-
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // code assumes a single source field for now
@@ -4192,9 +4154,6 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
-#ifdef OLD_LEGION_PROF
-      CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
-#endif
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }

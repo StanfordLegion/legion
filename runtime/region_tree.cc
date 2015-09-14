@@ -8705,16 +8705,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
-#ifdef OLD_LEGION_PROF
-          if (!use_event.exists())
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = field_size;
-            LegionProf::register_instance_creation(inst.id,
-                location.id, 0/*redop*/, blocking_factor,
-                inst_fields);
-          }
-#endif
         }
       }
       else
@@ -8751,24 +8741,6 @@ namespace LegionRuntime {
                                        use_event, depth, true/*reg now*/);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-          if (!use_event.exists())
-          {
-            std::map<unsigned,size_t> inst_fields;
-            for (std::set<FieldID>::const_iterator it = 
-                  create_fields.begin(); it != create_fields.end(); it++)
-            {
-              std::map<FieldID,FieldInfo>::const_iterator finder = 
-                fields.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
-              assert(finder != fields.end());
-#endif
-              inst_fields[*it] = finder->second.field_size;
-            }
-            LegionProf::register_instance_creation(inst.id, location.id,
-                                0/*redop*/, blocking_factor, inst_fields);
-          }
 #endif
         }
       }
@@ -8918,14 +8890,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
-#ifdef OLD_LEGION_PROF
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = reduction_op->sizeof_rhs;
-            LegionProf::register_instance_creation(inst.id, location.id,
-                redop, 1/*blocking factor*/, inst_fields);
-          }
-#endif
         }
       }
       else
@@ -8955,14 +8919,6 @@ namespace LegionRuntime {
                                             true/*register now*/);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = reduction_op->sizeof_rhs;
-            LegionProf::register_instance_creation(inst.id, location.id,
-                redop, 0/*blocking factor*/, inst_fields);
-          }
 #endif
         }
       }
@@ -9046,23 +9002,6 @@ namespace LegionRuntime {
                                          InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-      {
-        std::map<FieldID,size_t> inst_fields;
-        for (std::set<FieldID>::const_iterator it =
-            create_fields.begin(); it != create_fields.end(); it++)
-        {
-          std::map<FieldID,FieldInfo>::const_iterator finder =
-            fields.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != fields.end());
-#endif
-          inst_fields[*it] = finder->second.field_size;
-        }
-        LegionProf::register_instance_creation(inst.id, location.id,
-            0, blocking_factor, inst_fields);
-      }
 #endif
       return result;
     }
@@ -23334,9 +23273,6 @@ namespace LegionRuntime {
         log_garbage.debug("Garbage collecting physical instance " IDFMT
                               " in memory " IDFMT " in address space %d",
                               instance.id, memory.id, owner_space);
-#ifdef OLD_LEGION_PROF
-        LegionProf::register_instance_deletion(instance.id);
-#endif
 #ifndef DISABLE_GC
         instance.destroy(use_event);
 #endif
@@ -23588,9 +23524,6 @@ namespace LegionRuntime {
         log_garbage.debug("Garbage collecting reduction instance " IDFMT
                                 " in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
-#ifdef OLD_LEGION_PROF
-        LegionProf::register_instance_deletion(instance.id);
-#endif
 #ifndef DISABLE_GC
         instance.destroy();
 #endif
@@ -24357,9 +24290,6 @@ namespace LegionRuntime {
                                              const std::set<Event> &term_events)
     //--------------------------------------------------------------------------
     {
- #ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_BEGIN_GC);
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,
@@ -24369,9 +24299,6 @@ namespace LegionRuntime {
       // Then remove the gc reference on the object
       if (view->remove_base_gc_ref(PENDING_GC_REF))
         delete_logical_view(view);
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_END_GC);
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,
