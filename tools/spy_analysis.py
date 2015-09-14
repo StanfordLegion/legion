@@ -2544,6 +2544,9 @@ class Fence(object):
                 '",fillcolor=darkorchid2,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
+    def print_dataflow(self, printer, simplify_graphs):
+        return 0
+
 class Copy(object):
     def __init__(self, state, srcman, dstman, start_event, term_event,
             region, redop, uid):
