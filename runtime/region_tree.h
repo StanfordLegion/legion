@@ -1721,7 +1721,7 @@ namespace LegionRuntime {
      * is effectively all the information at the analysis
      * wavefront for this particular logical region.
      */
-    struct CurrentState {
+    class CurrentState {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
       static const VersionID init_version = 1;
