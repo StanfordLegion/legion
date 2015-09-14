@@ -112,6 +112,19 @@ namespace LegionRuntime {
       CUstream local_stream;
     };
 
+    class GPUWorkFence;
+
+    class GPUMemcpyFence : public GPUMemcpy {
+    public:
+      GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
+		     GPUWorkFence *_fence);
+
+      virtual void execute(void);
+
+    protected:
+      GPUWorkFence *fence;
+    };
+
     class GPUMemcpy1D : public GPUMemcpy {
     public:
       GPUMemcpy1D(GPUProcessor *_gpu,
