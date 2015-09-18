@@ -473,15 +473,6 @@ namespace LegionRuntime {
  
     CopyRequest::~CopyRequest(void)
     {
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        assert(!oas_by_inst->empty());
-        const InstPair &pair = oas_by_inst->begin()->first; 
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = pair.first.get_location();
-        usage.target = pair.second.get_location();
-        measurements.add_measurement(usage);
-      }
       delete oas_by_inst;
     }
 
@@ -2828,6 +2819,15 @@ namespace LegionRuntime {
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
 
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        const InstPair &pair = oas_by_inst->begin()->first; 
+
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        measurements.add_measurement(usage);
+      }
+
       // if(after_copy.exists())
       // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
 
@@ -3212,15 +3212,6 @@ namespace LegionRuntime {
 
     ReduceRequest::~ReduceRequest(void)
     {
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
-        // Not precise, but close enough for now
-        assert(!srcs.empty());
-        usage.source = srcs[0].inst.get_location();
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     size_t ReduceRequest::compute_size(void)
@@ -3763,6 +3754,14 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
+        // Not precise, but close enough for now
+        usage.source = srcs[0].inst.get_location();
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
     }
 
     FillRequest::FillRequest(const void *data, size_t datalen,
@@ -3813,13 +3812,6 @@ namespace LegionRuntime {
     {
       // clean up our mess
       free(fill_buffer);
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = Memory::NO_MEMORY;
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     size_t FillRequest::compute_size(void)
@@ -4007,6 +3999,13 @@ namespace LegionRuntime {
         }
       } else {
         // TODO: Implement GASNet, Disk, and Framebuffer
+      }
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = Memory::NO_MEMORY;
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
       }
     }
 
