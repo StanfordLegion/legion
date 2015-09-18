@@ -1224,6 +1224,11 @@ namespace Realm {
 	spawn_on_all(local_io_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
+#ifdef USE_CUDA
+	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MIN); // runs with lowest priority
+#endif
       } else {
 	log_task.info("no processor shutdown task");
       }
