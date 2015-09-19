@@ -135,6 +135,7 @@ endif
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 CC_FLAGS        += -DUSE_CUDA
+NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
@@ -252,7 +253,7 @@ endif
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
-CC_FLAGS        += -Wall -Werror
+CC_FLAGS        += -Wall -Wno-strict-overflow -Werror
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
@@ -272,6 +273,9 @@ ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/threads.cc \
+		   $(LG_RT_DIR)/realm/operation.cc \
+	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
 		   $(LG_RT_DIR)/realm/event_impl.cc \
 		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
@@ -281,10 +285,6 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/runtime_impl.cc
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/greenlet/greenlet.cc \
-		   $(LG_RT_DIR)/greenlet/greenlet-sys.cc \
-		   $(LG_RT_DIR)/greenlet/greenlet-cc.cc
-ASM_SRC		+= $(LG_RT_DIR)/greenlet/greenlet-asm.S
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
@@ -292,7 +292,6 @@ LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
-		   $(LG_RT_DIR)/realm/operation.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
 # If you want to go back to using the shared mapper, comment out the next line

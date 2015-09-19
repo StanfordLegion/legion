@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2015 Stanford University
+# Copyright 2015 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,93 +17,46 @@
 
 import sys, os, shutil
 import string, re
-from math import sqrt
+from math import sqrt, log
 from getopt import getopt
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
-processor_pat = re.compile(prefix + r'Prof Processor (?P<proc>[a-f0-9]+) (?P<utility>[0-1]) (?P<kind>[0-9]+)')
-memory_pat = re.compile(prefix + r'Prof Memory (?P<mem>[a-f0-9]+) (?P<kind>[0-9]+)')
-task_variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<name>\w+)')
-unique_task_pat = re.compile(prefix + r'Prof Unique Task (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<tid>[0-9]+) (?P<dim>[0-9]+) (?P<p0>[0-9\-]+) (?P<p1>[0-9\-]+) (?P<p2>[0-9\-]+)')
-unique_map_pat = re.compile(prefix + r'Prof Unique Map (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-unique_close_pat = re.compile(prefix + r'Prof Unique Close (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-unique_copy_pat = re.compile(prefix + r'Prof Unique Copy (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-event_pat = re.compile(prefix + r'Prof Event (?P<proc>[a-f0-9]+) (?P<kind>[0-9]+) (?P<uid>[0-9]+) (?P<time>[0-9]+)')
-create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[a-f0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
-field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[a-f0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
-destroy_pat = re.compile(prefix + r'Prof Destroy Instance (?P<iid>[a-f0-9]+) (?P<time>[0-9]+)')
-userevent_pat = re.compile(prefix + r'Prof User Event (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<name>[\w_\-]+)')
+task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
+multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
+meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
+op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
+proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
+mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[0-9]+) (?P<size>[0-9]+)')
 
-# List of event kinds from legion_profiling.h
-event_kind_ids = {
-    'PROF_BEGIN_DEP_ANALYSIS': 0,
-    'PROF_END_DEP_ANALYSIS': 1,
-    'PROF_BEGIN_PREMAP_ANALYSIS': 2,
-    'PROF_END_PREMAP_ANALYSIS': 3,
-    'PROF_BEGIN_MAP_ANALYSIS': 4,
-    'PROF_END_MAP_ANALYSIS': 5,
-    'PROF_BEGIN_EXECUTION': 6,
-    'PROF_END_EXECUTION': 7,
-    'PROF_BEGIN_WAIT': 8,
-    'PROF_END_WAIT': 9,
-    'PROF_BEGIN_SCHEDULER': 10,
-    'PROF_END_SCHEDULER': 11,
-    'PROF_COMPLETE': 12,
-    'PROF_LAUNCH': 13,
-    'PROF_BEGIN_POST': 14,
-    'PROF_END_POST': 15,
-    'PROF_BEGIN_TRIGGER': 16,
-    'PROF_END_TRIGGER': 17,
-    'PROF_BEGIN_GC': 18,
-    'PROF_END_GC': 19
+# Make sure this is up to date with lowlevel.h
+processor_kinds = {
+    0 : 'GPU',
+    1 : 'CPU',
+    2 : 'Utility',
+    3 : 'I/O',
 }
-event_kind_names = {
-    0: 'PROF_BEGIN_DEP_ANALYSIS',
-    1: 'PROF_END_DEP_ANALYSIS',
-    2: 'PROF_BEGIN_PREMAP_ANALYSIS',
-    3: 'PROF_END_PREMAP_ANALYSIS',
-    4: 'PROF_BEGIN_MAP_ANALYSIS',
-    5: 'PROF_END_MAP_ANALYSIS',
-    6: 'PROF_BEGIN_EXECUTION',
-    7: 'PROF_END_EXECUTION',
-    8: 'PROF_BEGIN_WAIT',
-    9: 'PROF_END_WAIT',
-    10: 'PROF_BEGIN_SCHEDULER',
-    11: 'PROF_END_SCHEDULER',
-    12: 'PROF_COMPLETE',
-    13: 'PROF_LAUNCH',
-    14: 'PROF_BEGIN_POST',
-    15: 'PROF_END_POST',
-    16: 'PROF_BEGIN_TRIGGER',
-    17: 'PROF_END_TRIGGER',
-    18: 'PROF_BEGIN_GC',
-    19: 'PROF_END_GC',
+
+# Make sure this is up to date with lowlevel.h
+memory_kinds = {
+    0 : 'GASNet Global',
+    1 : 'System',
+    2 : 'Registered',
+    3 : 'Socket',
+    4 : 'Zero-Copy',
+    5 : 'Framebuffer',
+    6 : 'Disk',
+    7 : 'HDF5',
+    8 : 'L3 Cache',
+    9 : 'L2 Cache',
+    10 : 'L1 Cache',
 }
-# Range Kinds
-DEPENDENCE_RANGE = 0
-PREMAP_RANGE = 1
-MAPPING_RANGE = 2
-LAUNCH_RANGE = 3
-EXECUTION_RANGE = 4
-POST_RANGE = 5
-WAIT_RANGE = 6
-COMPLETION_RANGE = 7
-SCHEDULE_RANGE = 8
-TRIGGER_RANGE = 9
-GC_RANGE = 10
-MESSAGE_RANGE = 11
-COPY_RANGE = 12
-USEREVENT_RANGE = 100
-
-# Helper functions for manipulating event kinds.
-def event_kind_is_begin(kind):
-    return kind % 2 == 0
-
-def event_kind_is_end(kind):
-    return kind % 2 == 1
-
-def event_kind_category(kind):
-    return kind / 2
 
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
@@ -157,298 +110,14 @@ def color_helper(step, num_steps):
     b = "%02x" % b
     return ("#"+r+g+b)
 
-class Point(object):
-    def __init__(self, dim, p0, p1, p2):
-        self.dim = dim
-        self.indexes = (p0, p1, p2)[:max(dim, 1)]
-
-    def __eq__(self, other):
-        return self.dim == other.dim and self.indexes == other.indexes
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def __hash__(self):
-        return hash((self.dim, self.indexes))
-
-    def __repr__(self):
-        return '(%s)' % ','.join(self.indexes)
-
-class TaskVariant(object):
-    def __init__(self, task_id, name):
-        self.task_id = task_id
-        self.name = name
-        self.color = None
-
-    def compute_color(self, step, num_steps):
-        assert self.color is None
-        self.color = color_helper(step, num_steps)
-
-    def __repr__(self):
-        return 'Task ID %s %s' % (self.task_id, self.name)
-
-class UniqueOp(object):
-    def __init__(self, proc, uid, color_string):
-        self.proc = proc
-        self.uid = uid
-        self.color_string = color_string
-        self.dependence_range = None
-        self.trigger_ranges = list() 
-        self.premap_range = None
-        self.mapping_range = None
-        self.launch_range = None
-        self.execution_range = None
-        self.post_range = None
-        self.completion_range = None
-        self.waits = list()
-        self.schedules = list()
-        self.garbage_ranges = list()
-        self.messages = list()
-
-        # Used construction of event begin/end pairs.
-        self.event_match = dict()
-
-    def add_event(self, event, proc):
-        if event.kind_id == 12:
-            # Handle the completion case
-            if self.execution_range is None:
-                return True 
-            assert self.completion_range is None
-            #self.completion_range = \
-            #    EventRange(self, self.execution_range.end_event, event, COMPLETION_RANGE)
-            # Don't add the completion range
-        elif event.kind_id == 13:
-            # Handle the launch case
-            if self.execution_range is None:
-                return True 
-            assert self.launch_range is None
-            self.launch_range = \
-                EventRange(self, event, self.execution_range.start_event, LAUNCH_RANGE)
-        elif event.kind_id == 8 or event.kind_id == 9:
-            return True
-        elif event.is_end():
-            # If it is an end event
-            key = (event.category,proc)
-            #assert key in self.event_match
-            if key not in self.event_match:
-                return True
-            begin_event = self.event_match[key].pop()
-            assert begin_event.category == event.category
-            if event.kind_id == 1:
-                assert self.dependence_range is None
-                time_range = EventRange(self, begin_event, event, DEPENDENCE_RANGE)
-                self.dependence_range = time_range
-                proc.add_time_range(time_range)
-            elif event.kind_id == 3:
-                assert self.premap_range is None
-                time_range = EventRange(self, begin_event, event, PREMAP_RANGE)
-                self.premap_range = time_range
-                proc.add_time_range(time_range)
-            elif event.kind_id == 5:
-                assert self.mapping_range is None
-                time_range = EventRange(self, begin_event, event, MAPPING_RANGE)
-                self.mapping_range = time_range
-                proc.add_time_range(time_range)
-            elif event.kind_id == 7:
-                assert self.execution_range is None
-                time_range = EventRange(self, begin_event, event, EXECUTION_RANGE)
-                self.execution_range = time_range
-                proc.add_time_range(time_range)
-            elif event.kind_id == 9:
-                time_range = EventRange(self, begin_event, event, WAIT_RANGE)
-                self.waits.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 11:
-                time_range = EventRange(self, begin_event, event, SCHEDULE_RANGE)
-                self.schedules.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 15:
-                assert self.post_range is None
-                time_range = EventRange(self, begin_event, event, POST_RANGE)
-                self.post_range = time_range
-                proc.add_time_range(time_range)
-            elif event.kind_id == 17:
-                time_range = EventRange(self, begin_event, event, TRIGGER_RANGE)
-                self.trigger_ranges.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 19:
-                time_range = EventRange(self, begin_event, event, GC_RANGE)
-                self.garbage_ranges.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 21:
-                time_range = EventRange(self, begin_event, event, MESSAGE_RANGE)
-                self.messages.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 23:
-                time_range = EventRange(self, begin_event, event, COPY_RANGE)
-                self.messages.append(time_range)
-                proc.add_time_range(time_range)
-            elif event.kind_id == 101:
-                time_range = EventRange(self, begin_event, event, USEREVENT_RANGE)
-                self.messages.append(time_range)
-                proc.add_time_range(time_range)
-            else:
-                assert False
-        else:
-            assert event.is_begin()
-            key = (event.category,proc)
-            if key not in self.event_match:
-                self.event_match[key] = list()
-            self.event_match[key].append(event)
-        return True
-
-    def waiting_time(self):
-        result = 0
-        for w in self.waits:
-            result = result + w.cumulative_time()
-        return result
-
-class UniqueTask(UniqueOp):
-    def __init__(self, proc, uid, variant, point, color_string):
-        UniqueOp.__init__(self, proc, uid, color_string)
-        self.variant = variant
-        self.point = point
-
-    def __repr__(self):
-        result = '%s (UID %s) Point (%u' % (self.variant, self.uid, self.point.indexes[0])
-        if len(self.point.indexes) > 1:
-            result = result+(',%u' % self.point.indexes[1])
-        if len(self.point.indexes) > 2:
-            result = result+(',%u' % self.point.indexes[2])
-        result = result+')'
-        #if self.launch_range is not None:
-        #    result = result+' Launch '+str(self.launch_range.start_event.abs_time)
-        #if self.completion_range is not None:
-        #    result = result+' Completion '+str(self.completion_range.end_event.abs_time)
-        return result
-
-    def get_variant(self):
-        return self.variant
-
-    def is_mapping(self):
-        return False
-
-    def is_close(self):
-        return False
-
-    def is_copy(self):
-        return False
-
-class UniqueMap(UniqueOp):
-    def __init__(self, proc, uid, parent):
-        UniqueOp.__init__(self, proc, uid, "#009999")
-        self.parent = parent
-
-    def __repr__(self):
-        return 'Map (UID %s) in %s' % (self.uid,self.get_variant().name)
-
-    def get_variant(self):
-        return self.parent.get_variant()
-
-    def is_mapping(self):
-        return True
-
-    def is_close(self):
-        return False
-
-    def is_copy(self):
-        return False
-
-class UniqueClose(UniqueOp):
-    def __init__(self, proc, uid, parent):
-        UniqueOp.__init__(self, proc, uid, "#FF3300")
-        self.parent = parent
-
-    def __repr__(self):
-        return 'Close (UID %s) in %s' % (self.uid,self.get_variant().name)
-
-    def get_variant(self):
-        return self.parent.get_variant()
-
-    def is_mapping(self):
-        return False
-
-    def is_close(self):
-        return True
-
-    def is_copy(self):
-        return False
-
-class UniqueCopy(UniqueOp):
-    def __init__(self, proc, uid, parent):
-        UniqueOp.__init__(self, proc, uid, "#FF3300")
-        self.parent = parent
-
-    def __repr__(self):
-        return 'Copy (UID %s) in %s' % (self.uid, self.get_variant().name)
-
-    def get_variant(self):
-        return self.parent.get_variant()
-
-    def is_mapping(self):
-        return False
-
-    def is_close(self):
-        return False
-
-    def is_copy(self):
-        return False
-
-class UniqueScheduler(UniqueOp):
-    def __init__(self, proc, uid):
-        UniqueOp.__init__(self, proc, uid, "#0099CC")
-
-    def __repr__(self):
-        return 'Scheduler'
-
-    def get_variant(self):
-        return repr(self)
-
-class UserEvent(UniqueOp):
-    def __init__(self, proc, uid, name):
-        UniqueOp.__init__(self, proc, uid, "#FF3300")
-        self.uid = uid
-        self.name = name
-
-    def __repr__(self):
-        return 'User Event %s %s' % (self.uid, self.name)
-
-class Event(object):
-    def __init__(self, kind_id, unique_op, time):
-        self.kind_id = kind_id
-        self.unique_op = unique_op
-        self.abs_time = time
-
-    def is_begin(self):
-        return event_kind_is_begin(self.kind_id)
-
-    def is_end(self):
-        return event_kind_is_end(self.kind_id)
-
-    @property
-    def category(self):
-        return event_kind_category(self.kind_id)
-
-    def __cmp__(self, other):
-        if other is None:
-             return -1
-        if self.abs_time < other.abs_time:
-            return -1
-        elif self.abs_time == other.abs_time:
-            return 0
-        else:
-            return 1
-
-    def __repr__(self):
-        return '%s for %s' % (event_kind_names[self.kind_id], self.unique_op)
+def read_time(string):
+    return long(string)/1000
 
 class TimeRange(object):
-    def __init__(self, start_event, end_event):
-        assert start_event is not None
-        assert end_event is not None
-        assert start_event <= end_event
-        self.start_event = start_event
-        self.end_event = end_event
+    def __init__(self, start_time, stop_time):
+        assert start_time <= stop_time
+        self.start_time = start_time
+        self.stop_time = stop_time
         self.subranges = list()
 
     def __cmp__(self, other):
@@ -456,27 +125,21 @@ class TimeRange(object):
         # sorted by start_event first, and then by *reversed*
         # end_event, so that each range will precede any ranges they
         # contain in the order.
-        if self.start_event < other.start_event:
+        if self.start_time < other.start_time:
             return -1
-        if self.start_event > other.start_event:
+        if self.start_time > other.start_time:
             return 1
 
-        if self.end_event > other.end_event:
+        if self.stop_time > other.stop_time:
             return -1
-        if self.end_event < other.end_event:
+        if self.stop_time < other.stop_time:
             return 1
         return 0
 
     def contains(self, other):
-        #if self.start_event > other.end_event:
-        #    return False
-        #if self.end_event < other.start_event:
-        #    return False
-        if self.start_event <= other.start_event and \
-            other.end_event <= self.end_event:
+        if self.start_time <= other.start_time and \
+            other.stop_time <= self.stop_time:
             return True
-        # Otherwise they overlap one way or the other
-        # but neither contains the other
         return False
 
     def add_range(self, other):
@@ -498,25 +161,8 @@ class TimeRange(object):
 
         self.subranges = [s for s in self.subranges if s not in removed]
 
-    def cumulative_time(self):
-        return self.end_event.abs_time - self.start_event.abs_time
-
-    def non_cumulative_time(self):
-        total_time = self.cumulative_time()
-        start_subrange = 0
-        end_subrange = 0
-        for r in self.subranges:
-            # the following does not work because of overlapping subranges
-            #total_time = total_time - r.cumulative_time()
-            if end_subrange <= r.start_event.abs_time:
-                total_time = total_time - (end_subrange - start_subrange)
-                start_subrange = r.start_event.abs_time
-            end_subrange = r.end_event.abs_time
-        total_time = total_time - (end_subrange - start_subrange)
-
-        assert total_time >= 0
-        return total_time
-
+    def total_time(self):
+        return self.stop_time - self.start_time
 
     def max_levels(self):
         max_lev = 0
@@ -531,30 +177,24 @@ class TimeRange(object):
 
     def __repr__(self):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
-            self.start_event.abs_time,
-            self.end_event.abs_time,
-            self.cumulative_time())
+            self.start_time,
+            self.end_time,
+            self.total_time())
 
 class BaseRange(TimeRange):
-    def __init__(self, proc, start_event, end_event):
-        TimeRange.__init__(self, start_event, end_event)
+    def __init__(self, start_time, stop_time, proc):
+        TimeRange.__init__(self, start_time, stop_time)
         self.proc = proc
-
-    def is_app_range(self):
-        return False
-
-    def is_meta_range(self):
-        return False
 
     def emit_svg(self, printer, level):
         title = repr(self.proc)
-        printer.emit_time_line(level, self.start_event.abs_time, self.end_event.abs_time, title)
+        printer.emit_time_line(level, self.start_time, self.stop_time, title)
         for subrange in self.subranges:
             subrange.emit_svg(printer, level + 1)
 
-    def update_task_stats(self, stat, proc):
+    def update_task_stats(self, stat):
         for r in self.subranges:
-            r.update_task_stats(stat, proc)
+            r.update_task_stats(stat)
 
     def active_time(self):
         total = 0
@@ -574,174 +214,92 @@ class BaseRange(TimeRange):
             total = total + subrange.meta_time()
         return total
 
-class EventRange(TimeRange):
-    def __init__(self, op, start_event, end_event, range_kind):
-        TimeRange.__init__(self, start_event, end_event)
-        self.op = op
-        self.range_kind = range_kind
+class TaskRange(TimeRange):
+    def __init__(self, task):
+        TimeRange.__init__(self, task.start, task.stop)
+        self.task = task
 
     def emit_svg(self, printer, level):
-        if self.range_kind == DEPENDENCE_RANGE:
-            color = "#0000FF" # Duke Blue
-            title = "Dependence Analysis for "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == PREMAP_RANGE:
-            color = "#6600FF" # Purple
-            title = "Premap Analysis for "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == MAPPING_RANGE:
-            color = "#009900" # Green
-            title = "Mapping Analysis for "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == EXECUTION_RANGE:
-            color = self.op.color_string
-            title = "Execution of "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == POST_RANGE:
-            color = "#333399" # Deep Purple 
-            title = "Post Execution of "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == TRIGGER_RANGE:
-            color = "#FF6600" # Orange
-            title = "Trigger Execution of "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == WAIT_RANGE:
-            color = "#FFFFFF" # White
-            title = "Waiting on "+repr(self.op)+" "+repr(self)
-        elif self.range_kind == SCHEDULE_RANGE:
-            color = self.op.color_string
-            title = "Scheduler "+repr(self)
-        elif self.range_kind == GC_RANGE:
-            color = "#990000" # Crimson
-            title = "Garbage Collection"
-        elif self.range_kind == MESSAGE_RANGE:
-            color = "#006600" # Evergreen
-            title = "Message Handler"
-        elif self.range_kind == COPY_RANGE:
-            color = "#8B0000" # Dark Red
-            title = "Low-Level Copy "+repr(self)
-        elif self.range_kind == USEREVENT_RANGE:
-            color = "#003300"
-            title = repr(self.op)+" "+repr(self)
-        else:
-            assert False
-        printer.emit_timing_range(color, level, self.start_event.abs_time, self.end_event.abs_time, title)
+        assert self.task.is_task
+        assert self.task.variant is not None
+        title = repr(self.task)
+        if self.task.is_meta:
+            title += (' '+self.task.get_initiation())
+        title += (' '+self.task.get_timing())
+        printer.emit_timing_range(self.task.variant.color, level,
+                                  self.start_time, self.stop_time, title)
         for subrange in self.subranges:
-            subrange.emit_svg(printer, level + 1)
+            subrange.emit_svg(printer, level+1)
 
-    def update_task_stats(self, stat, proc):
-        if self.range_kind == SCHEDULE_RANGE:
-            stat.update_scheduler(self.cumulative_time(), self.non_cumulative_time(), proc)
-        elif self.range_kind == GC_RANGE:
-            stat.update_gc(self.cumulative_time(), self.non_cumulative_time(), proc)
-        elif self.range_kind == USEREVENT_RANGE:
-            pass
-        elif self.range_kind <> WAIT_RANGE:
-            variant = self.op.get_variant()
-            cum_time = self.cumulative_time()
-            non_cum_time = self.non_cumulative_time()
-            if self.range_kind == DEPENDENCE_RANGE:
-                if self.op.is_mapping():
-                    stat.update_inline_dep_analysis(variant, cum_time, non_cum_time, proc)
-                elif self.op.is_close():
-                    stat.update_close_dep_analysis(variant, cum_time, non_cum_time, proc)
-                elif self.op.is_copy():
-                    stat.update_copy_dep_analysis(variant, cum_time, non_cum_time, proc)
-                else:
-                    stat.update_dependence_analysis(variant, cum_time, non_cum_time, proc)
-            elif self.range_kind == PREMAP_RANGE:
-                stat.update_premappings(variant, cum_time, non_cum_time, proc)
-            elif self.range_kind == MAPPING_RANGE:
-                if self.op.is_mapping():
-                    stat.update_inline_mappings(variant, cum_time, non_cum_time, proc)
-                elif self.op.is_close():
-                    stat.update_close_operations(variant, cum_time, non_cum_time, proc)
-                elif self.op.is_copy():
-                    stat.update_copy_operations(variant, cum_time, non_cum_time, proc)
-                else:
-                    stat.update_mapping_analysis(variant, cum_time, non_cum_time, proc)
-            elif self.range_kind == EXECUTION_RANGE:
-                stat.update_invocations(variant, cum_time, non_cum_time, proc)
-            elif self.range_kind == POST_RANGE:
-                stat.update_post(variant, cum_time, non_cum_time, proc)
-            elif self.range_kind == TRIGGER_RANGE:
-                stat.update_trigger(variant, cum_time, non_cum_time, proc)
-        for r in self.subranges:
-            r.update_task_stats(stat, proc)
+    def update_task_stats(self, stat):
+        exec_time = self.total_time()
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+            exec_time -= subrange.total_time()
+        stat.record_task(self.task, exec_time)
 
     def active_time(self):
-        if self.range_kind == EXECUTION_RANGE:
-            result = self.cumulative_time() - self.op.waiting_time()
-            for subrange in self.subranges:
-                result = result + subrange.active_time()
-            return result
-        elif self.range_kind == WAIT_RANGE:
-            result = 0
-            for subrange in self.subranges:
-                result = result + subrange.active_time()
-            return result
-        else:
-            return self.cumulative_time()
+        return self.total_time()
 
     def application_time(self):
-        if self.range_kind == EXECUTION_RANGE:
-            result = self.cumulative_time() - self.op.waiting_time()
+        if self.task.is_meta:
+            # Add up the application time from all subranges
+            total = 0
             for subrange in self.subranges:
-                result = result + subrange.application_time()
-            return result
-        elif self.range_kind == WAIT_RANGE:
-            result = 0
-            for subrange in self.subranges:
-                result = result + subrange.application_time()
-            return result
+                total += subrange.application_time()
+            return total
         else:
-            return 0
+            # Take our total minus meta time plus application time
+            total = self.total_time()
+            for subrange in self.subranges:
+                total += subrange.application_time()
+                total -= subrange.meta_time()
+                assert total >= 0
+            return total
 
     def meta_time(self):
-        if self.range_kind == EXECUTION_RANGE:
-            result = 0
+        if self.task.is_meta:
+            total = self.total_time()
             for subrange in self.subranges:
-                result = result + subrange.meta_time()
-            return result
-        elif self.range_kind == WAIT_RANGE:
-            result = 0
-            for subrange in self.subranges:
-                result = result + subrange.meta_time()
-            return result
+                total += subrange.meta_time()
+                total -= subrange.application_time()
+                assert total >= 0
+            return total
         else:
-            return self.cumulative_time()
+            total = 0
+            for subrange in self.subranges:
+                total += subrange.meta_time()
+            return total
+        
 
 class Processor(object):
-    def __init__(self, proc_id, utility, kind):
+    def __init__(self, proc_id, kind):
         self.proc_id = proc_id
-        self.utility = utility
-        if kind == 1 or kind == 2: # Kind 2 is a utility proc
-            self.kind = 'CPU'
-        elif kind == 3:
-            self.kind = 'COPY'
-        elif kind == 0:
-            self.kind = 'GPU'
-        else:
-            print 'WARNING: Unrecognized processor kind %s' % kind
-            self.kind = 'OTHER PROC KIND'
-        self.scheduler_op = UniqueScheduler(self, 0)
-        self.timing_ranges = list()
+        self.kind = kind
+        self.task_ranges = list()
         self.full_range = None
 
-    def init_time_range(self, last_time):
-        self.full_range = BaseRange(
-            self,
-            Event(event_kind_ids['PROF_BEGIN_SCHEDULER'], self.scheduler_op, 0L),
-            Event(event_kind_ids['PROF_END_SCHEDULER'], self.scheduler_op, last_time))
+    def add_task(self, task):
+        self.task_ranges.append(TaskRange(task))
 
-    def add_time_range(self, timing_range):
-        self.timing_ranges.append(timing_range)
+    def init_time_range(self, last_time):
+        self.full_range = BaseRange(0L, last_time, self)
 
     def sort_time_range(self):
-        for r in self.timing_ranges:
+        for r in self.task_ranges:
             self.full_range.add_range(r)
         self.full_range.sort_range()
 
+    def emit_svg(self, printer):
+        max_levels = self.full_range.max_levels()
+        # Skip any empty processors
+        if max_levels > 1:
+            # First figure out the max number of levels + 1 for padding
+            printer.init_chunk(max_levels+1)
+            self.full_range.emit_svg_range(printer)
+
     def print_stats(self):
-        # Figure out the total time for this processor
-        # The amount of time the processor was active
-        # The amount of time spent on application tasks
-        # The amount of time spent on meta tasks
-        total_time = self.full_range.cumulative_time()
+        total_time = self.full_range.total_time()
         active_time = self.full_range.active_time()
         application_time = self.full_range.application_time()
         meta_time = self.full_range.meta_time()
@@ -755,200 +313,387 @@ class Processor(object):
         print "    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio)
         print
 
-    def emit_svg(self, printer):
-        # First figure out the max number of levels + 1 for padding
-        max_levels = self.full_range.max_levels() + 1
-        # Skip any empty processors
-        if max_levels > 1:
-            printer.init_processor(max_levels)
-            self.full_range.emit_svg_range(printer)
-
     def update_task_stats(self, stat):
-        self.full_range.update_task_stats(stat, self.proc_id)
+        self.full_range.update_task_stats(stat)
 
     def __repr__(self):
-        if self.kind != 'COPY':
-            return '%s Processor %s%s' % (
-                self.kind,
-                hex(self.proc_id),
-                (' (Utility)' if self.utility else ''))
-        else:
-            return 'Low-Level Copies'
+        return '%s Processor %s' % (self.kind, hex(self.proc_id))
+
+class TimePoint(object):
+    def __init__(self, time, thing, first):
+        self.time = time
+        self.thing = thing
+        self.first = first
+        self.time_key = 2*time + (0 if first is True else 1)
 
 class Memory(object):
-    def __init__(self, mem, kind):
-        self.mem = mem
+    def __init__(self, mem_id, kind, size):
+        self.mem_id = mem_id
         self.kind = kind
+        self.total_size = size
         self.instances = set()
+        self.time_points = list()
         self.max_live_instances = None
-        self.time_points = None
+        self.last_time = None
 
     def add_instance(self, inst):
-        if inst not in self.instances:
-            self.instances.add(inst)
+        self.instances.add(inst)
 
-    def __repr__(self):
-        return 'Memory %s' % hex(self.mem)
-
-    def print_stats(self):
-        print self
-        print "    Total Instances: %d" % len(self.instances)
-
-    def get_title(self):
-        title = ""
-        if self.kind == 0:
-            title = "Global "
-        elif self.kind == 1:
-            title = "System "
-        elif self.kind == 2:
-            title = "Pinned "
-        elif self.kind == 3:
-            title = "Socket "
-        elif self.kind == 4:
-            title = "Zero-Copy "
-        elif self.kind == 5:
-            title = "GPU Framebuffer "
-        elif self.kind == 6:
-            title = "Disk "
-        elif self.kind == 7:
-            title = "HDF "
-        elif self.kind == 8:
-            title = "L3 Cache "
-        elif self.kind == 9:
-            title = "L2 Cache "
-        elif self.kind == 10:
-            title = "L1 Cache "
-        else:
-            print "WARNING: Unsupported memory type in LegionProf: "+str(self.kind)
-        title = title + "Memory "+str(hex(self.mem))
-        return title
+    def init_time_range(self, last_time):
+        self.last_time = last_time 
 
     def sort_time_range(self):
         self.max_live_instances = 0
-        self.time_points = list()
-        live_instances = set()
-        dead_instances = set()
-        # Go through all of our instances and mark down
-        # their creation and destruction times
-        while len(dead_instances) < len(self.instances):
-            # Find the next event
-            next_time = None
-            creation = None
-            target_inst = None
-            for inst in self.instances:
-                if inst in dead_instances:
-                    # Skip this since we're done with it
-                    continue
-                elif inst in live_instances:
-                    # Look at its destruction time
-                    if next_time is None:
-                        next_time = inst.destroy_time
-                        creation = False
-                        target_inst = inst
-                    elif inst.destroy_time < next_time:
-                        next_time = inst.destroy_time
-                        creation = False
-                        target_inst = inst
+        for inst in self.instances:
+            self.time_points.append(TimePoint(inst.create, inst, True))
+            self.time_points.append(TimePoint(inst.destroy, inst, False))
+        # Keep track of which levels are free
+        free_levels = set()
+        # Iterate over all the points in sorted order
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                # Find a level to assign this to
+                if len(free_levels) > 0:
+                    point.thing.level = free_levels.pop()
                 else:
-                    # Look at its creation time
-                    if next_time is None:
-                        next_time = inst.create_time
-                        creation = True
-                        target_inst = inst
-                    elif inst.create_time < next_time:
-                        next_time = inst.create_time
-                        creation = True
-                        target_inst = inst
-            # wonchan: this assertion does not hold when instances are leaked
-            #assert next_time is not None
-            self.time_points.append((next_time,creation,target_inst))
-            if creation:
-                assert target_inst not in live_instances
-                live_instances.add(target_inst)
-                # Check to see if we can update the max live instances
-                total_live = len(live_instances) - len(dead_instances)
-                if total_live > self.max_live_instances:
-                    self.max_live_instances = total_live
+                    point.thing.level = self.max_live_instances + 1
+                    self.max_live_instances += 1
             else:
-                assert target_inst in live_instances
-                assert target_inst not in dead_instances
-                dead_instances.add(target_inst)
+                # Finishing this instance so restore its point
+                free_levels.add(point.thing.level)
 
-    def emit_svg(self, printer, end_time):
-        printer.init_memory(self.max_live_instances+1)
-        levels = dict()
-        for time,create,inst in self.time_points:
-            if create:
-                # Find a level to place the instance at
-                level = None
-                for lev,lev_inst in levels.iteritems():
-                    if lev_inst is None:
-                        level = lev
-                        break
-                # If we didn't find a level, make a new one
-                if level is None:
-                    level = len(levels)+1
-                    assert len(levels) <= self.max_live_instances
-                levels[level] = inst
-                inst.emit_svg(printer, level)
+    def emit_svg(self, printer):
+        assert self.last_time is not None
+        max_levels = self.max_live_instances + 1       
+        if max_levels > 1:
+            printer.init_chunk(max_levels)
+            title = repr(self) 
+            printer.emit_time_line(0, 0, self.last_time, title) 
+            for instance in self.instances:
+                assert instance.level is not None
+                assert instance.create is not None
+                assert instance.destroy is not None
+                inst_name = repr(instance)
+                printer.emit_timing_range(instance.get_color(), instance.level,
+                                          instance.create, instance.destroy, inst_name)
+
+    def print_stats(self):
+        # Compute total and average utilization of memory
+        assert self.last_time is not None
+        average_usage = 0.0
+        max_usage = 0.0
+        current_size = 0
+        previous_time = 0
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            # First do the math for the previous interval
+            usage = float(current_size)/float(self.total_size) if self.total_size <> 0 else 0
+            if usage > max_usage:
+                max_usage = usage
+            duration = point.time - previous_time
+            # Update the average usage
+            average_usage += usage * float(duration)
+            # Update the size
+            if point.first:
+                current_size += point.thing.size  
             else:
-                # Remove the instance from the levels
-                found = False
-                for lev,lev_inst in levels.iteritems():
-                    if inst == lev_inst:
-                        levels[lev] = None
-                        found = True
-                        break
-                assert found
-        printer.emit_time_line(0, 0, end_time, self.get_title())
+                current_size -= point.thing.size
+            # Save the time for the next round through
+            previous_time = point.time
+        # Last interval is empty so don't worry about it
+        average_usage /= float(self.last_time) 
+        print self
+        print "    Total Instances: %d" % len(self.instances)
+        print "    Maximum Utilization: %.3f%%" % (100.0 * max_usage)
+        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
+        print
+  
+    def __repr__(self):
+        return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
-class Instance(object):
-    def __init__(self, iid):
-        self.iid = iid
-        self.memory = None 
-        self.redop = None 
-        self.blocking_factor = None 
-        self.create_time = None 
-        self.destroy_time = None
-        self.color = None
-        self.fields = dict()
+class Channel(object):
+    def __init__(self, src, dst):
+        self.src = src
+        self.dst = dst
+        self.copies = set()
+        self.time_points = list()
+        self.max_live_copies = None 
+        self.last_time = None
 
-    def set_create(self, memory, redop, blocking_factor, create_time):
-        assert self.memory is None or self.memory == memory
-        assert self.redop is None or self.redop == redop
-        assert self.blocking_factor is None or self.blocking_factor == blocking_factor
-        self.memory = memory
-        self.redop = redop
-        self.blocking_factor = blocking_factor
-        if self.create_time is None:
-            self.create_time = create_time
+    def add_copy(self, copy):
+        self.copies.add(copy)
 
-    def set_destroy(self, time):
-        if not (self.destroy_time is None):
-            print(self.destroy_time)
-        assert self.destroy_time is None
-        self.destroy_time = time
+    def init_time_range(self, last_time):
+        self.last_time = last_time
 
-    def add_field(self, fid, size):
-        if fid not in self.fields:
-            self.fields[fid] = size
+    def sort_time_range(self):
+        self.max_live_copies = 0 
+        for copy in self.copies:
+            self.time_points.append(TimePoint(copy.start, copy, True))
+            self.time_points.append(TimePoint(copy.stop, copy, False))
+        # Keep track of which levels are free
+        free_levels = set()
+        # Iterate over all the points in sorted order
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                if len(free_levels) > 0:
+                    point.thing.level = free_levels.pop()
+                else:
+                    point.thing.level = self.max_live_copies + 1
+                    self.max_live_copies += 1
+            else:
+                # Finishing this instance so restore its point
+                free_levels.add(point.thing.level)
+
+    def emit_svg(self, printer):
+        assert self.last_time is not None
+        max_levels = self.max_live_copies + 1
+        if max_levels > 1:
+            printer.init_chunk(max_levels)
+            title = repr(self)
+            printer.emit_time_line(0, 0, self.last_time, title)
+            for copy in self.copies:
+                assert copy.level is not None
+                assert copy.start is not None
+                assert copy.stop is not None
+                copy_name = repr(copy)
+                printer.emit_timing_range(copy.get_color(), copy.level,
+                                          copy.start, copy.stop, copy_name)
+
+    def print_stats(self):
+        assert self.last_time is not None 
+        total_usage_time = 0
+        max_transfers = 0
+        current_transfers = 0
+        previous_time = 0
+        for point in sorted(self.time_points,key=lambda p: p.time_key):
+            if point.first:
+                if current_transfers == 0:
+                    previous_time = point.time
+                current_transfers += 1
+                if current_transfers > max_transfers:
+                    max_transfers = current_transfers
+            else:
+                current_transfers -= 1
+                if current_transfers == 0:
+                    total_usage_time += (point.time - previous_time)
+        average_usage = float(total_usage_time)/float(self.last_time)
+        print self
+        print "    Total Transfers: %d" % len(self.copies)
+        print "    Maximum Executing Transfers: %d" % (max_transfers)
+        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
+        print
+        
+    def __repr__(self):
+        if self.src is None:
+            return 'Fill ' + self.dst.__repr__() + ' Channel'
         else:
-            assert self.fields[fid] == size
+            return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+
+class TaskKind(object):
+    def __init__(self, task_id, name):
+        self.task_id = task_id
+        self.name = 'Task "'+name+'"'
+
+    def __repr__(self):
+        return self.name
+
+class Variant(object):
+    def __init__(self, func_id, name):
+        self.func_id = func_id
+        if name <> None:
+            self.name = 'Task "'+name+'"'
+        else:
+            self.name = 'Task "'+str(func_id)+'"'
+        self.tasks = list()
+        self.color = None
+        self.total_calls = 0
+        self.total_execution_time = 0
+        self.all_calls = list()
+        self.max_call = None
+        self.min_call = None
+
+    def add_task(self, task):
+        self.tasks.append(task)
 
     def compute_color(self, step, num_steps):
         assert self.color is None
         self.color = color_helper(step, num_steps)
 
-    def get_title(self):
-        title = "Instance "+str(hex(self.iid))+" blocking factor "+str(self.blocking_factor)
-        title = title+" fields: "
-        for fid,size in self.fields.iteritems():
-            title = title + "("+str(fid)+","+str(size)+" bytes)"
-        return title
+    def assign_color(self, color):
+        assert self.color is None
+        self.color = color
 
-    def emit_svg(self, printer, level):
+    def total_time(self):
+        return self.total_execution_time
+
+    def increment_calls(self, exec_time):
+        self.total_calls += 1
+        self.total_execution_time += exec_time
+        self.all_calls.append(exec_time)
+        if self.max_call is None:
+            self.max_call = exec_time
+        elif exec_time > self.max_call:
+            self.max_call = exec_time
+        if self.min_call is None:
+            self.min_call = exec_time
+        elif exec_time < self.min_call:
+            self.min_call = exec_time
+
+    def print_stats(self):
+        avg = float(self.total_execution_time)/float(self.total_calls)
+        stddev = 0
+        for call in self.all_calls:
+            diff = float(call) - avg
+            stddev += sqrt(diff * diff)
+        stddev /= float(self.total_calls)
+        stddev = sqrt(stddev)
+        max_dev = (float(self.max_call) - avg) / stddev if stddev != 0.0 else 0.0
+        min_dev = (float(self.min_call) - avg) / stddev if stddev != 0.0 else 0.0
+        print '  '+self.name
+        print '       Total Invocations: '+str(self.total_calls)
+        print '       Total Time: '+str(self.total_execution_time)+' us'
+        print '       Average Time: %.2f us' % (avg)
+        print '       Maximum Time: %d us (%.3f sig)' % (self.max_call,max_dev)
+        print '       Minimum Time: %d us (%.3f sig)' % (self.min_call,min_dev)
+        print
+
+class Operation(object):
+    def __init__(self, op_id):
+        self.op_id = op_id
+        self.kind_num = None
+        self.kind = None
+        self.is_task = False
+        self.is_meta = False
+        self.is_multi = False
+        self.name = 'Operation '+str(op_id)
+        self.variant = None
+        self.task_kind = None
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+        self.color = None
+
+    def assign_color(self, color_map):
+        assert self.color is None
+        if self.is_task:
+            assert self.variant is not None
+            self.color = self.variant.color
+        else:
+            if self.kind is None:
+                self.color = '#000000' # Black
+            else:
+                assert self.kind_num in color_map
+                self.color = color_map[self.kind_num]
+
+    def get_color(self):
         assert self.color is not None
-        printer.emit_timing_range(self.color, level, self.create_time, self.destroy_time, self.get_title())
+        return self.color
+
+    def get_info(self):
+        return 'UID='+str(self.op_id)
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        if self.is_task:
+            assert self.variant is not None
+            return self.variant.name+' '+self.get_info()
+        elif self.is_multi:
+            assert self.task_kind is not None
+            return self.task_kind.name+' '+self.get_info()
+        else:
+            if self.kind is None:
+                return 'Operation '+self.get_info()
+            else:
+                return self.kind+' Operation '+self.get_info()
+
+class MetaTask(object):
+    def __init__(self, variant, op):
+        self.variant = variant
+        self.op = op
+        self.is_task = True
+        self.is_meta = True
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def get_initiation(self):
+        return 'initiated by="'+repr(self.op)+'"'
+
+    def __repr__(self):
+        return 'Meta '+self.variant.name
+
+class Copy(object):
+    def __init__(self, src, dst, op):
+        self.src = src
+        self.dst = dst
+        self.op = op
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_color(self):
+        # Get the color from the operation
+        return self.op.get_color()
+
+    def __repr__(self):
+        return 'Copy initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+
+class Fill(object):
+    def __init__(self, dst, op):
+        self.dst = dst
+        self.op = op
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_color(self):
+        return self.op.get_color()
+
+    def __repr__(self):
+        return 'Fill initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+
+class Instance(object):
+    def __init__(self, inst_id, mem, op, size):
+        self.inst_id = inst_id
+        self.mem = mem
+        self.op = op
+        self.size = size
+        self.create = None
+        self.destroy = None
+        self.level = None
+
+    def get_color(self):
+        # Get the color from the operation
+        return self.op.get_color()
+
+    def __repr__(self):
+        unit = 'B'
+        unit_size = self.size;
+        if self.size > (1024*1024*1024):
+            unit = 'GB'
+            unit_size /= (1024*1024*1024)
+        elif self.size > (1024*1024):
+            unit = 'MB'
+            unit_size /= (1024*1024)
+        elif self.size > 1024:
+            unit = 'KB'
+            unit_size /= 1024
+        return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
+                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
+                ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
 
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
@@ -984,10 +729,7 @@ class SVGPrinter(object):
         html_target.write('</html>\n')
         html_target.close()
 
-    def init_processor(self, total_levels):
-        self.offset = self.offset + total_levels
-
-    def init_memory(self, total_levels):
+    def init_chunk(self, total_levels):
         self.offset = self.offset + total_levels
 
     def emit_timing_range(self, color, level, start, finish, title):
@@ -1022,7 +764,6 @@ class SVGPrinter(object):
         if (y_val+PIXELS_PER_LEVEL) > self.max_height:
             self.max_height = y_val + PIXELS_PER_LEVEL
 
-
     def emit_time_line(self, level, start, finish, title):
         x_start = start//US_PER_PIXEL
         x_end = finish//US_PER_PIXEL
@@ -1032,430 +773,402 @@ class SVGPrinter(object):
         if ((self.offset-level)+1)*PIXELS_PER_LEVEL > self.max_height:
             self.max_height = ((self.offset-level)+1)*PIXELS_PER_LEVEL
 
-class CallTracker(object):
-    def __init__(self):
-        self.invocations = 0
-        self.cum_time = 0
-        self.non_cum_time = 0
-        self.min_time = 0
-        self.max_time = 0
-        self.min_proc = None
-        self.max_proc = None
-        self.all_vals = list()
+class LFSR(object):
+    def __init__(self, size):
+        self.register = ''
+        # Initialize the register with all zeros
+        needed_bits = int(log(size,2))+1
+        self.max_value = pow(2,needed_bits)
+        # We'll use a deterministic seed here so that
+        # our results are repeatable
+        seed_configuration = '1010010011110011'
+        for i in range(needed_bits):
+            self.register += seed_configuration[i]
+        polynomials = {
+          2 : (2,1),
+          3 : (3,2),
+          4 : (4,3),
+          5 : (5,3),
+          6 : (6,5),
+          7 : (7,6),
+          8 : (8,6,5,4),
+          9 : (9,5),
+          10 : (10,7),
+          11 : (11,9),
+          12 : (12,11,10,4),
+          13 : (13,12,11,8),
+          14 : (14,13,12,2),
+          15 : (15,14),
+          16 : (16,14,13,11),
+        }
+        # If we need more than 16 bits that is a lot tasks
+        assert needed_bits in polynomials
+        self.taps = polynomials[needed_bits]
 
-    def increment(self, cum, non_cum, proc):
-        if self.invocations == 0:
-            self.min_time = cum
-            self.max_time = cum
-            self.min_proc = proc
-            self.max_proc = proc
+    def get_max_value(self):
+        return self.max_value
+        
+    def get_next(self):
+        xor = 0
+        for t in self.taps:
+            xor += int(self.register[t-1])
+        if xor % 2 == 0:
+            xor = 0
         else:
-            if cum < self.min_time:
-                self.min_time = cum
-                self.min_proc = proc
-            if cum > self.max_time:
-                self.max_time = cum
-                self.max_proc = proc
-        self.invocations = self.invocations + 1
-        self.cum_time = self.cum_time + cum
-        self.non_cum_time = self.non_cum_time + non_cum
-        self.all_vals.append(cum)
-
-    def is_empty(self):
-        return self.invocations == 0
-
-    def print_stats(self, total_time):
-        print "                Total Invocations: "+str(self.invocations)
-        if self.invocations > 0:
-            stddev = 0
-            assert self.invocations == len(self.all_vals)
-            avg = float(self.cum_time)/float(self.invocations)
-            max_dev = 0.0
-            min_dev = 0.0
-            if self.invocations > 1:
-                for val in self.all_vals:
-                    diff = float(val) - avg
-                    stddev = stddev + sqrt(diff * diff)
-                stddev = stddev / float(self.invocations)
-                stddev = sqrt(stddev)
-                max_dev = (float(self.max_time) - avg) / stddev if stddev != 0 else 0.0
-                min_dev = (float(self.min_time) - avg) / stddev if stddev != 0 else 0.0
-            print "                Cumulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
-            print "                Non-Cumulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
-            print "                Average Cum Time: %.3f us" % (float(self.cum_time)/float(self.invocations))
-            print "                Average Non-Cum Time: %.3f us" % (float(self.non_cum_time)/float(self.invocations))
-            print "                Maximum Cum Time: %.3f us (%.3f sig) on processor %s" % (float(self.max_time),max_dev,hex(self.max_proc))
-            print "                Minimum Cum Time: %.3f us (%.3f sig) on processor %s" % (float(self.min_time),min_dev,hex(self.min_proc))
-
-class StatVariant(object):
-    def __init__(self, var):
-        self.var = var
-        self.invocations = CallTracker()
-        self.inline_dep_analysis = CallTracker()
-        self.inline_mappings = CallTracker()
-        self.close_dep_analysis = CallTracker()
-        self.close_operations = CallTracker()
-        self.copy_dep_analysis = CallTracker()
-        self.copy_operations = CallTracker()
-        self.dependence_analysis = CallTracker()
-        self.premappings = CallTracker()
-        self.mapping_analysis = CallTracker()
-        self.post_operations = CallTracker()
-        self.triggers = CallTracker()
-
-    def update_invocations(self, cum, non_cum, proc):
-        self.invocations.increment(cum, non_cum, proc)
-
-    def update_inline_dep_analysis(self, cum, non_cum, proc):
-        self.inline_dep_analysis.increment(cum, non_cum, proc)
-
-    def update_inline_mappings(self, cum, non_cum, proc):
-        self.inline_mappings.increment(cum, non_cum, proc)
-
-    def update_close_dep_analysis(self, cum, non_cum, proc):
-        self.close_dep_analysis.increment(cum, non_cum, proc)
-
-    def update_close_operations(self, cum, non_cum, proc):
-        self.close_operations.increment(cum, non_cum, proc)
-
-    def update_copy_dep_analysis(self, cum, non_cum, proc):
-        self.copy_dep_analysis.increment(cum, num_cum, proc)
-
-    def update_copy_operations(self, cum, non_cum, proc):
-        self.copy_operations.increment(cum, non_cum, proc)
-
-    def update_dependence_analysis(self, cum, non_cum, proc):
-        self.dependence_analysis.increment(cum, non_cum, proc)
-
-    def update_premappings(self, cum, non_cum, proc):
-        self.premappings.increment(cum, non_cum, proc)
-
-    def update_mapping_analysis(self, cum, non_cum, proc):
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_post_operations(self, cum, non_cum, proc):
-        self.post_operations.increment(cum, non_cum, proc)
-
-    def update_trigger(self, cum, non_cum, proc):
-        self.triggers.increment(cum, non_cum, proc)
-
-    def cumulative_time(self):
-        time = 0
-        time = time + self.invocations.cum_time
-        time = time + self.inline_dep_analysis.cum_time
-        time = time + self.inline_mappings.cum_time
-        time = time + self.close_dep_analysis.cum_time
-        time = time + self.close_operations.cum_time
-        time = time + self.copy_dep_analysis.cum_time
-        time = time + self.copy_operations.cum_time
-        time = time + self.dependence_analysis.cum_time
-        time = time + self.premappings.cum_time
-        time = time + self.mapping_analysis.cum_time
-        time = time + self.post_operations.cum_time
-        time = time + self.triggers.cum_time
-        return time
-
-    def non_cumulative_time(self):
-        time = 0
-        time = time + self.invocations.non_cum_time
-        time = time + self.inline_dep_analysis.non_cum_time
-        time = time + self.inline_mappings.non_cum_time
-        time = time + self.close_dep_analysis.non_cum_time
-        time = time + self.close_operations.non_cum_time
-        time = time + self.copy_dep_analysis.non_cum_time
-        time = time + self.copy_operations.non_cum_time
-        time = time + self.dependence_analysis.non_cum_time
-        time = time + self.premappings.non_cum_time
-        time = time + self.mapping_analysis.non_cum_time
-        time = time + self.post_operations.non_cum_time
-        time = time + self.triggers.non_cum_time
-        return time
-
-    def print_stats(self, total_time, cumulative, verbose):
-        title_str = repr(self.var)
-        to_add = 50 - len(title_str)
-        if to_add > 0:
-            for idx in range(to_add):
-                title_str = title_str+' '
-        cum_time = self.cumulative_time()
-        non_cum_time = self.non_cumulative_time()
-        if cumulative:
-            cum_per = 100.0*(float(cum_time)/float(total_time))
-            title_str = title_str+("%d us (%.3f%%)" % (cum_time,cum_per))
-        else:
-            non_cum_per = 100.0*(float(non_cum_time)/float(total_time))
-            title_str = title_str+("%d us (%.3f%%)" % (non_cum_time,non_cum_per))
-        print "    "+title_str
-        # Not verbose, print out the application and meta timings
-        if not verbose:
-            app_cum_time = self.invocations.cum_time
-            app_non_cum_time = self.invocations.non_cum_time
-            meta_cum_time = cum_time - app_cum_time
-            meta_non_cum_time = non_cum_time - app_non_cum_time
-            print "          Executions (APP):"
-            self.invocations.print_stats(total_time)
-            print "          Meta Execution Time (META):"
-            print "                Cumulative Time: %d us (%.3f%%)" % \
-                (meta_cum_time,100.0*float(meta_cum_time)/float(total_time))
-            print "                Non-Cumulative Time: %d us (%.3f%%)" % \
-                (meta_non_cum_time,100.0*float(meta_non_cum_time)/float(total_time))
-        else:
-            self.emit_call_stat(self.invocations,"Executions (APP):",total_time)
-            self.emit_call_stat(self.dependence_analysis,"Dependence Analysis (META):",total_time)
-            self.emit_call_stat(self.premappings,"Premapping Analysis (META):",total_time)
-            self.emit_call_stat(self.mapping_analysis,"Mapping Analysis (META):",total_time)
-            self.emit_call_stat(self.inline_dep_analysis,"Inline Mapping Dependence (META):",total_time)
-            self.emit_call_stat(self.inline_mappings,"Inline Mapping Analysis (META):",total_time)
-            self.emit_call_stat(self.close_dep_analysis,"Close Dependence Analysis (META):",total_time)
-            self.emit_call_stat(self.close_operations,"Close Mapping Analysis (META):",total_time)
-            self.emit_call_stat(self.copy_dep_analysis,"Copy Dependence Analysis (META):",total_time)
-            self.emit_call_stat(self.copy_operations,"Copy Mapping Analysis (META):",total_time)
-            self.emit_call_stat(self.triggers,"Trigger Calls (META):",total_time)
-            self.emit_call_stat(self.post_operations,"Post Operations (META):",total_time)
-
-    def emit_call_stat(self, calls, string, total_time):
-        if not calls.is_empty():
-            print "         "+string 
-            calls.print_stats(total_time)
+            xor = 1
+        self.register = str(xor) + self.register[:-1]
+        return int(self.register,2)
 
 class StatGatherer(object):
-    def __init__(self):
-        self.variants = dict()
-        self.scheduler = CallTracker()
-        self.gcs = CallTracker()
-        self.executing_task = list()
-        self.dependence_analysis = CallTracker()
-        self.mapping_analysis = CallTracker()
+    def __init__(self, state):
+        self.state = state
+        self.application_tasks = set()
+        self.meta_tasks = set()
 
-    def initialize_variant(self, var):
-        assert var not in self.variants
-        self.variants[var] = StatVariant(var)
+    def record_task(self, task, exec_time):
+        assert task.variant is not None
+        if task.is_meta:
+            if task.variant not in self.meta_tasks:
+                self.meta_tasks.add(task.variant)
+            task.variant.increment_calls(exec_time)
+        else:
+            if task.variant not in self.application_tasks:
+                self.application_tasks.add(task.variant)
+            task.variant.increment_calls(exec_time)
 
-    def update_invocations(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_invocations(cum, non_cum, proc)
-
-    def update_inline_dep_analysis(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_inline_dep_analysis(cum, non_cum, proc)
-        self.dependence_analysis.increment(cum, non_cum, proc)
-
-    def update_inline_mappings(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_inline_mappings(cum, non_cum, proc)
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_close_dep_analysis(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_close_dep_analysis(cum, non_cum, proc)
-        self.dependence_analysis.increment(cum, non_cum, proc)
-
-    def update_close_operations(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_close_operations(cum, non_cum, proc)
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_copy_dep_analysis(self, var, cum_non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_copy_dep_analysis(cum, non_cum, proc)
-        self.dependence_analysis.increment(cum, non_cum, proc)
-
-    def update_copy_operations(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_copy_operations(cum, non_cum, proc)
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_dependence_analysis(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_dependence_analysis(cum, non_cum, proc)
-        self.dependence_analysis.increment(cum, non_cum, proc)
-
-    def update_premappings(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_premappings(cum, non_cum, proc)
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_mapping_analysis(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_mapping_analysis(cum, non_cum, proc)
-        self.mapping_analysis.increment(cum, non_cum, proc)
-
-    def update_post(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_post_operations(cum, non_cum, proc)
-
-    def update_trigger(self, var, cum, non_cum, proc):
-        assert var in self.variants
-        self.variants[var].update_trigger(cum, non_cum, proc)
-
-    def update_scheduler(self, cum, non_cum, proc):
-        self.scheduler.increment(cum, non_cum, proc)
-
-    def update_gc(self, cum, non_cum, proc):
-        self.gcs.increment(cum, non_cum, proc)
-
-    def print_stats(self, total_time, cumulative, verbose):
+    def print_stats(self):
         print "  -------------------------"
         print "  Task Statistics"
         print "  -------------------------"
-        # Sort the tasks based on either their cumulative
-        # or non-cumulative time
-        task_list = list()
-        for v,var in self.variants.iteritems():
-            task_list.append(var)
-        if cumulative:
-            task_list.sort(key=lambda t: t.cumulative_time())
-        else:
-            task_list.sort(key=lambda t: t.non_cumulative_time())
-        task_list.reverse()
-        for t in task_list:
-            t.print_stats(total_time, cumulative, verbose)
+        for variant in sorted(self.application_tasks,
+                                key=lambda v: v.total_time(),reverse=True):
+            variant.print_stats()
         print "  -------------------------"
         print "  Meta-Task Statistics"
         print "  -------------------------"
-        if not self.scheduler.is_empty():
-            print "  Scheduler (META):"
-            self.scheduler.print_stats(total_time)
-        if not self.gcs.is_empty():
-            print "  Garbage Collection (META):"
-            self.gcs.print_stats(total_time)
-        if not self.dependence_analysis.is_empty():
-            print "  Total Dependence Analyses (META):"
-            self.dependence_analysis.print_stats(total_time)
-        if not self.mapping_analysis.is_empty():
-            print "  Total Mapping Analyses (META):"
-            self.mapping_analysis.print_stats(total_time)
+        for variant in sorted(self.meta_tasks,
+                                key=lambda v: v.total_time(),reverse=True):
+            variant.print_stats()
 
 class State(object):
     def __init__(self):
         self.processors = {}
         self.memories = {}
-        self.task_variants = {}
-        self.unique_ops = {}
-        self.instances = {}
-        self.last_time = None
-        self.userevents = {}
+        self.channels = {}
+        self.task_kinds = {}
+        self.variants = {}
+        self.meta_variants = {}
+        self.op_kinds = {}
+        self.operations = {}
+        self.multi_tasks = {}
+        self.first_times = {}
+        self.last_times = {}
+        self.last_time = 0L
 
-    def create_processor(self, proc_id, utility, kind):
+    def parse_log_file(self, file_name):
+        with open(file_name, 'rb') as log:  
+            matches = 0
+            # Keep track of the first and last times
+            first_time = 0L
+            last_time = 0L
+            for line in log:
+                matches += 1  
+                m = task_info_pat.match(line)
+                if m is not None:
+                    self.log_task_info(long(m.group('tid')),
+                                       int(m.group('fid')),
+                                       int(m.group('pid'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = meta_info_pat.match(line)
+                if m is not None:
+                    self.log_meta_info(long(m.group('opid')),
+                                       int(m.group('hlr')),
+                                       int(m.group('pid'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = copy_info_pat.match(line)
+                if m is not None:
+                    self.log_copy_info(long(m.group('opid')),
+                                       int(m.group('src'),16),
+                                       int(m.group('dst'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = fill_info_pat.match(line)
+                if m is not None:
+                    self.log_fill_info(long(m.group('opid')),
+                                       int(m.group('dst'),16),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')))
+                    continue
+                m = inst_info_pat.match(line)
+                if m is not None:
+                    self.log_inst_info(long(m.group('opid')),
+                                       int(m.group('inst'),16),
+                                       int(m.group('mem'),16),
+                                       long(m.group('bytes')),
+                                       read_time(m.group('create')),
+                                       read_time(m.group('destroy')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')),
+                                  m.group('name'))
+                    continue
+                m = variant_pat.match(line)
+                if m is not None:
+                    self.log_variant(int(m.group('fid')),
+                                     m.group('name'))
+                    continue
+                m = operation_pat.match(line)
+                if m is not None:
+                    self.log_operation(long(m.group('opid')),
+                                       int(m.group('kind')))
+                    continue
+                m = multi_pat.match(line)
+                if m is not None:
+                    self.log_multi(long(m.group('opid')),
+                                   int(m.group('tid')))
+                    continue
+                m = meta_desc_pat.match(line)
+                if m is not None:
+                    self.log_meta_desc(int(m.group('hlr')),
+                                       m.group('kind'))
+                    continue
+                m = op_desc_pat.match(line)
+                if m is not None:
+                    self.log_op_desc(int(m.group('opkind')),
+                                     m.group('kind'))
+                    continue
+                m = proc_desc_pat.match(line)
+                if m is not None:
+                    kind = int(m.group('kind'))
+                    assert kind in processor_kinds
+                    self.log_proc_desc(int(m.group('pid'),16),
+                                       processor_kinds[kind])
+                    continue
+                m = mem_desc_pat.match(line)
+                if m is not None:
+                    kind = int(m.group('kind'))
+                    assert kind in memory_kinds
+                    self.log_mem_desc(int(m.group('mid'),16),
+                                      memory_kinds[kind],
+                                      long(m.group('size')))
+                    continue
+                # If we made it here then we failed to match
+                matches -= 1 
+                print 'Skipping line: %s' % line.strip()
+        return matches
+
+    def log_task_info(self, task_id, func_id, proc_id,
+                      create, ready, start, stop):
+        variant = self.find_variant(func_id)
+        task = self.find_task(task_id, variant)
+        task.create = create
+        assert create <= ready
+        task.ready = ready
+        assert ready <= start
+        task.start = start
+        assert start <= stop
+        task.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
+
+    def log_meta_info(self, op_id, hlr, proc_id, 
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        variant = self.find_meta_variant(hlr)
+        meta = self.create_meta(variant, op)
+        meta.create = create
+        assert create <= ready
+        meta.ready = ready
+        assert ready <= start
+        meta.start = start
+        assert start <= stop
+        meta.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(meta)
+
+    def log_copy_info(self, op_id, src_mem, dst_mem,
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        src = self.find_memory(src_mem)
+        dst = self.find_memory(dst_mem)
+        copy = self.create_copy(src, dst, op)
+        copy.create = create
+        assert create <= ready
+        copy.ready = ready
+        assert ready <= start
+        copy.start = start
+        assert start <= stop
+        copy.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        channel = self.find_channel(src, dst)
+        channel.add_copy(copy)
+
+    def log_fill_info(self, op_id, dst_mem,
+                      create, ready, start, stop):
+        op = self.find_op(op_id)
+        dst = self.find_memory(dst_mem)
+        fill = self.create_fill(dst, op)
+        fill.create = create
+        assert create <= ready
+        fill.ready = ready
+        assert ready <= start
+        fill.start = start
+        assert start <= stop
+        fill.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop
+        channel = self.find_channel(None, dst)
+        channel.add_copy(fill)
+
+    def log_inst_info(self, op_id, inst_id, mem_id, size, 
+                      create, destroy):
+        op = self.find_op(op_id)
+        mem = self.find_memory(mem_id)
+        inst = self.create_instance(inst_id, mem, op, size)
+        inst.create = create
+        assert create <= destroy
+        inst.destroy = destroy
+        if destroy > self.last_time:
+            self.last_time = destroy 
+        mem.add_instance(inst)
+
+    def log_kind(self, task_id, name):
+        if task_id not in self.task_kinds:
+            self.task_kinds[task_id] = TaskKind(task_id, name)
+
+    def log_variant(self, func_id, name):
+        if func_id not in self.variants:
+            self.variants[func_id] = Variant(func_id, name)
+        else:
+            self.variants[func_id].name = name
+
+    def log_operation(self, op_id, kind):
+        op = self.find_op(op_id)
+        assert kind in self.op_kinds
+        op.kind_num = kind
+        op.kind = self.op_kinds[kind]
+
+    def log_multi(self, op_id, task_id):
+        op = self.find_op(op_id)
+        if task_id in self.task_kinds:
+            op.is_multi = True
+            op.task_kind = self.task_kinds[task_id]
+
+    def log_meta_desc(self, hlr, name):
+        if hlr not in self.meta_variants:
+            self.meta_variants[hlr] = Variant(hlr, name)
+        else:
+            self.meta_variants[hlr].name = name
+
+    def log_proc_desc(self, proc_id, kind):
         if proc_id not in self.processors:
-            self.processors[proc_id] = Processor(proc_id, utility, kind)
-
-    def create_memory(self, mem, kind):
-        if mem not in self.memories:
-            self.memories[mem] = Memory(mem, kind)
-
-    def create_task_variant(self, task_id, name):
-        if task_id not in self.task_variants:
-            self.task_variants[task_id] = TaskVariant(task_id, name)
+            self.processors[proc_id] = Processor(proc_id, kind)
         else:
-            assert self.task_variants[task_id].name == name
+            self.processors[proc_id].kind = kind
 
-    def create_unique_task(self, proc_id, uid, task_id, dim, p0, p1, p2):
-        if uid in self.unique_ops:
-            return
-        assert proc_id in self.processors
-        assert task_id in self.task_variants
-
-        self.unique_ops[uid] = UniqueTask(
-            proc = self.processors[proc_id],
-            variant = self.task_variants[task_id],
-            uid = uid,
-            point = Point(dim, p0, p1, p2),
-            color_string = color_helper(task_id % len(self.task_variants), len(self.task_variants)))
-
-    def create_unique_map(self, proc_id, uid, parent_uid):
-        assert uid not in self.unique_ops
-        if parent_uid not in self.unique_ops:
-            return False
-        assert proc_id in self.processors
-
-        self.unique_ops[uid] = UniqueMap(
-            proc = self.processors[proc_id],
-            uid = uid,
-            parent = self.unique_ops[parent_uid])
-        return True
-
-    def create_unique_close(self, proc_id, uid, parent_uid):
-        assert uid not in self.unique_ops
-        if parent_uid not in self.unique_ops:
-            return False
-        assert proc_id in self.processors
-
-        self.unique_ops[uid] = UniqueClose(
-            proc = self.processors[proc_id],
-            uid = uid,
-            parent = self.unique_ops[parent_uid])
-        return True
-
-    def create_unique_copy(self, proc_id, uid, parent_uid):
-        assert uid not in self.unique_ops
-        if parent_uid not in self.unique_ops:
-            return False
-        assert proc_id in self.processors
-        self.unique_ops[uid] = UniqueCopy(
-            proc = self.processors[proc_id],
-            uid = uid,
-            parent = self.unique_ops[parent_uid])
-        return True
-
-    def create_event(self, proc_id, uid, kind_id, time):
-        assert proc_id in self.processors
-        if uid <> 0 and not (uid in self.unique_ops or uid in self.userevents):
-            return False
-
-        if uid == 0:
-            unique_op = self.processors[proc_id].scheduler_op
-        elif kind_id == 100 or kind_id == 101:
-            assert uid in self.userevents
-            unique_op = self.userevents[uid]
+    def log_mem_desc(self, mem_id, kind, size):
+        if mem_id not in self.memories:
+            self.memories[mem_id] = Memory(mem_id, kind, size)
         else:
-            unique_op = self.unique_ops[uid]
+            self.memories[mem_id].kind = kind
 
-        event = Event(
-            unique_op = unique_op,
-            kind_id = kind_id,
-            time = time)
-        return unique_op.add_event(event, self.processors[proc_id])
+    def log_op_desc(self, kind, name):
+        if kind not in self.op_kinds:
+            self.op_kinds[kind] = name
 
-    def create_instance(self, iid, mem, redop, bf, time):
-        if iid not in self.instances:
-            self.instances[iid] = [Instance(iid)]
-        elif self.instances[iid][-1].destroy_time <> None and \
-                self.instances[iid][-1].create_time <> None:
-            self.instances[iid].append(Instance(iid))
+    def find_processor(self, proc_id):
+        if proc_id not in self.processors:
+            self.processors[proc_id] = Processor(proc_id, None)
+        return self.processors[proc_id]
 
-        self.instances[iid][-1].set_create(self.memories[mem],
-                                       redop, bf, time)
-        assert mem in self.memories
-        self.memories[mem].add_instance(self.instances[iid][-1])
+    def find_memory(self, mem_id):
+        if mem_id not in self.memories:
+            # use 'system memory' as the default kind
+            self.memories[mem_id] = Memory(mem_id, 1, None)
+        return self.memories[mem_id]
 
-    def add_instance_field(self, iid, fid, size):
-        assert iid in self.instances
-        self.instances[iid][-1].add_field(fid, size)
+    def find_channel(self, src, dst):
+        if src is not None:
+            key = (src,dst)
+            if key not in self.channels:
+                self.channels[key] = Channel(src,dst)
+            return self.channels[key]
+        else:
+            # This is a fill channel
+            if dst not in self.channels:
+                self.channels[dst] = Channel(None,dst)
+            return self.channels[dst]
 
-    def destroy_instance(self, iid, time):
-        #assert iid in self.instances
-        if iid not in self.instances or \
-                self.instances[iid][-1].destroy_time <> None:
-            self.instances[iid] = [Instance(iid)]
-        self.instances[iid][-1].set_destroy(time)
+    def find_variant(self, func_id):
+        if func_id not in self.variants:
+            self.variants[func_id] = Variant(func_id, None)
+        return self.variants[func_id]
 
-    def create_userevent(self, proc, uid, name):
-        assert uid not in self.userevents
-        self.userevents[uid] = UserEvent(proc, uid, name)
-        assert uid in self.userevents
+    def find_meta_variant(self, hlr_id):
+        if hlr_id not in self.meta_variants:
+            self.meta_variants[hlr_id] = Variant(hlr_id, None)
+        return self.meta_variants[hlr_id]
+
+    def find_op(self, op_id):
+        if op_id not in self.operations:
+            self.operations[op_id] = Operation(op_id) 
+        return self.operations[op_id]
+
+    def find_task(self, task_id, variant):
+        task = self.find_op(task_id)
+        # Upgrade this operation to a task if necessary
+        if not task.is_task:
+            task.is_task = True
+            task.name = 'Task '+str(task_id) 
+            task.variant = variant
+            variant.add_task(task)
+        return task
+
+    def create_meta(self, variant, op):
+        result = MetaTask(variant, op)
+        variant.add_task(result)
+        return result
+
+    def create_copy(self, src, dst, op):
+        return Copy(src, dst, op)
+
+    def create_fill(self, dst, op):
+        return Fill(dst, op)
+
+    def create_instance(self, inst_id, mem, op, size):
+        return Instance(inst_id, mem, op, size)
 
     def build_time_ranges(self):
-        assert self.last_time is not None
-
+        assert self.last_time is not None 
+        # Processors first
         for proc in self.processors.itervalues():
             proc.init_time_range(self.last_time)
-
-        # Now that we have all the time ranges added, sort themselves
-        for proc in self.processors.itervalues():
             proc.sort_time_range()
         for mem in self.memories.itervalues():
+            mem.init_time_range(self.last_time)
             mem.sort_time_range()
+        for channel in self.channels.itervalues():
+            channel.init_time_range(self.last_time)
+            channel.sort_time_range()
 
     def print_processor_stats(self):
         print '****************************************************'
@@ -1473,272 +1186,146 @@ class State(object):
             mem.print_stats()
         print
 
-    def print_task_stats(self, cumulative, verbose):
+    def print_channel_stats(self):
+        print '****************************************************'
+        print '   CHANNEL STATS'
+        print '****************************************************'
+        for c,channel in sorted(self.channels.iteritems()):
+            channel.print_stats()
+        print
+
+    def print_task_stats(self):
         print '****************************************************'
         print '   TASK STATS'
         print '****************************************************'
-        stat = StatGatherer()
-        for variant in self.task_variants.itervalues():
-            stat.initialize_variant(variant)
+        stat = StatGatherer(self)
         for proc in self.processors.itervalues():
             proc.update_task_stats(stat)
-        # Total time is the overall execution time multiplied by the number of processors
-        total_time = self.last_time * len(self.processors)
-        stat.print_stats(total_time, cumulative, verbose)
+        stat.print_stats()
         print
 
-    def generate_svg_picture(self, file_name, html_file):
-        # Before doing this, generate all the colors
-        num_variants = len(self.task_variants)
-        idx = 0
-        for variant in self.task_variants.itervalues():
-            variant.compute_color(idx, num_variants)
-            idx = idx + 1
-        printer = SVGPrinter(file_name, html_file)
-        for p,proc in sorted(self.processors.iteritems()):
-            proc.emit_svg(printer)
-        printer.close()
+    def print_stats(self, verbose):
+        if verbose:
+            self.print_processor_stats()
+            self.print_memory_stats()
+            self.print_channel_stats()
+        self.print_task_stats()
 
-    def generate_mem_picture(self, file_name, html_file):
-        # Check for any leaked instances
-        # and generate colors
-        num_instances = 0
-        for inst_list in self.instances.itervalues():
-            num_instances += len(inst_list)
-        idx = 0
-        for i,inst_list in self.instances.iteritems():
-            for inst in inst_list:
-                if inst.destroy_time is None:
-                    inst.set_destroy(self.last_time)
-                    print 'INFO: Instance %u leaked' % inst.iid
-                inst.compute_color(idx, num_instances)
-                idx = idx + 1
-        printer = SVGPrinter(file_name, html_file)
-        for m,mem in sorted(self.memories.iteritems(),key=lambda x: x[0]):
-            mem.emit_svg(printer, self.last_time)
+    def emit_visualization(self, output_prefix, show_procs,
+                           show_channels, show_instances):
+        svg_file = output_prefix + '.svg'
+        html_file = output_prefix + '.html'
+        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
+        # Subtract out some colors for which we have special colors
+        num_colors = len(self.variants)+len(self.meta_variants)+len(self.op_kinds)
+       # Use a LFSR to randomize these colors
+        lsfr = LFSR(num_colors)
+        num_colors = lsfr.get_max_value()
+        op_colors = {}
+        for variant in self.variants.itervalues():
+            variant.compute_color(lsfr.get_next(), num_colors)
+        for variant in self.meta_variants.itervalues():
+            if variant.func_id == 1: # Remote message
+                variant.assign_color('#006600') # Evergreen
+            elif variant.func_id == 2: # Post-Execution
+                variant.assign_color('#333399') # Deep Purple
+            elif variant.func_id == 6: # Garbage Collection
+                variant.assign_color('#990000') # Crimson
+            elif variant.func_id == 7: # Logical Dependence Analysis
+                variant.assign_color('#0000FF') # Duke Blue
+            elif variant.func_id == 8: # Operation Physical Analysis
+                variant.assign_color('#009900') # Green
+            elif variant.func_id == 9: # Task Physical Analysis
+                variant.assign_color('#009900') #Green
+            else:
+                variant.compute_color(lsfr.get_next(), num_colors)
+        for kind in self.op_kinds.iterkeys():
+            op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
+        # Now we need to assign all the operations colors
+        for op in self.operations.itervalues():
+            op.assign_color(op_colors)
+        # Make a printer and emit the files
+        printer = SVGPrinter(svg_file, html_file)
+        if show_procs:
+            for p,proc in sorted(self.processors.iteritems()):
+                proc.emit_svg(printer)
+        if show_channels:
+            for c,channel in sorted(self.channels.iteritems()):
+                channel.emit_svg(printer)
+        if show_instances:
+            for m,memory in sorted(self.memories.iteritems()):
+                memory.emit_svg(printer)
         printer.close()
-
-def parse_log_file(file_name, state):
-    with open(file_name, 'rb') as log:
-        matches = 0
-        # Also find the time for the last event.
-        last_time = 0L
-        replay_lines = list()
-        for line in log:
-            matches += 1
-            m = processor_pat.match(line)
-            if m is not None:
-                state.create_processor(
-                    proc_id = int(m.group('proc'),16),
-                    utility = int(m.group('utility')) == 1,
-                    kind = int(m.group('kind')))
-                continue
-            m = memory_pat.match(line)
-            if m is not None:
-                state.create_memory(
-                    mem = int(m.group('mem'),16),
-                    kind = int(m.group('kind')))
-                continue
-            m = task_variant_pat.match(line)
-            if m is not None:
-                state.create_task_variant(
-                    task_id = int(m.group('tid')),
-                    name = m.group('name'))
-                continue
-            m = unique_task_pat.match(line)
-            if m is not None:
-                state.create_unique_task(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    task_id = int(m.group('tid')),
-                    dim = int(m.group('dim')),
-                    p0 = int(m.group('p0')),
-                    p1 = int(m.group('p1')),
-                    p2 = int(m.group('p2')))
-                continue
-            m = unique_map_pat.match(line)
-            if m is not None:
-                if not state.create_unique_map(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    replay_lines.append(line)
-                continue
-            m = unique_close_pat.match(line)
-            if m is not None:
-                if not state.create_unique_close(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    replay_lines.append(line)
-                continue
-            m = unique_copy_pat.match(line)
-            if m is not None:
-                if not state.create_unique_copy(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    replay_lines.append(line)
-                continue
-            m = event_pat.match(line)
-            if m is not None:
-                time = long(m.group('time'))
-                if not state.create_event(
-                    proc_id = int(m.group('proc'),16),
-                    kind_id = int(m.group('kind')),
-                    uid = int(m.group('uid')),
-                    time = time):
-                    replay_lines.append(line)
-                if time > last_time:
-                    last_time = time
-                continue
-            m = create_pat.match(line)
-            if m is not None:
-                state.create_instance(
-                    iid = int(m.group('iid'),16),
-                    mem = int(m.group('mem')),
-                    redop = int(m.group('redop')),
-                    bf = int(m.group('bf')),
-                    time = long(m.group('time')))
-                continue
-            m = field_pat.match(line)
-            if m is not None:
-                state.add_instance_field(
-                    iid = int(m.group('iid'),16),
-                    fid = int(m.group('fid')),
-                    size = int(m.group('size')))
-                continue
-            m = destroy_pat.match(line)
-            if m is not None:
-                state.destroy_instance(
-                      iid = int(m.group('iid'),16),
-                      time = long(m.group('time')))
-                continue
-            m = userevent_pat.match(line)
-            if m is not None:
-                state.create_userevent(
-                    proc = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    name = m.group('name'))
-                continue
-            # If we made it here, then we failed to match.
-            matches -= 1
-            print 'Skipping line: %s' % line.strip()
-    if state.last_time == None:
-        state.last_time = last_time
-    elif state.last_time < last_time:
-        state.last_time = last_time
-    while len(replay_lines) > 0:
-        to_delete = set()
-        for line in replay_lines:
-            m = unique_map_pat.match(line)
-            if m is not None:
-                if state.create_unique_map(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    to_delete.add(line)
-                continue
-            m = unique_close_pat.match(line)
-            if m is not None:
-                if state.create_unique_close(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    to_delete.add(line)
-                continue
-            m = unique_copy_pat.match(line)
-            if m is not None:
-                if state.create_unique_copy(
-                    proc_id = int(m.group('proc'),16),
-                    uid = int(m.group('uid')),
-                    parent_uid = int(m.group('puid'))):
-                    to_delete.add(line)
-                continue
-            m = event_pat.match(line)
-            if m is not None:
-                time = long(m.group('time'))
-                if state.create_event(
-                    proc_id = int(m.group('proc'),16),
-                    kind_id = int(m.group('kind')),
-                    uid = int(m.group('uid')),
-                    time = time):
-                    to_delete.add(line)
-                continue
-        if len(to_delete) == 0:
-            print "ERROR: NO FORWARD PROGRESS ON REPLAY LINES!  BAD LEGION PROF ASSUMPTION!"
-            break
-        for line in to_delete:
-            replay_lines.remove(line)
-    return matches
 
 def usage():
-    print 'Usage: '+sys.argv[0]+' [-c] [-p] [-v] <file_name>'
-    print '  -c : perform cumulative analysis'
-    print '  -p : generate HTML and SVG files for pictures'
+    print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
+    print '  -p : include processors in visualization'
+    print '  -i : include instances in visualization'
+    print '  -c : include channels in visualization'
+    print '  -s : print statistics'
     print '  -v : print verbose profiling information'
+    print '  -o <out_file> : give a prefix for the output file'
     print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
-    print '  -i : generate HTML and SVG files for memory pictures'
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'cpvim:d:')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:s')
     opts = dict(opts)
     if len(args) == 0:
-        usage()
+      usage()
     file_names = args
-    cumulative = False
-    generate_pictures = False
-    generate_instance = False
+    # By default we show all
+    # If options are specified we only show what the user wants
+    show_all = True
+    show_procs = False
+    show_channels = False
+    show_instances = False
+    output_prefix = 'legion_prof'
+    print_stats = False
     verbose = False
-    if '-c' in opts:
-        cumulative = True
     if '-p' in opts:
-        generate_pictures = True
+        show_procs = True
+        show_all = False
+    if '-c' in opts:
+        show_channels = True
+        show_all = False
+    if '-i' in opts:
+        show_instances = True
+        show_all = False
+    if '-s' in opts:
+        print_stats = True
     if '-v' in opts:
         verbose = True
     if '-m' in opts:
         global US_PER_PIXEL
         US_PER_PIXEL = int(opts['-m'])
-    if '-i' in opts:
-        generate_instance = True
-    svg_file_name = 'legion_prof.svg'
-    html_file_name = 'legion_prof.html'
-    mem_file_name = 'legion_prof_mem.svg'
-    html_mem_file_name = 'legion_prof_mem.html'
+    if '-o' in opts:
+        output_prefix = opts['-o']
+    if show_all:
+        show_procs = True
+        show_channels = True
+        show_instances = True
 
     state = State()
     has_matches = False
     for file_name in file_names:
-        print 'Loading log file %s...' % file_name
-        total_matches = parse_log_file(file_name, state)
+        print 'Reading log file %s...' % file_name
+        total_matches = state.parse_log_file(file_name)
         print 'Matched %s lines' % total_matches
         if total_matches > 0:
             has_matches = True
     if not has_matches:
-        print 'No matches. Exiting...'
+        print 'No matches found! Exiting...'
         return
-    # Now have the state build the time ranges for each processor
+
+    # Once we are done loading everything, do the sorting
     state.build_time_ranges()
 
-    # Print the per-processor statistics
-    state.print_processor_stats()
+    if print_stats:
+        state.print_stats(verbose) 
 
-    # Print the per-memory statistics
-    state.print_memory_stats()
-
-    # Print the per-task statistics
-    state.print_task_stats(cumulative, verbose)
-
-    # Generate the svg profiling picture
-    if generate_pictures:
-        print 'Generating SVG execution profile in %s...' % svg_file_name
-        state.generate_svg_picture(svg_file_name, html_file_name)
-        print 'Done!'
-    if generate_instance:
-        print 'Generating SVG memory profile in %s...' % mem_file_name
-        state.generate_mem_picture(mem_file_name,html_mem_file_name)
-        print 'Done!'
+    state.emit_visualization(output_prefix, show_procs, 
+                             show_channels, show_instances) 
 
 if __name__ == '__main__':
     main()

@@ -147,7 +147,7 @@ def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet,
     # commands:
     #
     # otool -L liblegion_terra.so
-    # ./legion.py
+    # ./regent.py
     #   =package.loadlib('liblegion_terra.so', 'init')
 
     if os_name == 'Darwin':
@@ -158,7 +158,7 @@ def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet,
 
 def install():
     parser = argparse.ArgumentParser(
-        description = 'Install Legion/Terra front end.')
+        description = 'Install Regent front end.')
     parser.add_argument(
         '--with-terra', dest = 'terra', required = False,
         help = 'Path to Terra installation directory (optional).')

@@ -69,6 +69,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
+  extern Logger log_task; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -177,9 +178,9 @@ namespace Realm {
     RuntimeImpl *runtime_singleton = 0;
 
   // these should probably be member variables of RuntimeImpl?
-    static std::vector<ProcessorImpl*> local_cpus;
-    static std::vector<ProcessorImpl*> local_util_procs;
-    static std::vector<ProcessorImpl*> local_io_procs;
+    static std::vector<LocalTaskProcessor *> local_cpus;
+    static std::vector<LocalTaskProcessor *> local_util_procs;
+    static std::vector<LocalTaskProcessor *> local_io_procs;
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
@@ -191,7 +192,8 @@ namespace Realm {
       : machine(0), nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
-	local_proc_group_free_list(0), background_pthread(0)
+	local_proc_group_free_list(0), background_pthread(0),
+	shutdown_requested(false), shutdown_condvar(shutdown_mutex)
     {
       machine = new MachineImpl;
     }
@@ -231,15 +233,14 @@ namespace Realm {
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
-      unsigned init_stack_count = 1;
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
       unsigned num_io_procs = 0;
+      unsigned concurrent_io_threads = 1; // Legion does not support values > 1 right now
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       unsigned active_msg_handler_threads = 1;
-      bool     active_msg_sender_threads = false;
 #ifdef USE_CUDA
       size_t zc_mem_size_in_mb = 64;
       size_t fb_mem_size_in_mb = 256;
@@ -257,9 +258,8 @@ namespace Realm {
       double   lock_trace_exp_arrv_rate = 1e2;
 #endif
       // should local proc threads get dedicated cores?
-      bool bind_localproc_threads = true;
-      bool use_greenlet_procs = true;
-      bool disable_greenlets = false;
+      bool dummy_reservation_ok = true;
+      bool show_reservations = false;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname)                       \
@@ -279,18 +279,16 @@ namespace Realm {
 	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
         INT_ARG("-ll:dsize", disk_mem_size_in_mb);
         INT_ARG("-ll:stacksize", stack_size_in_mb);
-        INT_ARG("-ll:stacks", init_stack_count);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
         INT_ARG("-ll:io", num_io_procs);
+	INT_ARG("-ll:concurrent_io", concurrent_io_threads);
 	//INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
 	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
-        BOOL_ARG("-ll:senders", active_msg_sender_threads);
-	INT_ARG("-ll:bind", bind_localproc_threads);
-        BOOL_ARG("-ll:greenlet", use_greenlet_procs);
-        BOOL_ARG("-ll:gdb", disable_greenlets);
+	INT_ARG("-ll:dummy_rsrv_ok", dummy_reservation_ok);
+	INT_ARG("-ll:show_rsrv", show_reservations);
 #ifdef USE_CUDA
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
@@ -343,19 +341,6 @@ namespace Realm {
           assert(0);
 	}
       }
-
-      if(bind_localproc_threads) {
-	// this has to preceed all spawning of threads, including the ones done by things like gasnet_init()
-	proc_assignment = new ProcessorAssignment(num_local_cpus);
-
-	// now move ourselves off the reserved cores
-	proc_assignment->bind_thread(-1, 0, "machine thread");
-      }
-
-      if (disable_greenlets)
-        use_greenlet_procs = false;
-      if (use_greenlet_procs)
-        greenlet::init_greenlet_library();
 
       //GASNetNode::my_node = new GASNetNode(argc, argv, this);
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
@@ -445,6 +430,7 @@ namespace Realm {
       hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
       hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
       hcount += RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
+      hcount += RemoteWriteFenceAckMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence Ack AM");
       hcount += DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
       hcount += RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
       hcount += RuntimeShutdownMessage::Message::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
@@ -465,6 +451,7 @@ namespace Realm {
 
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
+		     core_reservations,
 		     *argc, (const char **)*argv);
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
@@ -513,12 +500,12 @@ namespace Realm {
       
       start_polling_threads(active_msg_worker_threads);
 
-      start_handler_threads(active_msg_handler_threads, stack_size_in_mb << 20);
+      start_handler_threads(active_msg_handler_threads,
+			    core_reservations,
+			    stack_size_in_mb << 20);
 
-      //LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads);
-
-      if (active_msg_sender_threads)
-        start_sending_threads();
+      //LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
+      //                                                  core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -547,17 +534,11 @@ namespace Realm {
       if (num_util_procs > 0)
       {
         for(unsigned i = 0; i < num_util_procs; i++) {
-          ProcessorImpl *up;
-          if (use_greenlet_procs)
-            up = new GreenletProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
-                                    n->processors.size()).convert<Processor>(),
-                                    Processor::UTIL_PROC, stack_size_in_mb << 20, 
-                                    init_stack_count, "utility worker");
-          else
-            up = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(), 
-                                    n->processors.size()).convert<Processor>(),
-                                    Processor::UTIL_PROC, 
-                                    stack_size_in_mb << 20, "utility worker");
+	  Processor p = ID(ID::ID_PROCESSOR, 
+			   gasnet_mynode(), 
+			   n->processors.size()).convert<Processor>();
+          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, core_reservations,
+								stack_size_in_mb << 20);
           n->processors.push_back(up);
           local_util_procs.push_back(up);
         }
@@ -566,18 +547,18 @@ namespace Realm {
       if (num_io_procs > 0)
       {
         for (unsigned i = 0; i < num_io_procs; i++) {
-          LocalProcessor *io = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
-                                            n->processors.size()).convert<Processor>(),
-                                            Processor::IO_PROC,
-                                            stack_size_in_mb << 20, "io worker");
+	  Processor p = ID(ID::ID_PROCESSOR, 
+			   gasnet_mynode(), 
+			   n->processors.size()).convert<Processor>();
+	  LocalIOProcessor *io = new LocalIOProcessor(p, core_reservations,
+						      stack_size_in_mb << 20,
+						      concurrent_io_threads);
           n->processors.push_back(io);
           local_io_procs.push_back(io);
         }
       }
 
 #ifdef USE_CUDA
-      // Initialize the driver API
-      CHECK_CU( cuInit(0) );
       // Keep track of the local system memories so we can pin them
       // after we've initialized the GPU
       std::vector<LocalCPUMemory*> local_mems;
@@ -585,34 +566,39 @@ namespace Realm {
       // and prioritize them so they are used first
       std::vector<int> peer_gpus;
       std::vector<int> dumb_gpus;
-      {
-        int num_devices;
-        CHECK_CU( cuDeviceGetCount(&num_devices) );
-        for (int i = 0; i < num_devices; i++)
-        {
-          CUdevice device;
-          CHECK_CU( cuDeviceGet(&device, i) );
-          bool has_peer = false;
-          // Go through all the other devices and see
-          // if we have peer access to them
-          for (int j = 0; j < num_devices; j++)
-          {
-            if (i == j) continue;
-            CUdevice peer;
-            CHECK_CU( cuDeviceGet(&peer, j) );
-            int can_access;
-            CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-            if (can_access)
+      // only do this if gpus have been requested
+      if(num_local_gpus > 0) {
+	// Initialize the driver API
+	CHECK_CU( cuInit(0) );
+	{
+	  int num_devices;
+	  CHECK_CU( cuDeviceGetCount(&num_devices) );
+	  for (int i = 0; i < num_devices; i++)
+	  {
+	    CUdevice device;
+	    CHECK_CU( cuDeviceGet(&device, i) );
+	    bool has_peer = false;
+	    // Go through all the other devices and see
+	    // if we have peer access to them
+	    for (int j = 0; j < num_devices; j++)
             {
-              has_peer = true;
-              break;
-            }
-          }
-          if (has_peer)
-            peer_gpus.push_back(i);
-          else
-            dumb_gpus.push_back(i);
-        }
+	      if (i == j) continue;
+	      CUdevice peer;
+	      CHECK_CU( cuDeviceGet(&peer, j) );
+	      int can_access;
+	      CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
+	      if (can_access)
+	      {
+		has_peer = true;
+		break;
+	      }
+	    }
+	    if (has_peer)
+	      peer_gpus.push_back(i);
+	    else
+	      dumb_gpus.push_back(i);
+	  }
+	}
       }
 #endif
       // create local processors
@@ -620,15 +606,8 @@ namespace Realm {
 	Processor p = ID(ID::ID_PROCESSOR, 
 			 gasnet_mynode(), 
 			 n->processors.size()).convert<Processor>();
-        ProcessorImpl *lp;
-        if (use_greenlet_procs)
-          lp = new GreenletProcessor(p, Processor::LOC_PROC,
-                                     stack_size_in_mb << 20, init_stack_count,
-                                     "local worker", i);
-        else
-	  lp = new LocalProcessor(p, Processor::LOC_PROC,
-                                  stack_size_in_mb << 20,
-                                  "local worker", i);
+        LocalTaskProcessor *lp;
+	lp = new LocalCPUProcessor(p, core_reservations, stack_size_in_mb << 20);
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
       }
@@ -701,14 +680,15 @@ namespace Realm {
         }
         GPUWorker *gpu_worker = 0;
         if (gpu_worker_thread) {
-          gpu_worker = GPUWorker::start_gpu_worker_thread(stack_size_in_mb << 20);
+          gpu_worker = GPUWorker::start_gpu_worker_thread(core_reservations,
+							  stack_size_in_mb << 20);
         }
 	for(unsigned i = 0; i < num_local_gpus; i++) {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
 	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p, Processor::TOC_PROC, "gpu worker",
+ 	  GPUProcessor *gp = new GPUProcessor(p, core_reservations,
                                               (i < peer_gpus.size() ?
                                                 peer_gpus[i] : 
                                                 dumb_gpus[i-peer_gpus.size()]), 
@@ -765,6 +745,20 @@ namespace Realm {
       }
 #endif
 
+      // now that we've created all the processors/etc., we can try to come up with core
+      //  allocations that satisfy everybody's requirements - this will also start up any
+      //  threads that have already been requested
+      bool ok = core_reservations.satisfy_reservations(dummy_reservation_ok);
+      if(ok) {
+	if(show_reservations) {
+	  std::cout << *core_reservations.get_core_map() << std::endl;
+	  core_reservations.report_reservations(std::cout);
+	}
+      } else {
+	printf("HELP!  Could not satisfy all core reservations!\n");
+	exit(1);
+      }
+
       {
 	const unsigned ADATA_SIZE = 4096;
 	size_t adata[ADATA_SIZE];
@@ -773,7 +767,7 @@ namespace Realm {
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_util_procs.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_util_procs.begin();
 	    it != local_util_procs.end();
 	    it++) {
 	  num_procs++;
@@ -782,7 +776,7 @@ namespace Realm {
           adata[apos++] = Processor::UTIL_PROC;
 	}
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_io_procs.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_io_procs.begin();
 	    it != local_io_procs.end();
 	    it++) {
 	  num_procs++;
@@ -791,7 +785,7 @@ namespace Realm {
           adata[apos++] = Processor::IO_PROC;
 	}
 
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_cpus.begin();
+	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_cpus.begin();
 	    it != local_cpus.end();
 	    it++) {
 	  num_procs++;
@@ -955,7 +949,7 @@ namespace Realm {
 	    adata[apos++] = 200;
 
 	    // ZC also accessible to all the local CPUs
-	    for(std::vector<ProcessorImpl*>::iterator it2 = local_cpus.begin();
+	    for(std::vector<LocalTaskProcessor *>::iterator it2 = local_cpus.begin();
 		it2 != local_cpus.end();
 		it2++) {
 	      adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -1025,6 +1019,19 @@ namespace Realm {
 
     static bool running_as_background_thread = false;
 
+  template <typename T>
+  void spawn_on_all(const T& container_of_procs,
+		    Processor::TaskFuncID func_id,
+		    const void *args, size_t arglen,
+		    Event start_event = Event::NO_EVENT,
+		    int priority = 0)
+  {
+    for(typename T::const_iterator it = container_of_procs.begin();
+	it != container_of_procs.end();
+	it++)
+      (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
+  }
+
     static void *background_run_thread(void *data)
     {
       MachineRunArgs *args = (MachineRunArgs *)data;
@@ -1062,39 +1069,34 @@ namespace Realm {
 	return;
       }
 
-      // Initialize the shutdown counter
       const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-      Atomic<int> running_proc_count(local_procs.size());
-
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	(*it)->run(&running_proc_count);
 
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      for(std::vector<ProcessorImpl*>::iterator it = local_util_procs.begin();
-	  it != local_util_procs.end();
-	  it++)
-	(*it)->start_processor();
+      if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
+	log_task.info("spawning processor init task on local cpus");
 
-      for (std::vector<ProcessorImpl*>::iterator it = local_io_procs.begin();
-            it != local_io_procs.end();
-            it++)
-        (*it)->start_processor();
+	spawn_on_all(local_util_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
 
-      for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
-	  it != local_cpus.end();
-	  it++)
-	(*it)->start_processor();
+	spawn_on_all(local_cpus,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
+
+	spawn_on_all(local_io_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
 
 #ifdef USE_CUDA
-      for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
-	  it != local_gpus.end();
-	  it++)
-	(*it)->start_processor();
+	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MAX); // runs with max priority
 #endif
+      } else {
+	log_task.info("no processor init task");
+      }
 
       if(task_id != 0 && 
 	 ((style != Runtime::ONE_TASK_ONLY) || 
@@ -1102,17 +1104,18 @@ namespace Realm {
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	    it != local_procs.end();
 	    it++) {
-	  (*it)->spawn_task(task_id, args, arglen, 
-			    Event::NO_EVENT, Event::NO_EVENT, 0/*priority*/);
+	  (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
+			  Event::NO_EVENT, 0/*priority*/);
 	  if(style != Runtime::ONE_TASK_PER_PROC) break;
 	}
       }
 
-      // wait for idle-ness somehow?
-      int timeout = -1;
 #ifdef TRACE_RESOURCES
       RuntimeImpl *rt = get_runtime();
 #endif
+#ifdef OLD_WAIT_LOOP
+      // wait for idle-ness somehow?
+      int timeout = -1;
       while(running_proc_count.get() > 0) {
 	if(timeout >= 0) {
 	  timeout--;
@@ -1123,6 +1126,7 @@ namespace Realm {
 	}
 	fflush(stdout);
 	sleep(1);
+
 #ifdef TRACE_RESOURCES
         log_runtime.info("total events: %d", rt->local_event_free_list->next_alloc);
         log_runtime.info("total reservations: %d", rt->local_reservation_free_list->next_alloc);
@@ -1131,6 +1135,15 @@ namespace Realm {
 #endif
       }
       log_runtime.info("running proc count is now zero - terminating\n");
+#endif
+      // sleep until shutdown has been requested by somebody
+      {
+	AutoHSLLock al(shutdown_mutex);
+	while(!shutdown_requested)
+	  shutdown_condvar.wait();
+	log_runtime.info("shutdown request received - terminating\n");
+      }
+
 #ifdef REPORT_REALM_RESOURCE_USAGE
       {
         RuntimeImpl *rt = get_runtime();
@@ -1150,41 +1163,52 @@ namespace Realm {
 #endif
 
       // Shutdown all the threads
-      for(std::vector<ProcessorImpl*>::iterator it = local_util_procs.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
-	(*it)->shutdown_processor();
+	(*it)->shutdown();
 
-      for(std::vector<ProcessorImpl*>::iterator it = local_io_procs.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_io_procs.begin();
           it != local_io_procs.end();
           it++)
-        (*it)->shutdown_processor();
+	(*it)->shutdown();
 
-      for(std::vector<ProcessorImpl*>::iterator it = local_cpus.begin();
+      for(std::vector<LocalTaskProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
-	(*it)->shutdown_processor();
+	(*it)->shutdown();
 
 #ifdef USE_CUDA
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
 	  it != local_gpus.end();
 	  it++)
-	(*it)->shutdown_processor(); 
+	(*it)->shutdown();
 #endif
 
 
-      // delete local processors and memories
+      // delete processors, memories, nodes, etc.
       {
-	Node& n = nodes[gasnet_mynode()];
+	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	  Node& n = nodes[i];
 
-	for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
-	    it != n.memories.end();
-	    it++)
-	  delete (*it);
+	  for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
+	      it != n.memories.end();
+	      it++)
+	    delete (*it);
 
-	// node 0 also deletes the gasnet memory
-	if(gasnet_mynode() == 0)
-	  delete global_memory;
+	  for(std::vector<ProcessorImpl *>::iterator it = n.processors.begin();
+	      it != n.processors.end();
+	      it++)
+	    delete (*it);
+	}
+	
+	delete[] nodes;
+	delete global_memory;
+	delete local_event_free_list;
+	delete local_barrier_free_list;
+	delete local_reservation_free_list;
+	delete local_index_space_free_list;
+	delete local_proc_group_free_list;
       }
 
       // need to kill other threads too so we can actually terminate process
@@ -1202,6 +1226,9 @@ namespace Realm {
       if(running_as_background_thread) {
 	pthread_exit(0);
       } else {
+	// not strictly necessary, but helps us find memory leaks
+	runtime_singleton = 0;
+	delete this;
 	exit(0);
       }
     }
@@ -1217,14 +1244,19 @@ namespace Realm {
 
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
+      if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+	log_task.info("spawning processor shutdown task on local cpus");
+	spawn_on_all(local_cpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
+		     Event::NO_EVENT,
+		     INT_MIN); // runs with lowest priority
+      } else {
+	log_task.info("no processor shutdown task");
+      }
+
       {
-        Event e = GenEventImpl::create_genevent()->current_event();
-	(*it)->spawn_task(0 /* shutdown task id */, 0, 0,
-			  Event::NO_EVENT, e, 0/*priority*/);
+	AutoHSLLock al(shutdown_mutex);
+	shutdown_requested = true;
+	shutdown_condvar.broadcast();
       }
     }
 

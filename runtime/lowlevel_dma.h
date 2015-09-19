@@ -19,6 +19,10 @@
 #include "lowlevel_impl.h"
 #include "activemsg.h"
 
+namespace Realm {
+  class CoreReservationSet;
+};
+
 namespace LegionRuntime {
   namespace LowLevel {
 
@@ -27,15 +31,15 @@ namespace LegionRuntime {
   class DmaRequest : public Realm::Operation {
   public:
     DmaRequest(int _priority, Event _after_copy)
-	: Operation(), state(STATE_INIT), priority(_priority),
-        after_copy(_after_copy) {
+	: Operation(_after_copy, Realm::ProfilingRequestSet()),
+	  state(STATE_INIT), priority(_priority) {
       pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest(int _priority, Event _after_copy,
                const Realm::ProfilingRequestSet &reqs)
-      : Realm::Operation(reqs), state(STATE_INIT), priority(_priority),
-        after_copy(_after_copy) {
+      : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
+        priority(_priority) {
       pthread_mutex_init(&request_lock, NULL);
     }
 
@@ -61,7 +65,6 @@ namespace LegionRuntime {
 
     State state;
     int priority;
-    Event after_copy;
 
     // <NEWDMA>
 	pthread_mutex_t request_lock;
@@ -108,7 +111,7 @@ namespace LegionRuntime {
       RegionInstance inst;
       unsigned offset, size;
       Event before_fill, after_fill;
-      int priority;
+      //int priority;
     };
 
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
@@ -130,7 +133,7 @@ namespace LegionRuntime {
 
     extern void init_dma_handler(void);
 
-    extern void start_dma_worker_threads(int count);
+    extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
     extern void start_dma_system(int count, int max_nr

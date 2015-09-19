@@ -23,12 +23,15 @@ DEBUG           ?= 1		# Include debugging symbols
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time print level
 SHARED_LOWLEVEL ?= 1		# Use the shared low level
 ALT_MAPPERS     ?= 0		# Compile the alternative mappers
+USE_CUDA        ?= 1            # enable gpu kernels by default
 
 # Put the binary file name here
 OUTFILE		?= ckt_sim
 # List all the application source files here
 GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
+ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
+endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

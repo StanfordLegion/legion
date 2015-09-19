@@ -375,7 +375,9 @@ namespace LegionRuntime{
           domain(_domain), src_buf(_src_buf), dst_buf(_dst_buf), oas_vec(_oas_vec),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid), pre_xd_guid(_pre_xd_guid), next_xd_guid(_next_xd_guid),
-          kind (_kind), order(_order), channel(NULL), complete_event(_after_copy) {}
+          kind (_kind), order(_order), channel(NULL), complete_event(_after_copy)
+      {
+      }
 
       virtual ~XferDes() {};
 
@@ -1349,11 +1351,14 @@ namespace LegionRuntime{
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue() {
+      XferDesQueue(Realm::CoreReservationSet& crs)
+      : core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters()) {
         pthread_mutex_init(&queues_lock, NULL);
         pthread_rwlock_init(&guid_lock, NULL);
         // reserve the first several guid
         next_to_assign_idx = 10;
+        num_threads = 0;
+        dma_threads = NULL;
       }
 
       ~XferDesQueue() {
@@ -1512,6 +1517,79 @@ namespace LegionRuntime{
         pthread_mutex_unlock(&dma_thread->enqueue_lock);
         return true;
       }
+
+      void start_worker(int count, int max_nr, ChannelManager* channel_manager
+#ifdef USE_CUDA
+                                ,std::vector<GPUProcessor*> &local_gpus
+#endif
+                       ) {
+        // TODO: count is currently ignored
+        num_threads = 3;
+#ifdef USE_HDF
+        // Need a dedicated thread for handling HDF requests
+        num_threads ++;
+#endif
+        dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
+        // dma thread #1: memcpy
+        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
+        dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
+        // dma thread #2: async xfer
+        std::vector<Channel*> async_channels, gasnet_channels;
+        async_channels.push_back(channel_manager->create_remote_write_channel(max_nr));
+#ifdef USE_DISK
+        async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
+        async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
+#endif /*USE_DISK*/
+#ifdef USE_CUDA
+        std::vector<GPUProcessor*>::iterator it;
+        for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
+          async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
+          async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
+          async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
+          async_channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
+        }
+#endif
+        dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
+        gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
+        gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
+        dma_threads[2] = new DMAThread(max_nr, xferDes_queue, gasnet_channels);
+#ifdef USE_HDF
+        std::vector<Channel*> hdf_channels;
+        hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
+        hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
+        dma_threads[3] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
+#endif
+        for (int i = 0; i < num_threads; i++) {
+          // register dma thread to XferDesQueue
+           register_dma_thread(dma_threads[i]);
+        }
+
+        Realm::ThreadLaunchParameters tlp;
+
+        for(int i = 0; i < num_threads; i++) {
+          Realm::Thread *t = Realm::Thread::create_kernel_thread<DMAThread,
+  	                                        &DMAThread::dma_thread_loop>(dma_threads[i],
+  										                                 tlp,
+  										                                 core_rsrv,
+  										                                 0 /* default scheduler*/);
+          worker_threads.push_back(t);
+        }
+      }
+
+      void stop_worker() {
+        for(int i = 0; i < num_threads; i++)
+          dma_threads[i]->stop();
+        // reap all the threads
+        for(std::vector<Realm::Thread *>::iterator it = worker_threads.begin();
+            it != worker_threads.end();
+            it++) {
+          (*it)->join();
+          delete (*it);
+        }
+        worker_threads.clear();
+        delete[] dma_threads;
+      }
+
     protected:
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
@@ -1519,15 +1597,19 @@ namespace LegionRuntime{
       pthread_mutex_t queues_lock;
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
+      Realm::CoreReservation core_rsrv;
+      int num_threads;
+      DMAThread** dma_threads;
+      std::vector<Realm::Thread*> worker_threads;
     };
 
     XferDesQueue* get_xdq_singleton();
-    int start_channel_manager(int max_nr, DMAThread** &dma_threads
+    void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
 #ifdef USE_CUDA
                               ,std::vector<GPUProcessor*> &local_gpus
 #endif
                              );
-    void stop_channel_manager(DMAThread** dma_threads);
+    void stop_channel_manager();
     template<unsigned DIM>
     void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                          XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,

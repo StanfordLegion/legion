@@ -87,13 +87,7 @@ namespace LegionRuntime {
     typedef Realm::RegionInstanceImpl RegionInstanceImpl;
     typedef Realm::IndexSpaceImpl IndexSpaceImpl;
     typedef Realm::Node Node;
-    typedef Realm::LocalProcessor LocalProcessor;
-    typedef Realm::PreemptableThread PreemptableThread;
-    typedef Realm::LocalThread LocalThread;
     typedef Realm::DetailedTimer DetailedTimer;
-#ifdef USE_GASNET
-    typedef Realm::HandlerThread HandlerThread;
-#endif
 
     inline Realm::RuntimeImpl *get_runtime(void)
     {

@@ -591,7 +591,8 @@ namespace Realm {
       // can't read/write a remote memory
 #define ALLOW_REMOTE_MEMORY_WRITES
 #ifdef ALLOW_REMOTE_MEMORY_WRITES
-      do_remote_write(me, offset, src, size, 0, Event::NO_EVENT, true /* make copy! */);
+      // THIS IS BAD - no fence means no consistency!
+      do_remote_write(me, offset, src, size, 0, true /* make copy! */);
 #else
       assert(0);
 #endif
@@ -986,8 +987,8 @@ namespace Realm {
   {
     size_t req_offset = sizeof(Payload) + sizeof(size_t) * field_sizes.size();
     // TODO: unbreak once the serialization stuff is repaired
-    if(prs)
-      assert(prs->empty());
+    //if(prs)
+    //  assert(prs->empty());
     size_t payload_size = req_offset + 0;//reqs.compute_size();
     Payload *payload = (Payload *)malloc(payload_size);
 
@@ -1064,7 +1065,7 @@ namespace Realm {
   };
 
   struct PartialWriteEntry {
-    Event event;
+    RemoteWriteFence *fence;
     int remaining_count;
   };
 
@@ -1080,12 +1081,11 @@ namespace Realm {
 
     log_copy.debug() << "received remote write request: mem=" << args.mem
 		     << ", offset=" << args.offset << ", size=" << datalen
-		     << ", seq=" << args.sender << '/' << args.sequence_id
-		     << ", event=" << args.event;
+		     << ", seq=" << args.sender << '/' << args.sequence_id;
 #ifdef DEBUG_REMOTE_WRITES
-    printf("received remote write request: mem=" IDFMT ", offset=%zd, size=%zd, seq=%d/%d, event=" IDFMT "/%d\n",
+    printf("received remote write request: mem=" IDFMT ", offset=%zd, size=%zd, seq=%d/%d",
 	   args.mem.id, args.offset, datalen,
-	   args.sender, args.sequence_id, args.event.id, args.event.gen);
+	   args.sender, args.sequence_id);
     printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
 	   data,
 	   ((unsigned *)(data))[0], ((unsigned *)(data))[1],
@@ -1110,9 +1110,6 @@ namespace Realm {
 	  impl->put_bytes(args.offset, data, datalen);
 	}
 	    
-	if(args.event.exists())
-	  get_runtime()->get_genevent_impl(args.event)->trigger(args.event.gen,
-								gasnet_mynode());
 	break;
       }
 
@@ -1123,9 +1120,6 @@ namespace Realm {
       {
 	impl->put_bytes(args.offset, data, datalen);
 	
-	if(args.event.exists())
-	  get_runtime()->get_genevent_impl(args.event)->trigger(args.event.gen,
-								gasnet_mynode());
 	break;
       }
 
@@ -1143,32 +1137,31 @@ namespace Realm {
       if(it == partial_remote_writes.end()) {
 	// first reference to this one
 	PartialWriteEntry entry;
-	entry.event = Event::NO_EVENT;
+	entry.fence = 0;
 	entry.remaining_count = -1;
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
+	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, entry.remaining_count);
+	       entry.fence, entry.remaining_count);
 #endif
       } else {
 	// have an existing entry (either another write or the fence)
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d, %d -> %d\n",
+	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, 
+	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
 	entry.remaining_count--;
 	if(entry.remaining_count == 0) {
 	  // we're the last write, and we've already got the fence, so 
-	  //  trigger
-	  Event e = entry.event;
+	  //  respond
+          RemoteWriteFenceAckMessage::send_request(args.sender,
+                                                   entry.fence);
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
-	  if(e.exists())
-	    get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	  return;
 	}
       }
@@ -1199,11 +1192,10 @@ namespace Realm {
       return;
     }
 
-    log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%d, size=%zd, redop=%d(%s), seq=%d/%d, event=" IDFMT "/%d",
+    log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%d, size=%zd, redop=%d(%s), seq=%d/%d",
 		   args.mem.id, args.offset, args.stride, datalen,
 		   redop_id, (red_fold ? "fold" : "apply"),
-		   args.sender, args.sequence_id,
-		   args.event.id, args.event.gen);
+		   args.sender, args.sequence_id);
 
     const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
@@ -1229,32 +1221,31 @@ namespace Realm {
       if(it == partial_remote_writes.end()) {
 	// first reference to this one
 	PartialWriteEntry entry;
-	entry.event = Event::NO_EVENT;
+	entry.fence = 0;
 	entry.remaining_count = -1;
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
+	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, entry.remaining_count);
+	       entry.fence, entry.remaining_count);
 #endif
       } else {
 	// have an existing entry (either another write or the fence)
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d, %d -> %d\n",
+	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, 
+	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
 	entry.remaining_count--;
 	if(entry.remaining_count == 0) {
 	  // we're the last write, and we've already got the fence, so 
-	  //  trigger
-	  Event e = entry.event;
+	  //  respond
+          RemoteWriteFenceAckMessage::send_request(args.sender,
+                                                   entry.fence);
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
-	  if(e.exists())
-	    get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	  return;
 	}
       }
@@ -1317,13 +1308,28 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class RemoteWriteFence
+  //
+
+  RemoteWriteFence::RemoteWriteFence(Operation *op)
+    : Operation::AsyncWorkItem(op)
+  {}
+
+  void RemoteWriteFence::request_cancellation(void)
+  {
+    // ignored
+  }
+  
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RemoteWriteFenceMessage
   //
 
   /*static*/ void RemoteWriteFenceMessage::handle_request(RequestArgs args)
   {
-    log_copy.debug("remote write fence (mem = " IDFMT ", seq = %d/%d, count = %d, event = " IDFMT "/%d)\n",
-		   args.mem.id, args.sender, args.sequence_id, args.num_writes, args.event.id, args.event.gen);
+    log_copy.debug("remote write fence (mem = " IDFMT ", seq = %d/%d, count = %d, fence = %p",
+		   args.mem.id, args.sender, args.sequence_id, args.num_writes, args.fence);
     
     assert(args.sequence_id != 0);
     // track the sequence ID to know when the full RDMA is done
@@ -1336,35 +1342,34 @@ namespace Realm {
       if(it == partial_remote_writes.end()) {
 	// first reference to this one
 	PartialWriteEntry entry;
-	entry.event = args.event;
+	entry.fence = args.fence;
 	entry.remaining_count = args.num_writes;
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
+	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, entry.remaining_count);
+	       entry.fence, entry.remaining_count);
 #endif
       } else {
 	// have an existing entry (previous writes)
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d -> " IDFMT "/%d, %d -> %d\n",
+	printf("PWT: %d: have entry for %d/%d: %p -> %p, %d -> %d\n",
 	       gasnet_mynode(), key.sender, key.sequence_id,
-	       entry.event.id, entry.event.gen, 
-	       args.event.id, args.event.gen,
+	       entry.fence, args.fence,
 	       entry.remaining_count, entry.remaining_count + args.num_writes);
 #endif
-	entry.event = args.event;
+        assert(entry.fence == 0);
+	entry.fence = args.fence;
 	entry.remaining_count += args.num_writes;
 	// a negative remaining count means we got too many writes!
 	assert(entry.remaining_count >= 0);
 	if(entry.remaining_count == 0) {
-	  // this fence came after all the writes, so trigger
-	  Event e = entry.event;
+	  // this fence came after all the writes, so respond
+          RemoteWriteFenceAckMessage::send_request(args.sender,
+                                                   entry.fence);
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
-	  if(e.exists())
-	    get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	  return;
 	}
       }
@@ -1376,7 +1381,7 @@ namespace Realm {
 							Memory memory,
 							unsigned sequence_id,
 							unsigned num_writes,
-							Event event)
+                                                        RemoteWriteFence *fence)
   {
     RequestArgs args;
 
@@ -1384,7 +1389,30 @@ namespace Realm {
     args.sender = gasnet_mynode();
     args.sequence_id = sequence_id;
     args.num_writes = num_writes;
-    args.event = event;
+    args.fence = fence;
+    Message::request(target, args);
+  }
+  
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteWriteFenceAckMessage
+  //
+
+  /*static*/ void RemoteWriteFenceAckMessage::handle_request(RequestArgs args)
+  {
+    log_copy.debug("remote write fence ack: fence = %p",
+		   args.fence);
+
+    args.fence->mark_finished();
+  }
+
+  /*static*/ void RemoteWriteFenceAckMessage::send_request(gasnet_node_t target,
+                                                           RemoteWriteFence *fence)
+  {
+    RequestArgs args;
+
+    args.fence = fence;
     Message::request(target, args);
   }
   
@@ -1396,12 +1424,11 @@ namespace Realm {
 
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const void *data, size_t datalen,
-			     unsigned sequence_id, Event event,
+			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd, event=" IDFMT "/%d",
-		     mem.id, offset, datalen,
-		     event.id, event.gen);
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd",
+		     mem.id, offset, datalen);
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1418,16 +1445,11 @@ namespace Realm {
 	size_t max_xfer_size = get_lmb_size(ID(mem).node());
 
 	if(datalen > max_xfer_size) {
-	  // can't do this if we've been given a trigger event - no guarantee
-	  //  on ordering of these xfers
-	  assert(!event.exists());
-
 	  log_copy.info("breaking large send into pieces");
 	  const char *pos = (const char *)data;
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.event = Event::NO_EVENT;
 	  args.sender = gasnet_mynode();
 	  args.sequence_id = sequence_id;
 
@@ -1456,7 +1478,6 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-	args.event = event;
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 	RemoteWriteMessage::Message::request(ID(mem).node(), args,
@@ -1470,12 +1491,11 @@ namespace Realm {
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const void *data, size_t datalen,
 			     off_t stride, size_t lines,
-			     unsigned sequence_id, Event event,
+			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, event=" IDFMT "/%d",
-		     mem.id, offset, datalen, lines,
-		     event.id, event.gen);
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zdx%zd",
+		     mem.id, offset, datalen, lines);
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1493,16 +1513,11 @@ namespace Realm {
 	assert(max_lines_per_xfer > 0);
 
 	if(lines > max_lines_per_xfer) {
-	  // can't do this if we've been given a trigger event - no guarantee
-	  //  on ordering of these xfers
-	  assert(!event.exists());
-
 	  log_copy.info("breaking large send into pieces");
 	  const char *pos = (const char *)data;
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.event = Event::NO_EVENT;
 	  args.sender = gasnet_mynode();
 	  args.sequence_id = sequence_id;
 
@@ -1532,7 +1547,6 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-	args.event = event;
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
@@ -1547,12 +1561,11 @@ namespace Realm {
 
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const SpanList &spans, size_t datalen,
-			     unsigned sequence_id, Event event,
+			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd(%zd spans), event=" IDFMT "/%d",
-		     mem.id, offset, datalen, spans.size(),
-		     event.id, event.gen);
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd(%zd spans)",
+		     mem.id, offset, datalen, spans.size());
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1568,15 +1581,10 @@ namespace Realm {
 	size_t max_xfer_size = get_lmb_size(ID(mem).node());
 
 	if(datalen > max_xfer_size) {
-	  // can't do this if we've been given a trigger event - no guarantee
-	  //  on ordering of these xfers
-	  assert(!event.exists());
-
 	  log_copy.info("breaking large send into pieces");
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.event = Event::NO_EVENT;
 	  args.sender = gasnet_mynode();
 	  args.sequence_id = sequence_id;
 
@@ -1642,7 +1650,6 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-	args.event = event;
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
@@ -1660,15 +1667,14 @@ namespace Realm {
 			      const void *data, size_t count,
 			      off_t src_stride, off_t dst_stride,
 			      unsigned sequence_id,
-			      Event event, bool make_copy /*= false*/)
+			      bool make_copy /*= false*/)
     {
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
       size_t rhs_size = redop->sizeof_rhs;
 
-      log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%zd+%zd, size=%zdx%zd, redop=%d(%s), event=" IDFMT "/%d",
+      log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%zd+%zd, size=%zdx%zd, redop=%d(%s)",
 		     mem.id, offset, dst_stride, rhs_size, count,
-		     redop_id, (red_fold ? "fold" : "apply"),
-		     event.id, event.gen);
+		     redop_id, (red_fold ? "fold" : "apply"));
 
       // reductions always have to bounce off an intermediate buffer, so are subject to
       //  LMB limits
@@ -1678,10 +1684,6 @@ namespace Realm {
 	assert(max_elmts_per_xfer > 0);
 
 	if(count > max_elmts_per_xfer) {
-	  // can't do this if we've been given a trigger event - no guarantee
-	  //  on ordering of these xfers
-	  assert(!event.exists());
-
 	  log_copy.info("breaking large reduction into pieces");
 	  const char *pos = (const char *)data;
 	  RemoteReduceMessage::RequestArgs args;
@@ -1692,7 +1694,6 @@ namespace Realm {
 	  // fold encoded as a negation of the redop_id
 	  args.redop_id = red_fold ? -redop_id : redop_id;
 	  //args.red_fold = red_fold;
-	  args.event = Event::NO_EVENT;
 	  args.sender = gasnet_mynode();
 	  args.sequence_id = sequence_id;
 
@@ -1726,7 +1727,6 @@ namespace Realm {
 	// fold encoded as a negation of the redop_id
 	args.redop_id = red_fold ? -redop_id : redop_id;
 	//args.red_fold = red_fold;
-	args.event = event;
 	args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
@@ -1746,14 +1746,15 @@ namespace Realm {
 					    data, datalen, PAYLOAD_COPY);
     }
 
-    void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes, Event event)
+    void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes,
+                         RemoteWriteFence *fence)
     {
       // technically we could handle a num_writes == 0 case, but since it's
       //  probably indicative of badness elsewhere, barf on it for now
       assert(num_writes > 0);
 
       RemoteWriteFenceMessage::send_request(ID(mem).node(), mem, sequence_id,
-					    num_writes, event);
+					    num_writes, fence);
     }
   
 }; // namespace Realm

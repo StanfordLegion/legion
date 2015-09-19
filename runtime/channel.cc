@@ -1893,63 +1893,24 @@ namespace LegionRuntime {
         return xferDes_queue;
       }
 
-      static int num_threads = 0;
-      int start_channel_manager(int max_nr, DMAThread** & dma_threads
+      void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
 #ifdef USE_CUDA
                                 ,std::vector<GPUProcessor*> &local_gpus
 #endif
                                )
       {
-        xferDes_queue = new XferDesQueue;
+        xferDes_queue = new XferDesQueue(crs);
         channel_manager = new ChannelManager;
-
-        num_threads = 3;
-#ifdef USE_HDF
-        // Need a dedicated thread for handling HDF requests
-        num_threads ++;
-#endif
-        dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
-        // dma thread #1: memcpy
-        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
-        dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
-        // dma thread #2: async xfer
-        std::vector<Channel*> async_channels, gasnet_channels;
-        async_channels.push_back(channel_manager->create_remote_write_channel(max_nr));
-#ifdef USE_DISK
-        async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
-        async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
-        std::vector<GPUProcessor*>::iterator it;
-        for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
-          async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
-        }
+        xferDes_queue->start_worker(count, max_nr, channel_manager, local_gpus);
+#else
+		xferDes_queue->start_worker(count, max_nr, channel_manager);
 #endif
-        dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
-        gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
-        gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
-        dma_threads[2] = new DMAThread(max_nr, xferDes_queue, gasnet_channels);
-#ifdef USE_HDF
-        std::vector<Channel*> hdf_channels;
-        hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
-        hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
-        dma_threads[3] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
-#endif
-        for (int i = 0; i < num_threads; i++) {
-          // register dma thread to XferDesQueue
-           xferDes_queue->register_dma_thread(dma_threads[i]);
-        }
-        return num_threads;
       }
 
-      void stop_channel_manager(DMAThread** dma_threads)
+      void stop_channel_manager()
       {
-        for(int i = 0; i < num_threads; i++)
-          delete dma_threads[i];
-        free(dma_threads);
+        xferDes_queue->stop_worker();
         delete xferDes_queue;
         delete channel_manager;
       }

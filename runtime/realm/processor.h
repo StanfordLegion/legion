@@ -92,9 +92,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "serialize.h"
-TYPE_IS_SERIALIZABLE(Realm::Processor);
-//include "processor.inl"
+#include "processor.inl"
 
 #endif // ifndef REALM_PROCESSOR_H
 
