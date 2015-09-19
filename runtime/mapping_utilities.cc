@@ -107,7 +107,14 @@ namespace LegionRuntime {
       {
         std::set<Memory> visible;
 	machine.get_visible_memories(proc, visible);
-        stack.insert(stack.end(),visible.begin(),visible.end());
+	// memories with no capacity should not go in the stack
+	for (std::set<Memory>::const_iterator it = visible.begin();
+	     it != visible.end();
+	     it++)
+	{
+	  if ((*it).capacity() > 0)
+	    stack.push_back(*it);
+	}
         MachineQueryInterface::sort_memories(machine, proc, stack, latency);
       }
 
@@ -140,7 +147,14 @@ namespace LegionRuntime {
       {
         std::set<Memory> visible;
 	machine.get_visible_memories(mem, visible);
-        stack.insert(stack.end(),visible.begin(),visible.end());
+	// memories with no capacity should not go in the stack
+	for (std::set<Memory>::const_iterator it = visible.begin();
+	     it != visible.end();
+	     it++)
+	{
+	  if ((*it).capacity() > 0)
+	    stack.push_back(*it);
+	}
         MachineQueryInterface::sort_memories(machine, mem, stack, latency);
       }
 

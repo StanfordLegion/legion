@@ -284,6 +284,9 @@ namespace LegionRuntime {
       assert(ThreadLocal::current_gpu_proc == 0);
       ThreadLocal::current_gpu_proc = gpu;
 
+      // push the CUDA context for this GPU onto this thread
+      CHECK_CU( cuCtxPushCurrent(gpu->proc_ctx) );
+
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
       CUstream s = gpu->switch_to_next_task_stream();
@@ -302,6 +305,11 @@ namespace LegionRuntime {
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( cuStreamSynchronize(s) );
 #endif
+
+      // pop the CUDA context for this GPU back off
+      CUcontext popped;
+      CHECK_CU( cuCtxPopCurrent(&popped) );
+      assert(popped == gpu->proc_ctx);
 
       assert(ThreadLocal::current_gpu_proc == gpu);
       ThreadLocal::current_gpu_proc = 0;
@@ -501,6 +509,19 @@ namespace LegionRuntime {
                         GPU_MEMCPY_PEER_TO_PEER));
     }
 
+    GPUMemcpyFence::GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
+				   GPUWorkFence *_fence)
+      : GPUMemcpy(_gpu, _kind), fence(_fence)
+    {}
+
+    void GPUMemcpyFence::execute(void)
+    {
+      fence->enqueue_on_stream(local_stream);
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CHECK_CU( cuStreamSynchronize(local_stream) );
+#endif
+    }
+
     void GPUProcessor::fence_to_fb(Realm::Operation *op)
     {
       GPUWorkFence *f = new GPUWorkFence(op);
@@ -508,7 +529,8 @@ namespace LegionRuntime {
       // this must be done before we enqueue the callback with CUDA
       op->add_async_work_item(f);
 
-      f->enqueue_on_stream(host_to_device_stream);
+      enqueue_copy(new GPUMemcpyFence(this, GPU_MEMCPY_HOST_TO_DEVICE,
+				      f));
     }
 
     void GPUProcessor::fence_from_fb(Realm::Operation *op)
@@ -518,7 +540,8 @@ namespace LegionRuntime {
       // this must be done before we enqueue the callback with CUDA
       op->add_async_work_item(f);
 
-      f->enqueue_on_stream(device_to_host_stream);
+      enqueue_copy(new GPUMemcpyFence(this, GPU_MEMCPY_DEVICE_TO_HOST,
+				      f));
     }
 
     void GPUProcessor::fence_within_fb(Realm::Operation *op)
@@ -528,7 +551,8 @@ namespace LegionRuntime {
       // this must be done before we enqueue the callback with CUDA
       op->add_async_work_item(f);
 
-      f->enqueue_on_stream(device_to_device_stream);
+      enqueue_copy(new GPUMemcpyFence(this, GPU_MEMCPY_DEVICE_TO_DEVICE,
+				      f));
     }
 
     void GPUProcessor::fence_to_peer(Realm::Operation *op, GPUProcessor *dst)
@@ -538,7 +562,8 @@ namespace LegionRuntime {
       // this must be done before we enqueue the callback with CUDA
       op->add_async_work_item(f);
 
-      f->enqueue_on_stream(peer_to_peer_stream);
+      enqueue_copy(new GPUMemcpyFence(this, GPU_MEMCPY_PEER_TO_PEER,
+				      f));
     }
 
     void GPUProcessor::register_host_memory(void *base, size_t size)

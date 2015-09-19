@@ -112,6 +112,19 @@ namespace LegionRuntime {
       CUstream local_stream;
     };
 
+    class GPUWorkFence;
+
+    class GPUMemcpyFence : public GPUMemcpy {
+    public:
+      GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
+		     GPUWorkFence *_fence);
+
+      virtual void execute(void);
+
+    protected:
+      GPUWorkFence *fence;
+    };
+
     class GPUMemcpy1D : public GPUMemcpy {
     public:
       GPUMemcpy1D(GPUProcessor *_gpu,
@@ -278,10 +291,10 @@ namespace LegionRuntime {
 
       std::set<GPUProcessor*> peer_gpus;
 
+    public:
       // Our CUDA context that we will create
       CUdevice  proc_dev;
       CUcontext proc_ctx;
-    public:
       // Streams for different copy types
       CUstream host_to_device_stream;
       CUstream device_to_host_stream;

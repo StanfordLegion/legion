@@ -42,11 +42,6 @@ using namespace LegionRuntime::Accessor;
 
 using namespace LegionRuntime::HighLevel::LegionLogging;
 #endif
-#ifdef OLD_LEGION_PROF
-#include "legion_profiling.h"
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::LegionProf;
-#endif
 
 #include "atomics.h"
 
@@ -439,21 +434,11 @@ namespace LegionRuntime {
     {
       //<NEWDMA>
       // destroy all xfer des
-      mark_completed();
       std::vector<XferDesID>::iterator it;
       for (it = path.begin(); it != path.end(); it++) {
         destroy_xfer_des(*it);
       }
       //</NEWDMA>
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        assert(!oas_by_inst->empty());
-        const InstPair &pair = oas_by_inst->begin()->first; 
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = pair.first.get_location();
-        usage.target = pair.second.get_location();
-        measurements.add_measurement(usage);
-      }
       delete oas_by_inst;
     }
 
@@ -3380,29 +3365,6 @@ namespace LegionRuntime {
     };
 #endif
 
-#ifdef OLD_LEGION_PROF
-    class CopyCompletionProfiler : public EventWaiter {
-      public:
-        CopyCompletionProfiler(Event _event) : event(_event) {}
-
-        virtual ~CopyCompletionProfiler(void) { }
-
-        virtual bool event_triggered(void)
-        {
-          register_copy_event(event.id, PROF_END_COPY);
-          return true;
-        }
-
-        virtual void print_info(FILE *f)
-        {
-	        fprintf(f, "copy completion profiler - " IDFMT "/%d\n",
-              event.id, event.gen);
-        }
-      protected:
-        Event event;
-    };
-#endif
-
     void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
@@ -3414,11 +3376,6 @@ namespace LegionRuntime {
       //  to log the completion
       EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
 #endif
-#ifdef OLD_LEGION_PROF
-      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
-      EventImpl::add_waiter(after_copy, new CopyCompletionProfiler(after_copy));
-#endif
-
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // create a copier for the memory used by all of these instance pairs
@@ -3485,6 +3442,15 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        const InstPair &pair = oas_by_inst->begin()->first; 
+
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        measurements.add_measurement(usage);
+      }
 
       // if(after_copy.exists())
       // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
@@ -3870,15 +3836,6 @@ namespace LegionRuntime {
 
     ReduceRequest::~ReduceRequest(void)
     {
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
-        // Not precise, but close enough for now
-        assert(!srcs.empty());
-        usage.source = srcs[0].inst.get_location();
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     size_t ReduceRequest::compute_size(void)
@@ -4183,11 +4140,6 @@ namespace LegionRuntime {
       //  to log the completion
       EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
 #endif
-#ifdef OLD_LEGION_PROF
-      register_copy_event(after_copy.id, PROF_BEGIN_COPY);
-      EventImpl::add_waiter(after_copy, new CopyCompletionProfiler(after_copy));
-#endif
-
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // code assumes a single source field for now
@@ -4431,6 +4383,14 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
+        // Not precise, but close enough for now
+        usage.source = srcs[0].inst.get_location();
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
     }
 
     FillRequest::FillRequest(const void *data, size_t datalen,
@@ -4481,13 +4441,6 @@ namespace LegionRuntime {
     {
       // clean up our mess
       free(fill_buffer);
-      if (measurements.wants_measurement<
-          Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = Memory::NO_MEMORY;
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     size_t FillRequest::compute_size(void)
@@ -4681,6 +4634,13 @@ namespace LegionRuntime {
       } else {
         // TODO: Implement GASNet, Disk, and Framebuffer
       }
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = Memory::NO_MEMORY;
+        usage.target = dst.inst.get_location();
+        measurements.add_measurement(usage);
+      }
     }
 
     template<int DIM>
@@ -4830,9 +4790,6 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
-#ifdef OLD_LEGION_PROF
-      CHECK_PTHREAD( pthread_key_create(&copy_profiler_key, 0) );
-#endif
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }
