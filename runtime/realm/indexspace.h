@@ -355,6 +355,8 @@ namespace Realm {
         return point_data[index];
       }
 
+      
+        
       struct STLComparator {
 	bool operator()(const DomainPoint& a, const DomainPoint& b) const
 	{
@@ -392,13 +394,20 @@ namespace Realm {
       bool is_null(void) const { return (dim > -1); }
 
       static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
-
+      friend std::ostream& operator<< (std::ostream& stream, const DomainPoint& dp);
     protected:
     public:
       int dim;
       int point_data[MAX_POINT_DIM];
     };
-
+  inline std::ostream& operator<<(std::ostream& os, const DomainPoint& dp) {
+    switch(dp.dim) {
+    case 3: os << dp[2] << ",";
+    case 2: os << dp[1] << ",";
+    case 1: os << dp[0];
+    }
+    return os;
+  }
     class DomainLinearization {
     public:
       DomainLinearization(void) : dim(-1), lptr(0) {}
@@ -558,7 +567,7 @@ namespace Realm {
       protected:
 	int dim;
 	void *lptr;
-      };
+    };
 
     class Domain {
     public:
