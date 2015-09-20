@@ -6945,12 +6945,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-#ifdef UNIMPLEMENTED_VERSIONING
       // First send back any created region tree state.  Note to do
-      // this we can start at the index of the remote contexts since we
+      // this we can start at the index of the version infos since we
       // know that any additional region beyond this are ones for which
       // we have created the privileges.
-#endif
+      for (unsigned idx = version_infos.size(); idx < regions.size(); idx++)
+      {
+        if (!region_deleted[idx])
+        {
+          runtime->forest->send_back_logical_state(enclosing_contexts[idx],
+                                                   remote_outermost_context,
+                                                   regions[idx], target);
+        }
+      }
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
@@ -7422,30 +7429,22 @@ namespace LegionRuntime {
       point_termination = UserEvent::create_user_event();
     } 
 
-#if 0
     //--------------------------------------------------------------------------
     void PointTask::send_back_created_state(AddressSpaceID target, 
                                             unsigned start,
-                                            RegionTreeContext remote_outermost,
-                                    std::set<PhysicalManager*> &needed_managers)
+                                            RegionTreeContext remote_outermost)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = start; idx < regions.size(); idx++)
       {
-        if (locally_mapped[idx] && !region_deleted[idx])
+        if (!region_deleted[idx])
         {
-          RegionTreePath path;
-          // Initialize a path to use
-          initialize_mapping_path(path, regions[idx], regions[idx].parent);
-          runtime->forest->send_back_physical_state(
-                                          enclosing_contexts[idx],
-                                          remote_outermost, path,
-                                          regions[idx], target,
-                                          needed_managers); 
+          runtime->forest->send_back_logical_state(enclosing_contexts[idx],
+                                                   remote_outermost,
+                                                   regions[idx], target);
         }
       }
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Wrapper Task 
@@ -10370,10 +10369,12 @@ namespace LegionRuntime {
     {
       // Send back any created state that our point tasks made
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-#ifdef UNIMPLEMENTED_VERSIONING
-      // Send back any newly created state
-      // See PointTask::send_back_created_state
-#endif
+      for (std::deque<PointTask*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        (*it)->send_back_created_state(target, version_infos.size(),
+                                       remote_outermost_context);
+      }
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());

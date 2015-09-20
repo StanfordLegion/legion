@@ -2595,6 +2595,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::send_back_logical_state(RegionTreeContext local_ctx,
+                                                   RegionTreeContext remote_ctx,
+                                                   const RegionRequirement &req,
+                                                   AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *top_node = get_node(req.region);  
+      FieldMask send_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      top_node->send_back_logical_state(local_ctx.get_id(), remote_ctx.get_id(),
+                                        send_mask, target);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
     //--------------------------------------------------------------------------
     {
@@ -10447,6 +10464,7 @@ namespace LegionRuntime {
         {
           rez.serialize(it1->first);
           rez.serialize(it->first->did);
+          rez.serialize(it->first->owner_space);
           rez.serialize(it->second);
         }
       }
@@ -10471,6 +10489,7 @@ namespace LegionRuntime {
           {
             rez.serialize(it1->first);
             rez.serialize(it->first->did);
+            rez.serialize(it->first->owner_space);
             rez.serialize(it->second);
           }
         }
@@ -10513,12 +10532,14 @@ namespace LegionRuntime {
         derez.deserialize(vid);
         DistributedID did;
         derez.deserialize(did);
+        AddressSpaceID owner;
+        derez.deserialize(owner);
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                                    did, source, mask);
+                                                              did, owner);
         info.physical_state->add_version_state(state, mask);
         // Also add this to the version numbers
         // Only need to do this for the non-advance states
@@ -10532,12 +10553,14 @@ namespace LegionRuntime {
         derez.deserialize(vid);
         DistributedID did;
         derez.deserialize(did);
+        AddressSpaceID owner;
+        derez.deserialize(owner);
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
         field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                                    did, source, mask);
+                                                              did, owner);
         // No point in adding this to the version state infos
         // since we already know we just use that to build the PhysicalState
         info.physical_state->add_advance_state(state, mask);
@@ -11941,8 +11964,7 @@ namespace LegionRuntime {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
-        VersionState *init_state = 
-          create_new_version_state(init_version, user_mask);
+        VersionState *init_state = create_new_version_state(init_version);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
         init_state->initialize(view, term_event, usage, user_mask);
         current_version_infos[init_version].valid_fields = user_mask;
@@ -12118,8 +12140,7 @@ namespace LegionRuntime {
           }
           node_info.field_versions->add_field_version(init_version,unversioned);
           VersionStateInfo &info = current_version_infos[init_version];
-          VersionState *init_state = create_new_version_state(init_version,
-                                                              unversioned);
+          VersionState *init_state = create_new_version_state(init_version);
           init_state->add_base_valid_ref(CURRENT_STATE_REF);
           info.states[init_state] = unversioned;
           info.valid_fields |= unversioned;
@@ -12335,8 +12356,7 @@ namespace LegionRuntime {
         VersionID next_version = vit->first+1;
         // Remove this version number from the delete set
         to_delete_current.erase(next_version);
-        VersionState *new_state = 
-          create_new_version_state(next_version, overlap);
+        VersionState *new_state = create_new_version_state(next_version);
         // Add our reference now
         new_state->add_base_valid_ref(CURRENT_STATE_REF);
         // Kind of dangerous to be getting another iterator to this
@@ -12366,8 +12386,7 @@ namespace LegionRuntime {
       // are being initialized and should be added as version 1
       if (!!current_filter)
       {
-        VersionState *new_state = 
-          create_new_version_state(init_version, current_filter);
+        VersionState *new_state = create_new_version_state(init_version);
         new_state->add_base_valid_ref(CURRENT_STATE_REF);
         VersionStateInfo &info = current_version_infos[init_version];
         info.states[new_state] = current_filter;
@@ -12404,21 +12423,19 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    VersionState* CurrentState::create_new_version_state(VersionID vid,
-                                                         const FieldMask &mask) 
+    VersionState* CurrentState::create_new_version_state(VersionID vid)
     //--------------------------------------------------------------------------
     {
       DistributedID new_did = 
         owner->context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = owner->context->runtime->address_space;
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                        new_did, local_space, local_space, this, mask);
+                        new_did, local_space, local_space, this);
     }
 
     //--------------------------------------------------------------------------
     VersionState* CurrentState::create_remote_version_state(VersionID vid,
-                                  DistributedID did, AddressSpaceID owner_space,
-                                  const FieldMask &mask)
+                                  DistributedID did, AddressSpaceID owner_space)
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
@@ -12426,13 +12443,12 @@ namespace LegionRuntime {
       assert(owner_space != local_space);
 #endif
       return legion_new<VersionState>(vid, owner->context->runtime, 
-                              did, owner_space, local_space, this, mask);
+                              did, owner_space, local_space, this);
     }
 
     //--------------------------------------------------------------------------
     VersionState* CurrentState::find_remote_version_state(VersionID vid,
-                                       DistributedID did, AddressSpaceID source,
-                                       const FieldMask &mask)
+                                  DistributedID did, AddressSpaceID owner_space)
     //--------------------------------------------------------------------------
     {
       // Use the lock on the version manager to ensure that we don't
@@ -12453,7 +12469,7 @@ namespace LegionRuntime {
 #endif
         }
         else // Otherwise make it
-          result = create_remote_version_state(vid, did, source, mask);
+          result = create_remote_version_state(vid, did, owner_space);
       }
       return result;
     }
@@ -12563,11 +12579,18 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
-                           const ColorPoint &c)
+    FieldState::FieldState(void)
+      : open_state(NOT_OPEN), redop(0), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
-      redop = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
+                           const ColorPoint &c)
+      : ChildState(m), redop(0), rebuild_timeout(1)
+    //--------------------------------------------------------------------------
+    {
       if (IS_READ_ONLY(user.usage))
         open_state = OPEN_READ_ONLY;
       else if (IS_WRITE(user.usage))
@@ -12577,9 +12600,7 @@ namespace LegionRuntime {
         open_state = OPEN_SINGLE_REDUCE;
         redop = user.usage.redop;
       }
-      valid_fields = m;
       open_children[c] = m;
-      rebuild_timeout = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -14179,7 +14200,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
-                               CurrentState *man, const FieldMask &mask)
+                               CurrentState *man)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
         manager(man), state_lock(Reservation::create_reservation())
 #ifdef DEBUG_HIGH_LEVEL
@@ -17706,6 +17727,262 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::send_back_logical_state(ContextID local_ctx,
+                                                 ContextID remote_ctx,
+                                                 const FieldMask &send_mask,
+                                                 AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      CurrentState &state = get_current_state(local_ctx);
+      Serializer field_rez;
+      unsigned num_field_states = 0;
+      for (LegionList<FieldState>::aligned::const_iterator it = 
+            state.field_states.begin(); it != state.field_states.end(); it++)
+      {
+        if (send_mask * it->valid_fields)
+          continue;
+        num_field_states++;
+        field_rez.serialize(it->open_state);
+        field_rez.serialize(it->redop);
+        unsigned num_children = 0;
+        Serializer child_rez;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator cit = 
+              it->open_children.begin(); cit != it->open_children.end(); cit++)
+        {
+          FieldMask overlap = send_mask & cit->second;
+          if (!overlap)
+            continue;
+          num_children++;
+          child_rez.serialize(cit->first);
+          child_rez.serialize(overlap);
+          // Also traverse the child
+          RegionTreeNode *child = get_tree_child(cit->first);
+          child->send_back_logical_state(local_ctx, remote_ctx, overlap,target);
+        }
+        field_rez.serialize(num_children);
+        field_rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
+      }
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        if (is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(as_partition_node()->handle);
+        }
+        rez.serialize(remote_ctx);
+        rez.serialize(num_field_states);
+        rez.serialize(field_rez.get_buffer(), field_rez.get_used_bytes());
+        // No need to pack the users, they are done
+        Serializer current_rez;
+        unsigned num_current = 0;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+              vit = state.current_version_infos.begin(); 
+              vit != state.current_version_infos.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second; 
+          if (info.valid_fields * send_mask)
+            continue;
+          num_current++;
+          current_rez.serialize(vit->first);
+          Serializer state_rez;
+          unsigned num_states = 0;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            FieldMask overlap = it->second & send_mask; 
+            if (!overlap)
+              continue;
+            num_states++;
+            state_rez.serialize(it->first->did);
+            state_rez.serialize(it->first->owner_space);
+            state_rez.serialize(overlap);
+          }
+          current_rez.serialize(num_states);
+          current_rez.serialize(state_rez.get_buffer(), 
+                                state_rez.get_used_bytes());
+        }
+        rez.serialize(num_current);
+        rez.serialize(current_rez.get_buffer(), current_rez.get_used_bytes());
+        Serializer previous_rez;
+        unsigned num_previous = 0;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+              vit = state.previous_version_infos.begin(); 
+              vit != state.previous_version_infos.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second; 
+          if (info.valid_fields * send_mask)
+            continue;
+          num_previous++;
+          previous_rez.serialize(vit->first);
+          Serializer state_rez;
+          unsigned num_states = 0;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            FieldMask overlap = it->second & send_mask; 
+            if (!overlap)
+              continue;
+            num_states++;
+            state_rez.serialize(it->first->did);
+            state_rez.serialize(it->first->owner_space);
+            state_rez.serialize(overlap);
+          }
+          previous_rez.serialize(num_states);
+          previous_rez.serialize(state_rez.get_buffer(), 
+                                 state_rez.get_used_bytes());
+        }
+        rez.serialize(num_previous);
+        rez.serialize(previous_rez.get_buffer(), previous_rez.get_used_bytes());
+        if (!(state.outstanding_reduction_fields * send_mask))
+        {
+          Serializer reduc_rez;
+          unsigned num_reductions = 0;
+          for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
+                state.outstanding_reductions.begin(); it !=
+                state.outstanding_reductions.end(); it++)
+          {
+            FieldMask overlap = it->second & send_mask;
+            if (!overlap)
+              continue;
+            num_reductions++;
+            reduc_rez.serialize(it->first);
+            reduc_rez.serialize(overlap);
+          }
+          rez.serialize(num_reductions);
+          rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
+        }
+        else
+          rez.serialize<unsigned>(0);
+        FieldMask send_dirty = state.dirty_below & send_mask;
+        rez.serialize(send_dirty);
+        FieldMask send_restricted = state.restricted_fields & send_mask;
+        rez.serialize(send_restricted);
+      }
+      context->runtime->send_back_logical_state(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::process_logical_state_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ContextID local_ctx;
+      derez.deserialize(local_ctx);
+      CurrentState &state = get_current_state(local_ctx);
+      unsigned num_field_states;
+      derez.deserialize(num_field_states);
+      for (unsigned idx = 0; idx < num_field_states; idx++)
+      {
+        FieldState field_state;
+        derez.deserialize(field_state.open_state);
+        derez.deserialize(field_state.redop);
+        unsigned num_children;
+        derez.deserialize(num_children);
+        for (unsigned idx2 = 0; idx2 < num_children; idx2++)
+        {
+          ColorPoint child;
+          derez.deserialize(child);
+          FieldMask &child_mask = field_state.open_children[child];
+          derez.deserialize(child_mask);
+          field_state.valid_fields |= child_mask;
+        }
+        merge_new_field_state(state, field_state);
+      }
+      unsigned num_current;
+      derez.deserialize(num_current);
+      for (unsigned idx = 0; idx < num_current; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        VersionStateInfo &info = state.current_version_infos[vid];
+        unsigned num_states;
+        derez.deserialize(num_states);
+        for (unsigned idx2 = 0; idx2 < num_states; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          AddressSpaceID owner;
+          derez.deserialize(owner);
+          FieldMask state_mask;
+          derez.deserialize(state_mask);
+          VersionState *version_state = 
+            state.find_remote_version_state(vid, did, owner);
+          info.states[version_state] |= state_mask; 
+          info.valid_fields |= state_mask;
+        }
+      }
+      unsigned num_previous;
+      derez.deserialize(num_previous);
+      for (unsigned idx = 0; idx < num_previous; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        VersionStateInfo &info = state.previous_version_infos[vid];
+        unsigned num_states;
+        derez.deserialize(num_states);
+        for (unsigned idx2 = 0; idx2 < num_states; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          AddressSpaceID owner;
+          derez.deserialize(owner);
+          FieldMask state_mask;
+          derez.deserialize(state_mask);
+          VersionState *version_state = 
+            state.find_remote_version_state(vid, did, owner);
+          info.states[version_state] |= state_mask; 
+          info.valid_fields |= state_mask;
+        }
+      }
+      unsigned num_reduc;
+      derez.deserialize(num_reduc);
+      for (unsigned idx = 0; idx < num_reduc; idx++)
+      {
+        ReductionOpID redop;
+        derez.deserialize(redop);
+        FieldMask reduc_mask;
+        derez.deserialize(reduc_mask);
+        state.outstanding_reductions[redop] |= reduc_mask;
+        state.outstanding_reduction_fields |= reduc_mask;
+      }
+      FieldMask dirty_below;
+      derez.deserialize(dirty_below);
+      state.dirty_below |= dirty_below;
+      FieldMask restricted;
+      derez.deserialize(restricted);
+      state.restricted_fields |= restricted;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionTreeNode::handle_logical_state_return(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = forest->get_node(handle); 
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = forest->get_node(handle);
+      }
+      target_node->process_logical_state_return(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::close_physical_node(PhysicalCloser &closer,
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
@@ -19603,12 +19880,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
-                  VersionID vid, DistributedID did, AddressSpaceID source,
-                  const FieldMask &mask)
+                  VersionID vid, DistributedID did, AddressSpaceID owner_space)
     //--------------------------------------------------------------------------
     {
       CurrentState &state = get_current_state(ctx);
-      return state.find_remote_version_state(vid, did, source, mask);
+      return state.find_remote_version_state(vid, did, owner_space);
     }
 
     //--------------------------------------------------------------------------

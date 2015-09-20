@@ -271,6 +271,7 @@ namespace LegionRuntime {
       SEND_INSTANCE_CREATION,
       SEND_REDUCTION_CREATION,
       SEND_CREATION_RESPONSE,
+      SEND_BACK_LOGICAL_STATE,
     };
 
     // Forward declarations for user level objects

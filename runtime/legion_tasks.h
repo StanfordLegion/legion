@@ -819,6 +819,8 @@ namespace LegionRuntime {
                                  size_t res_size, bool owned);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
+      void send_back_created_state(AddressSpaceID target, unsigned start,
+                                   RegionTreeContext remote_outermost_context);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;

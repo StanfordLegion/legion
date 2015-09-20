@@ -420,6 +420,11 @@ namespace LegionRuntime {
                         DetachOp *detach_op,
                         const InstanceRef &ref);
     public:
+      void send_back_logical_state(RegionTreeContext local_context,
+                                   RegionTreeContext remote_context,
+                                   const RegionRequirement &req,
+                                   AddressSpaceID target);
+    public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
     public:
@@ -1664,11 +1669,11 @@ namespace LegionRuntime {
     struct ChildState {
     public:
       ChildState(void) { }
+      ChildState(const FieldMask &m)
+        : valid_fields(m) { }
       ChildState(const ChildState &rhs) 
-      {
-        valid_fields = rhs.valid_fields;
-        open_children = rhs.open_children;
-      }
+        : valid_fields(rhs.valid_fields),
+          open_children(rhs.open_children) { }
     public:
       ChildState& operator=(const ChildState &rhs)
       {
@@ -1689,6 +1694,7 @@ namespace LegionRuntime {
      */
     struct FieldState : public ChildState {
     public:
+      FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
     public:
@@ -1752,14 +1758,11 @@ namespace LegionRuntime {
                                   bool report_unversioned);
       void advance_version_numbers(const FieldMask &mask);
     public:
-      VersionState* create_new_version_state(VersionID vid, 
-                                             const FieldMask &mask);
+      VersionState* create_new_version_state(VersionID vid); 
       VersionState* create_remote_version_state(VersionID vid, 
-                              DistributedID did, AddressSpaceID owner_space,
-                              const FieldMask &mask);
+                              DistributedID did, AddressSpaceID owner_space);
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
-                                              AddressSpaceID source,
-                                              const FieldMask &mask);
+                                              AddressSpaceID owner_space);
     public:
       inline bool has_persistent_views(void) const { return has_persistent; }
       void add_persistent_view(MaterializedView *view);
@@ -2099,7 +2102,7 @@ namespace LegionRuntime {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   CurrentState *manager, const FieldMask &mask); 
+                   CurrentState *manager); 
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -2329,6 +2332,13 @@ namespace LegionRuntime {
       void record_logical_restrictions(ContextID ctx, RestrictInfo &info,
                                        const FieldMask &mask);
     public:
+      void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
+                                   const FieldMask &send_mask, 
+                                   AddressSpaceID target);
+      void process_logical_state_return(Deserializer &derez);
+      static void handle_logical_state_return(RegionTreeForest *forest,
+                                              Deserializer &derez);
+    public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
     public:
@@ -2477,8 +2487,7 @@ namespace LegionRuntime {
       void unregister_logical_view(LogicalView *view);
       LogicalView* find_view(DistributedID did);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
-                                  DistributedID did, AddressSpaceID source,
-                                  const FieldMask &mask); 
+                                  DistributedID did, AddressSpaceID owner);
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);

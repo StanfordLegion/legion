@@ -1469,6 +1469,7 @@ namespace LegionRuntime {
       void send_remote_reduction_creation_request(AddressSpaceID target,
                                                   Serializer &rez);
       void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
+      void send_back_logical_state(AddressSpaceID, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1585,6 +1586,7 @@ namespace LegionRuntime {
       void handle_remote_reduction_creation(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_remote_creation_response(Deserializer &derez);
+      void handle_logical_state_return(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }

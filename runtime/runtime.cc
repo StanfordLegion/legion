@@ -3637,6 +3637,11 @@ namespace LegionRuntime {
               runtime->handle_remote_creation_response(derez);
               break;
             }
+          case SEND_BACK_LOGICAL_STATE:
+            {
+              runtime->handle_logical_state_return(derez);
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -11378,6 +11383,14 @@ namespace LegionRuntime {
       find_messenger(target)->send_message(rez, SEND_CREATION_RESPONSE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_back_logical_state(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
+                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
@@ -12047,6 +12060,13 @@ namespace LegionRuntime {
       UserEvent done_event;
       derez.deserialize(done_event);
       done_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_logical_state_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode::handle_logical_state_return(forest, derez);
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS
