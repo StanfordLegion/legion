@@ -914,6 +914,7 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
       virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -968,6 +969,7 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
       virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;

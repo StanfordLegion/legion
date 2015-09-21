@@ -4579,9 +4579,8 @@ namespace LegionRuntime {
           // Not we only need to do this for non-virtually mapped task
           if ((regions[idx].prop == SIMULTANEOUS) ||
               has_restrictions(idx, regions[idx].region)) 
-            runtime->forest->restrict_user_coherence(enclosing_contexts[idx], 
-                                                     this, regions[idx].region,
-                                                 regions[idx].privilege_fields);
+            runtime->forest->restrict_user_coherence(context, this, 
+                      regions[idx].region, regions[idx].privilege_fields);
         }
       }
     }
