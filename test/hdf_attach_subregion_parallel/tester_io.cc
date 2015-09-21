@@ -378,7 +378,6 @@ int main(int argc, char **argv)
     Processor::LOC_PROC, true/*single*/, true/*index*/);
 
   PersistentRegion_init();
-  sleep(4); 
   return HighLevelRuntime::start(argc, argv);
 }
 

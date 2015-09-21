@@ -181,7 +181,17 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       // random a memory in which we should create instance
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
-      machine.get_all_memories(mem);
+      if(j == 0 || j == PATH_LEN - 1) {
+        std::set<Memory> all_mem;
+        machine.get_all_memories(all_mem);
+        for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+          if (gasnet_mynode() == ID(*it).node())
+            mem.insert(*it);
+        }
+      }
+      else {
+        machine.get_all_memories(mem);
+      }
       int mem_idx = rand() % mem.size();
       std::set<Memory>::iterator it = mem.begin();
       while (mem_idx > 0) {
@@ -191,6 +201,7 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       block_size_vec[j] = rand() % domain.get_volume() + 1;
       inst_vec[j] = domain.create_instance(*it, field_sizes, block_size_vec[j]);
       assert(ID(inst_vec[j]).type() == ID::ID_INSTANCE);
+      printf("node = %d\n", ID(*it).node());
       // random field order of this region instance
       std::vector<size_t> rand_order;
       rand_order.clear();
@@ -220,15 +231,25 @@ void top_level_task(const void *args, size_t arglen, Processor p)
           dst_fields.push_back(dst_field);
         }
         Event copyEvent = domain.copy(src_fields, dst_fields, Event::NO_EVENT);
-        printf("	inst[%u] {%d (%d) -> %d (%d)}: ", j, get_runtime()->get_instance_impl(inst_vec[j-1])->memory.kind(), block_size_vec[j-1], get_runtime()->get_instance_impl(inst_vec[j])->memory.kind(), block_size_vec[j]);
+        printf("[%d]	inst[%u] {%d (%d) -> %d (%d)}: ", gasnet_mynode(), j,
+               get_runtime()->get_instance_impl(inst_vec[j-1])->memory.kind(),
+               ID(get_runtime()->get_instance_impl(inst_vec[j-1])->memory).node(),
+               get_runtime()->get_instance_impl(inst_vec[j])->memory.kind(),
+               ID(get_runtime()->get_instance_impl(inst_vec[j])->memory).node());
         copyEvent.wait();
-        if (verify_region_data(domain, inst_vec[j], field_order[j]))
+        //if (verify_region_data(domain, inst_vec[j], field_order[j]))
           printf("check passed...\n ");
-        else
-          printf("check failed...\n");
+        //else
+          //printf("check failed...\n");
       }
     }
 
+    if (verify_region_data(domain, inst_vec[PATH_LEN - 1], field_order[PATH_LEN - 1]))
+      printf("All check passed...\n");
+    else {
+      printf("Some check failed...\n");
+      assert(false);
+    }
     for (unsigned j = 0; j < PATH_LEN; j++) {
       get_runtime()->get_memory_impl(get_runtime()->get_instance_impl(inst_vec[j])->memory)->destroy_instance(inst_vec[j], false);
     }
