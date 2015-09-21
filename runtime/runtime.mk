@@ -252,7 +252,7 @@ endif
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
-CC_FLAGS        += -Wall -Werror -Wno-format  -Wno-sign-compare
+CC_FLAGS        += -Wall -Werror
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
