@@ -211,7 +211,11 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
 #endif
   
   IndexLauncher write_launcher(COPY_VALUES_TASK_ID, this->dom,
+#ifdef TESTERIO_SERIALIZE
+    TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map;
+#else
     TaskArgument(&task_args, sizeof(task_args)), arg_map);
+#endif
   
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
@@ -267,8 +271,12 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
   //std::cout << "task_args size is: " << sizeof(task_args) << std::endl;
 #endif
   IndexLauncher read_launcher(COPY_VALUES_TASK_ID, this->dom,
-           		       TaskArgument(&task_args, sizeof(task_args)), arg_map);
-  
+#ifdef TESTERIO_SERIALIZE
+    TaskArgument(&task_args, sizeof(task_args)+task_args.field_map_size), arg_map;
+#else
+    TaskArgument(&task_args, sizeof(task_args)), arg_map);
+#endif
+
   for(std::vector<Piece>::iterator itr = this->pieces.begin(); 
       itr != this->pieces.end(); itr++) {
     Piece piece = *itr;
@@ -311,8 +319,8 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
   this->field_map = field_map;
   this->dom = dom; 
   
-  //std::map<FieldID, std::string> field_map_des;
 #ifdef TESTERIO_SERIALIZE
+  std::map<FieldID, std::string> field_map_des;
   Realm::Serialization::DynamicBufferSerializer dbs(0);
   dbs << field_map;
   this->field_map_size = dbs.bytes_used();

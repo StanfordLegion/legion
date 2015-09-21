@@ -291,8 +291,14 @@ namespace LegionRuntime {
            sub_rect.hi.x[j] = local_rect.hi[j];
            subtotal *= local_rect.dim_size(j);
          }
-         else
+         else {
+           if (strides[j][0] == subtotal) {
+             size_t partial = left_over / subtotal;
+             sub_rect.hi.x[j] += partial - 1;
+             subtotal *= partial;
+           }
            break;
+         }
        }
      }
 
