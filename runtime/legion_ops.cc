@@ -3078,7 +3078,7 @@ namespace LegionRuntime {
     unsigned CopyOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      if (idx > src_parent_indexes.size())
+      if (idx >= src_parent_indexes.size())
       {
         idx -= src_parent_indexes.size();
 #ifdef DEBUG_HIGH_LEVEL
@@ -4977,6 +4977,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    unsigned AcquireOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable::MappableKind AcquireOp::get_mappable_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -5554,6 +5564,16 @@ namespace LegionRuntime {
     {
       version_info.release();
       Operation::trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ReleaseOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_req_index;
     }
 
     //--------------------------------------------------------------------------
