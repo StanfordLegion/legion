@@ -205,8 +205,6 @@ namespace LegionRuntime {
       bool children_commit_invoked;
     protected:
       AllocManager *arg_manager;
-    protected:
-      UserEvent all_children_mapped;
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
@@ -286,6 +284,10 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         ProcessorManager *manager;
         Operation *op;
+      };
+      struct DeferredPostMappedArgs {
+        HLRTaskID hlr_id;
+        SingleTask *task;
       };
     public:
       SingleTask(Runtime *rt);
@@ -491,6 +493,7 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
+      virtual void handle_post_mapped(Event pre = Event::NO_EVENT) = 0;
     protected:
       std::vector<RegionTreePath> mapping_paths;
       // Boolean for each region saying if it is virtual mapped
@@ -522,6 +525,7 @@ namespace LegionRuntime {
     protected:
       // Track whether this task has finished executing
       int outstanding_children_count;
+      bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children;
@@ -684,6 +688,7 @@ namespace LegionRuntime {
               bool check_privileges,
               bool track = true); 
       void initialize_paths(void);
+      void set_top_level(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
@@ -716,6 +721,7 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
+      virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
@@ -817,6 +823,7 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
+      virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
       void send_back_created_state(AddressSpaceID target, unsigned start,
@@ -880,6 +887,7 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
+      virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
       void activate_wrapper(void);
       void deactivate_wrapper(void);

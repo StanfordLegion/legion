@@ -105,8 +105,15 @@ namespace LegionRuntime {
       HLR_SCHEDULER_ID,
       HLR_MESSAGE_ID,
       HLR_POST_END_ID,
-      HLR_DEFERRED_MAPPING_ID,
+
+      HLR_DEFERRED_MAPPING_TRIGGER_ID,
+      HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
+      HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+      HLR_DEFERRED_POST_MAPPED_ID,
+
       HLR_DEFERRED_COMPLETE_ID,
+      HLR_DEFERRED_COMMIT_ID,
+
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
       HLR_TRIGGER_DEPENDENCE_ID,
@@ -152,8 +159,12 @@ namespace LegionRuntime {
         "Scheduler",                                              \
         "Remote Message",                                         \
         "Post-Task Execution",                                    \
-        "Deferred Mapping",                                       \
+        "Deferred Mapping Trigger",                               \
+        "Deferred Resolution Trigger",                            \
+        "Deferred Execution Trigger",                             \
+        "Deferred Post Mapped",                                   \
         "Deferred Complete",                                      \
+        "Deferred Commit",                                        \
         "Reclaim Local Field",                                    \
         "Garbage Collection",                                     \
         "Logical Dependence Analysis",                            \

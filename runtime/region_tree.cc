@@ -16081,7 +16081,7 @@ namespace LegionRuntime {
       if (finder == semantic_info.end())
       {
         log_run.error("ERROR: invalid semantic tag %ld for "
-                            "index tree node", tag);   
+                            "region tree node", tag);   
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif

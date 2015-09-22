@@ -231,7 +231,6 @@ namespace LegionRuntime {
       rez.serialize(map_locally);
       rez.serialize(profile_task);
       rez.serialize(task_priority);
-      rez.serialize(all_children_mapped);
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceRef>::iterator it = 
             early_mapped_regions.begin(); it != 
@@ -333,7 +332,6 @@ namespace LegionRuntime {
       derez.deserialize(map_locally);
       derez.deserialize(profile_task);
       derez.deserialize(task_priority);
-      derez.deserialize(all_children_mapped);
       size_t num_early;
       derez.deserialize(num_early);
       for (unsigned idx = 0; idx < num_early; idx++)
@@ -397,9 +395,7 @@ namespace LegionRuntime {
                                       Processor::TaskFuncID tid)
     //-------------------------------------------------------------------------- 
     {
-      all_children_mapped = UserEvent::create_user_event();
-      initialize_speculation(ctx, track, 
-                             all_children_mapped, regions.size(), p);
+      initialize_speculation(ctx, track, regions.size(), p);
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
       current_proc = orig_proc;
@@ -2184,13 +2180,13 @@ namespace LegionRuntime {
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
-      executed = false;
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
       pending_done = Event::NO_EVENT;
       last_registration = Event::NO_EVENT;
       current_trace = NULL;
+      task_executed = false;
       outstanding_children_count = 0;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
@@ -2694,7 +2690,7 @@ namespace LegionRuntime {
         // Put it on the list of complete children to complete
         complete_children.insert(op);
         // See if we need to trigger the all children complete call
-        if (executed && executing_children.empty() && 
+        if (task_executed && executing_children.empty() && 
             executed_children.empty() && !children_complete_invoked)
         {
           needs_trigger = true;
@@ -2702,12 +2698,7 @@ namespace LegionRuntime {
         }
       }
       if (needs_trigger)
-      {
-        // If we had any virtual mappings, we can now be considered mapped
-        if (num_virtual_mappings > 0)
-          complete_mapping();
         trigger_children_complete();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4930,11 +4921,6 @@ namespace LegionRuntime {
                   physical_instances[idx], unmap_events[idx]);
             }
           }
-          // we can also trigger the all children mapped event
-          all_children_mapped.trigger();
-#ifdef DEBUG_HIGH_LEVEL
-          all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
         }
       }
 
@@ -5178,7 +5164,7 @@ namespace LegionRuntime {
       // For each of the regions which were not virtual mapped, 
       // issue a close operation for them.  If we're a leaf task
       // and we had no virtual mappings then we are done.
-      if (!is_leaf() || (num_virtual_mappings > 0))
+      if (!is_leaf())
       {
         for (unsigned idx = 0; idx < local_instances.size(); idx++)
         {
@@ -5195,6 +5181,8 @@ namespace LegionRuntime {
           }
         }
       }
+      // Mark that we are done executing this task
+      task_executed = true;
 
       // If this is a GPU processor and we are profiling, 
       // synchronize the stream for now
@@ -5246,31 +5234,31 @@ namespace LegionRuntime {
 #endif
       // Handle the future result
       handle_future(res, res_size, owned);
-      // First complete the conditions for the children being mapped
-      if (!is_leaf() || (num_virtual_mappings > 0))
+      // If we weren't a leaf task, compute the conditions for being mapped
+      // which is that all of our children are now mapped
+      if (!is_leaf())
       {
         std::set<Event> preconditions;
-        AutoLock o_lock(op_lock);
-        // Only need to do this for executing and executed children
-        // We know that any complete children are done
-        for (std::set<Operation*>::const_iterator it = 
-              executing_children.begin(); it != executing_children.end(); it++)
         {
-          Event pre = (*it)->get_children_mapped();
-          if (pre.exists())
-            preconditions.insert(pre);
+          AutoLock o_lock(op_lock);
+          // Only need to do this for executing and executed children
+          // We know that any complete children are done
+          for (std::set<Operation*>::const_iterator it = 
+                executing_children.begin(); it != 
+                executing_children.end(); it++)
+          {
+            preconditions.insert((*it)->get_mapped_event());
+          }
+          for (std::set<Operation*>::const_iterator it = 
+                executed_children.begin(); it != executed_children.end(); it++)
+          {
+            preconditions.insert((*it)->get_mapped_event());
+          }
         }
-        for (std::set<Operation*>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          Event pre = (*it)->get_children_mapped();
-          if (pre.exists())
-            preconditions.insert(pre);
-        }
-        all_children_mapped.trigger(Event::merge_events(preconditions));
-#ifdef DEBUG_HIGH_LEVEL
-        all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
+        if (!preconditions.empty())
+          handle_post_mapped(Event::merge_events(preconditions));
+        else
+          handle_post_mapped();
       }
       // Mark that we are done executing this operation
       complete_execution();
@@ -5298,17 +5286,9 @@ namespace LegionRuntime {
         }
       } 
       if (need_complete)
-      {
-        // If we had any virtual mappings, mark that we are
-        // now mapping complete since all children are mapped
-        if (num_virtual_mappings > 0)
-          complete_mapping();
         trigger_children_complete();
-      }
       if (need_commit)
-      {
         trigger_children_committed();
-      } 
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
@@ -5429,7 +5409,6 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
 
-      std::set<Event> all_slices_mapped;
 #ifdef DEBUG_HIGH_LEVEL
       assert(minimal_points_assigned == 0);
 #endif
@@ -5514,7 +5493,6 @@ namespace LegionRuntime {
                                                      splits[idx].recurse,
                                                      splits[idx].stealable,
                                                      splits.size());
-        all_slices_mapped.insert(slice->get_children_mapped());
         slices.push_back(slice);
       }
       // If the volumes don't match, then something bad happend in the mapper
@@ -5534,13 +5512,6 @@ namespace LegionRuntime {
       }
       else
         minimal_points.clear();
-      // Trigger our all children mapped as being done when all
-      // the slices have all their children mapped
-      all_children_mapped.trigger(Event::merge_events(all_slices_mapped));
-#ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
-
 #ifdef LEGION_LOGGING
       UniqueID local_id = get_unique_task_id();
 #endif
@@ -6200,6 +6171,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::set_top_level(void)
+    //--------------------------------------------------------------------------
+    {
+      this->top_level_task = true;
+      // Top-level tasks never do dependence analysis, so we
+      // need to complete those stages now
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -6433,10 +6414,6 @@ namespace LegionRuntime {
           result.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
       }
-      all_children_mapped.trigger();
-#ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
       // Then clean up this task instance
       if (trigger)
         complete_execution();
@@ -6519,7 +6496,7 @@ namespace LegionRuntime {
       }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
-      if (map_success && (num_virtual_mappings == 0))
+      if (map_success && is_leaf())
       {
         if (is_remote())
         {
@@ -6684,14 +6661,6 @@ namespace LegionRuntime {
       }
       else
       {
-        // Send back any messages to say that we are complete
-        if (num_virtual_mappings > 0)
-        {
-          Serializer rez;
-          // Only need to send back the pointer to the task instance
-          rez.serialize(orig_task);
-          runtime->send_individual_remote_mapped(orig_proc,rez,false/*flush*/);
-        }
         Serializer rez;
         pack_remote_complete(rez);
         runtime->send_individual_remote_complete(orig_proc,rez);
@@ -6766,6 +6735,34 @@ namespace LegionRuntime {
         else
           must_epoch->set_future(index_point, res, res_size, owned);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::handle_post_mapped(Event mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_remote())
+      {
+        complete_mapping(mapped_precondition);
+        return;
+      }
+      if (!mapped_precondition.has_triggered())
+      {
+        SingleTask::DeferredPostMappedArgs args;
+        args.hlr_id = HLR_DEFERRED_POST_MAPPED_ID;
+        args.task = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_POST_MAPPED_ID,
+                                         this, mapped_precondition);
+        return;
+      }
+      // Send back the message saying that we finished mapping
+      Serializer rez;
+      // Only need to send back the pointer to the task instance
+      rez.serialize(orig_task);
+      runtime->send_individual_remote_mapped(orig_proc, rez);
+      // Now we can complete this task
+      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -6850,7 +6847,7 @@ namespace LegionRuntime {
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
-      if (is_locally_mapped() && (num_virtual_mappings == 0))
+      if (is_locally_mapped() && is_leaf())
         complete_mapping();
 #ifdef LEGION_LOGGING
       LegionLogging::log_point_point(Processor::get_executing_processor(),
@@ -6918,12 +6915,6 @@ namespace LegionRuntime {
       future_store = NULL;
       future_size = 0;
       result.impl->complete_future();
-
-      // Trigger our all children mapped event as well
-      all_children_mapped.trigger();
-#ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
 
       // Trigger our completion event
       completion_event.trigger();
@@ -7087,6 +7078,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_single();
+      // Point tasks never have to resolve speculation
+      resolve_speculation();
       slice_owner = NULL;
       has_remote_subtasks = false;
     }
@@ -7199,7 +7192,7 @@ namespace LegionRuntime {
                                          point_termination, mapper_invoked);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
-      if (map_success && (num_virtual_mappings == 0))
+      if (map_success && is_leaf()) 
       {
         // Tell our owner that we mapped
         slice_owner->record_child_mapped();
@@ -7314,10 +7307,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
 #endif
-      // If we had any virtual mappings, we can now be considered mapped
-      if (num_virtual_mappings > 0)
-        slice_owner->record_child_mapped();
-
       // Pass back our created and deleted operations 
       slice_owner->return_privileges(this);
 
@@ -7385,7 +7374,7 @@ namespace LegionRuntime {
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
-      if (is_locally_mapped() && (num_virtual_mappings == 0))
+      if (is_locally_mapped() && is_leaf())
       {
         slice_owner->record_child_mapped();
         complete_mapping();
@@ -7415,6 +7404,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       slice_owner->handle_future(index_point, res, res_size, owner);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::handle_post_mapped(Event mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!mapped_precondition.has_triggered())
+      {
+        SingleTask::DeferredPostMappedArgs args;
+        args.hlr_id = HLR_DEFERRED_POST_MAPPED_ID;
+        args.task = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_POST_MAPPED_ID,
+                                         this, mapped_precondition);
+        return;
+      }
+      slice_owner->record_child_mapped();
+      // Now we can complete this point task
+      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -7585,6 +7593,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void WrapperTask::handle_future(const void *res, size_t res_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperTask::handle_post_mapped(Event mapped_precondition)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8806,10 +8822,6 @@ namespace LegionRuntime {
                                   predicate_false_size, false/*own*/);
         }
       }
-      all_children_mapped.trigger();
-#ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
       // Then clean up this task execution
       if (trigger)
         complete_execution();
@@ -8853,11 +8865,6 @@ namespace LegionRuntime {
           assert(minimal_points_assigned == minimal_points.size());
 #endif
           minimal_points.clear();
-          // Before we do this we have to chain the all children mapped event
-          all_children_mapped.trigger(clone->get_children_mapped());
-#ifdef DEBUG_HIGH_LEVEL
-          all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
           runtime->send_task(target_proc, clone);
           return false; // We have now been sent away
         }
@@ -9095,12 +9102,6 @@ namespace LegionRuntime {
                                           reduction_state_size,false/*owner*/);
         reduction_future.impl->complete_future();
       }
-      // Trigger the all children mapped event
-      all_children_mapped.trigger();
-#ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
-#endif
-
       // Trigger all our events event
       completion_event.trigger();
     }
@@ -9528,6 +9529,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_multi();
+      // Slice tasks never have to resolve speculation
+      resolve_speculation();
       reclaim = false;
       index_complete = Event::NO_EVENT;
       mapping_index = 0;
@@ -10137,21 +10140,16 @@ namespace LegionRuntime {
       assert(index_domain.get_volume() > 0);
 #endif
       // Enumerate all the points
-      std::set<Event> all_points_mapped;
       for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
             minimal_points.begin(); it != minimal_points.end(); it++)
       {
         PointTask *next_point = clone_as_point_task(it->first, it->second);
-        all_points_mapped.insert(next_point->get_children_mapped());
         points.push_back(next_point);
         // We can now delete our old minimal points
         delete it->second;
       }
       minimal_points.clear();
-      // Trigger our all children mapped based on all the points being mapped
-      all_children_mapped.trigger(Event::merge_events(all_points_mapped));
 #ifdef DEBUG_HIGH_LEVEL
-      all_children_mapped = UserEvent::NO_USER_EVENT;
       assert(index_domain.get_volume() == points.size());
 #endif
       mapping_index = 0;

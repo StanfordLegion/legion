@@ -48,13 +48,13 @@ namespace LegionRuntime {
     Operation::Operation(Runtime *rt)
       : runtime(rt), op_lock(Reservation::create_reservation()), 
         gen(0), unique_op_id(0), 
-        outstanding_mapping_deps(0),
-        outstanding_commit_deps(0),
         outstanding_mapping_references(0),
-        mapped(false), hardened(false), completed(false), 
-        committed(false), parent_ctx(NULL)
+        hardened(false), parent_ctx(NULL)
     //--------------------------------------------------------------------------
     {
+      dependence_tracker.mapping = NULL;
+      if (!Runtime::resilient_mode)
+        commit_event = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -71,33 +71,35 @@ namespace LegionRuntime {
     {
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
-      outstanding_mapping_deps = 0;
-      outstanding_speculation_deps = 0;
-      outstanding_commit_deps = 0;
       outstanding_mapping_references = 0;
+#ifdef DEBUG_HIGH_LEVEL
       mapped = false;
       executed = false;
       resolved = false;
-      hardened = false;
+#endif
       completed = false;
       committed = false;
-      trigger_mapping_invoked = false;
-      trigger_resolution_invoked = false;
-      trigger_complete_invoked = false;
-      trigger_commit_invoked = false;
+      hardened = false;
+      trigger_commit_invoked = true;
       early_commit_request = false;
       track_parent = false;
       parent_ctx = NULL;
-      children_mapped = Event::NO_EVENT;
       need_completion_trigger = true;
+      mapped_event = UserEvent::create_user_event();
+      resolved_event = UserEvent::create_user_event();
       completion_event = UserEvent::create_user_event();
+      if (Runtime::resilient_mode)
+        commit_event = UserEvent::create_user_event();
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
-      must_epoch_gen = 0;
       must_epoch_index = 0;
 #ifdef DEBUG_HIGH_LEVEL
+      assert(mapped_event.exists());
+      assert(resolved_event.exists());
       assert(completion_event.exists());
+      if (Runtime::resilient_mode)
+        assert(commit_event.exists());
 #endif
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
@@ -115,10 +117,20 @@ namespace LegionRuntime {
       outgoing.clear();
       unverified_regions.clear();
       verify_regions.clear();
-      dependent_children_mapped.clear();
       logical_records.clear();
+      if (dependence_tracker.commit != NULL)
+      {
+        delete dependence_tracker.commit;
+        dependence_tracker.commit = NULL;
+      }
+      if (!mapped_event.has_triggered())
+        mapped_event.trigger();
+      if (!resolved_event.has_triggered())
+        resolved_event.trigger();
       if (need_completion_trigger && !completion_event.has_triggered())
         completion_event.trigger();
+      if (!commit_event.has_triggered())
+        commit_event.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -205,7 +217,6 @@ namespace LegionRuntime {
       assert(epoch != NULL);
 #endif
       must_epoch = epoch;
-      must_epoch_gen = epoch->get_generation();
       must_epoch_index = index;
       must_epoch->register_subop(this);
     }
@@ -223,7 +234,6 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Operation::initialize_operation(SingleTask *ctx, bool track, 
-                                         Event child_event, 
                                          unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
@@ -233,7 +243,6 @@ namespace LegionRuntime {
 #endif
       parent_ctx = ctx;
       track_parent = track;
-      children_mapped = child_event;
       if (track_parent)
         parent_ctx->register_new_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
@@ -284,15 +293,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       resolve_speculation();
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // should only be called if overridden
-      assert(false);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Operation::trigger_complete(void)
@@ -312,6 +313,34 @@ namespace LegionRuntime {
       commit_operation();
       // Once we're done with this, we can deactivate the object
       deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called if overridden
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::deferred_commit(GenerationID our_gen)
+    //--------------------------------------------------------------------------
+    {
+      bool need_trigger = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(our_gen <= gen); // better not be ahead of where we are now
+#endif
+        if ((our_gen == gen) && !trigger_commit_invoked)
+        {
+          trigger_commit_invoked = true;
+          need_trigger = true;
+        }
+      }
+      if (need_trigger)
+        trigger_commit();
     }
 
     //--------------------------------------------------------------------------
@@ -348,143 +377,63 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_mapping(void)
+    void Operation::complete_mapping(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      // Mark that we are mapped and make a copy of the outgoing that
-      // we can read since people can still add outgoing dependences
-      // even after we have mapped.
-      bool need_resolution = false;
-      bool need_complete = false;
-      std::map<Operation*,GenerationID> outgoing_copy;
-      bool use_copy;
+#ifdef DEBUG_HIGH_LEVEL
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
         assert(!mapped);
-#endif
         mapped = true;
-        use_copy = (outstanding_mapping_references > 0);
-        if (use_copy)
-          outgoing_copy = outgoing;
-        if (executed && !resolved && (outstanding_speculation_deps == 0) && 
-            !trigger_resolution_invoked)
-        {
-          trigger_resolution_invoked = true;
-          need_resolution = true;
-        }
-        if (executed && resolved && !trigger_complete_invoked)
-        {
-          trigger_complete_invoked = true;
-          need_complete = true;
-        }
       }
-      if (need_resolution)
-        trigger_resolution();
-      if (need_complete)
-        trigger_complete();
-      if (use_copy)
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              outgoing_copy.begin(); it != outgoing_copy.end(); it++)
-        {
-          it->first->notify_mapping_dependence(it->second);
-        }
-      }
-      else
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              outgoing.begin(); it != outgoing.end(); it++)
-        {
-          it->first->notify_mapping_dependence(it->second);
-        }
-      }
+#endif
+      mapped_event.trigger(wait_on);
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_execution(void)
+    void Operation::complete_execution(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      bool need_resolution = false;
-      bool need_complete = false;
       // Tell our parent context that we are done mapping
       // It's important that this is done before we mark that we
       // are executed to avoid race conditions
       if (track_parent)
         parent_ctx->register_child_executed(this);
+#ifdef DEBUG_HIGH_LEVEL
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
         assert(!executed);
-#endif
         executed = true;
-        // If we haven't been resolved and we've already mapped, check to see
-        // if all of our speculation deps have been satisfied
-        if (mapped && !resolved && (outstanding_speculation_deps == 0) &&
-            !trigger_resolution_invoked)
-        {
-          trigger_resolution_invoked = true;
-          need_resolution = true;
-        }
-        if (mapped && resolved && !trigger_complete_invoked)
-        {
-          trigger_complete_invoked = true;
-          need_complete = true;
-        }
       }
-      if (need_resolution)
-        trigger_resolution();
-      if (need_complete)
+#endif
+      // Merge together all three events to find the precondition for completion
+      Event trigger_pre = 
+        Event::merge_events(mapped_event, resolved_event, wait_on);
+      if (!trigger_pre.has_triggered())
+      {
+        DeferredCompleteArgs args;
+        args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         this, trigger_pre);
+      }
+      else // Do the trigger now
         trigger_complete();
     }
 
     //--------------------------------------------------------------------------
-    void Operation::resolve_speculation(void)
+    void Operation::resolve_speculation(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, RESOLVE_SPECULATION);
-#endif
-      // Mark that we are mapped and make a copy of the outgoing
-      // edges that we can read since people can still be adding
-      // outgoing dependences even after we have resolved.
-      std::map<Operation*,GenerationID> outgoing_copy;
-      bool use_copy;
-      bool need_trigger = false;
+#ifdef DEBUG_HIGH_LEVEL
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
         assert(!resolved);
-#endif
         resolved = true;
-        use_copy = (outstanding_mapping_references > 0);
-        if (use_copy)
-          outgoing_copy = outgoing;
-        if (mapped && executed && !trigger_complete_invoked)
-        {
-          trigger_complete_invoked = true;
-          need_trigger = true;
-        }
       }
-      if (use_copy)
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it =
-              outgoing_copy.begin(); it != outgoing_copy.end(); it++)
-        {
-          it->first->notify_speculation_dependence(it->second);
-        }
-      }
-      else
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it =
-              outgoing.begin(); it != outgoing.end(); it++)
-        {
-          it->first->notify_speculation_dependence(it->second);
-        }
-      }
-      if (need_trigger)
-        trigger_complete();
+#endif
+      resolved_event.trigger(wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -506,15 +455,28 @@ namespace LegionRuntime {
         assert(!completed);
 #endif
         completed = true;
+        // Now that we have done the completion stage, we can 
+        // mark trigger commit to false which will open all the
+        // different path ways for doing commit, this also
+        // means we need to check all the ways here because they
+        // have been disable previously
+        trigger_commit_invoked = false;
         // Check to see if we need to trigger commit
-        if (!trigger_commit_invoked && 
-            ((!Runtime::resilient_mode) || early_commit_request ||
-            ((hardened && unverified_regions.empty()) ||
-            ((outstanding_mapping_references == 0) &&
-             (outstanding_commit_deps == 0)))))
+        if ((!Runtime::resilient_mode) || early_commit_request ||
+            ((hardened && unverified_regions.empty())))
         {
           trigger_commit_invoked = true;
           need_trigger = true;
+        }
+        else if (outstanding_mapping_references == 0)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(dependence_tracker.commit != NULL);
+#endif
+          CommitDependenceTracker *tracker = dependence_tracker.commit;
+          need_trigger = tracker->issue_commit_trigger(this, runtime);
+          if (need_trigger)
+            trigger_commit_invoked = true;
         }
       }
       if (need_completion_trigger)
@@ -565,12 +527,9 @@ namespace LegionRuntime {
       } 
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
-      // Finally tell any incoming edges that we've now committed
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            incoming.begin(); it != incoming.end(); it++)
-      {
-        it->first->notify_commit_dependence(it->second);
-      }
+      // Trigger the commit event
+      if (Runtime::resilient_mode)
+        commit_event.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -585,8 +544,7 @@ namespace LegionRuntime {
         assert(!hardened);
 #endif
         hardened = true;
-        if (completed && unverified_regions.empty() && 
-            !trigger_commit_invoked)
+        if (unverified_regions.empty() && !trigger_commit_invoked)
         {
           trigger_commit_invoked = true;
           need_trigger = true;
@@ -617,11 +575,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_mapping_deps == 0);
+      assert(dependence_tracker.mapping == NULL);
 #endif
-      // No need to hold the lock since we haven't started yet
-      outstanding_mapping_deps++;
-      outstanding_speculation_deps++;
+      // Make a dependence tracker
+      dependence_tracker.mapping = new MappingDependenceTracker();
       // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
       // Register ourselves with our trace if there is one
@@ -634,61 +591,15 @@ namespace LegionRuntime {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      bool need_mapping = false;
-      bool need_resolution = false;
-      {
-        AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(outstanding_mapping_deps > 0);
+      assert(dependence_tracker.mapping != NULL);
 #endif
-        outstanding_mapping_deps--;
-        outstanding_speculation_deps--;
-        if (!mapped && (outstanding_mapping_deps == 0) &&
-            !trigger_mapping_invoked)
-        {
-          trigger_mapping_invoked = true;
-          need_mapping = true;
-        }
-        if (!resolved && (outstanding_speculation_deps == 0) &&
-            !trigger_resolution_invoked)
-        {
-          trigger_resolution_invoked = true;
-          need_resolution = true;
-        }
-      }
-      if (need_mapping)
-      {
-        bool trigger_now = false;
-        if (!dependent_children_mapped.empty())
-        {
-          Event wait_on = Event::merge_events(dependent_children_mapped);
-          if (wait_on.exists())
-          {
-            DeferredMappingArgs args;
-            args.hlr_id = HLR_DEFERRED_MAPPING_ID;
-            args.proxy_this = this;
-            args.must_epoch = must_epoch;
-            args.must_epoch_gen = must_epoch_gen;
-            runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                             HLR_DEFERRED_MAPPING_ID,
-                                             this, wait_on);
-          }
-          else
-            trigger_now = true;
-        }
-        else
-          trigger_now = true;
-        // See if we should do the trigger now
-        if (trigger_now)
-        {
-          if (must_epoch == NULL)
-            trigger_mapping();
-          else
-            must_epoch->notify_mapping_dependence(must_epoch_gen);
-        }
-      }
-      if (need_resolution)
-        trigger_resolution();
+      MappingDependenceTracker *tracker = dependence_tracker.mapping;
+      // Now make a commit tracker
+      dependence_tracker.commit = new CommitDependenceTracker();
+      // Cannot touch anything not on our stack after this call
+      tracker->issue_stage_triggers(this, runtime, must_epoch);
+      delete tracker;
     }
 
     //--------------------------------------------------------------------------
@@ -717,14 +628,13 @@ namespace LegionRuntime {
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
-      Event all_mapped = Event::NO_EVENT;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(dependence_tracker.mapping != NULL);
+#endif
       bool prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
-                                                outstanding_mapping_deps,
-                                                outstanding_speculation_deps,
-                                                all_mapped);
-      if (all_mapped.exists())
-        dependent_children_mapped.insert(all_mapped);
+                                                dependence_tracker.mapping,
+                                                commit_event);
       if (registered_dependence)
         incoming[target] = target_gen;
       if (tracing)
@@ -783,14 +693,13 @@ namespace LegionRuntime {
       bool prune = false;
       if (do_registration)
       {
-        Event all_mapped = Event::NO_EVENT;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(dependence_tracker.mapping != NULL);
+#endif
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
-                                                outstanding_mapping_deps,
-                                                outstanding_speculation_deps,
-                                                all_mapped);
-        if (all_mapped.exists())
-          dependent_children_mapped.insert(all_mapped);
+                                                dependence_tracker.mapping,
+                                                commit_event);
       }
       if (registered_dependence)
       {
@@ -818,9 +727,8 @@ namespace LegionRuntime {
     bool Operation::perform_registration(GenerationID our_gen, 
                                          Operation *op, GenerationID op_gen,
                                          bool &registered_dependence,
-                                         unsigned &op_mapping_deps,
-                                         unsigned &op_speculation_deps,
-                                         Event &all_mapped)
+                                         MappingDependenceTracker *tracker,
+                                         Event other_commit_event)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -844,16 +752,15 @@ namespace LegionRuntime {
           outgoing[op] = op_gen;
           // Record that the operation has a mapping dependence
           // on us as long as we haven't mapped
-          if (!mapped)
-            op_mapping_deps++;
-          if (!resolved)
-            op_speculation_deps++;
+          tracker->add_mapping_dependence(mapped_event);
+          tracker->add_resolution_dependence(resolved_event);
           // Record that we have a commit dependence on the
           // registering operation
-          outstanding_commit_deps++;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(dependence_tracker.commit != NULL);
+#endif
+          dependence_tracker.commit->add_commit_dependence(other_commit_event);
           registered_dependence = true;
-          // Give back the event for when all our children are mapped
-          all_mapped = children_mapped;
         }
         else
         {
@@ -875,10 +782,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // If we're on an old generation then it's definitely committed
-      if (our_gen < gen)
-        return true;
-      // Otherwise check the committed flag
-      return committed;
+      return (our_gen < gen);
     }
 
     //--------------------------------------------------------------------------
@@ -912,11 +816,15 @@ namespace LegionRuntime {
           // If we've completed and we have no mapping references
           // and we have no outstanding commit dependences then 
           // we can commit this operation
-          if (completed && (outstanding_mapping_references == 0) &&
-              (outstanding_commit_deps == 0) && !trigger_commit_invoked)
+          if ((outstanding_mapping_references == 0) && !trigger_commit_invoked)
           {
-            trigger_commit_invoked = true;
-            need_trigger = true;
+#ifdef DEBUG_HIGH_LEVEL
+            assert(dependence_tracker.commit != NULL);
+#endif
+            CommitDependenceTracker *tracker = dependence_tracker.commit;
+            need_trigger = tracker->issue_commit_trigger(this, runtime);
+            if (need_trigger)
+              trigger_commit_invoked = true;
           }
         }
         // otherwise we were already recycled and are no longer valid
@@ -973,117 +881,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::notify_mapping_dependence(GenerationID our_gen)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = false;
-      {
-        AutoLock o_lock(op_lock); 
-#ifdef DEBUG_HIGH_LEVEL
-        assert(our_gen <= gen); // better not be ahead of where we are now
-#endif
-        if ((our_gen == gen) && !committed)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(outstanding_mapping_deps > 0);
-#endif
-          outstanding_mapping_deps--;
-          if ((outstanding_mapping_deps == 0) && !trigger_mapping_invoked)
-          {
-            need_trigger = true;
-            trigger_mapping_invoked = true;
-          }
-        }
-      }
-      if (need_trigger)
-      {
-        bool trigger_now = false;
-        if (!dependent_children_mapped.empty())
-        {
-          Event wait_on = Event::merge_events(dependent_children_mapped);
-          if (wait_on.exists())
-          {
-            DeferredMappingArgs args;
-            args.hlr_id = HLR_DEFERRED_MAPPING_ID;
-            args.proxy_this = this;
-            args.must_epoch = must_epoch;
-            args.must_epoch_gen = must_epoch_gen;
-            runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                             HLR_DEFERRED_MAPPING_ID,
-                                             this, wait_on);
-          }
-          else
-            trigger_now = true;
-        }
-        else
-          trigger_now = true;
-        if (trigger_now)
-        {
-          if (must_epoch == NULL)
-            trigger_mapping();
-          else
-            must_epoch->notify_mapping_dependence(must_epoch_gen);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::notify_speculation_dependence(GenerationID our_gen)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(our_gen <= gen); // better not be ahead of where we are now
-#endif
-        if ((our_gen == gen) && !committed)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!resolved);
-          assert(outstanding_speculation_deps > 0);
-#endif
-          outstanding_speculation_deps--;
-          need_trigger = !trigger_resolution_invoked &&
-                          (outstanding_speculation_deps == 0);
-          if (need_trigger)
-            trigger_resolution_invoked = true;
-        }
-      }
-      if (need_trigger)
-        trigger_resolution();
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::notify_commit_dependence(GenerationID our_gen)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(our_gen <= gen); // better not be ahead of where we are now
-#endif
-        if ((our_gen == gen) && !committed)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(outstanding_commit_deps > 0);
-#endif
-          outstanding_commit_deps--;
-          if (completed && (outstanding_commit_deps == 0) &&
-              (outstanding_mapping_references == 0) && !trigger_commit_invoked)
-          {
-            trigger_commit_invoked = true;
-            need_trigger = true;
-          }
-        }
-        // Operation was already commited and advanced
-      }
-      if (need_trigger)
-        trigger_commit();
-    } 
-
-    //--------------------------------------------------------------------------
     void Operation::notify_regions_verified(const std::set<unsigned> &regions,
                                             GenerationID our_gen)
     //--------------------------------------------------------------------------
@@ -1094,17 +891,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
-        if ((our_gen == gen) && !committed)
+        if ((our_gen == gen) && !trigger_commit_invoked)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(outstanding_commit_deps > 0);
-#endif
           for (std::set<unsigned>::const_iterator it = regions.begin();
                 it != regions.end(); it++)
           {
             unverified_regions.erase(*it);
           }
-          if (completed && hardened && unverified_regions.empty()
+          if (hardened && unverified_regions.empty()
               && !trigger_commit_invoked)
           {
             need_trigger = true;
@@ -1114,6 +908,76 @@ namespace LegionRuntime {
       }
       if (need_trigger)
         trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::MappingDependenceTracker::issue_stage_triggers(
+                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
+    //--------------------------------------------------------------------------
+    {
+      bool map_now = true;
+      bool resolve_now = true;
+      if (!mapping_dependences.empty())
+      {
+        Event map_precondition = Event::merge_events(mapping_dependences);
+        if (!map_precondition.has_triggered())
+        {
+          if (must_epoch == NULL)
+          {
+            DeferredMappingArgs args;
+            args.hlr_id = HLR_DEFERRED_MAPPING_TRIGGER_ID;
+            args.proxy_this = op;
+            runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                             HLR_DEFERRED_MAPPING_TRIGGER_ID,
+                                             op, map_precondition);
+          }
+          else
+            must_epoch->add_mapping_dependence(map_precondition);  
+          map_now = false;
+        }
+      }
+      if (!resolution_dependences.empty())
+      {
+        Event resolve_precondition = 
+          Event::merge_events(resolution_dependences);
+        if (!resolve_precondition.has_triggered())
+        {
+          DeferredResolutionArgs args;
+          args.hlr_id = HLR_DEFERRED_RESOLUTION_TRIGGER_ID;
+          args.proxy_this = op;
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                           HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
+                                           op, resolve_precondition);
+          resolve_now = false;
+        }
+      }
+      if (map_now && (must_epoch == NULL))
+        op->trigger_mapping();
+      if (resolve_now)
+        op->trigger_resolution();
+    }
+    
+    //--------------------------------------------------------------------------
+    bool Operation::CommitDependenceTracker::issue_commit_trigger(Operation *op,
+                                                               Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (!commit_dependences.empty())
+      {
+        Event commit_precondition = Event::merge_events(commit_dependences);
+        if (!commit_precondition.has_triggered())
+        {
+          DeferredCommitArgs args;
+          args.hlr_id = HLR_DEFERRED_COMMIT_ID;
+          args.proxy_this = op;
+          args.gen = op->get_generation();
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                           HLR_DEFERRED_COMMIT_ID,
+                                           op, commit_precondition);
+          return false;
+        }
+      }
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1275,12 +1139,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void SpeculativeOp::initialize_speculation(SingleTask *ctx, bool track,
-                                               Event child_event,
                                                unsigned regions,
                                                const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, child_event, regions);
+      initialize_operation(ctx, track, regions);
       if (p == Predicate::TRUE_PRED)
       {
         speculation_state = RESOLVE_TRUE_STATE;
@@ -1562,7 +1425,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::deferred_complete(void)
+    void SpeculativeOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -1610,7 +1473,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx;
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       if (launcher.requirement.privilege_fields.empty())
       {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
@@ -1670,7 +1533,7 @@ namespace LegionRuntime {
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
       requirement = req;
       if (requirement.privilege_fields.empty())
@@ -1730,7 +1593,7 @@ namespace LegionRuntime {
     void MapOp::initialize(SingleTask *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
       requirement.copy_without_mapping_info(reg.impl->get_requirement());
       requirement.initialize_mapping_fields();
@@ -2035,22 +1898,22 @@ namespace LegionRuntime {
         // triggering our completion event
         completion_event.trigger(map_complete_event);
         need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
+        DeferredExecuteArgs deferred_execute_args;
+        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
+        deferred_execute_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_execute_args,
+                                         sizeof(deferred_execute_args),
+                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                          this, map_complete_event);
       }
       else
-        deferred_complete();
+        deferred_execute();
       // return true since we succeeded
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::deferred_complete(void)
+    void MapOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       // Note that completing mapping and execution should
@@ -2345,7 +2208,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
+      initialize_speculation(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.predicate);
@@ -3145,23 +3008,9 @@ namespace LegionRuntime {
                                         completion_event);
 #endif
         // Handle the case for marking when the copy completes
-        if (!copy_complete_event.has_triggered())
-        {
-          // Issue a deferred trigger on our completion event
-          // and mark that we are no longer responsible for
-          // triggering our completion event.
-          completion_event.trigger(copy_complete_event);
-          need_completion_trigger = false;
-          DeferredCompleteArgs deferred_complete_args;
-          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-          deferred_complete_args.proxy_this = this;
-          runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                           sizeof(deferred_complete_args),
-                                           HLR_DEFERRED_COMPLETE_ID,
-                                           this, copy_complete_event);
-        }
-        else
-          deferred_complete();
+        completion_event.trigger(copy_complete_event);
+        need_completion_trigger = false;
+        complete_execution(copy_complete_event);
       }
       else
       {
@@ -3177,14 +3026,6 @@ namespace LegionRuntime {
           dst_versions[idx].reset();
       }
       return map_success;
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Mark that we're done executing
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -3556,7 +3397,7 @@ namespace LegionRuntime {
     void FenceOp::initialize(SingleTask *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
 #ifdef LEGION_LOGGING
       LegionLogging::log_fence_operation(parent_ctx->get_executing_processor(),
@@ -3665,16 +3506,16 @@ namespace LegionRuntime {
             Event wait_on = Event::merge_events(trigger_events);
             if (!wait_on.has_triggered())
             {
-              DeferredCompleteArgs deferred_complete_args;
-              deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-              deferred_complete_args.proxy_this = this;
-              runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                               sizeof(deferred_complete_args),
-                                               HLR_DEFERRED_COMPLETE_ID,
+              DeferredExecuteArgs deferred_execute_args;
+              deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
+              deferred_execute_args.proxy_this = this;
+              runtime->issue_runtime_meta_task(&deferred_execute_args,
+                                               sizeof(deferred_execute_args),
+                                              HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                                this, wait_on);
             }
             else
-              deferred_complete();
+              deferred_execute();
             break;
           }
         default:
@@ -3685,7 +3526,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::deferred_complete(void)
+    void FenceOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       switch (fence_kind)
@@ -3813,21 +3654,21 @@ namespace LegionRuntime {
       Event wait_on = Event::merge_events(trigger_events);
       if (!wait_on.has_triggered())
       {
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
+        DeferredExecuteArgs deferred_execute_args;
+        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
+        deferred_execute_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_execute_args,
+                                         sizeof(deferred_execute_args),
+                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                          this, wait_on);
       }
       else
-        deferred_complete();
+        deferred_execute();
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::deferred_complete(void)
+    void FrameOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       // This frame has finished executing so it is no longer mapped
@@ -3877,7 +3718,7 @@ namespace LegionRuntime {
                                                      IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
 #ifdef LEGION_LOGGING
@@ -3896,7 +3737,7 @@ namespace LegionRuntime {
                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
 #ifdef LEGION_LOGGING
@@ -3915,7 +3756,7 @@ namespace LegionRuntime {
                                                      FieldSpace handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
 #ifdef LEGION_LOGGING
@@ -3934,7 +3775,7 @@ namespace LegionRuntime {
                                                 FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
@@ -3954,7 +3795,7 @@ namespace LegionRuntime {
                             FieldSpace handle, const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free;
@@ -3974,7 +3815,7 @@ namespace LegionRuntime {
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
 #ifdef LEGION_LOGGING
@@ -3993,7 +3834,7 @@ namespace LegionRuntime {
                                                        LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
 #ifdef LEGION_LOGGING
@@ -4195,7 +4036,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
-      initialize_operation(ctx, track, Event::NO_EVENT);
+      initialize_operation(ctx, track);
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
@@ -4280,24 +4121,6 @@ namespace LegionRuntime {
         ready_event.trigger();
       else
         ready_event.trigger(Event::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
-    void CloseOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_LOGGING
-      UniqueID local_id = unique_op_id;
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id,
-                                      BEGIN_POST_EXEC);
-#endif
-      complete_execution();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id,
-                                      BEGIN_POST_EXEC);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4548,24 +4371,7 @@ namespace LegionRuntime {
                                           close_event,
                                           completion_event);
 #endif
-      // See if we need to defer completion of the close operation
-      if (!close_event.has_triggered())
-      {
-        // Issue a deferred trigger of our completion event and mark
-        // that we are no longer responsible for triggering it
-        // when we are complete.
-        completion_event.trigger(close_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, close_event);
-      }
-      else
-        deferred_complete();
+      complete_execution(close_event);
       // This should always succeed
       return true;
     }
@@ -4760,24 +4566,9 @@ namespace LegionRuntime {
                                           close_event,
                                           completion_event);
 #endif
-      // See if we need to defer completion of the close operation
-      if (!close_event.has_triggered())
-      {
-        // Issue a deferred trigger of our completion event and mark
-        // that we are no longer responsible for triggering it
-        // when we are complete.
-        completion_event.trigger(close_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, close_event);
-      }
-      else
-        deferred_complete();
+      completion_event.trigger(close_event);
+      need_completion_trigger = false;
+      complete_execution(close_event);
       // This should always succeed
       return true;
     }
@@ -4834,7 +4625,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT,
+      initialize_speculation(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
@@ -5170,32 +4961,11 @@ namespace LegionRuntime {
       
       // Mark that we completed mapping
       complete_mapping();
-
-      // See if we already triggered
-      if (!acquire_complete.has_triggered())
-      {
-        completion_event.trigger(acquire_complete);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, acquire_complete);
-      }
-      else
-        deferred_complete();
+      completion_event.trigger(acquire_complete);
+      need_completion_trigger = false;
+      complete_execution(acquire_complete);
       // we succeeded in mapping
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Mark that we're done executing
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -5428,7 +5198,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
+      initialize_speculation(ctx, true/*track*/, 
                              1/*num region requirements*/,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
@@ -5771,32 +5541,11 @@ namespace LegionRuntime {
       
       // Mark that we completed mapping
       complete_mapping();
-
-      // See if we already triggered
-      if (!release_complete.has_triggered())
-      {
-        completion_event.trigger(release_complete);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, release_complete);
-      }
-      else
-        deferred_complete();
+      completion_event.trigger(release_complete);
+      need_completion_trigger = false;
+      complete_execution(release_complete);
       // We succeeded in mapping
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Mark that we're done executing
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6031,7 +5780,7 @@ namespace LegionRuntime {
                                            const DynamicCollective &dc)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       future = Future(legion_new<Future::Impl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), runtime->address_space,
             runtime->address_space, this));
@@ -6077,22 +5826,22 @@ namespace LegionRuntime {
       Barrier barrier = collective.phase_barrier.get_previous_phase();
       if (!barrier.has_triggered())
       {
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
+        DeferredExecuteArgs deferred_execute_args;
+        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
+        deferred_execute_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&deferred_execute_args,
+                                         sizeof(deferred_execute_args),
+                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                          this, barrier);
       }
       else
-        deferred_complete();
+        deferred_execute();
       complete_mapping();
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::deferred_complete(void)
+    void DynamicCollectiveOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
@@ -6194,7 +5943,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, false/*track*/);
       future = f;
     }
 
@@ -6293,7 +6042,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, false/*track*/);
       // Don't forget to reverse the values
       if (p == Predicate::TRUE_PRED)
         set_resolved_value(get_generation(), false);
@@ -6427,7 +6176,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, false/*track*/);
       // Short circuit case
       if ((p1 == Predicate::FALSE_PRED) || (p2 == Predicate::FALSE_PRED))
       {
@@ -6652,7 +6401,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, false/*track*/);
       // Short circuit case
       if ((p1 == Predicate::TRUE_PRED) || (p2 == Predicate::TRUE_PRED))
       {
@@ -6868,10 +6617,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
-      // Make an event for the all children mapped that is a merged of
-      // all our tasks all children mapped events
-      UserEvent all_children_mapped = UserEvent::create_user_event();
-      initialize_operation(ctx, true/*track*/, all_children_mapped);
+      initialize_operation(ctx, true/*track*/);
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -6906,21 +6652,7 @@ namespace LegionRuntime {
       // Make a new future map for storing our results
       // We'll fill it in later
       result_map = legion_new<FutureMap::Impl>(ctx, 
-                                               get_completion_event(), runtime);
-      // Once all the tasks have been initialized we can defer
-      // our all mapped event on all their all mapped events
-      std::set<Event> tasks_all_mapped;
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
-      {
-        tasks_all_mapped.insert((*it)->get_children_mapped());
-      }
-      for (std::vector<IndexTask*>::const_iterator it = 
-            index_tasks.begin(); it != index_tasks.end(); it++)
-      {
-        tasks_all_mapped.insert((*it)->get_children_mapped());
-      }
-      all_children_mapped.trigger(Event::merge_events(tasks_all_mapped));
+                                               get_completion_event(), runtime); 
 #ifdef DEBUG_HIGH_LEVEL
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
@@ -7034,7 +6766,6 @@ namespace LegionRuntime {
       // dependence.  When our sub-operations map, they will trigger these
       // mapping dependences which guarantees that we will not be able to
       // map until all of the sub-operations are ready to map.
-      outstanding_mapping_deps += (indiv_tasks.size() + index_tasks.size());
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
         indiv_tasks[idx]->trigger_dependence_analysis();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
@@ -7195,13 +6926,31 @@ namespace LegionRuntime {
         }
       }
 
+      // Once all the tasks have been initialized we can defer
+      // our all mapped event on all their all mapped events
+      std::set<Event> tasks_all_mapped;
+      std::set<Event> tasks_all_complete;
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        tasks_all_mapped.insert((*it)->get_mapped_event());
+        tasks_all_complete.insert((*it)->get_completion_event());
+      }
+      for (std::vector<IndexTask*>::const_iterator it = 
+            index_tasks.begin(); it != index_tasks.end(); it++)
+      {
+        tasks_all_mapped.insert((*it)->get_mapped_event());
+        tasks_all_complete.insert((*it)->get_completion_event());
+      }
       // If we passed all the constraints, then kick everything off
       MustEpochDistributor distributor(this);
       distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks);
       
       // Mark that we are done mapping and executing this operation
-      complete_mapping();
-      complete_execution();
+      Event all_mapped = Event::merge_events(tasks_all_mapped);
+      Event all_complete = Event::merge_events(tasks_all_complete);
+      complete_mapping(all_mapped);
+      complete_execution(all_complete);
       return true;
     }
 
@@ -7321,6 +7070,16 @@ namespace LegionRuntime {
         // and do not need to be recorded
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::add_mapping_dependence(Event precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(dependence_tracker.mapping != NULL);
+#endif
+      dependence_tracker.mapping->add_mapping_dependence(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7871,7 +7630,7 @@ namespace LegionRuntime {
                                                         size_t granularity)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7888,7 +7647,7 @@ namespace LegionRuntime {
                                        const std::map<DomainPoint,int> &weights)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7905,7 +7664,7 @@ namespace LegionRuntime {
                                                         IndexPartition h2)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7922,7 +7681,7 @@ namespace LegionRuntime {
                                                             IndexPartition h2)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7939,7 +7698,7 @@ namespace LegionRuntime {
                                                              IndexPartition h2)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7956,7 +7715,7 @@ namespace LegionRuntime {
                                   std::map<DomainPoint,IndexPartition> &handles)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7972,7 +7731,7 @@ namespace LegionRuntime {
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -7988,7 +7747,7 @@ namespace LegionRuntime {
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -8003,7 +7762,7 @@ namespace LegionRuntime {
      SingleTask *ctx, IndexSpace target, const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -8018,7 +7777,7 @@ namespace LegionRuntime {
                       SingleTask *ctx, IndexSpace target, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -8034,7 +7793,7 @@ namespace LegionRuntime {
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(thunk == NULL);
 #endif
@@ -8079,33 +7838,11 @@ namespace LegionRuntime {
       }
 #endif
       complete_mapping();
-      // Now see if we need to defer our completion
-      if (!ready_event.has_triggered())
-      {
-        // Issue a deferred completion task and
-        // mark that we are no longer responsible for
-        // triggering our completion event
-        completion_event.trigger(ready_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, ready_event);
-      }
-      else
-        deferred_complete();
+      completion_event.trigger(ready_event);
+      need_completion_trigger = false;
+      complete_execution(ready_event);
       // Return true since we succeeded
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8183,7 +7920,7 @@ namespace LegionRuntime {
                                     const Domain &space, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT); 
+      initialize_operation(ctx, true/*track*/); 
       partition_kind = BY_FIELD;
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
@@ -8203,7 +7940,7 @@ namespace LegionRuntime {
                                           const Domain &space)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       partition_kind = BY_IMAGE;
       requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
                                       EXCLUSIVE, parent);
@@ -8223,7 +7960,7 @@ namespace LegionRuntime {
                                     FieldID fid, const Domain &space)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       partition_kind = BY_PREIMAGE;
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
@@ -8390,33 +8127,11 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependence(ready_event, completion_event);
 #endif
       complete_mapping();
-
-      if (!ready_event.has_triggered())
-      {
-        // Issue a deferred completion task and
-        // mark that we are no longer responsible for
-        // triggering our completion event
-        completion_event.trigger(ready_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, ready_event);
-      }
-      else
-        deferred_complete();
+      completion_event.trigger(ready_event);
+      need_completion_trigger = false;
+      complete_execution(ready_event);
       // return true since we succeeded
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      complete_execution();  
     }
 
     //--------------------------------------------------------------------------
@@ -8618,7 +8333,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
       requirement.initialize_mapping_fields();
@@ -8637,7 +8352,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
       requirement.initialize_mapping_fields();
@@ -8656,7 +8371,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
       requirement.initialize_mapping_fields();
@@ -8676,7 +8391,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 1, pred);
+      initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
       requirement.initialize_mapping_fields();
@@ -8842,23 +8557,23 @@ namespace LegionRuntime {
         if (!future_ready_event.has_triggered())
         {
           // Launch a task to handle the deferred complete
-          DeferredCompleteArgs deferred_complete_args;
-          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-          deferred_complete_args.proxy_this = this;
-          runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                           sizeof(deferred_complete_args),
-                                           HLR_DEFERRED_COMPLETE_ID,
+          DeferredExecuteArgs deferred_execute_args;
+          deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
+          deferred_execute_args.proxy_this = this;
+          runtime->issue_runtime_meta_task(&deferred_execute_args,
+                                           sizeof(deferred_execute_args),
+                                           HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                            this, future_ready_event);
         }
         else
-          deferred_complete(); // can do the completion now
+          deferred_execute(); // can do the completion now
       }
       // This should never fail
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deferred_complete(void)
+    void FillOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the future value since the region tree
@@ -9093,7 +8808,7 @@ namespace LegionRuntime {
                                              bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       if (fmap.empty())
       {
         log_run.warning("WARNING: HDF5 ATTACH OPERATION ISSUED WITH NO "
@@ -9262,32 +8977,11 @@ namespace LegionRuntime {
       // Once we have created the instance, then we are done
       complete_mapping();
       Event acquired_event = result.get_ready_event();
-      if (!acquired_event.has_triggered())
-      {
-        // Issue a deferred trigger on our completion event
-        // and mark that we are no longer responsible for
-        // triggering our completion event.
-        completion_event.trigger(acquired_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, acquired_event);
-      }
-      else
-        complete_execution();
+      completion_event.trigger(acquired_event);
+      need_completion_trigger = false;
+      complete_execution(acquired_event);
       // Should always succeed
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9512,7 +9206,7 @@ namespace LegionRuntime {
     void DetachOp::initialize_detach(SingleTask *ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      initialize_operation(ctx, true/*track*/);
       reference = region.impl->get_reference();
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
@@ -9636,32 +9330,11 @@ namespace LegionRuntime {
         runtime->forest->detach_file(physical_ctx, requirement, this,reference);
       version_info.apply_mapping(physical_ctx.get_id());
       complete_mapping();
-      if (!detach_event.has_triggered())
-      {
-        // Issue a deferred trigger on our completion event
-        // and mark that we are no longer responsible for
-        // triggering our completion event.
-        completion_event.trigger(detach_event);
-        need_completion_trigger = false;
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_complete_args,
-                                         sizeof(deferred_complete_args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         this, detach_event);
-      }
-      else
-        complete_execution();
+      completion_event.trigger(detach_event);
+      need_completion_trigger = false;
+      complete_execution(detach_event);
       // This should always succeed
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::deferred_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------

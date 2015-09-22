@@ -4532,7 +4532,7 @@ namespace LegionRuntime {
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
         // Mark that this task is the top-level task
-        top_task->top_level_task = true;
+        top_task->set_top_level();
         top_task->initialize_task(top_context, launcher, 
                                   false/*check priv*/, false/*track parent*/);
         // Set up the input arguments
@@ -15764,22 +15764,47 @@ namespace LegionRuntime {
                                 post_end_args->result_size, true/*owned*/);
             break;
           }
-        case HLR_DEFERRED_MAPPING_ID:
+        case HLR_DEFERRED_MAPPING_TRIGGER_ID:
           {
             const Operation::DeferredMappingArgs *deferred_mapping_args = 
               (const Operation::DeferredMappingArgs*)args;
-            if (deferred_mapping_args->must_epoch == NULL)
-              deferred_mapping_args->proxy_this->trigger_mapping();
-            else
-              deferred_mapping_args->must_epoch->notify_mapping_dependence(
-                  deferred_mapping_args->must_epoch_gen);
+            deferred_mapping_args->proxy_this->trigger_mapping();
+            break;
+          }
+        case HLR_DEFERRED_RESOLUTION_TRIGGER_ID:
+          {
+            const Operation::DeferredResolutionArgs *deferred_resolution_args =
+              (const Operation::DeferredResolutionArgs*)args;
+            deferred_resolution_args->proxy_this->trigger_resolution();
+            break;
+          }
+        case HLR_DEFERRED_EXECUTION_TRIGGER_ID:
+          {
+            const Operation::DeferredExecuteArgs *deferred_execute_args = 
+              (const Operation::DeferredExecuteArgs*)args;
+            deferred_execute_args->proxy_this->deferred_execute();
+            break;
+          }
+        case HLR_DEFERRED_POST_MAPPED_ID:
+          {
+            const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
+              (const SingleTask::DeferredPostMappedArgs*)args;
+            post_mapped_args->task->handle_post_mapped();
             break;
           }
         case HLR_DEFERRED_COMPLETE_ID:
           {
-            const Operation::DeferredCompleteArgs *deferred_complete_args = 
+            const Operation::DeferredCompleteArgs *deferred_complete_args =
               (const Operation::DeferredCompleteArgs*)args;
-            deferred_complete_args->proxy_this->deferred_complete();
+            deferred_complete_args->proxy_this->trigger_complete();
+            break;
+          }
+        case HLR_DEFERRED_COMMIT_ID:
+          {
+            const Operation::DeferredCommitArgs *deferred_commit_args = 
+              (const Operation::DeferredCommitArgs*)args;
+            deferred_commit_args->proxy_this->deferred_commit(
+                deferred_commit_args->gen);
             break;
           }
         case HLR_RECLAIM_LOCAL_FIELD_ID:
