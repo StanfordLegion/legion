@@ -4895,6 +4895,7 @@ namespace LegionRuntime {
       std::set<Event> acquire_preconditions;
 #ifdef LEGION_SPY
       std::set<Event> acquire_preconditions_spy;
+      acquire_preconditions.insert(result.get_ready_event());
 #endif
       acquire_preconditions.insert(result.get_ready_event());
       if (!wait_barriers.empty())
