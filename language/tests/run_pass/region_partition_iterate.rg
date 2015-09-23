@@ -16,15 +16,19 @@ import "regent"
 
 local c = regentlib.c
 
+function raw(t)
+  return terra(x : t) return x.__ptr end
+end
+
 task f() : int
   var r = region(ispace(ptr, 5), int)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
-  var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
-  var r0 = p[0]
+  var x = new(ptr(int, r))
 
-  var x = new(ptr(int, r0))
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x))
+  var p = partition(disjoint, r, rc)
+  c.legion_coloring_destroy(rc)
+  var r0 = p[0]
 
   -- Check that pointer shows up in child.
   @x = 100
