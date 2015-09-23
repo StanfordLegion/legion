@@ -3785,9 +3785,15 @@ namespace LegionRuntime {
       if (part_node->depth < sp_one->depth)
       {
         path.clear();
-        if (compute_index_path(part_node->parent->handle, parent, path) &&
-            (path[0] == part_node->color))
-          return false;
+        if (compute_index_path(part_node->parent->handle, parent, path))
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(path.size() > 2);
+#endif
+          path.pop_back();
+          if (path.back() == part_node->color)
+            return false;
+        }
       }
       IndexSpaceNode *sp_two = part_node->parent;
       // Bring them up to the same minimum depth
