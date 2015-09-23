@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- []
-
+-- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-compact", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
