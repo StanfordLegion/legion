@@ -3252,6 +3252,12 @@ namespace LegionRuntime {
       // children are disjoint
       IndexSpaceNode *sp_one = get_node(parent);
       IndexSpaceNode *sp_two = get_node(child);
+      if (sp_two->depth < sp_one->depth)
+      {
+        path.clear();
+        if (compute_index_path(child, parent, path))
+          return false;
+      }
       // Bring them up to the same minimum depth
       unsigned depth = sp_one->depth;
       if (sp_two->depth < depth)
@@ -3310,6 +3316,19 @@ namespace LegionRuntime {
       // Now check for a common ancestor and see if the
       // children are disjoint
       IndexSpaceNode *sp_one = get_node(parent);
+      if (part_node->depth < sp_one->depth)
+      {
+        path.clear();
+        if (compute_index_path(part_node->parent->handle, parent, path))
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(path.size() > 2);
+#endif
+          path.pop_back();
+          if (path.back() == part_node->color)
+            return false;
+        }
+      }
       IndexSpaceNode *sp_two = part_node->parent;
       // Bring them up to the same minimum depth
       unsigned depth = sp_one->depth;
