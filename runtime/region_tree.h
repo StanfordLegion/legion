@@ -1498,8 +1498,11 @@ namespace LegionRuntime {
         { return (node == upper_bound_node); }
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
-      void apply_mapping(ContextID ctx);
-      void apply_close(ContextID ctx, bool permit_leave_open); 
+      void apply_mapping(ContextID ctx, AddressSpaceID target,
+                         std::set<Event> &applied_conditions);
+      void apply_close(ContextID ctx, bool permit_leave_open, 
+                       AddressSpaceID target,
+                       std::set<Event> &applied_conditions); 
       void reset(void);
       void release(void);
       void clear(void);
@@ -2024,9 +2027,12 @@ namespace LegionRuntime {
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool path_only, bool close_top);
-      void apply_path_only_state(const FieldMask &advance_mask) const;
-      void apply_state(const FieldMask &advance_mask);
-      void filter_and_apply(bool top, bool filter_children);
+      void apply_path_only_state(const FieldMask &advance_mask,
+            AddressSpaceID target, std::set<Event> &applied_conditions) const;
+      void apply_state(const FieldMask &advance_mask, 
+            AddressSpaceID target, std::set<Event> &applied_conditions);
+      void filter_and_apply(bool top, bool filter_children,
+            AddressSpaceID target, std::set<Event> &applied_conditions);
       void reset(void);
       void record_created_instance(InstanceView *view);
     public:
@@ -2124,12 +2130,17 @@ namespace LegionRuntime {
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
       void merge_path_only_state(const PhysicalState *state,
-                              const FieldMask &merge_mask);
+                                 const FieldMask &merge_mask,
+                                 AddressSpaceID target,
+                                 std::set<Event> &applied_conditions);
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
+                                AddressSpaceID target,
+                                std::set<Event> &applied_conditions,
                                 bool need_lock = true);
       void filter_and_merge_physical_state(const PhysicalState *state,
-         const FieldMask &merge_mask, bool top, bool filter_children);
+         const FieldMask &merge_mask, bool top, bool filter_children,
+         AddressSpaceID target, std::set<Event> &applied_conditions);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);

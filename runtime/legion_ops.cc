@@ -1834,7 +1834,9 @@ namespace LegionRuntime {
       assert(result.has_ref());
 #endif
       // We're done so apply our mapping changes
-      version_info.apply_mapping(physical_ctx.get_id());
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(), 
+                                 runtime->address_space, applied_conditions);
       // We succeeded in mapping, so set up our physical region with
       // the reference information.  Note that the physical region
       // becomes responsible for triggering the termination event
@@ -1888,7 +1890,10 @@ namespace LegionRuntime {
       region.impl->reset_reference(result, termination_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
-      complete_mapping();
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       
       Event map_complete_event = result.get_ready_event(); 
       if (!map_complete_event.has_triggered())
@@ -2828,6 +2833,7 @@ namespace LegionRuntime {
         std::set<Event> start_events;
         start_events.insert(sync_precondition);
 #endif
+        std::set<Event> applied_conditions;
         std::set<Event> copy_complete_events;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -2902,8 +2908,10 @@ namespace LegionRuntime {
             assert(src_ref.has_ref());
 #endif
             // Apply our changes to the state
-            src_versions[idx].apply_mapping(src_contexts[idx].get_id());
-            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id());
+            src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
+                                runtime->address_space, applied_conditions);
+            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
+                                runtime->address_space, applied_conditions);
             if (notify)
             {
               src_requirements[idx].mapping_failed = false;
@@ -2992,7 +3000,10 @@ namespace LegionRuntime {
         }
 
         // Mark that we completed mapping
-        complete_mapping();
+        if (!applied_conditions.empty())
+          complete_mapping(Event::merge_events(applied_conditions));
+        else
+          complete_mapping();
         // Notify the mapper if it wanted to be notified
         if (notify)
           runtime->invoke_mapper_notify_result(local_proc, this);
@@ -4344,8 +4355,9 @@ namespace LegionRuntime {
         version_info.reset();
         return false;
       }
-      else
-        version_info.apply_close(physical_ctx.get_id(), leave_open);
+      std::set<Event> applied_conditions;
+      version_info.apply_close(physical_ctx.get_id(), leave_open,
+                               runtime->address_space, applied_conditions);
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
@@ -4365,7 +4377,10 @@ namespace LegionRuntime {
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
-      complete_mapping();
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependence(Processor::get_executing_processor(),
                                           close_event,
@@ -4889,7 +4904,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(physical_ctx.get_id());
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(),
+                                 runtime->address_space, applied_conditions);
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
@@ -4961,7 +4978,10 @@ namespace LegionRuntime {
       }
       
       // Mark that we completed mapping
-      complete_mapping();
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       completion_event.trigger(acquire_complete);
       need_completion_trigger = false;
       complete_execution(acquire_complete);
@@ -5480,7 +5500,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(physical_ctx.get_id());
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(),
+                                 runtime->address_space, applied_conditions);
 
       Event release_event = result.get_ready_event();
       std::set<Event> release_preconditions;
@@ -5551,7 +5573,10 @@ namespace LegionRuntime {
       }
       
       // Mark that we completed mapping
-      complete_mapping();
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       completion_event.trigger(release_complete);
       need_completion_trigger = false;
       complete_execution(release_complete);
@@ -8563,12 +8588,17 @@ namespace LegionRuntime {
 #endif
         runtime->forest->fill_fields(physical_ctx, requirement,
                                      value, value_size, version_info);
-        version_info.apply_mapping(physical_ctx.get_id());
+        std::set<Event> applied_conditions;
+        version_info.apply_mapping(physical_ctx.get_id(),
+                                   runtime->address_space, applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
         value_size = 0;
-        complete_mapping();
+        if (!applied_conditions.empty())
+          complete_mapping(Event::merge_events(applied_conditions));
+        else
+          complete_mapping();
         complete_execution();
       }
       else
@@ -8606,8 +8636,13 @@ namespace LegionRuntime {
         parent_ctx->find_enclosing_context(parent_req_index);
       runtime->forest->fill_fields(physical_ctx, requirement, 
                                    result, result_size, version_info);
-      version_info.apply_mapping(physical_ctx.get_id());
-      complete_mapping();
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(),
+                                 runtime->address_space, applied_conditions);
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       complete_execution();
     }
     
@@ -8992,11 +9027,16 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(physical_ctx.get_id());
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(),
+                                 runtime->address_space, applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
-      complete_mapping();
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       Event acquired_event = result.get_ready_event();
       completion_event.trigger(acquired_event);
       need_completion_trigger = false;
@@ -9349,8 +9389,13 @@ namespace LegionRuntime {
       }
       Event detach_event = 
         runtime->forest->detach_file(physical_ctx, requirement, this,reference);
-      version_info.apply_mapping(physical_ctx.get_id());
-      complete_mapping();
+      std::set<Event> applied_conditions;
+      version_info.apply_mapping(physical_ctx.get_id(),
+                                 runtime->address_space, applied_conditions);
+      if (!applied_conditions.empty())
+        complete_mapping(Event::merge_events(applied_conditions));
+      else
+        complete_mapping();
       completion_event.trigger(detach_event);
       need_completion_trigger = false;
       complete_execution(detach_event);

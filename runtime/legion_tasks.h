@@ -161,7 +161,7 @@ namespace LegionRuntime {
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(MinimalPoint *mp = NULL);
-      bool early_map_regions(void);
+      bool early_map_regions(std::set<Event> &applied_conditions);
       bool prepare_steal(void);
     protected:
       void compute_parent_indexes(void);
@@ -769,6 +769,8 @@ namespace LegionRuntime {
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
+    protected:
+      std::set<Event> map_applied_conditions;
     };
 
     /**
@@ -1095,7 +1097,8 @@ namespace LegionRuntime {
       void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
-      void return_slice_mapped(unsigned points, long long denom);
+      void return_slice_mapped(unsigned points, long long denom,
+                               Event applied_condition);
       void return_slice_complete(unsigned points);
       void return_slice_commit(unsigned points);
     public:
@@ -1130,6 +1133,8 @@ namespace LegionRuntime {
       std::set<unsigned>          rerun_analysis_requirements;
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> locally_mapped_slices;
+    protected:
+      std::set<Event> map_applied_conditions;
     };
 
     /**
@@ -1194,7 +1199,7 @@ namespace LegionRuntime {
       void trigger_slice_complete(void);
       void trigger_slice_commit(void);
     protected:
-      void pack_remote_mapped(Serializer &rez);
+      void pack_remote_mapped(Serializer &rez, Event applied_condition);
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
     public:

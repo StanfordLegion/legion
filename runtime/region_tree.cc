@@ -9919,7 +9919,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_mapping(ContextID ctx)
+    void VersionInfo::apply_mapping(ContextID ctx, AddressSpaceID target,
+                                    std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9933,9 +9934,10 @@ namespace LegionRuntime {
         // Apply path only differently
         if (it->second.path_only())
           it->second.physical_state->apply_path_only_state(
-                                                  it->second.advance_mask);
+                    it->second.advance_mask, target, applied_conditions);
         else
-          it->second.physical_state->apply_state(it->second.advance_mask);
+          it->second.physical_state->apply_state(it->second.advance_mask,
+                                             target, applied_conditions);
         // Don't delete it because we need to hold onto the 
         // version manager references in case this operation
         // fails to complete
@@ -9943,7 +9945,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open)
+    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open,
+                     AddressSpaceID target, std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9958,10 +9961,10 @@ namespace LegionRuntime {
             continue;
           if (it->second.path_only())
             it->second.physical_state->apply_path_only_state(
-                                                    it->second.advance_mask);
+                        it->second.advance_mask, target, applied_conditions);
           else
             it->second.physical_state->filter_and_apply(it->second.close_top(),
-                                                 false/*filter children*/);
+                        false/*filter children*/, target, applied_conditions);
         }
       }
       else
@@ -9974,13 +9977,13 @@ namespace LegionRuntime {
           if (it->second.path_only())
           {
             it->second.physical_state->apply_path_only_state(
-                                                    it->second.advance_mask);
+                        it->second.advance_mask, target, applied_conditions);
           }
           // We can also skip anything that isn't the top node
           if (!it->second.close_top())
             continue;
           it->second.physical_state->filter_and_apply(true/*top*/,
-                                         true/*filter children*/);
+                         true/*filter children*/, target, applied_conditions);
         }
       }
     }
@@ -13688,7 +13691,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_path_only_state(const FieldMask &adv_mask) const
+    void PhysicalState::apply_path_only_state(const FieldMask &adv_mask,
+               AddressSpaceID target, std::set<Event> &applied_conditions) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13705,7 +13709,8 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_path_only_state(this, it->second);
+            it->first->merge_path_only_state(this, it->second, 
+                                             target, applied_conditions);
           }
           non_advance_mask -= info.valid_fields;
         }
@@ -13725,7 +13730,8 @@ namespace LegionRuntime {
               FieldMask overlap = it->second & non_advance_mask;
               if (!overlap)
                 continue;
-              it->first->merge_path_only_state(this, overlap); 
+              it->first->merge_path_only_state(this, overlap,
+                                               target, applied_conditions);
             }
           }
         }
@@ -13740,14 +13746,16 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_path_only_state(this, it->second); 
+            it->first->merge_path_only_state(this, it->second, 
+                                             target, applied_conditions); 
           }
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_state(const FieldMask &advance_mask)
+    void PhysicalState::apply_state(const FieldMask &advance_mask,
+                     AddressSpaceID target, std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       if (!advance_states.empty())
@@ -13761,7 +13769,8 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_physical_state(this, it->second);
+            it->first->merge_physical_state(this, it->second, 
+                                            target, applied_conditions);
           }
           non_advance_mask -= info.valid_fields;
         }
@@ -13780,7 +13789,8 @@ namespace LegionRuntime {
               FieldMask overlap = it->second & non_advance_mask;
               if (!overlap)
                 continue;
-              it->first->merge_physical_state(this, overlap); 
+              it->first->merge_physical_state(this, overlap,
+                                              target, applied_conditions); 
             }
           } 
         }
@@ -13795,7 +13805,8 @@ namespace LegionRuntime {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = info.states.begin(); it != info.states.end(); it++)
           {
-            it->first->merge_physical_state(this, it->second); 
+            it->first->merge_physical_state(this, it->second,
+                                            target, applied_conditions); 
           }
         }
       }
@@ -13814,7 +13825,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::filter_and_apply(bool top, bool filter_children)
+    void PhysicalState::filter_and_apply(bool top, bool filter_children,
+                     AddressSpaceID target, std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       if (top)
@@ -13831,7 +13843,7 @@ namespace LegionRuntime {
                 it = info.states.begin(); it != info.states.end(); it++)
           {
             it->first->filter_and_merge_physical_state(this, it->second, 
-                                                       true, filter_children);
+                         true, filter_children, target, applied_conditions);
           }
         }
       }
@@ -13849,7 +13861,7 @@ namespace LegionRuntime {
                 it = info.states.begin(); it != info.states.end(); it++)
           {
             it->first->filter_and_merge_physical_state(this, it->second, 
-                                                       false, filter_children);
+                         false, filter_children, target, applied_conditions);
           }
         }
       }
@@ -14491,7 +14503,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::merge_path_only_state(const PhysicalState *state,
-                                             const FieldMask &merge_mask)
+                                             const FieldMask &merge_mask,
+                                             AddressSpaceID target,
+                                            std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       // We're writing so we need the lock in exclusive mode
@@ -14530,6 +14544,14 @@ namespace LegionRuntime {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(new_path_only);
+            if (target != owner_space)
+            {
+              UserEvent registered_event = UserEvent::create_user_event();
+              rez.serialize(registered_event);
+              applied_conditions.insert(registered_event);
+            }
+            else
+              rez.serialize(UserEvent::NO_USER_EVENT);
           }
           runtime->send_version_state_path_only(owner_space, rez);
         }
@@ -14540,6 +14562,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask,
+                                            AddressSpaceID target,
+                                            std::set<Event> &applied_conditions,
                                             bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
     {
@@ -14628,6 +14652,14 @@ namespace LegionRuntime {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(new_initial_fields);
+            if (owner_space != target)
+            {
+              UserEvent registered_event = UserEvent::create_user_event();
+              rez.serialize(registered_event);
+              applied_conditions.insert(registered_event);
+            }
+            else
+              rez.serialize(UserEvent::NO_USER_EVENT);
           }
           runtime->send_version_state_initialization(owner_space, rez);
         }
@@ -14640,7 +14672,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::filter_and_merge_physical_state(
                         const PhysicalState *state, const FieldMask &merge_mask,
-                        bool top, bool filter_children)
+                        bool top, bool filter_children, AddressSpaceID target,
+                        std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       // We're writing so we need the lock in exclusive mode
@@ -14732,7 +14765,8 @@ namespace LegionRuntime {
         }
       }
       // Now we can do the merge
-      merge_physical_state(state, merge_mask, false/*need lock*/);
+      merge_physical_state(state, merge_mask, 
+                           target, applied_conditions, false/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15846,6 +15880,10 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_path_only(source, path_only_mask);
+      UserEvent registered_event;
+      derez.deserialize(registered_event);
+      if (registered_event.exists())
+        registered_event.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -15866,6 +15904,10 @@ namespace LegionRuntime {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_initialization(source, initial_mask);
+      UserEvent registered_event;
+      derez.deserialize(registered_event);
+      if (registered_event.exists())
+        registered_event.trigger();
     }
 
     //--------------------------------------------------------------------------

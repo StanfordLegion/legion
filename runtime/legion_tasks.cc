@@ -1650,7 +1650,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::early_map_regions(void)
+    bool TaskOp::early_map_regions(std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       // Invoke the mapper to perform the early mappings
@@ -1753,7 +1753,8 @@ namespace LegionRuntime {
                   early_mapped_regions[idx].get_memory();
               }
               // Apply any version info updates
-              version_info.apply_mapping(enclosing_contexts[idx].get_id());
+              version_info.apply_mapping(enclosing_contexts[idx].get_id(),
+                                 runtime->address_space, applied_conditions);
             }
           }
           if (notify)
@@ -1780,7 +1781,7 @@ namespace LegionRuntime {
       if (is_locally_mapped())
         return false;
       if (!is_remote())
-        return early_map_regions();
+        return early_map_task();
       else
         return true;
     }
@@ -5960,6 +5961,7 @@ namespace LegionRuntime {
       privilege_paths.clear();
       version_infos.clear();
       restrict_infos.clear();
+      map_applied_conditions.clear();
       // Read this before freeing the task
       // Should be safe, but we'll be careful
       bool is_top_level_task = top_level_task;
@@ -6424,7 +6426,7 @@ namespace LegionRuntime {
     bool IndividualTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      return early_map_regions();
+      return early_map_regions(map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -6490,23 +6492,41 @@ namespace LegionRuntime {
         // If we mapped, then we are no longer stealable
         spawn_task = false;
         // Also flush out physical regions
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id());
-      }
-      // If we succeeded in mapping and everything was mapped
-      // then we get to mark that we are done mapping
-      if (map_success && is_leaf())
-      {
         if (is_remote())
         {
-          // Send back the message saying that we finished mapping
-          Serializer rez;
-          // Only need to send back the pointer to the task instance
-          rez.serialize(orig_task);
-          runtime->send_individual_remote_mapped(orig_proc, rez);
+          AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+            version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                                         owner_space, map_applied_conditions);
         }
-        // Mark that we have completed mapping
-        complete_mapping();
+        else
+        {
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+            version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                              runtime->address_space, map_applied_conditions);
+        }
+        // If we succeeded in mapping and everything was mapped
+        // then we get to mark that we are done mapping
+        if (is_leaf())
+        {
+          Event applied_condition = Event::NO_EVENT;
+          if (!map_applied_conditions.empty())
+          {
+            applied_condition = Event::merge_events(map_applied_conditions);
+            map_applied_conditions.clear();
+          }
+          if (is_remote())
+          {
+            // Send back the message saying that we finished mapping
+            Serializer rez;
+            // Only need to send back the pointer to the task instance
+            rez.serialize(orig_task);
+            rez.serialize(applied_condition);
+            runtime->send_individual_remote_mapped(orig_proc, rez);
+          }
+          // Mark that we have completed mapping
+          complete_mapping(applied_condition);
+        }
       }
       return map_success;
     }
@@ -6755,13 +6775,17 @@ namespace LegionRuntime {
                                          this, mapped_precondition);
         return;
       }
+      Event applied_condition = Event::NO_EVENT;
+      if (!map_applied_conditions.empty())
+        applied_condition = Event::merge_events(map_applied_conditions);
       // Send back the message saying that we finished mapping
       Serializer rez;
       // Only need to send back the pointer to the task instance
       rez.serialize(orig_task);
+      rez.serialize(applied_condition);
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
-      complete_mapping();
+      complete_mapping(applied_condition);
     }
 
     //--------------------------------------------------------------------------
@@ -6927,7 +6951,16 @@ namespace LegionRuntime {
       // Nothing more to unpack, we know everything is mapped
       // so tell everyone that we are mapped
       if (!is_locally_mapped())
-        complete_mapping();
+      {
+        Event applied;
+        derez.deserialize(applied);
+        if (applied.exists())
+          map_applied_conditions.insert(applied);
+        if (!map_applied_conditions.empty())
+          complete_mapping(Event::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -8104,6 +8137,7 @@ namespace LegionRuntime {
       // Remove our reference to the reduction future
       reduction_future = Future();
       rerun_analysis_requirements.clear();
+      map_applied_conditions.clear();
       runtime->free_index_task(this);
     }
 
@@ -8832,7 +8866,7 @@ namespace LegionRuntime {
     bool IndexTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      return early_map_regions();
+      return early_map_regions(map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -9293,21 +9327,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_slice_mapped(unsigned points, long long denom)
+    void IndexTask::return_slice_mapped(unsigned points, long long denom,
+                                        Event applied_condition)
     //--------------------------------------------------------------------------
     {
       bool need_trigger = false;
       bool trigger_children_completed = false;
       bool trigger_children_commit = false;
+      Event map_condition = Event::NO_EVENT;
       {
         AutoLock o_lock(op_lock);
         total_points += points;
         mapped_points += points;
         slice_fraction.add(Fraction<long long>(1,denom));
+        if (applied_condition.exists())
+          map_applied_conditions.insert(applied_condition);
         // Already know that mapped points is the same as total points
         if (slice_fraction.is_whole())
         {
           need_trigger = true;
+          if (!map_applied_conditions.empty())
+          {
+            map_condition = Event::merge_events(map_applied_conditions);
+            map_applied_conditions.clear();
+          }
           if ((complete_points == total_points) &&
               !children_complete_invoked)
           {
@@ -9323,7 +9366,7 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-        complete_mapping();
+        complete_mapping(map_condition);
       if (trigger_children_completed)
         trigger_children_complete();
       if (trigger_children_commit)
@@ -9393,6 +9436,8 @@ namespace LegionRuntime {
       derez.deserialize(points);
       long long denom;
       derez.deserialize(denom);
+      Event applied_condition;
+      derez.deserialize(applied_condition);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -9405,7 +9450,7 @@ namespace LegionRuntime {
         }
         // otherwise it was locally mapped so we are already done
       }
-      return_slice_mapped(points, denom);
+      return_slice_mapped(points, denom, applied_condition);
     }
 
     //--------------------------------------------------------------------------
@@ -10253,15 +10298,21 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // No matter what, flush out our physical states
+      Event applied_condition = Event::NO_EVENT;
       if (!version_infos.empty())
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(version_infos.size() == enclosing_contexts.size());
 #endif
+        std::set<Event> applied_conditions;
+        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
         {
-          version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id());
+          version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                                           owner_space, applied_conditions);
         }
+        if (!applied_conditions.empty())
+          applied_condition = Event::merge_events(applied_conditions);
       }
       if (is_remote())
       {
@@ -10269,7 +10320,7 @@ namespace LegionRuntime {
         if (!is_locally_mapped())
         {
           Serializer rez;
-          pack_remote_mapped(rez);
+          pack_remote_mapped(rez, applied_condition);
           runtime->send_slice_remote_mapped(orig_proc, rez);
         }
       }
@@ -10288,9 +10339,10 @@ namespace LegionRuntime {
           }
           // otherwise it was locally mapped so we are already done
         }
-        index_owner->return_slice_mapped(points.size(), denominator);
+        index_owner->return_slice_mapped(points.size(), denominator, 
+                                         applied_condition);
       }
-      complete_mapping();
+      complete_mapping(applied_condition);
       complete_execution();
     }
 
@@ -10341,13 +10393,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::pack_remote_mapped(Serializer &rez)
+    void SliceTask::pack_remote_mapped(Serializer &rez, Event applied_condition)
     //--------------------------------------------------------------------------
     {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize(points.size());
       rez.serialize(denominator);
+      rez.serialize(applied_condition);
       // Also pack up any regions names we need for doing invalidations
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
