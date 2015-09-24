@@ -63,5 +63,5 @@ if __name__ == '__main__':
         'LG_RT_DIR': runtime_dir,
     })
 
-    test(root_dir, ['--debug'], env)
-    test(root_dir, [], env)
+    test(root_dir, ['--general', '--debug'], env)
+    test(root_dir, ['--general'], env)

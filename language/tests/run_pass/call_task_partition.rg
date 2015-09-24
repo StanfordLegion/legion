@@ -16,6 +16,10 @@ import "regent"
 
 local c = regentlib.c
 
+function raw(t)
+  return terra(x : t) return x.__ptr end
+end
+
 task f(s : region(int), t : partition(disjoint, s), n : int) : int
 where reads(s) do
   var w = 0
@@ -30,26 +34,32 @@ end
 
 task g() : int
   var r = region(ispace(ptr, 5), int)
+  var x0 = new(ptr(int, r))
+  var x1 = new(ptr(int, r))
+  var x2 = new(ptr(int, r))
 
   var rc = c.legion_coloring_create()
   var n = 5
   for i = 0, n do
     c.legion_coloring_ensure_color(rc, i)
   end
+  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x0))
+  c.legion_coloring_add_point(rc, 1, [raw(ptr(int, r))](x1))
+  c.legion_coloring_add_point(rc, 2, [raw(ptr(int, r))](x2))
   var p = partition(disjoint, r, rc)
   c.legion_coloring_destroy(rc)
 
   var r0 = p[0]
-  var x0 = new(ptr(int, r0))
-  @x0 = 100
+  var x0_ = dynamic_cast(ptr(int, r0), x0)
+  @x0_ = 100
 
   var r1 = p[1]
-  var x1 = new(ptr(int, r1))
-  @x1 = 20
+  var x1_ = dynamic_cast(ptr(int, r1), x1)
+  @x1_ = 20
 
   var r2 = p[2]
-  var x2 = new(ptr(int, r2))
-  @x2 = 3
+  var x2_ = dynamic_cast(ptr(int, r2), x2)
+  @x2_ = 3
 
   return f(r, p, n)
 end
