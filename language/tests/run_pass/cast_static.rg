@@ -16,10 +16,16 @@ import "regent"
 
 local c = regentlib.c
 
+function raw(t)
+  return terra(x : t) return x.__ptr end
+end
+
 task main()
   var r = region(ispace(ptr, 5), int)
+  var x = new(ptr(int, r))
+
   var rc = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(rc, 0)
+  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x))
   c.legion_coloring_ensure_color(rc, 1)
 
   var p = partition(disjoint, r, rc)
@@ -29,12 +35,17 @@ task main()
   var p0 = partition(disjoint, r0, rc)
   var r00 = p0[0]
   var r01 = p0[1]
+  c.legion_coloring_destroy(rc)
 
+  var rc1 = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc1, 0)
+  c.legion_coloring_ensure_color(rc1, 1)
   var p1 = partition(disjoint, r1, rc)
   var r10 = p1[0]
   var r11 = p1[1]
+  c.legion_coloring_destroy(rc1)
 
-  var x00 = new(ptr(int, r00))
+  var x00 = dynamic_cast(ptr(int, r00), x)
   var x0 = static_cast(ptr(int, r0), x00)
 
   var x00_01 = static_cast(ptr(int, r00, r01), x00)
@@ -43,9 +54,9 @@ task main()
   var x00_01_10_11 = static_cast(ptr(int, r00, r01, r10, r11), x00)
   var x01_10_11_00 = static_cast(ptr(int, r01, r10, r11, r00), x00_01_10_11)
 
-  var x = static_cast(ptr(int, r), x01_10_11_00)
+  var x_ = static_cast(ptr(int, r), x01_10_11_00)
 
-  @x = 123
+  @x_ = 123
 
   regentlib.assert(@x0 == 123, "test failed")
   regentlib.assert(@x00 == 123, "test failed")
@@ -53,7 +64,5 @@ task main()
   regentlib.assert(@x01_00 == 123, "test failed")
   regentlib.assert(@x00_01_10_11 == 123, "test failed")
   regentlib.assert(@x01_10_11_00 == 123, "test failed")
-
-  c.legion_coloring_destroy(rc)
 end
 regentlib.start(main)
