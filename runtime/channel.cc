@@ -296,9 +296,9 @@ namespace LegionRuntime {
                                         const Buffer& _src_buf, const Buffer& _dst_buf,
                                         const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                         uint64_t _max_req_size, long max_nr, int _priority,
-                                        XferOrder::Type _order, Event _after_copy)
+                                        XferOrder::Type _order, XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_MEM_CPY, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_MEM_CPY, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -390,9 +390,9 @@ namespace LegionRuntime {
                                         const Buffer& _src_buf, const Buffer& _dst_buf,
                                         const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                         uint64_t _max_req_size, long max_nr, int _priority,
-                                        XferOrder::Type _order, XferKind _kind, Event _after_copy)
+                                        XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -550,9 +550,9 @@ namespace LegionRuntime {
                                                   const Buffer& _src_buf, const Buffer& _dst_buf,
                                                   const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                                   uint64_t _max_req_size, long max_nr, int _priority,
-                                                  XferOrder::Type _order, Event _after_copy)
+                                                  XferOrder::Type _order, XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_REMOTE_WRITE, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_REMOTE_WRITE, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -624,25 +624,31 @@ namespace LegionRuntime {
       template<unsigned DIM>
       void RemoteWriteXferDes<DIM>::notify_request_read_done(Request* req)
       {
+        pthread_mutex_lock(&xd_lock);
         req->is_read_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_read(offset, size);
+        pthread_mutex_unlock(&xd_lock);
       }
 
       template<unsigned DIM>
       void RemoteWriteXferDes<DIM>::notify_request_write_done(Request* req)
       {
+        pthread_mutex_lock(&xd_lock);
         req->is_write_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
+        pthread_mutex_unlock(&xd_lock);
       }
 
       template<unsigned DIM>
       void RemoteWriteXferDes<DIM>::flush()
       {
+        pthread_mutex_lock(&xd_lock);
+        pthread_mutex_unlock(&xd_lock);
       }
 
 #ifdef USE_DISK
@@ -652,9 +658,9 @@ namespace LegionRuntime {
                                     const Buffer& _src_buf, const Buffer& _dst_buf,
                                     const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                     uint64_t _max_req_size, long max_nr, int _priority,
-                                    XferOrder::Type _order, XferKind _kind, Event _after_copy)
+                                    XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -819,9 +825,9 @@ namespace LegionRuntime {
                                   const Buffer& _src_buf, const Buffer& _dst_buf,
                                   const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                   uint64_t _max_req_size, long max_nr, int _priority,
-                                  XferOrder::Type _order, XferKind _kind, Event _after_copy)
+                                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
       : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
+                _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -1051,9 +1057,9 @@ namespace LegionRuntime {
                                   RegionInstance inst, const Buffer& _src_buf, const Buffer& _dst_buf,
                                   const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                   uint64_t _max_req_size, long max_nr, int _priority,
-                                  XferOrder::Type _order, XferKind _kind, Event _after_copy)
+                                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
       {
         MemoryImpl* src_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -1414,9 +1420,12 @@ namespace LegionRuntime {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
-        assert((size_t)nr <= capacity - flying_reqs.size());
+        assert((size_t)nr <= capacity);
         for (int i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
+          XferDesRemoteWriteMessage::send_request(ID(req->dst_mem).node(), req->dst_buf, req->src_buf, req->nbytes, req);
+          capacity--;
+        /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
           Realm::RemoteWriteMessage::RequestArgs args;
           args.mem = req->dst_mem;
@@ -1424,32 +1433,22 @@ namespace LegionRuntime {
           args.event = req->complete_event;
           args.sender = gasnet_mynode();
           args.sequence_id = 0;
+
           Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
                                                       req->src_buf, req->nbytes,
-                                                      PAYLOAD_KEEP,
-                                                      req->dst_buf);
-          flying_reqs.push_back(req);
+                                                      PAYLOAD_KEEPREG,
+                                                      req->dst_buf);*/
         }
         return nr;
       }
 
       void RemoteWriteChannel::pull()
       {
-        while (!flying_reqs.empty()) {
-          RemoteWriteRequest* req = (RemoteWriteRequest*)flying_reqs.front();
-          if (req->complete_event.has_triggered()) {
-            req->xd->notify_request_read_done(req);
-            req->xd->notify_request_write_done(req);
-            flying_reqs.pop_front();
-          }
-          else
-            break;
-        }
       }
 
       long RemoteWriteChannel::available()
       {
-        return capacity - flying_reqs.size();
+        return capacity;
       }
 
 #ifdef USE_DISK
@@ -1576,9 +1575,9 @@ namespace LegionRuntime {
               gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
-                                  gpu_to_fb_reqs[i]->nbytes,
+                                  gpu_to_fb_reqs[i]->nbytes/*,
                                   Event::NO_EVENT,
-                                  gpu_to_fb_reqs[i]->complete_event);
+                                  gpu_to_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_to_fb_reqs[i]);
             }
             break;
@@ -1590,9 +1589,9 @@ namespace LegionRuntime {
               gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
-                                    gpu_from_fb_reqs[i]->nbytes,
+                                    gpu_from_fb_reqs[i]->nbytes/*,
                                     Event::NO_EVENT,
-                                    gpu_from_fb_reqs[i]->complete_event);
+                                    gpu_from_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_from_fb_reqs[i]);
             }
             break;
@@ -1604,9 +1603,9 @@ namespace LegionRuntime {
               gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_within_fb(gpu_in_fb_reqs[i]->dst_offset,
                                       gpu_in_fb_reqs[i]->src_offset,
-                                      gpu_in_fb_reqs[i]->nbytes,
+                                      gpu_in_fb_reqs[i]->nbytes/*,
                                       Event::NO_EVENT,
-                                      gpu_in_fb_reqs[i]->complete_event);
+                                      gpu_in_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_in_fb_reqs[i]);
             }
             break;
@@ -1619,9 +1618,9 @@ namespace LegionRuntime {
               src_gpu->copy_to_peer(gpu_peer_fb_reqs[i]->dst_gpu,
                                     gpu_peer_fb_reqs[i]->dst_offset,
                                     gpu_peer_fb_reqs[i]->src_offset,
-                                    gpu_peer_fb_reqs[i]->nbytes,
+                                    gpu_peer_fb_reqs[i]->nbytes/*,
                                     Event::NO_EVENT,
-                                    gpu_peer_fb_reqs[i]->complete_event);
+                                    gpu_peer_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_peer_fb_reqs[i]);
             }
             break;
@@ -1782,6 +1781,21 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
+      /*static*/ void XferDesRemoteWriteMessage::handle_request(RequestArgs args, const void *data, size_t datalen)
+      {
+        // assert data copy is in right position
+        assert(data == args.dst_buf);
+        XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
+      }
+
+      /*static*/ void XferDesRemoteWriteAckMessage::handle_request(RequestArgs args)
+      {
+        RemoteWriteRequest* req = args.req;
+        req->xd->notify_request_read_done(req);
+        req->xd->notify_request_write_done(req);
+        channel_manager->get_remote_write_channel()->notify_completion();
+      }
+
       /*static*/ void XferDesCreateMessage::handle_request(RequestArgs args, const void *msgdata, size_t msglen)
       {
         const Payload *payload = (const Payload *)msgdata;
@@ -1803,21 +1817,21 @@ namespace LegionRuntime {
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
                              src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.after_copy, args.inst);
+                             payload->order, payload->kind, args.fence, args.inst);
           break;
         case 2:
           create_xfer_des<2>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
                              src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.after_copy, args.inst);
+                             payload->order, payload->kind, args.fence, args.inst);
           break;
         case 3:
           create_xfer_des<3>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
                              src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.after_copy, args.inst);
+                             payload->order, payload->kind, args.fence, args.inst);
           break;
         default:
           assert(0);
@@ -1878,11 +1892,12 @@ namespace LegionRuntime {
               it->second->erase(xd);
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
-              bool need_to_delete_dma_request = xd->mark_completed();
+              xd->mark_completed();
+              /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
                 DmaRequest* dma_request = xd->dma_request;
                 delete dma_request;
-              }
+              }*/
             }
           }
         }
@@ -1922,7 +1937,7 @@ namespace LegionRuntime {
                            const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                            uint64_t _max_req_size, long max_nr, int _priority,
                            XferOrder::Type _order, XferDes::XferKind _kind,
-                           Event _after_copy, RegionInstance inst)
+                           XferDesFence* _complete_fence, RegionInstance inst)
       {
         if (ID(_src_buf.memory).node() == gasnet_mynode()) {
           XferDes* xd;
@@ -1932,7 +1947,7 @@ namespace LegionRuntime {
                                         _guid, _pre_xd_guid, _next_xd_guid,
                                         _src_buf, _dst_buf, _domain, _oas_vec,
                                         _max_req_size, max_nr, _priority,
-                                        _order, _after_copy);
+                                        _order, _complete_fence);
             break;
           case XferDes::XFER_GASNET_READ:
           case XferDes::XFER_GASNET_WRITE:
@@ -1940,14 +1955,14 @@ namespace LegionRuntime {
                                         _guid, _pre_xd_guid, _next_xd_guid,
                                         _src_buf, _dst_buf, _domain, _oas_vec,
                                         _max_req_size, max_nr, _priority,
-                                        _order, _kind, _after_copy);
+                                        _order, _kind, _complete_fence);
             break;
           case XferDes::XFER_REMOTE_WRITE:
             xd = new RemoteWriteXferDes<DIM>(_dma_request, _launch_node,
                                              _guid, _pre_xd_guid, _next_xd_guid,
                                              _src_buf, _dst_buf, _domain, _oas_vec,
                                              _max_req_size, max_nr, _priority,
-                                             _order, _after_copy);
+                                             _order, _complete_fence);
             break;
 #ifdef USE_DISK
           case XferDes::XFER_DISK_READ:
@@ -1956,7 +1971,7 @@ namespace LegionRuntime {
                                       _guid, _pre_xd_guid, _next_xd_guid,
                                       _src_buf, _dst_buf, _domain, _oas_vec,
                                       _max_req_size, max_nr, _priority,
-                                      _order, _kind, _after_copy);
+                                      _order, _kind, _complete_fence);
             break;
 #endif
 #ifdef USE_CUDA
@@ -1968,7 +1983,7 @@ namespace LegionRuntime {
                                      _guid, _pre_xd_guid, _next_xd_guid,
                                      _src_buf, _dst_buf, _domain, _oas_vec,
                                      _max_req_size, max_nr, _priority,
-                                     _order, _kind, _after_copy);
+                                     _order, _kind, _complete_fence);
             break;
 #endif
 #ifdef USE_HDF
@@ -1978,7 +1993,7 @@ namespace LegionRuntime {
                                      _guid, _pre_xd_guid, _next_xd_guid,
                                      inst, _src_buf, _dst_buf, _domain, _oas_vec,
                                      _max_req_size, max_nr, _priority,
-                                     _order, _kind, _after_copy);
+                                     _order, _kind, _complete_fence);
             break;
 #endif
         default:
@@ -1990,7 +2005,7 @@ namespace LegionRuntime {
                                            _guid, _pre_xd_guid, _next_xd_guid,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
                                            _max_req_size, max_nr, _priority,
-                                           _order, _kind, _after_copy, inst);
+                                           _order, _kind, _complete_fence, inst);
       }
     }
 

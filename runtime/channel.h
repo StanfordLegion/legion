@@ -32,6 +32,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
+#include <atomic>
 #include "lowlevel.h"
 #include "lowlevel_dma.h"
 
@@ -276,35 +277,35 @@ namespace LegionRuntime{
     typedef uint64_t XferDesID;
     struct NotifyXferDesCompleteMessage {
       struct RequestArgs {
-        DmaRequest* dma_request;
-        XferDesID guid;
+        XferDesFence* fence;
       };
 
       static void handle_request(RequestArgs args)
       {
-        bool all_completed = args.dma_request->notify_xfer_des_completion(args.guid);
-        if (all_completed)
-        {
-          // all xd of a dma_request has compelted
-          // we could delete this dma_request
-          delete args.dma_request;
-        }
+        args.fence->mark_finished();
       }
 
       typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, DmaRequest* dma_request, XferDesID guid)
+      static void send_request(gasnet_node_t target, XferDesFence* fence)
       {
         RequestArgs args;
-        args.dma_request = dma_request;
-        args.guid = guid;
+        args.fence = fence;
         Message::request(target, args);
       }
     };
 
     typedef class Layouts::XferOrder XferOrder;
+    class XferDesFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      XferDesFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
+      virtual void request_cancellation(void) {
+    	// ignored for now
+      }
+    };
+
     class XferDes {
     public:
       enum XferKind {
@@ -330,8 +331,8 @@ namespace LegionRuntime{
       // ID of the node that launches this XferDes
       gasnet_node_t launch_node;
       uint64_t /*bytes_submit, */bytes_read, bytes_write, bytes_total;
-      uint64_t pre_bytes_write;
-      uint64_t next_bytes_read;
+      std::atomic<uint64_t> pre_bytes_write;
+      std::atomic<uint64_t> next_bytes_read;
       // Domain that is to be copied
       Domain domain;
       // source and destination buffer
@@ -362,24 +363,31 @@ namespace LegionRuntime{
       };
       Channel* channel;
       // event is triggered when the XferDes is completed
-      Event complete_event;
+      XferDesFence* complete_fence;
+      // xd_lock is designed to provide thread-safety for
+      // SIMULTANEOUS invocation to get_requests,
+      // notify_request_read_done, and notify_request_write_done
+      pthread_mutex_t xd_lock;
     public:
       XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
               const Buffer& _src_buf, const Buffer& _dst_buf,
               const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
               uint64_t _max_req_size, int _priority,
-              XferOrder::Type _order, XferKind _kind, Event _after_copy)
+              XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : dma_request(_dma_request), launch_node(_launch_node),
           bytes_read(0), bytes_write(0), bytes_total(0), pre_bytes_write(0), next_bytes_read(0),
           domain(_domain), src_buf(_src_buf), dst_buf(_dst_buf), oas_vec(_oas_vec),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid), pre_xd_guid(_pre_xd_guid), next_xd_guid(_next_xd_guid),
-          kind (_kind), order(_order), channel(NULL), complete_event(_after_copy)
+          kind (_kind), order(_order), channel(NULL), complete_fence(_complete_fence)
       {
+        pthread_mutex_init(&xd_lock, NULL);
       }
 
-      virtual ~XferDes() {};
+      virtual ~XferDes() {
+        pthread_mutex_destroy(&xd_lock);
+      };
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
@@ -448,36 +456,34 @@ namespace LegionRuntime{
       }
 #endif
 
-      bool is_write_done() {
-        return bytes_write == bytes_total;
-      }
-
       bool is_completed() {
         return ((bytes_write == bytes_total)&&(next_xd_guid == XFERDES_NO_GUID || next_bytes_read == bytes_total));
       }
 
-      // Returns true if this is the last completed xd of the owning DmaRequest
-      // in which case, invoking thread is responsible for delete the DmaRequest
-      bool mark_completed() {
+      void mark_completed() {
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == gasnet_mynode()) {
-          bool all_completed = dma_request->notify_xfer_des_completion(guid);
-          return all_completed;
+          complete_fence->mark_finished();
         } else {
-          NotifyXferDesCompleteMessage::send_request(launch_node, dma_request, guid);
-          return false;
+          NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
         }
       }
 
+      // This method is thread-safe
       void update_pre_bytes_write(size_t new_val) {
-        if (pre_bytes_write < new_val)
-          pre_bytes_write = new_val;
+        uint64_t old_val = pre_bytes_write;
+        while (old_val < new_val) {
+          pre_bytes_write.compare_exchange_strong(old_val, new_val);
+        }
       }
 
+      // This method is thread-safe
       void update_next_bytes_read(size_t new_val) {
-        if (next_bytes_read < new_val)
-          next_bytes_read = new_val;
+        uint64_t old_val = next_bytes_read;
+        while (old_val < new_val) {
+          next_bytes_read.compare_exchange_strong(old_val, new_val);
+        }
       }
 
       gasnet_node_t find_execution_node() {
@@ -604,7 +610,7 @@ namespace LegionRuntime{
                     const Buffer& _src_buf, const Buffer& _dst_buf,
                     const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                     uint64_t max_req_size, long max_nr, int _priority,
-                    XferOrder::Type _order, Event _after_copy);
+                    XferOrder::Type _order, XferDesFence* _complete_fence);
 
       ~MemcpyXferDes()
       {
@@ -614,9 +620,9 @@ namespace LegionRuntime{
         }
         free(requests);
         // trigger complete event
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         if (src_buf.is_ib) {
@@ -645,7 +651,7 @@ namespace LegionRuntime{
                     const Buffer& _src_buf, const Buffer& _dst_buf,
                     const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                     uint64_t _max_req_size, long max_nr, int _priority,
-                    XferOrder::Type _order, XferKind _kind, Event _after_copy);
+                    XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
       ~GASNetXferDes()
       {
@@ -655,9 +661,9 @@ namespace LegionRuntime{
         }
         free(requests);
         // trigger completion event
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         if (src_buf.is_ib) {
@@ -686,7 +692,7 @@ namespace LegionRuntime{
                          const Buffer& _src_buf, const Buffer& _dst_buf,
                          const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                          uint64_t max_req_size, long max_nr, int _priority,
-                         XferOrder::Type _order, Event _after_copy);
+                         XferOrder::Type _order, XferDesFence* _complete_fence);
 
       ~RemoteWriteXferDes()
       {
@@ -695,9 +701,9 @@ namespace LegionRuntime{
           available_reqs.pop();
         }
         free(requests);
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         if (src_buf.is_ib) {
@@ -728,7 +734,7 @@ namespace LegionRuntime{
                   const Buffer& _src_buf, const Buffer& _dst_buf,
                   const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                   uint64_t _max_req_size, long max_nr, int _priority,
-                  XferOrder::Type _order, XferKind _kind, Event _after_copy);
+                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
       ~DiskXferDes() {
         // clear available_reqs
@@ -737,9 +743,9 @@ namespace LegionRuntime{
         }
         free(requests);
         // trigger complete event
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         if (src_buf.is_ib) {
@@ -770,7 +776,7 @@ namespace LegionRuntime{
                  const Buffer& _src_buf, const Buffer& _dst_buf,
                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                  uint64_t _max_req_size, long max_nr, int _priority,
-                 XferOrder::Type _order, XferKind _kind, Event _after_copy);
+                 XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~GPUXferDes()
       {
         // clear available_reqs
@@ -779,9 +785,9 @@ namespace LegionRuntime{
         }
         free(requests);
         // trigger complete event
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         if (src_buf.is_ib) {
@@ -814,7 +820,7 @@ namespace LegionRuntime{
                  RegionInstance inst, const Buffer& _src_buf, const Buffer& _dst_buf,
                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                  uint64_t _max_req_size, long max_nr, int _priority,
-                 XferOrder::Type _order, XferKind _kind, Event _after_copy);
+                 XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~HDFXferDes()
       {
         // clear available_reqs
@@ -824,9 +830,9 @@ namespace LegionRuntime{
         free(requests);
         delete hli;
         // trigger complete event
-        if (complete_event.exists()) {
-          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        }
+        //if (complete_event.exists()) {
+          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        //}
       }
 
       long get_requests(Request** requests, long nr);
@@ -907,11 +913,10 @@ namespace LegionRuntime{
       long submit(Request** requests, long nr);
       void pull();
       long available();
+      void notify_completion() {capacity ++;}
     private:
       long capacity;
-      std::deque<RemoteWriteRequest*> flying_reqs;
     };
-
 
 #ifdef USE_DISK
     class DiskChannel : public Channel {
@@ -1213,11 +1218,54 @@ namespace LegionRuntime{
       XferDesQueue* xd_queue;
     };
 
+    struct XferDesRemoteWriteMessage {
+      struct RequestArgs : public BaseMedium {
+        char* dst_buf;
+        RemoteWriteRequest* req;
+        gasnet_node_t sender;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<XFERDES_REMOTEWRITE_MSGID,
+                                         RequestArgs,
+                                         handle_request> Message;
+
+      static void send_request(gasnet_node_t target, char* dst_buf,
+                               char* src_buf, size_t nbytes, RemoteWriteRequest* req)
+      {
+        RequestArgs args;
+        args.dst_buf = dst_buf;
+        args.req = req;
+        args.sender = gasnet_mynode();
+        //TODO: need to ask Sean what payload mode we should use
+        Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEPREG, dst_buf);
+      }
+    };
+
+    struct XferDesRemoteWriteAckMessage {
+      struct RequestArgs {
+        RemoteWriteRequest* req;
+      };
+
+      static void handle_request(RequestArgs args);
+      typedef ActiveMessageShortNoReply<XFERDES_REMOTEWRITE_ACK_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, RemoteWriteRequest* req)
+      {
+        RequestArgs args;
+        args.req = req;
+        Message::request(target, args);
+      }
+    };
+
     struct XferDesCreateMessage {
       struct RequestArgs : public BaseMedium {
         RegionInstance inst;
         Memory src_mem, dst_mem;
-        Event after_copy;
+        XferDesFence* fence;
       };
 
       // TODO: replace with new serialization stuff
@@ -1250,7 +1298,7 @@ namespace LegionRuntime{
                                const Domain& domain, const std::vector<OffsetsAndSize>& oas_vec,
                                uint64_t max_req_size, long max_nr, int priority,
                                XferOrder::Type order, XferDes::XferKind kind,
-                               Event after_copy, RegionInstance inst = RegionInstance::NO_INST)
+                               XferDesFence* fence, RegionInstance inst = RegionInstance::NO_INST)
       {
         size_t payload_size = sizeof(Payload) + sizeof(OffsetsAndSize) * oas_vec.size();
         Payload *payload = (Payload*) malloc(payload_size);
@@ -1274,7 +1322,7 @@ namespace LegionRuntime{
         args.inst = inst;
         args.src_mem = src_buf.memory;
         args.dst_mem = dst_buf.memory;
-        args.after_copy = after_copy;
+        args.fence = fence;
         Message::request(target, args, payload, payload_size, PAYLOAD_FREE);
       }
     };
@@ -1617,7 +1665,7 @@ namespace LegionRuntime{
                          const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                          uint64_t _max_req_size, long max_nr, int _priority,
                          XferOrder::Type _order, XferDes::XferKind _kind,
-                         Event _after_copy, RegionInstance inst = RegionInstance::NO_INST);
+                         XferDesFence* _complete_fence, RegionInstance inst = RegionInstance::NO_INST);
 
     void destroy_xfer_des(XferDesID _guid);
   }  // namespace LowLevel

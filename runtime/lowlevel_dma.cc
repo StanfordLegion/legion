@@ -2800,7 +2800,6 @@ namespace LegionRuntime {
             XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : path[idx - 2];
             XferDesID next_xd_guid = idx == path.size() ? XferDes::XFERDES_NO_GUID : path[idx];
             Buffer cur_buf;
-            Event event;
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
             XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
             RegionInstance hdf_inst;
@@ -2813,13 +2812,13 @@ namespace LegionRuntime {
 
             if (idx != mem_path.size() - 1) {
               cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).node(), mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-              event = Event::NO_EVENT;
             } else {
               cur_buf = dst_buf;
-              event = after_copy;
               oasvec_src = oasvec;
               oasvec.clear();
             }
+            XferDesFence* complete_fence = new XferDesFence(this);
+            add_async_work_item(fence);
             if (DIM == 0) {
               // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
               // First we should make sure destination instance space's index space match what we're copying
@@ -2832,18 +2831,19 @@ namespace LegionRuntime {
               Domain new_domain = Domain::from_rect<1>(new_rect);
               create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, new_domain, oasvec_src, 16 * 1024/*max_req_size*/,
-                                   100/*max_nr*/, priority, order, kind, event, hdf_inst);
+                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
             }
             else {
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
-                                   100/*max_nr*/, priority, order, kind, event, hdf_inst);
+                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
             }
             pre_buf = cur_buf;
             oasvec = oasvec_dst;
         }
       }
     }
+    mark_finished();
   }
 
 #ifdef ENUM_PERFORM_NEW_DMA
