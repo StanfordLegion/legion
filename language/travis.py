@@ -44,13 +44,14 @@ def install_dependencies():
 
     return env
 
-def test(root_dir, install_args, install_env):
+def test(root_dir, debug, env):
     subprocess.check_call(
-        ['./install.py', '-j', '2'] + install_args,
-        env = install_env,
+        ['./install.py', '-j', '2'] + (['--debug'] if debug else []),
+        env = env,
         cwd = root_dir)
     subprocess.check_call(
-        ['./test.py', '-j', '2'],
+        ['./test.py', '-j', '2'] + (['--debug'] if debug else []),
+        env = env,
         cwd = root_dir)
 
 if __name__ == '__main__':
@@ -63,5 +64,5 @@ if __name__ == '__main__':
         'LG_RT_DIR': runtime_dir,
     })
 
-    test(root_dir, ['--general', '--debug'], env)
-    test(root_dir, ['--general'], env)
+    test(root_dir, True, env)
+    test(root_dir, False, env)
