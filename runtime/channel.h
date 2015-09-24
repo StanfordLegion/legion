@@ -32,7 +32,6 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include <atomic>
 #include "lowlevel.h"
 #include "lowlevel_dma.h"
 
@@ -275,27 +274,6 @@ namespace LegionRuntime{
 #endif
 
     typedef uint64_t XferDesID;
-    struct NotifyXferDesCompleteMessage {
-      struct RequestArgs {
-        XferDesFence* fence;
-      };
-
-      static void handle_request(RequestArgs args)
-      {
-        args.fence->mark_finished();
-      }
-
-      typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(gasnet_node_t target, XferDesFence* fence)
-      {
-        RequestArgs args;
-        args.fence = fence;
-        Message::request(target, args);
-      }
-    };
 
     typedef class Layouts::XferOrder XferOrder;
     class XferDesFence : public Realm::Operation::AsyncWorkItem {
@@ -331,8 +309,8 @@ namespace LegionRuntime{
       // ID of the node that launches this XferDes
       gasnet_node_t launch_node;
       uint64_t /*bytes_submit, */bytes_read, bytes_write, bytes_total;
-      std::atomic<uint64_t> pre_bytes_write;
-      std::atomic<uint64_t> next_bytes_read;
+      uint64_t pre_bytes_write;
+      uint64_t next_bytes_read;
       // Domain that is to be copied
       Domain domain;
       // source and destination buffer
@@ -460,30 +438,24 @@ namespace LegionRuntime{
         return ((bytes_write == bytes_total)&&(next_xd_guid == XFERDES_NO_GUID || next_bytes_read == bytes_total));
       }
 
-      void mark_completed() {
-        // notify owning DmaRequest upon completion of this XferDes
-        //printf("complete XD = %lu\n", guid);
-        if (launch_node == gasnet_mynode()) {
-          complete_fence->mark_finished();
-        } else {
-          NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
-        }
-      }
+      void mark_completed();
 
-      // This method is thread-safe
       void update_pre_bytes_write(size_t new_val) {
-        uint64_t old_val = pre_bytes_write;
+        if (pre_bytes_write < new_val)
+          pre_bytes_write = new_val;
+        /*uint64_t old_val = pre_bytes_write;
         while (old_val < new_val) {
           pre_bytes_write.compare_exchange_strong(old_val, new_val);
-        }
+        }*/
       }
 
-      // This method is thread-safe
       void update_next_bytes_read(size_t new_val) {
-        uint64_t old_val = next_bytes_read;
+        if (next_bytes_read < new_val)
+          next_bytes_read = new_val;
+        /*uint64_t old_val = next_bytes_read;
         while (old_val < new_val) {
           next_bytes_read.compare_exchange_strong(old_val, new_val);
-        }
+        }*/
       }
 
       gasnet_node_t find_execution_node() {
@@ -1218,6 +1190,28 @@ namespace LegionRuntime{
       XferDesQueue* xd_queue;
     };
 
+    struct NotifyXferDesCompleteMessage {
+      struct RequestArgs {
+        XferDesFence* fence;
+      };
+
+      static void handle_request(RequestArgs args)
+      {
+        args.fence->mark_finished();
+      }
+
+      typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, XferDesFence* fence)
+      {
+        RequestArgs args;
+        args.fence = fence;
+        Message::request(target, args);
+      }
+    };
+
     struct XferDesRemoteWriteMessage {
       struct RequestArgs : public BaseMedium {
         char* dst_buf;
@@ -1570,73 +1564,9 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
                                 ,std::vector<GPUProcessor*> &local_gpus
 #endif
-                       ) {
-        // TODO: count is currently ignored
-        num_threads = 3;
-#ifdef USE_HDF
-        // Need a dedicated thread for handling HDF requests
-        num_threads ++;
-#endif
-        dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
-        // dma thread #1: memcpy
-        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
-        dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
-        // dma thread #2: async xfer
-        std::vector<Channel*> async_channels, gasnet_channels;
-        async_channels.push_back(channel_manager->create_remote_write_channel(max_nr));
-#ifdef USE_DISK
-        async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
-        async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
-#endif /*USE_DISK*/
-#ifdef USE_CUDA
-        std::vector<GPUProcessor*>::iterator it;
-        for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
-          async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
-          async_channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
-        }
-#endif
-        dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
-        gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
-        gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
-        dma_threads[2] = new DMAThread(max_nr, xferDes_queue, gasnet_channels);
-#ifdef USE_HDF
-        std::vector<Channel*> hdf_channels;
-        hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
-        hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
-        dma_threads[3] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
-#endif
-        for (int i = 0; i < num_threads; i++) {
-          // register dma thread to XferDesQueue
-           register_dma_thread(dma_threads[i]);
-        }
+                       );
 
-        Realm::ThreadLaunchParameters tlp;
-
-        for(int i = 0; i < num_threads; i++) {
-          Realm::Thread *t = Realm::Thread::create_kernel_thread<DMAThread,
-  	                                        &DMAThread::dma_thread_loop>(dma_threads[i],
-  										                                 tlp,
-  										                                 core_rsrv,
-  										                                 0 /* default scheduler*/);
-          worker_threads.push_back(t);
-        }
-      }
-
-      void stop_worker() {
-        for(int i = 0; i < num_threads; i++)
-          dma_threads[i]->stop();
-        // reap all the threads
-        for(std::vector<Realm::Thread *>::iterator it = worker_threads.begin();
-            it != worker_threads.end();
-            it++) {
-          (*it)->join();
-          delete (*it);
-        }
-        worker_threads.clear();
-        delete[] dma_threads;
-      }
+      void stop_worker();
 
     protected:
       std::map<Channel*, DMAThread*> channel_to_dma_thread;

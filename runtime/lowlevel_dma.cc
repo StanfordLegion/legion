@@ -2818,7 +2818,7 @@ namespace LegionRuntime {
               oasvec.clear();
             }
             XferDesFence* complete_fence = new XferDesFence(this);
-            add_async_work_item(fence);
+            add_async_work_item(complete_fence);
             if (DIM == 0) {
               // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
               // First we should make sure destination instance space's index space match what we're copying
@@ -3409,7 +3409,7 @@ namespace LegionRuntime {
 		   oas_by_inst->begin()->second.size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
-		   after_copy.id, after_copy.gen);
+		   get_finish_event().id, get_finish_event().gen);
       return;
       // </NEWDMA>
 
@@ -4750,9 +4750,6 @@ namespace LegionRuntime {
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
-    // list of all dma threads
-    static DMAThread** dma_threads = 0;
-
     void DmaRequestQueue::worker_thread_loop(void)
     {
       log_dma.info("dma worker thread created");
@@ -4817,7 +4814,7 @@ namespace LegionRuntime {
 
     void stop_dma_system(void)
     {
-      stop_channel_manager(dma_threads);
+      stop_channel_manager();
     }
   };
 };
