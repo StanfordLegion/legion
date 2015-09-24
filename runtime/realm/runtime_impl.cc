@@ -749,6 +749,14 @@ namespace Realm {
       }
 #endif
 
+      // start dma system at the very ending of initialization
+      // since we need list of local gpus to create channels
+      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
+#ifdef USE_CUDA
+                       ,local_gpus
+#endif
+                       ,core_reservations);
+
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
@@ -1001,14 +1009,6 @@ namespace Realm {
 	}
 #endif
       }
-
-      // start dma system at the very ending of initialization
-      // since we need list of local gpus to create channels
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
-#ifdef USE_CUDA
-                       ,local_gpus
-#endif
-                       ,core_reservations);
 
       return true;
     }

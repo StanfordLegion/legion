@@ -18,6 +18,7 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
+    Logger::Category log_new_dma("new_dma");
 #ifdef USE_DISK 
     inline int io_setup(unsigned nr, aio_context_t *ctxp)
       {
@@ -1868,6 +1869,7 @@ namespace LegionRuntime {
 
       void DMAThread::dma_thread_loop()
       {
+        log_new_dma.info("start dma thread loop");
         while (!is_stopped) {
           bool is_empty = true;
           std::map<Channel*, PriorityXferDesQueue*>::iterator it;
@@ -1914,6 +1916,7 @@ namespace LegionRuntime {
             }
           }
         }
+        log_new_dma.info("finish dma thread loop");
       }
 
       XferDesQueue* get_xdq_singleton()
@@ -1941,6 +1944,7 @@ namespace LegionRuntime {
                                       ,std::vector<GPUProcessor*> &local_gpus
 #endif
     ) {
+        log_new_dma.info("XferDesQueue: start_workers");
         // TODO: count is currently ignored
         num_threads = 3;
 #ifdef USE_HDF
@@ -1985,6 +1989,7 @@ namespace LegionRuntime {
         Realm::ThreadLaunchParameters tlp;
 
         for(int i = 0; i < num_threads; i++) {
+          log_new_dma.info("Create a DMA worker thread");
           Realm::Thread *t = Realm::Thread::create_kernel_thread<DMAThread,
   	                                        &DMAThread::dma_thread_loop>(dma_threads[i],
   										                                 tlp,
