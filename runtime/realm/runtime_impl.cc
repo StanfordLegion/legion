@@ -1008,7 +1008,7 @@ namespace Realm {
 #ifdef USE_CUDA
                        ,local_gpus
 #endif
-                       );
+                       ,core_reservations);
 
       return true;
     }
