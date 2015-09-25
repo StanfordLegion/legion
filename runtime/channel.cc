@@ -249,7 +249,7 @@ namespace LegionRuntime {
             update = true;
           }
           else {
-            printf("[%lx] insert: key = %ld, value = %lu\n", guid, offset, size);
+            //printf("[%lx] insert: key = %ld, value = %lu\n", guid, offset, size);
             segments_read[offset] = size;
           }
           std::map<int64_t, uint64_t>::iterator it;
@@ -259,7 +259,7 @@ namespace LegionRuntime {
               break;
             bytes_read += it->second;
             update = true;
-            printf("[%lx] erase: key = %ld, value = %lu\n", guid, it->first, it->second);
+            //printf("[%lx] erase: key = %ld, value = %lu\n", guid, it->first, it->second);
             segments_read.erase(it);
           }
           if (update) {
