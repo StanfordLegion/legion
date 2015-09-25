@@ -660,11 +660,10 @@ namespace Realm {
             num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
           assert(false);
         }
-        GPUWorker *gpu_worker = 0;
-        if (gpu_worker_thread) {
-          gpu_worker = GPUWorker::start_gpu_worker_thread(core_reservations,
-							  stack_size_in_mb << 20);
-        }
+
+	// TODO: let the CUDA module actually parse config variables
+	assert(gpu_worker_thread == true);
+
 	for(unsigned i = 0; i < num_local_gpus; i++) {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
@@ -677,7 +676,7 @@ namespace Realm {
                                               zc_mem_size_in_mb << 20,
                                               fb_mem_size_in_mb << 20,
                                               stack_size_in_mb << 20,
-                                              gpu_worker, num_gpu_streams);
+                                              num_gpu_streams);
 	  n->processors.push_back(gp);
 	  local_gpus.push_back(gp);
 
@@ -1188,9 +1187,6 @@ namespace Realm {
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       LegionRuntime::LowLevel::stop_dma_worker_threads();
-#ifdef USE_CUDA
-      GPUWorker::stop_gpu_worker_thread();
-#endif
       stop_activemsg_threads();
 
       // if we are running as a background thread, just terminate this thread
