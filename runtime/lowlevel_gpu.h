@@ -22,6 +22,7 @@
 // we need all its declarations so we have all the right types
 #include "cuda_runtime.h"
 #include "realm/threads.h"
+#include "realm/circ_queue.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -68,23 +69,17 @@ namespace LegionRuntime {
 
     // Forard declaration
     class GPUProcessor;
+    class GPUWorker;
+    class GPUStream;
 
-#if 0
-    class GPUJob : public EventWaiter {
+    // an interface for receiving completion notification for a GPU operation
+    //  (right now, just copies)
+    class GPUCompletionNotification {
     public:
-      GPUJob(GPUProcessor *_gpu)
-	: gpu(_gpu) { }
-      virtual ~GPUJob(void) {}
-    public:
-      virtual bool event_triggered(void) = 0;
-      virtual void print_info(FILE *f) = 0;
-      virtual void run_or_wait(Event start_event) = 0;
-      virtual void execute(void) = 0;
-      virtual void finish_job(void) = 0;
-    public:
-      GPUProcessor *const gpu;
+      virtual ~GPUCompletionNotification(void) {}
+
+      virtual void request_completed(void) = 0;
     };
-#endif
 
     // An abstract base class for all GPU memcpy operations
     class GPUMemcpy { //: public GPUJob {
@@ -92,34 +87,31 @@ namespace LegionRuntime {
       GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind);
       virtual ~GPUMemcpy(void) { }
     public:
-      virtual void execute(void) = 0;
-#if 0
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
-      virtual void run_or_wait(Event start_event);
-      virtual void execute(void) = 0;
-      virtual void finish_job(void);
-    public:
-      void post_execute(void);
-    public:
-      // Helper method for handling a callback
-      static void handle_finish(CUstream stream, CUresult res, void *data);
-#endif
+      virtual void execute(GPUStream *stream) = 0;
     public:
       GPUProcessor *const gpu;
     protected:
       GPUMemcpyKind kind;
-      CUstream local_stream;
     };
 
-    class GPUWorkFence;
+    class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      GPUWorkFence(Realm::Operation *op);
+      
+      virtual void request_cancellation(void);
+
+      void enqueue_on_stream(GPUStream *stream);
+
+    protected:
+      static void cuda_callback(CUstream stream, CUresult res, void *data);
+    };
 
     class GPUMemcpyFence : public GPUMemcpy {
     public:
       GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
 		     GPUWorkFence *_fence);
 
-      virtual void execute(void);
+      virtual void execute(GPUStream *stream);
 
     protected:
       GPUWorkFence *fence;
@@ -128,24 +120,28 @@ namespace LegionRuntime {
     class GPUMemcpy1D : public GPUMemcpy {
     public:
       GPUMemcpy1D(GPUProcessor *_gpu,
-		void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
-	  mask(0), elmt_size(_bytes) { }
+		  void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
+		  GPUCompletionNotification *_notification);
+
       GPUMemcpy1D(GPUProcessor *_gpu,
-		void *_dst, const void *_src, 
-		const ElementMask *_mask, size_t _elmt_size,
-		GPUMemcpyKind _kind)
-	: GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
-	  mask(_mask), elmt_size(_elmt_size) { }
-      virtual ~GPUMemcpy1D(void) { }
+		  void *_dst, const void *_src, 
+		  const ElementMask *_mask, size_t _elmt_size,
+		  GPUMemcpyKind _kind,
+		  GPUCompletionNotification *_notification);
+
+      virtual ~GPUMemcpy1D(void);
+
     public:
       void do_span(off_t pos, size_t len);
-      virtual void execute(void);
+      virtual void execute(GPUStream *stream);
     protected:
       void *dst;
       const void *src;
       const ElementMask *mask;
       size_t elmt_size;
+      GPUCompletionNotification *notification;
+    private:
+      GPUStream *local_stream;  // used by do_span
     };
 
     class GPUMemcpy2D : public GPUMemcpy {
@@ -154,47 +150,125 @@ namespace LegionRuntime {
                   void *_dst, const void *_src,
                   off_t _dst_stride, off_t _src_stride,
                   size_t _bytes, size_t _lines,
-                  GPUMemcpyKind _kind)
-        : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
-          dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
-          src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
-          bytes(_bytes), lines(_lines) { }
-      virtual ~GPUMemcpy2D(void) { }
+                  GPUMemcpyKind _kind,
+		  GPUCompletionNotification *_notification);
+
+      virtual ~GPUMemcpy2D(void);
+
     public:
-      virtual void execute(void);
+      virtual void execute(GPUStream *stream);
     protected:
       void *dst;
       const void *src;
       off_t dst_stride, src_stride;
       size_t bytes, lines;
+      GPUCompletionNotification *notification;
     };
 
+    // a class that represents a CUDA stream and work associated with 
+    //  it (e.g. queued copies, events in flight)
+    // a stream is also associated with a GPUWorker that it will register
+    //  with when async work needs doing
+    class GPUStream {
+    public:
+      GPUStream(GPUProcessor *_gpu, GPUWorker *_worker);
+      ~GPUStream(void);
+
+      GPUProcessor *get_gpu(void) const;
+      CUstream get_stream(void) const;
+
+      // may be called by anybody to enqueue a copy or an event
+      void add_copy(GPUMemcpy *copy);
+      void add_fence(GPUWorkFence *fence);
+      void add_notification(GPUCompletionNotification *notification);
+
+      // to be called by a worker (that should already have the GPU context
+      //   current) - returns true if any work remains
+      bool issue_copies(void);
+      bool reap_events(void);
+
+    protected:
+      void add_event(CUevent event, GPUWorkFence *fence, 
+		     GPUCompletionNotification *notification);
+
+      GPUProcessor *gpu;
+      GPUWorker *worker;
+
+      CUstream stream;
+
+      GASNetHSL mutex;
+
+#define USE_CQ
+#ifdef USE_CQ
+      Realm::CircularQueue<GPUMemcpy *> pending_copies;
+#else
+      std::deque<GPUMemcpy *> pending_copies;
+#endif
+
+      struct PendingEvent {
+	CUevent event;
+	GPUWorkFence *fence;
+	GPUCompletionNotification* notification;
+      };
+#ifdef USE_CQ
+      Realm::CircularQueue<PendingEvent> pending_events;
+#else
+      std::deque<PendingEvent> pending_events;
+#endif
+    };
+
+    // a GPUWorker is responsible for making progress on one or more GPUStreams -
+    //  this may be done directly by a GPUProcessor or in a background thread
+    //  spawned for the purpose
     class GPUWorker {
     public:
-      GPUWorker(Realm::CoreReservationSet& crs, size_t stack_size);
+      GPUWorker(void);
       virtual ~GPUWorker(void);
-    public:
-      void shutdown(void);
-    public:
-      void enqueue_copy(GPUProcessor *proc, GPUMemcpy *copy);
-      void handle_complete_copy(GPUProcessor *proc, GPUMemcpy *copy);
+
+      // adds a stream that has work to be done
+      void add_stream(GPUStream *s);
+
+      // processes work on streams, optionally sleeping for work to show up
+      // returns true if work remains to be done
+      bool process_streams(bool sleep_on_empty);
+
+      void start_background_thread(Realm::CoreReservationSet& crs,
+				   size_t stack_size);
+      void shutdown_background_thread(void);
+
     public:
       void thread_main(void);
-    public:
-      static GPUWorker* start_gpu_worker_thread(Realm::CoreReservationSet& crs,
-						size_t stack_size);
-      static void stop_gpu_worker_thread(void);
+
     protected:
-      // Keep these sorted by processors
-      std::map<GPUProcessor*,std::deque<GPUMemcpy*> > copies;
-      std::map<GPUProcessor*,std::deque<GPUMemcpy*> > complete_copies;
-      bool copies_empty, jobs_empty;
-      GASNetHSL worker_lock;
-      GASNetCondVar worker_cond;
-      bool worker_shutdown_requested;
-      Realm::CoreReservation core_rsrv;
+      GASNetHSL lock;
+      GASNetCondVar condvar;
+      std::set<GPUStream *> active_streams;
+
+      // used by the background thread (if any)
+      Realm::CoreReservation *core_rsrv;
       Realm::Thread *worker_thread;
-      static GPUWorker *worker_singleton;
+      bool worker_shutdown_requested;
+    };
+
+    // a little helper class to manage a pool of CUevents that can be reused
+    //  to reduce alloc/destroy overheads
+    class GPUEventPool {
+    public:
+      GPUEventPool(int _batch_size = 256);
+
+      // allocating the initial batch of events and cleaning up are done with
+      //  these methods instead of constructor/destructor because we don't
+      //  manage the GPU context in this helper class
+      void init_pool(int init_size = 0 /* default == batch size */);
+      void empty_pool(void);
+
+      CUevent get_event(void);
+      void return_event(CUevent e);
+
+    protected:
+      GASNetHSL mutex;
+      int batch_size, current_size, total_size;
+      std::vector<CUevent> available_events;
     };
 
     class GPUProcessor : public Realm::LocalTaskProcessor {
@@ -202,12 +276,13 @@ namespace LegionRuntime {
       GPUProcessor(Processor _me, Realm::CoreReservationSet& crs,
 		   int _gpu_index, 
 		   size_t _zcmem_size, size_t _fbmem_size, 
-                   size_t _stack_size, GPUWorker *worker/*can be 0*/,
+                   size_t _stack_size,
                    int _streams);
       virtual ~GPUProcessor(void);
 
     protected:
       void initialize_cuda_stuff(void);
+      void cleanup_cuda_stuff(void);
 
     public:
       virtual void shutdown(void);
@@ -218,41 +293,52 @@ namespace LegionRuntime {
       size_t get_fbmem_size(void) const;
     public:
       // copy operations are asynchronous - use a fence (of the right type)
-      //   after all of your copies
-      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes);
+      //   after all of your copies, or a completion notification for particular copies
+      void copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
+		      GPUCompletionNotification *notification = 0);
 
-      void copy_from_fb(void *dst, off_t src_offset, size_t bytes);
+      void copy_from_fb(void *dst, off_t src_offset, size_t bytes,
+			GPUCompletionNotification *notification = 0);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  size_t bytes);
+			  size_t bytes,
+			  GPUCompletionNotification *notification = 0);
 
       void copy_to_fb_2d(off_t dst_offset, const void *src,
                          off_t dst_stride, off_t src_stride,
-                         size_t bytes, size_t lines);
+                         size_t bytes, size_t lines,
+			 GPUCompletionNotification *notification = 0);
 
       void copy_from_fb_2d(void *dst, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines);
+                           size_t bytes, size_t lines,
+			   GPUCompletionNotification *notification = 0);
 
       void copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                              off_t dst_stride, off_t src_stride,
-                             size_t bytes, size_t lines);
+                             size_t bytes, size_t lines,
+			     GPUCompletionNotification *notification = 0);
 
       void copy_to_peer(GPUProcessor *dst, off_t dst_offset, 
-                        off_t src_offset, size_t bytes);
+                        off_t src_offset, size_t bytes,
+			GPUCompletionNotification *notification = 0);
 
       void copy_to_peer_2d(GPUProcessor *dst, off_t dst_offset, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
-                           size_t bytes, size_t lines);
+                           size_t bytes, size_t lines,
+			   GPUCompletionNotification *notification = 0);
 
       void copy_to_fb(off_t dst_offset, const void *src,
-		      const ElementMask *mask, size_t elmt_size);
+		      const ElementMask *mask, size_t elmt_size,
+		      GPUCompletionNotification *notification = 0);
 
       void copy_from_fb(void *dst, off_t src_offset,
-			const ElementMask *mask, size_t elmt_size);
+			const ElementMask *mask, size_t elmt_size,
+			GPUCompletionNotification *notification = 0);
 
       void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  const ElementMask *mask, size_t elmt_size);
+			  const ElementMask *mask, size_t elmt_size,
+			  GPUCompletionNotification *notification = 0);
 
       void fence_to_fb(Realm::Operation *op);
       void fence_from_fb(Realm::Operation *op);
@@ -264,7 +350,7 @@ namespace LegionRuntime {
       void handle_peer_access(CUcontext peer_ctx);
       bool can_access_peer(GPUProcessor *peer) const;
       void handle_complete_copy(GPUMemcpy *copy);
-      CUstream get_current_task_stream(void);
+      GPUStream *get_current_task_stream(void);
     public:
       void load_context(void);
     public:
@@ -280,14 +366,12 @@ namespace LegionRuntime {
       const int gpu_index;
       const size_t zcmem_size, fbmem_size;
       const size_t zcmem_reserve, fbmem_reserve;
-      GPUWorker *const gpu_worker;
+      GPUWorker *gpu_worker;
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
       Realm::CoreReservation *core_rsrv;
     protected:
-      std::deque<GPUMemcpy*> copies;
-      std::deque<GPUMemcpy*> complete_jobs;
 
       std::set<GPUProcessor*> peer_gpus;
 
@@ -296,15 +380,23 @@ namespace LegionRuntime {
       CUdevice  proc_dev;
       CUcontext proc_ctx;
       // Streams for different copy types
-      CUstream host_to_device_stream;
-      CUstream device_to_host_stream;
-      CUstream device_to_device_stream;
-      CUstream peer_to_peer_stream;
+      GPUStream *host_to_device_stream;
+      GPUStream *device_to_host_stream;
+      GPUStream *device_to_device_stream;
+      GPUStream *peer_to_peer_stream;
 
-      CUstream switch_to_next_task_stream(void);
+      GPUStream *switch_to_next_task_stream(void);
+
+      // we're going to keep a pile of events that we use for notifications
+      GPUEventPool event_pool;
+
+      void add_event_to_stream(GPUStream *stream,
+			       GPUWorkFence *fence, 
+			       GPUCompletionNotification *notification);
+
     protected:
       size_t current_stream;
-      std::vector<CUstream> task_streams;
+      std::vector<GPUStream *> task_streams;
     public:
       // Our helper cuda calls
       void** internal_register_fat_binary(void *fat_bin);
