@@ -214,6 +214,7 @@ ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
 
   ocean_pr.read_persistent_subregions(ctx, ocean_check_lr, ocean_check_lp);
 
+#ifdef TESTERIO_CHECK
   IndexLauncher check_launcher(CHECK_TASK_ID, color_domain,
                                TaskArgument(NULL, 0), ArgumentMap());
   
@@ -230,7 +231,7 @@ ocean_check_lr = runtime->create_logical_region(ctx, is, fs);
   
   runtime->execute_index_space(ctx, check_launcher);
 
-
+#endif
   
   runtime->destroy_logical_region(ctx, ocean_lr);
   runtime->destroy_field_space(ctx, fs);
@@ -377,7 +378,6 @@ int main(int argc, char **argv)
     Processor::LOC_PROC, true/*single*/, true/*index*/);
 
   PersistentRegion_init();
-  
   return HighLevelRuntime::start(argc, argv);
 }
 
