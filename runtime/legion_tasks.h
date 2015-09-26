@@ -435,7 +435,8 @@ namespace LegionRuntime {
                            bool mapper_invoked); 
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
-          const std::vector<UserEvent> &unmap_events);
+          const std::vector<UserEvent> &unmap_events,
+          std::set<Event> &preconditions);
       void invalidate_region_tree_contexts(void);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
@@ -504,12 +505,11 @@ namespace LegionRuntime {
       std::vector<bool> region_deleted; 
       // Boolean indicating if any index requirements have been deleted
       std::vector<bool> index_deleted;
-      // Number of virtual mapped regions
-      unsigned num_virtual_mappings;
       Processor executing_processor;
       // Hold the result of the mapping 
       LegionDeque<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::tracked
                                                     physical_instances;
+      std::map<unsigned/*idx*/,CompositeRef> virtual_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
       LegionDeque<InstanceRef,TASK_LOCAL_REGION_ALLOC>::tracked

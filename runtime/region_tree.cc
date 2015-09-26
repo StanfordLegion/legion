@@ -1904,6 +1904,13 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
       bool result = traverser.traverse(child_node);
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     child_node, ctx.get_id(), 
+                                     false/*before*/, false/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
 #ifdef DEBUG_PERF
       end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
@@ -1911,6 +1918,29 @@ namespace LegionRuntime {
         return traverser.get_instance_ref();
       else
         return MappingRef();
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeRef RegionTreeForest::map_virtual_region(RegionTreeContext ctx,
+                                                      RegionRequirement &req,
+                                                      unsigned index,
+                                                      VersionInfo &version_info
+#ifdef DEBUG_HIGH_LEVEL
+                                                      , const char *log_name
+                                                      , UniqueID uid
+#endif
+                                                      )
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *child_node = get_node(req.region);
+      FieldMask user_mask = 
+        child_node->column_source->get_field_mask(req.privilege_fields);
+      return child_node->map_virtual_region(ctx.get_id(), user_mask, 
+                                            version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -1987,6 +2017,24 @@ namespace LegionRuntime {
 #endif
       return result;
     }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::register_virtual_region(RegionTreeContext ctx,
+                                                  CompositeView *composite_view,
+                                                   RegionRequirement &req,
+                                                   VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *child_node = get_node(req.region);
+      FieldMask user_mask = 
+        child_node->column_source->get_field_mask(req.privilege_fields);
+      child_node->register_virtual(ctx.get_id(), composite_view,
+                                   version_info, user_mask);
+    }
     
     //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::initialize_current_context(
@@ -1994,7 +2042,6 @@ namespace LegionRuntime {
                                                 const RegionRequirement &req,
                                                 PhysicalManager *manager,
                                                 Event term_event,
-                                                Processor local_proc,
                                                 unsigned depth,
                             std::map<PhysicalManager*,InstanceView*> &top_views)
     //--------------------------------------------------------------------------
@@ -2067,8 +2114,26 @@ namespace LegionRuntime {
       // region tree here in case we have multiple region requirements
       // that overlap with each other.
       // Now seed the top node
-      return top_node->seed_state(ctx.get_id(), term_event, usage,
-                                  user_mask, new_view, local_proc);
+      top_node->seed_state(ctx.get_id(), term_event, usage,
+                           user_mask, new_view);
+      return InstanceRef(Event::NO_EVENT, new_view);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
+                                                  const RegionRequirement &req,
+                                                  CompositeView *composite_view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *top_node = get_node(req.region);
+      RegionUsage usage(req);
+      FieldMask user_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      top_node->seed_state(ctx.get_id(), Event::NO_EVENT, usage,
+                           user_mask, composite_view);
     }
     
     //--------------------------------------------------------------------------
@@ -2137,7 +2202,8 @@ namespace LegionRuntime {
       if (!result && create_composite)
       {
         close_node->create_composite_instance(info.ctx, target_children,
-                        leave_open, next_children, closing_mask, version_info);
+                        leave_open, next_children, closing_mask, 
+                        version_info, true/*register instance*/);
         // Making a composite always succeeds
         result = true;
         closed = Event::NO_EVENT;
@@ -10291,7 +10357,7 @@ namespace LegionRuntime {
         next.advance_mask = current.advance_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & 0x7;
+        next.bit_mask = current.bit_mask & NodeInfo::BASE_FIELDS_MASK;
         // Needs capture is already set
       }
     }
@@ -10336,7 +10402,7 @@ namespace LegionRuntime {
         next.advance_mask = current.advance_mask & clone_mask;
         next.field_versions = current.field_versions;
         next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & 0x7;
+        next.bit_mask = current.bit_mask & NodeInfo::BASE_FIELDS_MASK;
         // Needs capture is already set
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -13405,9 +13471,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeCloser::create_valid_view(PhysicalState *state,
-                                            CompositeNode *root,
-                                            const FieldMask &closed_mask)
+    CompositeRef CompositeCloser::create_valid_view(PhysicalState *state,
+                                                    CompositeNode *root,
+                                                   const FieldMask &closed_mask,
+                                                    bool register_view)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = root->logical_node;
@@ -13434,8 +13501,14 @@ namespace LegionRuntime {
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
-      node->update_valid_views(state, closed_mask,
-                               true/*dirty*/, composite_view);
+      if (register_view)
+      {
+        node->update_valid_views(state, closed_mask,
+                                 true/*dirty*/, composite_view);
+        // return an empty composite ref since it won't be used
+        return CompositeRef(); 
+      }
+      return CompositeRef(composite_view);
     }
 
     //--------------------------------------------------------------------------
@@ -14321,34 +14394,52 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
-      assert(new_view->is_instance_view());
 #endif
       new_view->add_nested_gc_ref(did);
       new_view->add_nested_valid_ref(did);
-      InstanceView *inst_view = new_view->as_instance_view();
-      if (inst_view->is_reduction_view())
+      if (new_view->is_instance_view())
       {
-        ReductionView *view = inst_view->as_reduction_view();
-        LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-          track_aligned::iterator finder = reduction_views.find(view); 
-        if (finder == reduction_views.end())
-          reduction_views[view] = user_mask;
+        InstanceView *inst_view = new_view->as_instance_view();
+        if (inst_view->is_reduction_view())
+        {
+          ReductionView *view = inst_view->as_reduction_view();
+          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+            track_aligned::iterator finder = reduction_views.find(view); 
+          if (finder == reduction_views.end())
+            reduction_views[view] = user_mask;
+          else
+            finder->second |= user_mask;
+          reduction_mask |= user_mask;
+          inst_view->add_initial_user(term_event, usage, user_mask);
+        }
         else
-          finder->second |= user_mask;
-        reduction_mask |= user_mask;
-        inst_view->add_initial_user(term_event, usage, user_mask);
+        {
+          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::iterator finder = valid_views.find(new_view);
+          if (finder == valid_views.end())
+            valid_views[new_view] = user_mask;
+          else
+            finder->second |= user_mask;
+          if (HAS_WRITE(usage))
+            dirty_mask |= user_mask;
+          inst_view->add_initial_user(term_event, usage, user_mask);
+        }
       }
       else
       {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!term_event.exists());
+#endif
         LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-          track_aligned::iterator finder = valid_views.find(new_view);
+            track_aligned::iterator finder = valid_views.find(new_view);
         if (finder == valid_views.end())
           valid_views[new_view] = user_mask;
         else
           finder->second |= user_mask;
         if (HAS_WRITE(usage))
           dirty_mask |= user_mask;
-        inst_view->add_initial_user(term_event, usage, user_mask);
+        // Don't add a user since this is a deferred view and
+        // we can't access it anyway
       }
       // Update our field information, we know we are the owner
       initial_nodes[local_space] |= user_mask;
@@ -18484,12 +18575,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::create_composite_instance(ContextID ctx_id,
+    CompositeRef RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                             const std::set<ColorPoint> &targets,
                                                bool leave_open, 
                                       const std::set<ColorPoint> &next_children,
                                                const FieldMask &closing_mask,
-                                               VersionInfo &version_info)
+                                               VersionInfo &version_info,
+                                               bool register_view)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -18554,7 +18646,7 @@ namespace LegionRuntime {
       // and then create a composite view
       closer.capture_physical_state(root, this, state, 
                                     capture_mask, dirty_mask);
-      closer.create_valid_view(state, root, dirty_mask);
+      return closer.create_valid_view(state, root, dirty_mask, register_view);
     }
 
     //--------------------------------------------------------------------------
@@ -20962,6 +21054,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    CompositeRef RegionNode::map_virtual_region(ContextID ctx_id,
+                                                const FieldMask &virtual_mask,
+                                                VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      log_run.error("Unfortunately Legion Spy doesn't support virtual "
+                    "mapping analysis yet");
+      assert(false); // TODO: Teach Legion Spy to analyze composite instances
+#endif
+      PhysicalState *state = get_physical_state(ctx_id, version_info);
+      // Figure out which children we need to close
+      std::set<ColorPoint> targets, next;
+      if (!(virtual_mask * state->children.valid_fields))
+      {
+        LegionMap<ColorPoint,FieldMask>::aligned &open_children = 
+          state->children.open_children;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              open_children.begin(); it != open_children.end(); it++)
+        {
+          if (it->second * virtual_mask)
+            continue;
+          targets.insert(it->first);
+        }
+      }
+      return create_composite_instance(ctx_id, targets, false/*leave open*/,
+                                       next, virtual_mask, version_info,
+                                       false/*register*/);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionNode::register_region(const MappableInfo &info,
                                             Event term_event,
                                             const RegionUsage &usage,
@@ -21106,16 +21229,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::seed_state(ContextID ctx, Event term_event,
-                                       const RegionUsage &usage,
-                                       const FieldMask &user_mask,
-                                       InstanceView *new_view,
-                                       Processor local_proc)
+    void RegionNode::register_virtual(ContextID ctx, CompositeView *view,
+                     VersionInfo &version_info, const FieldMask &composite_mask)
     //--------------------------------------------------------------------------
     {
-      get_current_state(ctx).initialize_state(new_view, 
-                                              term_event, usage, user_mask);
-      return InstanceRef(Event::NO_EVENT, new_view);
+      PhysicalState *state = get_physical_state(ctx, version_info);
+      update_valid_views(state, composite_mask, true/*dirty*/, view);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::seed_state(ContextID ctx, Event term_event,
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                LogicalView *new_view)
+    //--------------------------------------------------------------------------
+    {
+      get_current_state(ctx).initialize_state(new_view, term_event, 
+                                              usage, user_mask);
     } 
 
     //--------------------------------------------------------------------------
@@ -28913,6 +29043,8 @@ namespace LegionRuntime {
                       valid_instances, src_instances, deferred_instances);
           if (!src_instances.empty())
           {
+            // Use our version info for the sources
+            const VersionInfo &src_info = version_info->get_version_info();
             LegionMap<Event,FieldMask>::aligned update_preconditions;
             FieldMask update_mask;
             for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator
@@ -28922,8 +29054,7 @@ namespace LegionRuntime {
               assert(!!it->second);
 #endif
               it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                it->second, version_info->get_version_info(), 
-                                update_preconditions);
+                                it->second, src_info, update_preconditions);
               update_mask |= it->second;
             }
             // Also get the set of destination preconditions
@@ -28940,8 +29071,7 @@ namespace LegionRuntime {
               else
                 finder->second |= overlap;
             }
-            // Use our version info for the sources
-            const VersionInfo &src_info = version_info->get_version_info();
+            
             // Now we have our preconditions so we can issue our copy
             LegionMap<Event,FieldMask>::aligned update_postconditions;
             RegionTreeNode::issue_grouped_copies(context, info, dst, 
@@ -31529,6 +31659,90 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < num_locks; idx++)
         derez.deserialize(needed_locks[idx]); 
     } 
+
+    /////////////////////////////////////////////////////////////
+    // CompositeRef 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeRef::CompositeRef(void)
+      : view(NULL), local(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeRef::CompositeRef(CompositeView *v)
+      : view(v), local(true)
+    //--------------------------------------------------------------------------
+    {
+      if (view != NULL)
+        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeRef::CompositeRef(const CompositeRef &rhs)
+      : view(rhs.view), local(rhs.local)
+    //--------------------------------------------------------------------------
+    {
+      if (view != NULL)
+        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeRef::~CompositeRef(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((view != NULL) && view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(view);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeRef& CompositeRef::operator=(const CompositeRef &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((view != NULL) && view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(view);
+      view = rhs.view;
+      local = rhs.local;
+      if (view != NULL)
+        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeRef::pack_reference(Serializer &rez, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (view != NULL)
+      {
+        DistributedID did = view->send_view_base(target);
+        rez.serialize(did);
+      }
+      else
+        rez.serialize<DistributedID>(0);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeRef::unpack_reference(Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view == NULL);
+#endif
+      DistributedID did;
+      derez.deserialize(did);
+      if (did == 0)
+        return;
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      view = dynamic_cast<CompositeView*>(dc);
+      assert(view != NULL);
+#else
+      view = static_cast<CompositeView*>(dc);
+#endif
+      local = false;
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

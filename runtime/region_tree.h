@@ -270,8 +270,11 @@ namespace LegionRuntime {
     public:
       InstanceRef initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, Processor local_proc, unsigned depth,
+                    Event term_event, unsigned depth,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
+      void initialize_current_context(RegionTreeContext ctx,
+                                      const RegionRequirement &req,
+                                      CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
                                       bool logical_users_only);
@@ -328,10 +331,20 @@ namespace LegionRuntime {
                                        , UniqueID uid
 #endif
                                        );
+      // Map a virtual region to a composite instance 
+      CompositeRef map_virtual_region(RegionTreeContext ctx,
+                                      RegionRequirement &req,
+                                      unsigned index,
+                                      VersionInfo &version_info
+#ifdef DEBUG_HIGH_LEVEL
+                                      , const char *log_name
+                                      , UniqueID uid
+#endif
+                                      );
       InstanceRef register_physical_region(RegionTreeContext ctx,
                                            const MappingRef &ref,
                                            RegionRequirement &req,
-                                           unsigned idx,
+                                           unsigned index,
                                            VersionInfo &version_info,
                                            Operation *op,
                                            Processor local_proc,
@@ -341,6 +354,10 @@ namespace LegionRuntime {
                                            , UniqueID uid
 #endif
                                            );
+      void register_virtual_region(RegionTreeContext ctx,
+                                   CompositeView *composite_view,
+                                   RegionRequirement &req,
+                                   VersionInfo &version_info);
       bool perform_close_operation(RegionTreeContext ctx,
                                    RegionRequirement &req,
                                    SingleTask *parent_ctx,
@@ -1465,6 +1482,7 @@ namespace LegionRuntime {
       public:
         // Don't forget to update clone_from methods
         // when changing these bit values
+        static const unsigned BASE_FIELDS_MASK = 0x7;
         inline void set_path_only(void) { bit_mask |= 1; }
         inline void set_needs_final(void) { bit_mask |= 2; }
         inline void set_close_top(void) { bit_mask |= 4; }
@@ -1961,9 +1979,10 @@ namespace LegionRuntime {
     public:
       CompositeNode* get_composite_node(RegionTreeNode *tree_node,
                                         CompositeNode *parent);
-      void create_valid_view(PhysicalState *state,
-                             CompositeNode *root,
-                             const FieldMask &closed_mask);
+      CompositeRef create_valid_view(PhysicalState *state,
+                                     CompositeNode *root,
+                                     const FieldMask &closed_mask,
+                                     bool register_view);
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,
                                   PhysicalState *state,
@@ -2376,12 +2395,13 @@ namespace LegionRuntime {
                                 const std::set<ColorPoint> &next_children,
                                 bool &create_composite, bool &changed);
       // Analogous methods to those above except for closing to a composite view
-      void create_composite_instance(ContextID ctx_id,
+      CompositeRef create_composite_instance(ContextID ctx_id,
                                      const std::set<ColorPoint> &targets,
                                      bool leave_open, 
                                      const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
-                                     VersionInfo &version_info); 
+                                     VersionInfo &version_info,
+                                     bool register_instance); 
       void close_physical_node(CompositeCloser &closer,
                                CompositeNode *node,
                                const FieldMask &closing_mask,
@@ -2742,16 +2762,21 @@ namespace LegionRuntime {
       void remap_region(ContextID ctx, MaterializedView *view, 
                         const FieldMask &user_mask, 
                         VersionInfo &version_info, FieldMask &needed_mask);
+      CompositeRef map_virtual_region(ContextID ctx, 
+                                      const FieldMask &virtual_mask,
+                                      VersionInfo &version_info);
       InstanceRef register_region(const MappableInfo &info, Event term_event,
                                   const RegionUsage &usage, 
                                   const FieldMask &user_mask,
                                   LogicalView *view,
                                   const FieldMask &needed_fields);
-      InstanceRef seed_state(ContextID ctx, Event term_event,
+      void register_virtual(ContextID ctx, CompositeView *view,
+                            VersionInfo &version_info,
+                            const FieldMask &composite_mask);
+      void seed_state(ContextID ctx, Event term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
-                             InstanceView *new_view,
-                             Processor local_proc);
+                             LogicalView *new_view);
       Event close_state(const MappableInfo &info, Event term_event,
                         RegionUsage &usage, const FieldMask &user_mask,
                         const InstanceRef &target);
@@ -4571,6 +4596,26 @@ namespace LegionRuntime {
       InstanceView *view; // only valid on creation node
       PhysicalManager *manager;
       std::vector<Reservation> needed_locks;
+    };
+
+    class CompositeRef {
+    public:
+      CompositeRef(void);
+      CompositeRef(CompositeView *view);
+      CompositeRef(const CompositeRef &rhs);
+      ~CompositeRef(void);
+    public:
+      CompositeRef& operator=(const CompositeRef &rhs);
+    public:
+      inline bool has_ref(void) const { return (view != NULL); }
+      inline bool is_local(void) const { return local; }
+      CompositeView* get_view(void) const { return view; }
+    public:
+      void pack_reference(Serializer &rez, AddressSpaceID target);
+      void unpack_reference(Runtime *rt, Deserializer &derez);
+    private:
+      CompositeView *view;
+      bool local;
     };
 
     /**

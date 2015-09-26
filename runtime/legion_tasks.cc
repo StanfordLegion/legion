@@ -2175,7 +2175,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_task();
-      num_virtual_mappings = 0;
       executing_processor = Processor::NO_PROC;
       profile_task = false;
       current_fence = NULL;
@@ -2207,6 +2206,7 @@ namespace LegionRuntime {
     {
       deactivate_task();
       clear_physical_instances();
+      virtual_instances.clear();
       local_instances.clear();
       physical_regions.clear();
       inline_regions.clear();
@@ -2488,8 +2488,14 @@ namespace LegionRuntime {
       {
         bool virt = virtual_mapped[idx];
         rez.serialize(virt);
+        if (virt)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(virtual_instances.find(idx) != virtual_instances.end());
+#endif
+          virtual_instances[idx].pack_reference(rez, target);
+        }
       }
-      rez.serialize(num_virtual_mappings);
       rez.serialize(executing_processor);
       rez.serialize<size_t>(physical_instances.size());
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
@@ -2512,8 +2518,9 @@ namespace LegionRuntime {
         bool virt;
         derez.deserialize(virt);
         virtual_mapped[idx] = virt;
+        if (virt)
+          virtual_instances[idx].unpack_reference(runtime, derez);
       }
-      derez.deserialize(num_virtual_mappings);
       derez.deserialize(executing_processor);
       size_t num_phy;
       derez.deserialize(num_phy);
@@ -4328,7 +4335,6 @@ namespace LegionRuntime {
     {
       virtual_mapped.clear();
       region_deleted.clear();
-      num_virtual_mappings = 0;
       clear_physical_instances();
     }
 
@@ -4365,7 +4371,6 @@ namespace LegionRuntime {
       // Info for virtual mappings
       virtual_mapped.resize(regions.size(),false);
       locally_mapped.resize(regions.size(),true);
-      num_virtual_mappings = 0;
       // Info for actual mappings
       LegionVector<MappingRef>::aligned mapping_refs(regions.size());
       physical_instances.resize(regions.size());
@@ -4385,9 +4390,21 @@ namespace LegionRuntime {
         if (regions[idx].virtual_map || regions[idx].privilege_fields.empty())
         {
           virtual_mapped[idx] = true;
-          // Only count it as virtual mapped if it really was
-          if (regions[idx].virtual_map)
-            num_virtual_mappings++;
+          // Check to see if we already virtually mapped it
+          if (virtual_instances.find(idx) != virtual_instances.end())
+            continue;
+          // Virtually map this region if necessary
+          if (!regions[idx].privilege_fields.empty())
+            virtual_instances[idx] = runtime->forest->map_virtual_region(
+                                          enclosing_contexts[idx], regions[idx],
+                                          idx, get_version_info(idx)
+#ifdef DEBUG_HIGH_LEVEL
+                                          , get_logging_name()
+                                          , unique_op_id
+#endif
+                                          );
+          else
+            virtual_instances[idx] = CompositeRef();
           continue;
         }
         // Check to see if we have to do a restricted mapping
@@ -4437,7 +4454,6 @@ namespace LegionRuntime {
       {
         // Clean up our mess
         virtual_mapped.clear();
-        num_virtual_mappings = 0;
         // Finally notify the mapper about the failed mapping
         runtime->invoke_mapper_failed_mapping(current_proc, this);
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4534,7 +4550,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
-                      const std::vector<UserEvent> &unmap_events)
+                      const std::vector<UserEvent> &unmap_events,
+                      std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4562,8 +4579,7 @@ namespace LegionRuntime {
             runtime->forest->initialize_current_context(context,
                 clone_requirements[idx], 
                 physical_instances[idx].get_manager(),
-                unmap_events[idx], 
-                executing_processor, depth+1, top_views);
+                unmap_events[idx], depth+1, top_views);
 #ifdef DEBUG_HIGH_LEVEL
           assert(local_instances[idx].has_ref());
 #endif
@@ -4573,6 +4589,37 @@ namespace LegionRuntime {
               has_restrictions(idx, regions[idx].region)) 
             runtime->forest->restrict_user_coherence(context, this, 
                       regions[idx].region, regions[idx].privilege_fields);
+        }
+        else if (virtual_mapped[idx])
+        {
+          std::map<unsigned,CompositeRef>::iterator finder = 
+            virtual_instances.find(idx);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != virtual_instances.end());
+#endif
+          if (finder->second.has_ref())
+          {
+            CompositeView *composite_view = finder->second.get_view();
+            // First get any events necessary to make this view local
+            if (!finder->second.is_local())
+              composite_view->make_local(preconditions);
+            // There is something really scary here so pay attention!
+            // We're about to put a composite view from one context into
+            // a different context. This composite view has captured
+            // certain version numbers internally in its version info,
+            // or possibly nested version infos. In theory this could
+            // cause issues for the physical analysis since it sometimes
+            // uses version numbers to avoid catching dependences when 
+            // version numbers are the same. This would be really bad
+            // if we tried to do this with version numbers from different
+            // contexts. However, we know that it will never happen because
+            // the physical analysis only permits this optimization for
+            // WAR and WAW dependences, but composite instances are only
+            // ever being read from, so all the dependences it will catch
+            // are true dependences, therefore making it safe. :)
+            runtime->forest->initialize_current_context(context,
+                clone_requirements[idx], composite_view);
+          }
         }
       }
     }
@@ -4730,60 +4777,11 @@ namespace LegionRuntime {
 	Event e = wait_barriers[idx].phase_barrier.get_previous_phase();
         wait_on_events.insert(e);
       }
-      // Merge together all the events for the start condition 
-      Event start_condition = Event::merge_events(wait_on_events);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      if (!start_condition.exists())
-      {
-        UserEvent new_start = UserEvent::create_user_event();
-        new_start.trigger();
-        start_condition = new_start;
-      }
-#endif
-      // Record the dependences
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), wait_on_events, start_condition);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependences(wait_on_events, start_condition);
-#endif
-      // Take all the locks in order in the proper way
-      if (!atomic_locks.empty())
-      {
-        for (std::map<Reservation,bool>::const_iterator it = 
-              atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
-          Event next = Event::NO_EVENT;
-          if (it->second)
-            next = it->first.acquire(0, true/*exclusive*/,
-                                         start_condition);
-          else
-            next = it->first.acquire(1, false/*exclusive*/,
-                                         start_condition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-          if (!next.exists())
-          {
-            UserEvent new_next = UserEvent::create_user_event();
-            new_next.trigger();
-            next = new_next;
-          }
-#endif
-#ifdef LEGION_LOGGING
-          LegionLogging::log_event_dependence(
-              Processor::get_executing_processor(), start_condition, next);
-#endif
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(start_condition, next);
-#endif
-          start_condition = next;
-        }
-      }
 
       // STEP 2: Set up the task's context
       index_deleted.resize(indexes.size(),false);
       region_deleted.resize(regions.size(),false);
-      std::vector<UserEvent>         unmap_events(regions.size());
+      std::vector<UserEvent> unmap_events(regions.size());
       {
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
@@ -4860,7 +4858,7 @@ namespace LegionRuntime {
         // If we're a leaf task and we have virtual mappings
         // then it's possible for the application to do inline
         // mappings which require a physical context
-        if (!chosen_variant.leaf || (num_virtual_mappings > 0))
+        if (!chosen_variant.leaf || !virtual_instances.empty())
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
@@ -4895,7 +4893,7 @@ namespace LegionRuntime {
           // start condition so we can add a user off of which
           // all sub-users should be chained.
           initialize_region_tree_contexts(clone_requirements,
-                                          unmap_events);
+                                          unmap_events, wait_on_events);
           if (!chosen_variant.inner)
           {
             for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4923,7 +4921,55 @@ namespace LegionRuntime {
           }
         }
       }
-
+      // Merge together all the events for the start condition 
+      Event start_condition = Event::merge_events(wait_on_events);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+      if (!start_condition.exists())
+      {
+        UserEvent new_start = UserEvent::create_user_event();
+        new_start.trigger();
+        start_condition = new_start;
+      }
+#endif
+      // Record the dependences
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependences(
+          Processor::get_executing_processor(), wait_on_events, start_condition);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(wait_on_events, start_condition);
+#endif
+      // Take all the locks in order in the proper way
+      if (!atomic_locks.empty())
+      {
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
+          Event next = Event::NO_EVENT;
+          if (it->second)
+            next = it->first.acquire(0, true/*exclusive*/,
+                                         start_condition);
+          else
+            next = it->first.acquire(1, false/*exclusive*/,
+                                         start_condition);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+          if (!next.exists())
+          {
+            UserEvent new_next = UserEvent::create_user_event();
+            new_next.trigger();
+            next = new_next;
+          }
+#endif
+#ifdef LEGION_LOGGING
+          LegionLogging::log_event_dependence(
+              Processor::get_executing_processor(), start_condition, next);
+#endif
+#ifdef LEGION_SPY
+          LegionSpy::log_event_dependence(start_condition, next);
+#endif
+          start_condition = next;
+        }
+      }
       // STEP 3: Finally we get to launch the task
       // Get the low-level task ID for the selected variant
       Processor::TaskFuncID low_id = chosen_variant.low_id;
@@ -5022,7 +5068,7 @@ namespace LegionRuntime {
       // avoid the race.
       bool perform_chaining_optimization = false; 
       UserEvent chain_complete_event;
-      if (chosen_variant.leaf && (num_virtual_mappings == 0) &&
+      if (chosen_variant.leaf && virtual_instances.empty() &&
           can_early_complete(chain_complete_event))
         perform_chaining_optimization = true;
       SingleTask *proxy_this = this; // dumb c++
@@ -5161,16 +5207,14 @@ namespace LegionRuntime {
       }
       inline_regions.clear();
 
-      // For each of the regions which were not virtual mapped, 
-      // issue a close operation for them.  If we're a leaf task
-      // and we had no virtual mappings then we are done.
-      if (!is_leaf())
+      if (!is_leaf() || !virtual_instances.empty())
       {
         for (unsigned idx = 0; idx < local_instances.size(); idx++)
         {
-          if (!virtual_mapped[idx] && !region_deleted[idx]
-              && !IS_READ_ONLY(regions[idx]) &&
-              !IS_NO_ACCESS(regions[idx]))
+          if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]) ||
+              region_deleted[idx])
+            continue;
+          if (!virtual_mapped[idx])
           {
 #ifdef DEBUG_HIGH_LEVEL
             assert(local_instances[idx].has_ref());
@@ -5178,6 +5222,16 @@ namespace LegionRuntime {
             PostCloseOp *close_op = runtime->get_available_post_close_op(true);
             close_op->initialize(this, idx, local_instances[idx]);
             runtime->add_to_dependence_queue(executing_processor, close_op);
+          }
+          else
+          {
+            std::map<unsigned,CompositeRef>::const_iterator finder = 
+              virtual_instances.find(idx);
+            if ((finder != virtual_instances.end()) && finder->second.has_ref())
+            {
+              // Make a virtual close op to close up the instance
+
+            }
           }
         }
       }
@@ -6685,7 +6739,7 @@ namespace LegionRuntime {
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
       // Invalidate any state that we had if we didn't already
-      if (context.exists() && (!is_leaf() || (num_virtual_mappings > 0)))
+      if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
         invalidate_region_tree_contexts();
       // Mark that this operation is complete
       complete_operation();
@@ -6762,6 +6816,25 @@ namespace LegionRuntime {
     {
       if (!is_remote())
       {
+        // Check to see if we have any virtual mappings to apply
+        if (!virtual_instances.empty())
+        {
+          for (std::map<unsigned,CompositeRef>::iterator it = 
+                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          {
+            if (it->second.has_ref())
+            {
+              CompositeView *composite_view = it->second.get_view();
+              // Yes this is very dangerous, see the note about why it is 
+              // safe in initialize_region_tree_contexts
+              runtime->forest->register_virtual_region(
+                                               enclosing_contexts[it->first],
+                                               composite_view, 
+                                               regions[it->first],
+                                               version_infos[it->first]);
+            }
+          }
+        }
         complete_mapping(mapped_precondition);
         return;
       }
@@ -6783,6 +6856,22 @@ namespace LegionRuntime {
       // Only need to send back the pointer to the task instance
       rez.serialize(orig_task);
       rez.serialize(applied_condition);
+      if (!is_locally_mapped())
+      {
+        rez.serialize<size_t>(virtual_instances.size());
+        if (!virtual_instances.empty())
+        {
+          AddressSpaceID target = runtime->find_address_space(orig_proc);
+          for (std::map<unsigned,CompositeRef>::iterator it = 
+                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          {
+            rez.serialize(it->first);
+            it->second.pack_reference(rez, target);
+          }
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
       complete_mapping(applied_condition);
@@ -6956,6 +7045,29 @@ namespace LegionRuntime {
         derez.deserialize(applied);
         if (applied.exists())
           map_applied_conditions.insert(applied);
+        size_t num_virtual_instances;
+        derez.deserialize(num_virtual_instances);
+        for (unsigned idx = 0; idx < num_virtual_instances; idx++)
+        {
+          unsigned index;
+          derez.deserialize(index);
+          CompositeRef &virtual_ref = virtual_instances[index];
+          virtual_ref.unpack_reference(runtime, derez);
+          if (virtual_ref.has_ref())
+          {
+            // Do what we need to in order to make this view local
+            CompositeView *composite_view = virtual_ref.get_view();
+            // We need to make this local before our mapping is complete
+            composite_view->make_local(map_applied_conditions);
+            // Now we need to register this instance in our parent
+            // task's context as the result of our mapping
+            // Yes this is very dangerous, see the note about why it is 
+            // safe in initialize_region_tree_contexts
+            runtime->forest->register_virtual_region(enclosing_contexts[index],
+                                                composite_view, regions[index],
+                                                version_infos[index]);
+          }
+        }
         if (!map_applied_conditions.empty())
           complete_mapping(Event::merge_events(map_applied_conditions));
         else
@@ -7349,12 +7461,12 @@ namespace LegionRuntime {
       // this if we're a leaf task with no virtual mappings
       // because we would have performed the leaf task
       // early complete chaining operation.
-      if (!is_leaf() || (num_virtual_mappings > 0))
+      if (!is_leaf() || !virtual_instances.empty())
         point_termination.trigger();
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      if (context.exists() && (!is_leaf() || (num_virtual_mappings > 0)))
+      if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
         invalidate_region_tree_contexts();
       // Mark that this operation is now complete
       complete_operation();

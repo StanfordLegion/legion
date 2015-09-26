@@ -432,6 +432,7 @@ namespace LegionRuntime {
     class FillView;
     class MappingRef;
     class InstanceRef;
+    class CompositeRef;
     class InnerTaskView;
     class ReductionManager;
     class ListReductionManager;

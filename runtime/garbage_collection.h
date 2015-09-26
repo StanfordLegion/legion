@@ -33,6 +33,7 @@ namespace LegionRuntime {
       PENDING_COLLECTIVE_REF,
       MEMORY_MANAGER_REF,
       COMPOSITE_NODE_REF,
+      COMPOSITE_HANDLE_REF,
       PERSISTENCE_REF,
       INITIAL_CREATION_REF,
       LAST_SOURCE_REF,
@@ -55,6 +56,7 @@ namespace LegionRuntime {
       "Pending Collective Reference",               \
       "Memory Manager Reference"                    \
       "Composite Node Reference",                   \
+      "Composite Handle Reference",                 \
       "Persistent Reference",                       \
       "Initial Creation Reference",                 \
     }
