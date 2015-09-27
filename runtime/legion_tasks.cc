@@ -2185,6 +2185,7 @@ namespace LegionRuntime {
       deferred_complete = Event::NO_EVENT; 
       pending_done = Event::NO_EVENT;
       last_registration = Event::NO_EVENT;
+      dependence_precondition = Event::NO_EVENT;
       current_trace = NULL;
       task_executed = false;
       outstanding_children_count = 0;
@@ -2627,39 +2628,44 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_to_dependence_queue(Operation *op, 
-                                             ProcessorManager *manager)
+    void SingleTask::add_to_dependence_queue(Operation *op, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      // Since this call always comes from the application, we have to
-      // defer it using a meta-task
-      AddToDepQueueArgs args;
-      args.hlr_id = HLR_ADD_TO_DEP_QUEUE_TASK_ID;
-      args.manager = manager;
-      args.op = op;
-      last_registration = runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                           HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, last_registration);
-    }
-
-    //--------------------------------------------------------------------------
-    ContextID SingleTask::register_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
+      if (!has_lock)
+      {
+        Event lock_acquire = 
+          op_lock.acquire(0, true/*exclusive*/, last_registration); 
+        if (!lock_acquire.has_triggered())
+        {
+          AddToDepQueueArgs args;
+          args.hlr_id = HLR_ADD_TO_DEP_QUEUE_TASK_ID;
+          args.proxy_this = this;
+          args.op = op;
+          last_registration = runtime->issue_runtime_meta_task(&args, 
+             sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, lock_acquire);
+          return;
+        }
+      }
+      // We have the lock
       if (op->is_tracking_parent())
       {
-        AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
-#endif
-        // Put this in the list of child operations that need to map
+#endif       
         executing_children.insert(op);
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(context.exists());
-#endif
-      return context.get_id();
+      // Issue the next dependence analysis task
+      DeferredDependenceArgs args;
+      args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
+      args.op = op;
+      Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                      HLR_TRIGGER_DEPENDENCE_ID, op,
+                                      dependence_precondition);
+      dependence_precondition = next;
+      // Now we can release the lock
+      op_lock.release();
     }
 
     //--------------------------------------------------------------------------
@@ -8153,18 +8159,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::add_to_dependence_queue(Operation *op,
-                                             ProcessorManager *manager)
+    void InlineTask::add_to_dependence_queue(Operation *op, bool has_lock)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, manager);
-    }
-
-    //--------------------------------------------------------------------------
-    ContextID InlineTask::register_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_child_operation(op);
+      enclosing->add_to_dependence_queue(op, has_lock);
     }
 
     //--------------------------------------------------------------------------

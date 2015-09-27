@@ -422,12 +422,6 @@ namespace LegionRuntime {
      */
     class ProcessorManager {
     public:
-      struct DeferredTriggerArgs {
-      public:
-        HLRTaskID hlr_id;
-        ProcessorManager *manager;
-        Operation *op;
-      };
       struct TriggerOpArgs {
       public:
         HLRTaskID hlr_id;
@@ -547,7 +541,6 @@ namespace LegionRuntime {
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
-      void add_to_dependence_queue(Operation *op);
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
@@ -574,10 +567,6 @@ namespace LegionRuntime {
       const bool stealing_disabled;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
-    protected:
-      // Dependence analysis state
-      Reservation dependence_lock;
-      std::vector<Event> dependence_preconditions;
     protected:
       // Local queue state
       Reservation local_queue_lock;

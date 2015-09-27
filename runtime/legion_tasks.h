@@ -259,6 +259,11 @@ namespace LegionRuntime {
         size_t     field_size;
         Event      reclaim_event;
       };
+      struct DeferredDependenceArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *op;
+      };
       struct PostEndArgs {
       public:
         HLRTaskID hlr_id;
@@ -282,7 +287,7 @@ namespace LegionRuntime {
       };
       struct AddToDepQueueArgs {
         HLRTaskID hlr_id;
-        ProcessorManager *manager;
+        SingleTask *proxy_this;
         Operation *op;
       };
       struct DeferredPostMappedArgs {
@@ -328,8 +333,7 @@ namespace LegionRuntime {
       // these calls to notify the parent context.
       virtual void register_new_child_operation(Operation *op);
       virtual void add_to_dependence_queue(Operation *op, 
-                                           ProcessorManager *manager);
-      virtual ContextID register_child_operation(Operation *op);
+                                           bool has_lock);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -542,6 +546,7 @@ namespace LegionRuntime {
       Event deferred_complete;
       Event pending_done;
       Event last_registration;
+      Event dependence_precondition;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -988,8 +993,7 @@ namespace LegionRuntime {
     public:
       virtual void register_new_child_operation(Operation *op);
       virtual void add_to_dependence_queue(Operation *op,
-                                           ProcessorManager *manager);
-      virtual ContextID register_child_operation(Operation *op);
+                                           bool has_lock);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 

@@ -1694,14 +1694,12 @@ namespace LegionRuntime {
         ready_queues[idx].clear();
         outstanding_steal_requests[idx] = std::set<Processor>();
       }
-      this->dependence_lock = Reservation::create_reservation();
       this->local_queue_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
       this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
-      dependence_preconditions.resize(DEFAULT_CONTEXTS, Event::NO_EVENT);
       local_scheduler_preconditions.resize(superscalar_width, Event::NO_EVENT);
     }
 
@@ -1739,8 +1737,6 @@ namespace LegionRuntime {
       mapper_objects.clear();
       mapper_locks.clear();
       ready_queues.clear();
-      dependence_lock.destroy_reservation();
-      dependence_lock = Reservation::NO_RESERVATION;
       local_queue_lock.destroy_reservation();
       local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
@@ -2398,10 +2394,6 @@ namespace LegionRuntime {
     void ProcessorManager::update_max_context_count(unsigned max_contexts)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock d_lock(dependence_lock);
-        dependence_preconditions.resize(max_contexts, Event::NO_EVENT);
-      }
       AutoLock q_lock(queue_lock);
       context_states.resize(max_contexts);
     }
@@ -2587,26 +2579,6 @@ namespace LegionRuntime {
         task_scheduler_enabled = true;
         launch_task_scheduler();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_dependence_queue(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(op != NULL);
-#endif
-      DeferredTriggerArgs args;
-      args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
-      args.manager = this;
-      args.op = op;
-      SingleTask *parent = op->get_parent();
-      ContextID ctx_id = parent->register_child_operation(op);
-      AutoLock d_lock(dependence_lock);
-      Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                       HLR_TRIGGER_DEPENDENCE_ID, op,
-                                       dependence_preconditions[ctx_id]);
-      dependence_preconditions[ctx_id] = next;
     }
 
     //--------------------------------------------------------------------------
@@ -12280,7 +12252,7 @@ namespace LegionRuntime {
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
       SingleTask *parent = op->get_parent();
-      parent->add_to_dependence_queue(op, proc_managers[p]);
+      parent->add_to_dependence_queue(op, false/*has lock*/);
     }
     
     //--------------------------------------------------------------------------
@@ -15867,8 +15839,8 @@ namespace LegionRuntime {
           }
         case HLR_TRIGGER_DEPENDENCE_ID:
           {
-            const ProcessorManager::DeferredTriggerArgs *deferred_trigger_args =
-              (const ProcessorManager::DeferredTriggerArgs*)args;
+            const SingleTask::DeferredDependenceArgs *deferred_trigger_args =
+              (const SingleTask::DeferredDependenceArgs*)args;
             deferred_trigger_args->op->trigger_dependence_analysis();
             break;
           }
@@ -16080,7 +16052,8 @@ namespace LegionRuntime {
           {
             SingleTask::AddToDepQueueArgs *dargs = 
               (SingleTask::AddToDepQueueArgs*)args;
-            dargs->manager->add_to_dependence_queue(dargs->op);
+            dargs->proxy_this->add_to_dependence_queue(dargs->op,
+                                                       true/*has lock*/);
             break;
           }
         case HLR_WINDOW_WAIT_TASK_ID:
