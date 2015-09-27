@@ -205,7 +205,44 @@ namespace Realm {
       LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::Translation<1> >();
 
       DetailedTimer::init_timers();
-      
+
+      // gasnet_init() must be called before parsing command line arguments, as some
+      //  spawners (e.g. the ssh spawner for gasnetrun_ibv) start with bogus args and
+      //  fetch the real ones from somewhere during gasnet_init()
+
+      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+      // SJT: WAR for issue on Titan with duplicate cookies on Gemini
+      //  communication domains
+      char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
+      if(orig_pmi_gni_cookie) {
+        char *new_pmi_gni_cookie = (char *)malloc(256);
+        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
+        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
+        putenv(new_pmi_gni_cookie);  // libc now owns the memory
+      }
+      // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
+      if(!getenv("GASNET_IB_SPAWNER"))
+	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+#ifdef DEBUG_REALM_STARTUP
+      { // we don't have rank IDs yet, so everybody gets to spew
+        char s[80];
+        gethostname(s, 79);
+        strcat(s, " enter gasnet_init");
+        TimeStamp ts(s, false);
+        fflush(stdout);
+      }
+#endif
+      CHECK_GASNET( gasnet_init(argc, argv) );
+#ifdef DEBUG_REALM_STARTUP
+      { // once we're convinced there isn't skew here, reduce this to rank 0
+        char s[80];
+        gethostname(s, 79);
+        strcat(s, " exit gasnet_init");
+        TimeStamp ts(s, false);
+        fflush(stdout);
+      }
+#endif
+
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
@@ -326,39 +363,6 @@ namespace Realm {
           assert(0);
 	}
       }
-
-      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
-      // SJT: WAR for issue on Titan with duplicate cookies on Gemini
-      //  communication domains
-      char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
-      if(orig_pmi_gni_cookie) {
-        char *new_pmi_gni_cookie = (char *)malloc(256);
-        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
-        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
-        putenv(new_pmi_gni_cookie);  // libc now owns the memory
-      }
-      // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      if(!getenv("GASNET_IB_SPAWNER"))
-	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
-#ifdef DEBUG_REALM_STARTUP
-      { // we don't have rank IDs yet, so everybody gets to spew
-        char s[80];
-        gethostname(s, 79);
-        strcat(s, " enter gasnet_init");
-        TimeStamp ts(s, false);
-        fflush(stdout);
-      }
-#endif
-      CHECK_GASNET( gasnet_init(argc, argv) );
-#ifdef DEBUG_REALM_STARTUP
-      { // once we're convinced there isn't skew here, reduce this to rank 0
-        char s[80];
-        gethostname(s, 79);
-        strcat(s, " exit gasnet_init");
-        TimeStamp ts(s, false);
-        fflush(stdout);
-      }
-#endif
 
       // Check that we have enough resources for the number of nodes we are using
       if (gasnet_nodes() > MAX_NUM_NODES)
@@ -656,11 +660,10 @@ namespace Realm {
             num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
           assert(false);
         }
-        GPUWorker *gpu_worker = 0;
-        if (gpu_worker_thread) {
-          gpu_worker = GPUWorker::start_gpu_worker_thread(core_reservations,
-							  stack_size_in_mb << 20);
-        }
+
+	// TODO: let the CUDA module actually parse config variables
+	assert(gpu_worker_thread == true);
+
 	for(unsigned i = 0; i < num_local_gpus; i++) {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
@@ -673,7 +676,7 @@ namespace Realm {
                                               zc_mem_size_in_mb << 20,
                                               fb_mem_size_in_mb << 20,
                                               stack_size_in_mb << 20,
-                                              gpu_worker, num_gpu_streams);
+                                              num_gpu_streams);
 	  n->processors.push_back(gp);
 	  local_gpus.push_back(gp);
 
@@ -1184,9 +1187,6 @@ namespace Realm {
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       LegionRuntime::LowLevel::stop_dma_worker_threads();
-#ifdef USE_CUDA
-      GPUWorker::stop_gpu_worker_thread();
-#endif
       stop_activemsg_threads();
 
       // if we are running as a background thread, just terminate this thread

@@ -166,6 +166,9 @@ def install():
         '--debug', dest = 'debug', action = 'store_true', required = False,
         help = 'Build Legion with debugging enabled.')
     parser.add_argument(
+        '--shared', dest = 'shared_llr', action = 'store_true', required = False,
+        help = 'Build Legion with the shared low-level runtime.')
+    parser.add_argument(
         '--general', dest = 'general_llr', action = 'store_true', required = False,
         help = 'Build Legion with the general low-level runtime.')
     parser.add_argument(
@@ -179,10 +182,15 @@ def install():
         help = 'Number threads used to compile.')
     args = parser.parse_args()
 
-    if args.gasnet and not args.general_llr:
+    if args.shared_llr and args.general_llr:
+        raise Exception('Shared LLR is mutually exclusive with general LLR.')
+
+    general = not args.shared_llr
+
+    if args.gasnet and not general:
         raise Exception('General LLR is required for GASNet.')
 
-    if args.cuda and not args.general_llr:
+    if args.cuda and not general:
         raise Exception('General LLR is required for CUDA.')
 
     thread_count = args.thread_count
@@ -200,7 +208,7 @@ def install():
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, terra_dir, args.debug,
-                     args.general_llr, args.cuda, args.gasnet,
+                     general, args.cuda, args.gasnet,
                      thread_count)
 
 if __name__ == '__main__':
