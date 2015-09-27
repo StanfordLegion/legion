@@ -1456,6 +1456,14 @@ namespace LegionRuntime {
       free(log_error_buffer);
     }
 
+    void GPUProcessor::find_function_handle(const void *func, CUfunction *handle)
+    {
+      std::map<const void*,CUfunction>::const_iterator finder = 
+        device_functions.find(func);
+      assert(finder != device_functions.end());
+      *handle = finder->second;
+    }
+
     /*static*/ char GPUProcessor::init_module(void **fat_bin)
     {
       GPUProcessor *local = find_local_gpu();
@@ -1693,6 +1701,97 @@ namespace LegionRuntime {
       return cudaSuccess;
     }
 
+    /*static*/ const char* GPUProcessor::get_error_string(cudaError_t error)
+    {
+      const char *result;
+      CHECK_CU( cuGetErrorString((CUresult)error, &result) );
+      return result;
+    }
+
+    /*static*/ cudaError_t GPUProcessor::get_device(int *device)
+    {
+      GPUProcessor *local = find_local_gpu();
+      CHECK_CU( cuDeviceGet(device, local->gpu_index) );
+      return cudaSuccess;
+    }
+
+    /*static*/ cudaError_t GPUProcessor::get_device_properties(cudaDeviceProp *prop, int device)
+    {
+      CHECK_CU( cuDeviceGetName(prop->name, 255, device) );
+      CHECK_CU( cuDeviceTotalMem(&(prop->totalGlobalMem), device) );
+#define GET_DEVICE_PROP(member, name)   \
+      {                                 \
+        int tmp;                        \
+        CHECK_CU( cuDeviceGetAttribute(&tmp, CU_DEVICE_ATTRIBUTE_##name, device) ); \
+        prop->member = tmp;             \
+      }
+      // SCREW TEXTURES AND SURFACES FOR NOW!
+      GET_DEVICE_PROP(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK);
+      GET_DEVICE_PROP(regsPerBlock, MAX_REGISTERS_PER_BLOCK);
+      GET_DEVICE_PROP(warpSize, WARP_SIZE);
+      GET_DEVICE_PROP(memPitch, MAX_PITCH);
+      GET_DEVICE_PROP(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK);
+      GET_DEVICE_PROP(maxThreadsDim[0], MAX_BLOCK_DIM_X);
+      GET_DEVICE_PROP(maxThreadsDim[1], MAX_BLOCK_DIM_Y);
+      GET_DEVICE_PROP(maxThreadsDim[2], MAX_BLOCK_DIM_Z);
+      GET_DEVICE_PROP(maxGridSize[0], MAX_GRID_DIM_X);
+      GET_DEVICE_PROP(maxGridSize[1], MAX_GRID_DIM_Y);
+      GET_DEVICE_PROP(maxGridSize[2], MAX_GRID_DIM_Z);
+      GET_DEVICE_PROP(clockRate, CLOCK_RATE);
+      GET_DEVICE_PROP(totalConstMem, TOTAL_CONSTANT_MEMORY);
+      GET_DEVICE_PROP(major, COMPUTE_CAPABILITY_MAJOR);
+      GET_DEVICE_PROP(minor, COMPUTE_CAPABILITY_MINOR);
+      GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
+      GET_DEVICE_PROP(multiProcessorCount, MULTIPROCESSOR_COUNT);
+      GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
+      GET_DEVICE_PROP(integrated, INTEGRATED);
+      GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
+      GET_DEVICE_PROP(computeMode, COMPUTE_MODE);
+      GET_DEVICE_PROP(concurrentKernels, CONCURRENT_KERNELS);
+      GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
+      GET_DEVICE_PROP(pciBusID, PCI_BUS_ID);
+      GET_DEVICE_PROP(pciDeviceID, PCI_DEVICE_ID);
+      GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
+      GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
+      GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
+      GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
+      GET_DEVICE_PROP(memoryClockRate, MEMORY_CLOCK_RATE);
+      GET_DEVICE_PROP(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH);
+      GET_DEVICE_PROP(l2CacheSize, L2_CACHE_SIZE);
+      GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR);
+      GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
+      GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
+      GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
+      GET_DEVICE_PROP(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
+      GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
+      GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
+      GET_DEVICE_PROP(isMultiGpuBoard, MULTI_GPU_BOARD);
+      GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
+#undef GET_DEVICE_PROP
+      return cudaSuccess;
+    }
+
+    /*static*/ cudaError_t GPUProcessor::get_func_attributes(cudaFuncAttributes *attr,
+                                                             const void *func)
+    {
+      CUfunction handle;
+      GPUProcessor *local = find_local_gpu();
+      local->find_function_handle(func, &handle);
+      CHECK_CU( cuFuncGetAttribute(&(attr->binaryVersion), CU_FUNC_ATTRIBUTE_BINARY_VERSION, handle) );
+      CHECK_CU( cuFuncGetAttribute(&(attr->cacheModeCA), CU_FUNC_ATTRIBUTE_CACHE_MODE_CA, handle) );
+      int tmp;
+      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, handle) );
+      attr->constSizeBytes = tmp;
+      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, handle) );
+      attr->localSizeBytes = tmp;
+      CHECK_CU( cuFuncGetAttribute(&(attr->maxThreadsPerBlock), CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, handle) );
+      CHECK_CU( cuFuncGetAttribute(&(attr->numRegs), CU_FUNC_ATTRIBUTE_NUM_REGS, handle) );
+      CHECK_CU( cuFuncGetAttribute(&(attr->ptxVersion), CU_FUNC_ATTRIBUTE_PTX_VERSION, handle) );
+      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, handle) );
+      attr->sharedSizeBytes = tmp;
+      return cudaSuccess;
+    }
+
   }; // namespace LowLevel
 }; // namespace LegionRuntime
 
@@ -1855,5 +1954,25 @@ extern cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const void *src,
 extern cudaError_t cudaDeviceSetSharedMemConfig(cudaSharedMemConfig config)
 {
   return LegionRuntime::LowLevel::GPUProcessor::set_shared_memory_config(config);
+}
+
+extern const char* cudaGetErrorString(cudaError_t error)
+{
+  return LegionRuntime::LowLevel::GPUProcessor::get_error_string(error);
+}
+
+extern cudaError_t cudaGetDevice(int *device)
+{
+  return LegionRuntime::LowLevel::GPUProcessor::get_device(device);
+}
+
+extern cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int device)
+{
+  return LegionRuntime::LowLevel::GPUProcessor::get_device_properties(prop, device);
+}
+
+extern cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr, const void *func)
+{
+  return LegionRuntime::LowLevel::GPUProcessor::get_func_attributes(attr, func);
 }
 
