@@ -3949,6 +3949,7 @@ namespace LegionRuntime {
         deletion_op_lock(Reservation::create_reservation()), 
         inter_close_op_lock(Reservation::create_reservation()), 
         post_close_op_lock(Reservation::create_reservation()),
+        virtual_close_op_lock(Reservation::create_reservation()),
         dynamic_collective_op_lock(Reservation::create_reservation()),
         future_pred_op_lock(Reservation::create_reservation()), 
         not_pred_op_lock(Reservation::create_reservation()),
@@ -4302,6 +4303,15 @@ namespace LegionRuntime {
       available_post_close_ops.clear();
       post_close_op_lock.destroy_reservation();
       post_close_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<VirtualCloseOp*>::const_iterator it = 
+            available_virtual_close_ops.begin(); it !=
+            available_virtual_close_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_virtual_close_ops.clear();
+      virtual_close_op_lock.destroy_reservation();
+      virtual_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
@@ -13348,6 +13358,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    VirtualCloseOp* Runtime::get_available_virtual_close_op(bool need_cont,
+                                                            bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<VirtualCloseOp*,
+                     &Runtime::get_available_virtual_close_op> 
+                       continuation(this, virtual_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(virtual_close_op_lock,
+                           available_virtual_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(
                                                   bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
@@ -13754,6 +13783,14 @@ namespace LegionRuntime {
     {
       AutoLock p_lock(post_close_op_lock);
       available_post_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_virtual_close_op(VirtualCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(virtual_close_op_lock);
+      available_virtual_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------

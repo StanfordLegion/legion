@@ -4599,6 +4599,129 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // Virtual Close Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VirtualCloseOp::VirtualCloseOp(Runtime *rt)
+      : CloseOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualCloseOp::VirtualCloseOp(const VirtualCloseOp &rhs) 
+      : CloseOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualCloseOp::~VirtualCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualCloseOp& VirtualCloseOp::operator=(const VirtualCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      initialize_close(ctx, ctx->regions[index], true/*track*/);
+      // If it was write-discard from the task's perspective, make it
+      // read-write within the task's context
+      if (requirement.privilege == WRITE_DISCARD)
+        requirement.privilege = READ_WRITE;
+      parent_idx = index;
+      localize_region_requirement(requirement);
+      perform_logging();
+    }
+    
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_close();
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_close();
+      runtime->free_virtual_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* VirtualCloseOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return op_names[VIRTUAL_CLOSE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind VirtualCloseOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return VIRTUAL_CLOSE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   restrict_info,
+                                                   privilege_path);
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualCloseOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_context(parent_idx);
+      CompositeRef virtual_ref = 
+        runtime->forest->map_virtual_region(physical_ctx, requirement, 
+                                            0/*idx*/, version_info
+#ifdef DEBUG_HIGH_LEVEL
+                                            , get_logging_name()
+                                            , unique_op_id
+#endif
+                                            );
+      // Pass the reference back to the parent task
+      parent_ctx->return_virtual_instance(parent_idx, virtual_ref);
+      // Then we can mark that we are mapped and executed
+      complete_mapping();
+      complete_execution();
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned VirtualCloseOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_idx;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Acquire Operation 
     /////////////////////////////////////////////////////////////
 

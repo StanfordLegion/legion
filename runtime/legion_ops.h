@@ -44,6 +44,7 @@ namespace LegionRuntime {
         DELETION_OP_KIND,
         INTER_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
+        VIRTUAL_CLOSE_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -71,6 +72,7 @@ namespace LegionRuntime {
         "Deletion",                 \
         "Inter Close",              \
         "Post Close",               \
+        "Virtual Close",            \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -903,6 +905,35 @@ namespace LegionRuntime {
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       InstanceRef reference;
+      unsigned parent_idx;
+    };
+
+    /**
+     * \class VirtualCloseOp
+     * Virtual close operations are issued by the runtime for
+     * closing up virtual mappings to a composite instance
+     * that can then be propagated back to the enclosing
+     * parent task.
+     */
+    class VirtualCloseOp : public CloseOp {
+    public:
+      VirtualCloseOp(Runtime *runtime);
+      VirtualCloseOp(const VirtualCloseOp &rhs);
+      virtual ~VirtualCloseOp(void);
+    public:
+      VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, unsigned index);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
       unsigned parent_idx;
     };
 

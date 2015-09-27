@@ -454,6 +454,7 @@ namespace LegionRuntime {
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
       PhysicalManager* get_instance(unsigned idx);
+      void return_virtual_instance(unsigned index, const CompositeRef &ref);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -1097,6 +1098,7 @@ namespace LegionRuntime {
       void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
+      void return_virtual_instance(unsigned index, const CompositeRef &ref);
       void return_slice_mapped(unsigned points, long long denom,
                                Event applied_condition);
       void return_slice_complete(unsigned points);
@@ -1191,6 +1193,7 @@ namespace LegionRuntime {
       virtual void trigger_task_commit(void);
     public:
       void return_privileges(PointTask *point);
+      void return_virtual_instance(unsigned index, const CompositeRef &ref);
       void record_child_mapped(void);
       void record_child_complete(void);
       void record_child_committed(void);
@@ -1227,6 +1230,8 @@ namespace LegionRuntime {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
+      // Temporary storage for virtual instance references
+      std::deque<std::pair<unsigned,CompositeRef> > temporary_virtual_refs;
     };
 
     /**

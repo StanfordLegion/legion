@@ -359,6 +359,7 @@ namespace LegionRuntime {
     class CloseOp;
     class InterCloseOp;
     class PostCloseOp;
+    class VirtualCloseOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -690,6 +691,7 @@ namespace LegionRuntime {
     friend class CloseOp;                         \
     friend class InterCloseOp;                    \
     friend class PostCloseOp;                     \
+    friend class VirtualCloseOp;                  \
     friend class AcquireOp;                       \
     friend class ReleaseOp;                       \
     friend class NotPredOp;                       \

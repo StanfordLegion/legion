@@ -292,6 +292,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_ALLOCATOR_REQUEST = 129,
   ERROR_ILLEGAL_DETACH_OPERATION = 130,
   ERROR_NO_PROCESSORS = 131,
+  ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING = 132,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

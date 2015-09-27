@@ -2478,6 +2478,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::return_virtual_instance(unsigned index, 
+                                             const CompositeRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      std::map<unsigned,CompositeRef>::iterator finder = 
+        virtual_instances.find(index);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != virtual_instances.end());
+#endif
+      finder->second = ref;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -4393,6 +4407,18 @@ namespace LegionRuntime {
           // Check to see if we already virtually mapped it
           if (virtual_instances.find(idx) != virtual_instances.end())
             continue;
+          // At the moment we don't allow virtual mappings for pure-reductions
+          if (IS_REDUCE(regions[idx]) && regions[idx].virtual_map)
+          {
+            log_run.error("Illegal virtual mapping requested on region "
+                          "requirement %d of task %s (UID %lld) which "
+                          "has only reduction privileges", idx, 
+                          variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
+          }
           // Virtually map this region if necessary
           if (!regions[idx].privilege_fields.empty())
             virtual_instances[idx] = runtime->forest->map_virtual_region(
@@ -5225,12 +5251,20 @@ namespace LegionRuntime {
           }
           else
           {
-            std::map<unsigned,CompositeRef>::const_iterator finder = 
+            std::map<unsigned,CompositeRef>::iterator finder = 
               virtual_instances.find(idx);
-            if ((finder != virtual_instances.end()) && finder->second.has_ref())
+            if (finder != virtual_instances.end())
             {
-              // Make a virtual close op to close up the instance
-
+              if (finder->second.has_ref())
+              {
+                // Make a virtual close op to close up the instance
+                VirtualCloseOp *close_op = 
+                  runtime->get_available_virtual_close_op(true);
+                close_op->initialize(this, finder->first);
+                runtime->add_to_dependence_queue(executing_processor, close_op);
+              }
+              else // otherwise we can erase it
+                virtual_instances.erase(finder);
             }
           }
         }
@@ -7564,6 +7598,15 @@ namespace LegionRuntime {
                                          this, mapped_precondition);
         return;
       }
+      if (!virtual_instances.empty())
+      {
+        for (std::map<unsigned,CompositeRef>::iterator it = 
+              virtual_instances.begin(); it != virtual_instances.end(); it++)
+        {
+          if (it->second.has_ref())
+            slice_owner->return_virtual_instance(it->first, it->second);
+        }
+      }
       slice_owner->record_child_mapped();
       // Now we can complete this point task
       complete_mapping();
@@ -9439,6 +9482,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::return_virtual_instance(unsigned index, 
+                                            const CompositeRef &ref)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.has_ref());
+#endif
+      CompositeView *composite_view = ref.get_view();
+      if (!ref.is_local())
+        composite_view->make_local(map_applied_conditions);
+      // Have to control access to the version info data structure
+      AutoLock o_lock(op_lock);
+      runtime->forest->register_virtual_region(enclosing_contexts[index],
+                                          composite_view, regions[index],
+                                          version_infos[index]);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom,
                                         Event applied_condition)
     //--------------------------------------------------------------------------
@@ -9561,6 +9622,16 @@ namespace LegionRuntime {
             derez.deserialize(handles[pidx]);
         }
         // otherwise it was locally mapped so we are already done
+      }
+      size_t num_virtual;
+      derez.deserialize(num_virtual);
+      for (unsigned idx = 0; idx < num_virtual; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        CompositeRef virtual_ref;
+        virtual_ref.unpack_reference(runtime, derez);
+        return_virtual_instance(index, virtual_ref);
       }
       return_slice_mapped(points, denom, applied_condition);
     }
@@ -9725,6 +9796,7 @@ namespace LegionRuntime {
         legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
       }
       temporary_futures.clear();
+      temporary_virtual_refs.clear();
       runtime->free_slice_task(this);
     }
 
@@ -10346,6 +10418,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::return_virtual_instance(unsigned idx, 
+                                            const CompositeRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock); 
+        temporary_virtual_refs.push_back(
+            std::pair<unsigned,CompositeRef>(idx,ref));
+      }
+      else
+        index_owner->return_virtual_instance(idx, ref);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::record_child_mapped(void)
     //--------------------------------------------------------------------------
     {
@@ -10522,6 +10609,19 @@ namespace LegionRuntime {
           continue;
         for (unsigned pidx = 0; pidx < points.size(); pidx++)
           rez.serialize(points[pidx]->regions[idx].region);
+      }
+      // Pack any virtual instances
+      rez.serialize<size_t>(temporary_virtual_refs.size());
+      if (!temporary_virtual_refs.empty())
+      {
+        AddressSpaceID target = runtime->find_address_space(orig_proc);
+        for (std::deque<std::pair<unsigned,CompositeRef> >::iterator it =
+              temporary_virtual_refs.begin(); it != 
+              temporary_virtual_refs.end(); it++)
+        {
+          rez.serialize(it->first);
+          it->second.pack_reference(rez, target);
+        }
       }
     }
 
