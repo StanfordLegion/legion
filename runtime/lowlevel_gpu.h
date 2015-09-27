@@ -409,6 +409,7 @@ namespace LegionRuntime {
                                       const char *device_fun);
       char internal_init_module(void **fat_bin);
       void load_module(CUmodule *module, const void *image);
+      void find_function_handle(const void *func, CUfunction *handle);
     public:
       // Our cuda calls
       cudaError_t internal_stream_synchronize(void);  
@@ -518,6 +519,10 @@ namespace LegionRuntime {
                                                 size_t offset, cudaMemcpyKind kind, bool sync);
       static cudaError_t device_synchronize(void);
       static cudaError_t set_shared_memory_config(cudaSharedMemConfig config);
+      static const char* get_error_string(cudaError_t error);
+      static cudaError_t get_device(int *device);
+      static cudaError_t get_device_properties(cudaDeviceProp *prop, int device);
+      static cudaError_t get_func_attributes(cudaFuncAttributes *attr, const void *func);
     };
 
     class GPUFBMemory : public MemoryImpl {
