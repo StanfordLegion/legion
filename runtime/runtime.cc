@@ -12249,7 +12249,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(p.kind() != Processor::UTIL_PROC);
-      assert(proc_managers.find(p) != proc_managers.end());
 #endif
       SingleTask *parent = op->get_parent();
       parent->add_to_dependence_queue(op, false/*has lock*/);
