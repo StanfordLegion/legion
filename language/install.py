@@ -47,22 +47,6 @@ def git_update(repo_dir):
         ['git', 'pull', '--ff-only'],
         cwd = repo_dir)
 
-def check_luabind(luabind_dir):
-    if os.path.exists(luabind_dir):
-        print('Is this your first time installing the new Terra bindings? You seem to')
-        print('have a luabind directory left over from the old install script. If so,')
-        print('that\'s not a problem. Just remove the directory and run this script')
-        print('again to continue:')
-        print()
-        print('    mv terra terra_old')
-        print('    mv luabind luabind_old')
-        print('    ./install.py')
-        print()
-        print('(You can remove both *_old directories once you\'re sure it works.)')
-        print()
-        print('(Or you can continue to use the old bindings with ./install_old.py.)')
-        sys.exit(1)
-
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
         ['make', 'all', '-j', str(thread_count)],
@@ -109,9 +93,7 @@ def symlink(from_path, to_path):
 
 def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet,
                      thread_count):
-    luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
-        ('LUAJIT_DIR', luajit_dir),                         # for bindings
         ('TERRA_DIR', terra_dir),                           # for bindings
     ])
 
@@ -199,9 +181,6 @@ def install():
 
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
-
-    luabind_dir = os.path.join(root_dir, 'luabind')
-    check_luabind(luabind_dir)
 
     terra_dir = os.path.join(root_dir, 'terra')
     install_terra(terra_dir, args.terra, thread_count)
