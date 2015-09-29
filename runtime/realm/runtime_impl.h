@@ -37,6 +37,8 @@
 
 #include "threads.h"
 
+#include "module.h"
+
 #if __cplusplus >= 201103L
 #define typeof decltype
 #endif
@@ -111,6 +113,39 @@ namespace Realm {
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
+    // the "core" module provides the basic memories and processors used by Realm
+    class CoreModule : public Module {
+    public:
+      CoreModule(void);
+      virtual ~CoreModule(void);
+
+      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+
+      // create any memories provided by this module (default == do nothing)
+      //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
+      virtual void create_memories(RuntimeImpl *runtime);
+
+      // create any processors provided by the module (default == do nothing)
+      //  (each new ProcessorImpl should use a Processor from
+      //   RuntimeImpl::next_local_processor_id)
+      virtual void create_processors(RuntimeImpl *runtime);
+
+      // create any DMA channels provided by the module (default == do nothing)
+      virtual void create_dma_channels(RuntimeImpl *runtime);
+
+      // create any code translators provided by the module (default == do nothing)
+      virtual void create_code_translators(RuntimeImpl *runtime);
+
+      // clean up any common resources created by the module - this will be called
+      //  after all memories/processors/etc. have been shut down and destroyed
+      virtual void cleanup(void);
+
+    protected:
+      int num_cpu_procs, num_util_procs, num_io_procs;
+      int concurrent_io_threads;
+      size_t sysmem_size_in_mb, stack_size_in_mb;
+    };
+
     class RuntimeImpl {
     public:
       RuntimeImpl(void);
@@ -147,7 +182,6 @@ namespace Realm {
       void add_thread(const pthread_t *thread);
 #endif
 
-    protected:
     public:
       MachineImpl *machine;
 
@@ -158,7 +192,6 @@ namespace Realm {
       static const char *prefix;
 #endif
 
-      std::vector<Module *> modules;
       Node *nodes;
       MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
@@ -179,6 +212,21 @@ namespace Realm {
       GASNetCondVar shutdown_condvar;
 
       CoreReservationSet core_reservations;
+
+    public:
+      // used by modules to add processors, memories, etc.
+      void add_memory(MemoryImpl *m);
+      void add_processor(ProcessorImpl *p);
+
+      Memory next_local_memory_id(void);
+      Processor next_local_processor_id(void);
+      CoreReservationSet& core_reservation_set(void);
+
+    protected:
+      ID::IDType num_local_memories, num_local_processors;
+
+      ModuleRegistrar module_registrar;
+      std::vector<Module *> modules;
     };
 
     extern RuntimeImpl *runtime_singleton;

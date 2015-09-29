@@ -128,6 +128,8 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
       virtual int get_home_node(off_t offset, size_t size) = 0;
 
+      virtual void *local_reg_base(void) { return 0; };
+
       Memory::Kind get_kind(void) const;
 
     public:
@@ -177,6 +179,7 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
+      virtual void *local_reg_base(void);
 
     public: //protected:
       char *base, *base_orig;

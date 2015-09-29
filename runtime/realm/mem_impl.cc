@@ -539,6 +539,10 @@ namespace Realm {
     return gasnet_mynode();
   }
 
+  void *LocalCPUMemory::local_reg_base(void)
+  {
+    return registered ? base : 0;
+  };
   
   ////////////////////////////////////////////////////////////////////////
   //
