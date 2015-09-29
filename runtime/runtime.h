@@ -1658,7 +1658,7 @@ namespace LegionRuntime {
                                const TaskArgument &arg);
       void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
-      //inline Processor find_utility_group(void) { return utility_group; }
+      inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);
       Event issue_runtime_meta_task(const void *args, size_t arglen,
                                     HLRTaskID tid, Operation *op = NULL,
@@ -1832,6 +1832,8 @@ namespace LegionRuntime {
       static void high_level_runtime_task(
                           const void *args, size_t arglen, Processor p);
       static void profiling_runtime_task(
+                          const void *args, size_t arglen, Processor p);
+      static void profiling_mapper_task(
                           const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods

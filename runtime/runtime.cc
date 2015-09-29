@@ -15413,10 +15413,11 @@ namespace LegionRuntime {
           exit(ERROR_RESERVED_TASK_ID);
         }
       }
-      table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
-      table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
-      table[HLR_TASK_ID]           = Runtime::high_level_runtime_task;
-      table[HLR_PROFILING_ID]      = Runtime::profiling_runtime_task;
+      table[INIT_FUNC_ID]            = Runtime::initialize_runtime;
+      table[SHUTDOWN_FUNC_ID]        = Runtime::shutdown_runtime;
+      table[HLR_TASK_ID]             = Runtime::high_level_runtime_task;
+      table[HLR_LEGION_PROFILING_ID] = Runtime::profiling_runtime_task;
+      table[HLR_MAPPER_PROFILING_ID] = Runtime::profiling_mapper_task;
     }
 
     //--------------------------------------------------------------------------
@@ -16135,6 +16136,14 @@ namespace LegionRuntime {
     {
       Runtime *rt = Runtime::get_runtime(p);
       rt->process_profiling_task(p, args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::profiling_mapper_task(
+                                   const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::process_mapper_profiling(args, arglen);
     }
 
     //--------------------------------------------------------------------------

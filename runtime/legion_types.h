@@ -88,11 +88,12 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      HLR_TASK_ID           = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
-      HLR_PROFILING_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
+      INIT_FUNC_ID            = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_FUNC_ID        = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      HLR_TASK_ID             = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
+      HLR_LEGION_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      HLR_MAPPER_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      TASK_ID_AVAILABLE       = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -105,15 +106,12 @@ namespace LegionRuntime {
       HLR_SCHEDULER_ID,
       HLR_MESSAGE_ID,
       HLR_POST_END_ID,
-
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
       HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_EXECUTION_TRIGGER_ID,
       HLR_DEFERRED_POST_MAPPED_ID,
-
       HLR_DEFERRED_COMPLETE_ID,
       HLR_DEFERRED_COMMIT_ID,
-
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
       HLR_TRIGGER_DEPENDENCE_ID,

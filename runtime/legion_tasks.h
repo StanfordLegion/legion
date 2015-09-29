@@ -294,6 +294,10 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         SingleTask *task;
       };
+      struct MapperProfilingInfo {
+        SingleTask *task;
+        UserEvent profiling_done;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -457,6 +461,9 @@ namespace LegionRuntime {
       void restart_task(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
+      void notify_profiling_results(Realm::ProfilingResponse &results);
+      static void process_mapper_profiling(const void *args, size_t arglen);
+    public:
       PhysicalManager* get_instance(unsigned idx);
       void return_virtual_instance(unsigned index, const CompositeRef &ref);
     public:
@@ -547,6 +554,7 @@ namespace LegionRuntime {
       Event pending_done;
       Event last_registration;
       Event dependence_precondition;
+      Event profiling_done;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;

@@ -22,13 +22,6 @@
 #include "legion_profiling.h"
 #include <algorithm>
 
-// A little bit of a hack for now for profiling
-// GPU tasks, this will go away with the new 
-// profiling interface
-#ifdef USE_CUDA
-#include "cuda_runtime.h"
-#endif
-
 #define PRINT_REG(reg) (reg).index_space.id,(reg).field_space.id, (reg).tree_id
 
 namespace LegionRuntime {
@@ -2186,6 +2179,7 @@ namespace LegionRuntime {
       pending_done = Event::NO_EVENT;
       last_registration = Event::NO_EVENT;
       dependence_precondition = Event::NO_EVENT;
+      profiling_done = Event::NO_EVENT;
       current_trace = NULL;
       task_executed = false;
       outstanding_children_count = 0;
@@ -5122,6 +5116,22 @@ namespace LegionRuntime {
       Realm::ProfilingRequestSet profiling_requests;
       if (runtime->profiler != NULL)
         runtime->profiler->add_task_request(profiling_requests, low_id, this);
+      // If the mapper requested profiling add that now too
+      if (profile_task)
+      {
+        // Make a user event for signaling when we've reporting profiling
+        MapperProfilingInfo info;
+        info.task = this;
+        info.profiling_done = UserEvent::create_user_event();
+        Realm::ProfilingRequest &req = profiling_requests.add_request(
+                                        runtime->find_utility_group(),
+                                        HLR_MAPPER_PROFILING_ID, 
+                                        &info, sizeof(info));
+        req.add_measurement<
+          Realm::ProfilingMeasurements::OperationTimeline>();
+        // Record the event for when we are done profiling
+        profiling_done = info.profiling_done;
+      }
       Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
                                     sizeof(proxy_this), profiling_requests,
                                     start_condition, task_priority);
@@ -5196,25 +5206,47 @@ namespace LegionRuntime {
         pending_done = runtime->issue_runtime_meta_task(&decrement_args, 
             sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
       }
-      // Start the profiling if requested
-      if (profile_task)
-        this->start_time = Realm::Clock::current_time_in_microseconds();
       return physical_regions;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::notify_profiling_results(Realm::ProfilingResponse &results)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(results.has_measurement<
+          Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+      Realm::ProfilingMeasurements::OperationTimeline *timeline = 
+              results.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>();
+      this->start_time = timeline->start_time;
+      this->stop_time = timeline->end_time;
+      // Now tell the mapper the results
+      runtime->invoke_mapper_notify_profiling(executing_processor, this);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::process_mapper_profiling(const void *buffer, 
+                                                         size_t size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ProfilingResponse response(buffer, size);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(response.user_data_size() == sizeof(MapperProfilingInfo));
+#endif
+      const MapperProfilingInfo *info = 
+        (const MapperProfilingInfo*)response.user_data();
+      // Record the results
+      info->task->notify_profiling_results(response);
+      // Then trigger the event saying we are done
+      info->profiling_done.trigger();
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      if (profile_task)
-      {
-#ifdef USE_CUDA
-        if (executing_processor.kind() == Processor::TOC_PROC)
-          cudaStreamSynchronize(0);
-#endif
-        this->stop_time = Realm::Clock::current_time_in_microseconds();
-        runtime->invoke_mapper_notify_profiling(executing_processor, this);
-      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
       assert(regions.size() == physical_instances.size());
@@ -5278,23 +5310,16 @@ namespace LegionRuntime {
       // Mark that we are done executing this task
       task_executed = true;
 
-      // If this is a GPU processor and we are profiling, 
-      // synchronize the stream for now
-#ifdef LEGION_LOGGING
-#ifdef USE_CUDA
-      if (executing_processor.kind() == Processor::TOC_PROC) 
-        cudaStreamSynchronize(0);
-#endif
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_EXECUTION);
 #endif
       // See if we want to move the rest of this computation onto
-      // the utility processor
+      // the utility processor. We also need to be sure that we have 
+      // registered all of our operations before we can do the post end task
       if (runtime->has_explicit_utility_procs || 
-          !last_registration.has_triggered() || !pending_done.has_triggered())
+          !last_registration.has_triggered())
       {
         PostEndArgs post_end_args;
         post_end_args.hlr_id = HLR_POST_END_ID;
@@ -5308,9 +5333,8 @@ namespace LegionRuntime {
         }
         else
           post_end_args.result = const_cast<void*>(res);
-        Event post_pre = Event::merge_events(pending_done, last_registration);
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-                                         HLR_POST_END_ID, this, post_pre);
+                                     HLR_POST_END_ID, this, last_registration);
       }
       else
         post_end_task(res, res_size, owned);
@@ -5355,7 +5379,16 @@ namespace LegionRuntime {
           handle_post_mapped();
       }
       // Mark that we are done executing this operation
-      complete_execution();
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered() || !profiling_done.has_triggered())
+      {
+        Event exec_precondition = 
+          Event::merge_events(pending_done, profiling_done);
+        complete_execution(exec_precondition);
+      }
+      else
+        complete_execution();
       // Mark that we are done executing and then see if we need to
       // trigger any of our mapping, completion, or commit methods
       bool need_complete = false;
