@@ -37,7 +37,7 @@ def run(filename, debug, verbose, flags):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(args), str(output))
+        raise TestFailure(' '.join(args), output.decode('utf-8'))
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_prefix(filename, label):

@@ -17,19 +17,15 @@ ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
+ifndef TERRA_DIR
+$(error TERRA_DIR variable is not defined, aborting build)
+endif
+
 #Flags for directing the runtime makefile what to include
 DEBUG?=1                   # Include debugging symbols
 OUTPUT_LEVEL?=LEVEL_DEBUG  # Compile time print level
 SHARED_LOWLEVEL?=1	  # Use the shared low level
 #ALT_MAPPERS?=1		  # Include the alternative mappers
-
-ifndef LUAJIT_DIR
-$(error LUAJIT_DIR variable is not defined, aborting build)
-endif
-
-ifndef TERRA_DIR
-$(error TERRA_DIR variable is not defined, aborting build)
-endif
 
 # Put the binary file name here
 OUTFILE		:= liblegion_terra.so
@@ -44,7 +40,7 @@ GEN_GPU_SRC	:=		# .cu files
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
-INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src -I$(TERRA_DIR)/release/include -I$(TERRA_DIR)/release/include/terra
+INC_FLAGS += -I$(TERRA_DIR)/release/include/terra
 LD_FLAGS +=
 
 CC_FLAGS += -fPIC
