@@ -724,8 +724,6 @@ namespace Realm {
 
       Node *n = &nodes[gasnet_mynode()];
 
-      printf("%zd modules\n", modules.size());
-
       // create memories and processors for all loaded modules
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
