@@ -23,6 +23,8 @@
 
 #include "activemsg.h"
 
+#include "cmdline.h"
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -169,7 +171,7 @@ namespace Realm {
 
   CoreModule::CoreModule(void)
     : Module("core")
-    , num_cpu_procs(1), num_util_procs(1), num_io_procs(1)
+    , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , sysmem_size_in_mb(512), stack_size_in_mb(2)
   {}
@@ -180,9 +182,8 @@ namespace Realm {
   /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime,
 					       std::vector<std::string>& cmdline)
   {
-    Module *m = new CoreModule;
+    CoreModule *m = new CoreModule;
 
-#if 0
     // parse command line arguments
     CommandLineParser cp;
     cp.add_option_int("-ll:cpu", m->num_cpu_procs)
@@ -191,8 +192,7 @@ namespace Realm {
       .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
       .add_option_int("-ll:csize", m->sysmem_size_in_mb)
       .add_option_int("-ll:stacksize", m->stack_size_in_mb, true /*keep*/)
-      .parse_cmdline(cmdline);
-#endif
+      .parse_command_line(cmdline);
 
     return m;
   }
@@ -471,14 +471,6 @@ namespace Realm {
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       unsigned active_msg_handler_threads = 1;
-#ifdef USE_CUDA
-      size_t zc_mem_size_in_mb = 64;
-      size_t fb_mem_size_in_mb = 256;
-      unsigned num_local_gpus = 0;
-      unsigned num_gpu_streams = 12;
-      bool     gpu_worker_thread = true;
-      bool pin_sysmem_for_gpu = true;
-#endif
 #ifdef EVENT_TRACING
       size_t   event_trace_block_size = 1 << 20;
       double   event_trace_exp_arrv_rate = 1e3;
@@ -491,90 +483,85 @@ namespace Realm {
       bool dummy_reservation_ok = true;
       bool show_reservations = false;
 
-      for(int i = 1; i < *argc; i++) {
-#define INT_ARG(argname, varname)                       \
-	  if(!strcmp((*argv)[i], argname)) {		\
-	    varname = atoi((*argv)[++i]);		\
-	    continue;					\
-	  }
+      CommandLineParser cp;
+      cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
+	.add_option_int("-ll:rsize", reg_mem_size_in_mb)
+	.add_option_int("-ll:dsize", disk_mem_size_in_mb)
+	.add_option_int("-ll:stacksize", stack_size_in_mb)
+	.add_option_int("-ll:dma", dma_worker_threads)
+	.add_option_int("-ll:amsg", active_msg_worker_threads)
+	.add_option_int("-ll:ahandlers", active_msg_handler_threads)
+	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
+	.add_option_bool("-ll:show_rsrv", show_reservations);
 
-#define BOOL_ARG(argname, varname)                      \
-	  if(!strcmp((*argv)[i], argname)) {		\
-	    varname = true;				\
-	    continue;					\
-	  }
-
-	INT_ARG("-ll:gsize", gasnet_mem_size_in_mb);
-#ifdef OLD_INIT
-	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
-#endif
-	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
-        INT_ARG("-ll:dsize", disk_mem_size_in_mb);
-        INT_ARG("-ll:stacksize", stack_size_in_mb);
-#ifdef OLD_INIT
-	INT_ARG("-ll:cpu", num_local_cpus);
-	INT_ARG("-ll:util", num_util_procs);
-        INT_ARG("-ll:io", num_io_procs);
-	INT_ARG("-ll:concurrent_io", concurrent_io_threads);
-#endif
-	//INT_ARG("-ll:workers", cpu_worker_threads);
-	INT_ARG("-ll:dma", dma_worker_threads);
-	INT_ARG("-ll:amsg", active_msg_worker_threads);
-	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
-	INT_ARG("-ll:dummy_rsrv_ok", dummy_reservation_ok);
-	INT_ARG("-ll:show_rsrv", show_reservations);
 #ifdef USE_CUDA
-	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
-	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
-	INT_ARG("-ll:gpu", num_local_gpus);
-        INT_ARG("-ll:streams", num_gpu_streams);
-        BOOL_ARG("-ll:gpuworker", gpu_worker_thread);
-        INT_ARG("-ll:pin", pin_sysmem_for_gpu);
+      size_t zc_mem_size_in_mb = 64;
+      size_t fb_mem_size_in_mb = 256;
+      unsigned num_local_gpus = 0;
+      unsigned num_gpu_streams = 12;
+      bool     gpu_worker_thread = true;
+      bool pin_sysmem_for_gpu = true;
+
+      cp.add_option_int("-ll:fsize", fb_mem_size_in_mb)
+	.add_option_int("-ll:zsize", zc_mem_size_in_mb)
+	.add_option_int("-ll:gpu", num_local_gpus)
+	.add_option_int("-ll:streams", num_gpu_streams)
+	.add_option_bool("-ll:gpuworker", gpu_worker_thread)
+	.add_option_int("-ll:pin", pin_sysmem_for_gpu);
 #endif
 
-	if(!strcmp((*argv)[i], "-ll:eventtrace")) {
-#ifdef EVENT_TRACING
-	  event_trace_file = strdup((*argv)[++i]);
-#else
-	  fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
-#endif
-	  continue;
-	}
+      std::string event_trace_file, lock_trace_file;
 
-        if (!strcmp((*argv)[i], "-ll:locktrace"))
-        {
-#ifdef LOCK_TRACING
-          lock_trace_file = strdup((*argv)[++i]);
-#else
-          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
-#endif
-          continue;
-        }
+      cp.add_option_string("-ll:eventtrace", event_trace_file)
+	.add_option_string("-ll:locktrace", lock_trace_file);
 
-        if (!strcmp((*argv)[i], "-ll:prefix"))
-        {
 #ifdef NODE_LOGGING
-          RuntimeImpl::prefix = strdup((*argv)[++i]);
+      cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
 #else
-          fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+      std::string dummy_prefix;
+      cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
-          continue;
-        }
 
-        // Skip arguments that parsed in activemsg.cc
-        if (!strcmp((*argv)[i], "-ll:numlmbs") || !strcmp((*argv)[i],"-ll:lmbsize") ||
-            !strcmp((*argv)[i], "-ll:forcelong") || !strcmp((*argv)[i],"-ll:sdpsize"))
-        {
-          i++;
-          continue;
-        }
+      // these are actually parsed in activemsg.cc, but consume them here for now
+      size_t dummy = 0;
+      cp.add_option_int("-ll:numlmbs", dummy)
+	.add_option_int("-ll:lmbsize", dummy)
+	.add_option_int("-ll:forcelong", dummy)
+	.add_option_int("-ll:sdpsize", dummy);
 
-        if (strncmp((*argv)[i], "-ll:", 4) == 0)
-        {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", (*argv)[i]);
+      bool cmdline_ok = cp.parse_command_line(cmdline);
+
+      if(!cmdline_ok) {
+	fprintf(stderr, "ERROR: failure parsing command line options\n");
+	gasnet_exit(1);
+      }
+
+#ifndef EVENT_TRACING
+      if(!event_trace_file.empty()) {
+	fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
+      }
+#endif
+
+#ifndef LOCK_TRACING
+      if(!lock_trace_file.empty()) {
+          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
+      }
+#endif
+
+#ifndef NODE_LOGGING
+      if(!dummy_prefix.empty()) {
+	fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+      }
+#endif
+
+      // scan through what's left and see if anything starts with -ll: - probably a misspelled argument
+      for(std::vector<std::string>::const_iterator it = cmdline.begin();
+	  it != cmdline.end();
+	  it++)
+	if(it->compare(0, 4, "-ll:") == 0) {
+	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
           assert(0);
 	}
-      }
 
       // Check that we have enough resources for the number of nodes we are using
       if (gasnet_nodes() > MAX_NUM_NODES)

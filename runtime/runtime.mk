@@ -264,7 +264,9 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
+	           $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/cmdline.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
@@ -276,8 +278,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 		   $(LG_RT_DIR)/realm/mem_impl.cc \
 		   $(LG_RT_DIR)/realm/inst_impl.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
-		   $(LG_RT_DIR)/realm/machine_impl.cc \
-		   $(LG_RT_DIR)/realm/runtime_impl.cc
+		   $(LG_RT_DIR)/realm/machine_impl.cc
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
