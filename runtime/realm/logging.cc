@@ -24,6 +24,8 @@
 #include "activemsg.h"
 #endif
 
+#include "cmdline.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -31,6 +33,7 @@
 #include <errno.h>
 
 #include <set>
+#include <map>
 
 namespace Realm {
 
@@ -148,29 +151,29 @@ namespace Realm {
 
     static void flush_all_streams(void);
 
-    void read_command_line(int argc, const char *argv[]);
+    void read_command_line(std::vector<std::string>& cmdline);
 
     // either configures a logger right away or remembers it to config once
     //   we know the desired settings
     void configure(Logger *logger);
 
   protected:
+    bool parse_level_argument(const std::string& s);
+
     bool cmdline_read;
-    Logger::LoggingLevel level;
-    char *cats_enabled;
+    Logger::LoggingLevel default_level;
+    std::map<std::string, Logger::LoggingLevel> category_levels;
+    std::string cats_enabled;
     std::set<Logger *> pending_configs;
     LoggerOutputStream *stream;
   };
 
   LoggerConfig::LoggerConfig(void)
-    : cmdline_read(false), level(Logger::LEVEL_PRINT), cats_enabled(0), stream(0)
+    : cmdline_read(false), default_level(Logger::LEVEL_PRINT), stream(0)
   {}
 
   LoggerConfig::~LoggerConfig(void)
   {
-    if(cats_enabled)
-      free(cats_enabled);
-
     delete stream;
   }
 
@@ -187,51 +190,91 @@ namespace Realm {
       cfg->stream->flush();
   }
 
-  void LoggerConfig::read_command_line(int argc, const char *argv[])
+  bool LoggerConfig::parse_level_argument(const std::string& s)
   {
-    const char *logname = 0;
+    const char *p1 = s.c_str();
 
-    for(int i = 1; i < argc-1; i++) {
-      if(!strcmp(argv[i], "-level")) {
-	int l = atoi(argv[++i]);
-	assert((l >= 0) && (l <= Logger::LEVEL_NONE));
-	level = (Logger::LoggingLevel)l;
-	continue;
+    while(true) {
+      // skip commas
+      while(*p1 == ',') p1++;
+      if(!*p1) break;
+
+      // numbers may be preceeded by name= to specify a per-category level
+      std::string catname;
+      if(!isdigit(*p1)) {
+	const char *p2 = p1;
+	while(*p2 != '=') {
+	  if(!*p2) {
+	    fprintf(stderr, "ERROR: category name in -level must be followed by =\n");
+	    return false;
+	  }
+	  p2++;
+	}
+	catname.assign(p1, p2 - p1);
+	p1 = p2 + 1;
       }
 
-      if(!strcmp(argv[i], "-cat")) {
-	if(cats_enabled)
-	  free(cats_enabled);
-	cats_enabled = strdup(argv[++i]);
-	continue;
+      // levels are small integers
+      if(isdigit(*p1)) {
+	char *p2;
+	assert(errno == 0); // no leftover errors from elsewhere
+	long v = strtol(p1, &p2, 10);
+
+	if((errno == 0) && ((*p2 == 0) || (*p2) == ',') &&
+	   (v >= 0) && (v <= Logger::LEVEL_NONE)) {
+	  if(catname.empty())
+	    default_level = (Logger::LoggingLevel)v;
+	  else
+	    category_levels[catname] = (Logger::LoggingLevel)v;
+
+	  p1 = p2;
+	  continue;
+	}
       }
 
-      if(!strcmp(argv[i], "-logfile")) {
-	logname = argv[++i];
-	continue;
-      }
+      fprintf(stderr, "ERROR: logger level malformed or out of range: '%s'\n", p1);
+      return false;
+    }
+
+    return true;
+  }
+
+  void LoggerConfig::read_command_line(std::vector<std::string>& cmdline)
+  {
+    std::string logname;
+
+    bool ok = CommandLineParser()
+      .add_option_string("-cat", cats_enabled)
+      .add_option_string("-logfile", logname)
+      .add_option_method("-level", this, &LoggerConfig::parse_level_argument)
+      .parse_command_line(cmdline);
+
+    if(!ok) {
+      fprintf(stderr, "couldn't parse logger config options\n");
+      exit(1);
     }
 
     // lots of choices for log output
-    if(!logname || !strcmp(logname, "stdout")) {
+    if(logname.empty() || (logname == "stdout")) {
       stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
 							    true);
-    } else if(!strcmp(logname, "stderr")) {
+    } else if(logname == "stderr") {
       stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
 							    true);
     } else {
       // we're going to open a file, but key off a + for appending and
       //  look for a % for node number insertion
       bool append = false;
+      size_t start = 0;
 
-      if(*logname == '+') {
+      if(logname[0] == '+') {
 	append = true;
-	logname++;
+	start++;
       }
 
-      const char *pos = strchr(logname, '%');
       FILE *f = 0;
-      if(pos == 0) {
+      size_t pct = logname.find_first_of('%', start);
+      if(pct == std::string::npos) {
 	// no node number - everybody uses the same file
 	if(gasnet_nodes() > 1) {
 	  if(!append) {
@@ -240,15 +283,17 @@ namespace Realm {
 	    append = true;
 	  }
 	}
-	f = fopen(logname, append ? "a" : "w");
+	const char *fn = logname.c_str() + start;
+	f = fopen(fn, append ? "a" : "w");
 	if(!f) {
-	  fprintf(stderr, "could not open log file '%s': %s\n", logname, strerror(errno));
+	  fprintf(stderr, "could not open log file '%s': %s\n", fn, strerror(errno));
 	  exit(1);
 	}
       } else {
 	// replace % with node number
 	char filename[256];
-	sprintf(filename, "%.*s%d%s", (int)(pos - logname), logname, gasnet_mynode(), pos+1);
+	sprintf(filename, "%.*s%d%s",
+		(int)(pct - start), logname.c_str() + start, gasnet_mynode(), logname.c_str() + pct + 1);
 
 	f = fopen(filename, append ? "a" : "w");
 	if(!f) {
@@ -283,9 +328,9 @@ namespace Realm {
     }
 
     // see if this logger is one of the categories we want
-    if(cats_enabled && (cats_enabled[0] != '*')) {
+    if(!cats_enabled.empty()) {
       bool found = false;
-      const char *p = cats_enabled;
+      const char *p = cats_enabled.c_str();
       int l = logger->get_name().length();
       const char *n = logger->get_name().c_str();
       while(*p) {
@@ -302,6 +347,12 @@ namespace Realm {
 	return;
       }
     }
+
+    // see if the level for this category has been customized
+    Logger::LoggingLevel level = default_level;
+    std::map<std::string, Logger::LoggingLevel>::const_iterator it = category_levels.find(logger->get_name());
+    if(it != category_levels.end())
+      level = it->second;
 
     // give this logger a copy of the global stream
     logger->add_stream(stream, level, 
@@ -331,9 +382,9 @@ namespace Realm {
     streams.clear();
   }
 
-  /*static*/ void Logger::configure_from_cmdline(int argc, const char *argv[])
+  /*static*/ void Logger::configure_from_cmdline(std::vector<std::string>& cmdline)
   {
-    LoggerConfig::get_config()->read_command_line(argc, argv);
+    LoggerConfig::get_config()->read_command_line(cmdline);
   }
 
   void Logger::log_msg(LoggingLevel level, const std::string& msg)

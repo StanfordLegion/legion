@@ -441,7 +441,7 @@ namespace Realm {
 	cmdline[i - 1] = (*argv)[i];
 
       // very first thing - let the logger initialization happen
-      Logger::configure_from_cmdline(*argc, (const char **)*argv);
+      Logger::configure_from_cmdline(cmdline);
 
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
