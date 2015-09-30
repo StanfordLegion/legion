@@ -50,6 +50,16 @@ namespace Realm {
     return *this;
   }
 
+  template <typename T>
+  CommandLineParser& CommandLineParser::add_option_method(const std::string& optname,
+							  T *target,
+							  bool (T::*method)(const std::string&),
+							  bool keep /*= false*/)
+  {
+    options.push_back(new MethodCommandLineOption<T>(optname, keep, target, method));
+    return *this;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -112,6 +122,39 @@ namespace Realm {
     T val;
     if(convert_integer_cmdline_argument(*pos, val)) {
       target = val;
+      if(keep) {
+	++pos;
+      } else {
+	pos = cmdline.erase(pos);
+      }
+      return true;
+    } else
+      return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MethodCommandLineOption<T>
+
+  template <typename T>
+  MethodCommandLineOption<T>::MethodCommandLineOption(const std::string& _optname,
+						      bool _keep,
+						      T *_target,
+						      bool (T::*_method)(const std::string&))
+    : CommandLineOption(_optname, _keep)
+    , target(_target), method(_method)
+  {}
+    
+  template <typename T>
+  bool MethodCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
+						  std::vector<std::string>::iterator& pos)
+  {
+    // requires an additional argument
+    if(pos == cmdline.end()) return false;
+
+    // call method - true means it parsed ok
+    if((target->*method)(*pos)) {
       if(keep) {
 	++pos;
       } else {

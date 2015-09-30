@@ -38,6 +38,10 @@ namespace Realm {
 
     CommandLineParser& add_option_bool(const std::string& optname, bool& target, bool keep = false);
 
+    template <typename T>
+    CommandLineParser& add_option_method(const std::string& optname, T *target,
+					 bool (T::*method)(const std::string&), bool keep = false);
+
     bool parse_command_line(std::vector<std::string>& cmdline);
 
   protected:
@@ -92,6 +96,20 @@ namespace Realm {
 
   protected:
     bool& target;
+  };
+
+  template <typename T>
+  class MethodCommandLineOption : public CommandLineOption {
+  public:
+    MethodCommandLineOption(const std::string& _optname, bool _keep, T *_target,
+			     bool (T::*_method)(const std::string&));
+    
+    virtual bool parse_argument(std::vector<std::string>& cmdline,
+				std::vector<std::string>::iterator& pos);
+
+  protected:
+    T *target;
+    bool (T::*method)(const std::string&);
   };
 
 }; // namespace Realm
