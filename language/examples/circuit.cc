@@ -30,7 +30,7 @@ using namespace LegionRuntime::HighLevel;
 /// Mapper
 ///
 
-// LegionRuntime::Logger::Category log_mapper("mapper");
+static LegionRuntime::Logger::Category log_circuit("circuit");
 
 class CircuitMapper : public DefaultMapper
 {
@@ -120,13 +120,13 @@ bool CircuitMapper::map_inline(Inline *inline_operation)
   // Place all regions in global memory.
   req.target_ranking.push_back(sysmem);
 
-  // log_mapper.debug(
-  //   "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
-  //   req.region.get_index_space().get_id(),
-  //   req.region.get_field_space().get_id(),
-  //   req.region.get_tree_id(),
-  //   req.target_ranking[0].id,
-  //   req.target_ranking.size());
+  log_circuit.debug(
+    "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
+    req.region.get_index_space().get_id(),
+    req.region.get_field_space().get_id(),
+    req.region.get_tree_id(),
+    req.target_ranking[0].id,
+    req.target_ranking.size());
 
   return false;
 }
@@ -136,36 +136,36 @@ void CircuitMapper::notify_mapping_failed(const Mappable *mappable)
   switch (mappable->get_mappable_kind()) {
   case Mappable::TASK_MAPPABLE:
     {
-      // log_mapper.warning("mapping failed on task");
+      log_circuit.warning("mapping failed on task");
       break;
     }
   case Mappable::COPY_MAPPABLE:
     {
-      // log_mapper.warning("mapping failed on copy");
+      log_circuit.warning("mapping failed on copy");
       break;
     }
   case Mappable::INLINE_MAPPABLE:
     {
-      // Inline *_inline = mappable->as_mappable_inline();
-      // RegionRequirement &req = _inline->requirement;
-      // LogicalRegion region = req.region;
-      // log_mapper.warning(
-      //   "mapping %s on inline region (%d,%d,%d) memory %d",
-      //   (req.mapping_failed ? "failed" : "succeeded"),
-      //   region.get_index_space().get_id(),
-      //   region.get_field_space().get_id(),
-      //   region.get_tree_id(),
-      //   req.selected_memory.id);
+      Inline *_inline = mappable->as_mappable_inline();
+      RegionRequirement &req = _inline->requirement;
+      LogicalRegion region = req.region;
+      log_circuit.warning(
+        "mapping %s on inline region (%d,%d,%d) memory %d",
+        (req.mapping_failed ? "failed" : "succeeded"),
+        region.get_index_space().get_id(),
+        region.get_field_space().get_id(),
+        region.get_tree_id(),
+        req.selected_memory.id);
       break;
     }
   case Mappable::ACQUIRE_MAPPABLE:
     {
-      // log_mapper.warning("mapping failed on acquire");
+      log_circuit.warning("mapping failed on acquire");
       break;
     }
   case Mappable::RELEASE_MAPPABLE:
     {
-      // log_mapper.warning("mapping failed on release");
+      log_circuit.warning("mapping failed on release");
       break;
     }
   }
