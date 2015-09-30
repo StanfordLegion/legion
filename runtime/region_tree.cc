@@ -12168,24 +12168,29 @@ namespace LegionRuntime {
             node_info.field_versions->add_reference();
           }
           node_info.field_versions->add_field_version(init_version,unversioned);
-          LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
-            finder = current_version_infos.find(init_version);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != current_version_infos.end());
-#endif
-          const VersionStateInfo &info = finder->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          VersionStateInfo &info = current_version_infos[init_version];
+          // See if we have any fields to test
+          if (!(info.valid_fields * unversioned))
           {
-            FieldMask state_overlap = it->second & unversioned;
-            if (!state_overlap)
-              continue;
-            state->add_advance_state(it->first, state_overlap);
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              FieldMask state_overlap = it->second & unversioned;
+              if (!state_overlap)
+                continue;
+              state->add_advance_state(it->first, state_overlap);
+            }
+            unversioned -= info.valid_fields;
           }
-          unversioned -= info.valid_fields;
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!unversioned);
-#endif
+          // If we still have unversioned states, we need to make a new state
+          if (!!unversioned)
+          {
+            VersionState *init_state = create_new_version_state(init_version);
+            init_state->add_base_valid_ref(CURRENT_STATE_REF);
+            info.states[init_state] = unversioned;
+            info.valid_fields |= unversioned;
+            state->add_advance_state(init_state, unversioned);
+          }
         }
       }
       else
