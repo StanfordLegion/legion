@@ -1901,8 +1901,8 @@ namespace LegionRuntime {
 	  MemoryImpl::MemoryKind src_kind = src_impl->kind;
 	  MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
-	  log_dma.print("copier: " IDFMT "(%d) -> " IDFMT "(%d) = %s",
-			src_mem.id, src_kind, dst_mem.id, dst_kind, (*it)->get_name().c_str());
+	  log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d) = %s",
+		       src_mem.id, src_kind, dst_mem.id, dst_kind, (*it)->get_name().c_str());
 	  return (*it)->create_copier(src_mem, dst_mem, redop_id, fold);
 	}
       }
@@ -1916,7 +1916,7 @@ namespace LegionRuntime {
       MemoryImpl::MemoryKind src_kind = src_impl->kind;
       MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
-      log_dma.print("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
+      log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
       if(redop_id == 0) {
 	// can we perform simple memcpy's?
