@@ -1882,9 +1882,9 @@ namespace LegionRuntime {
                                  parent_ctx->get_unique_task_id(),
                                  this->variants->name, 
                                  get_unique_task_id(), 
-                                 regions[idx].region.index_space.id,
-                                 regions[idx].region.field_space.id, 
-                                 regions[idx].region.tree_id, idx);
+                                 regions[idx].parent.index_space.id,
+                                 regions[idx].parent.field_space.id, 
+                                 regions[idx].parent.tree_id, idx);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
