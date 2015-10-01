@@ -217,7 +217,7 @@ namespace Realm {
       // levels are small integers
       if(isdigit(*p1)) {
 	char *p2;
-	assert(errno == 0); // no leftover errors from elsewhere
+	errno = 0; // no leftover errors from elsewhere
 	long v = strtol(p1, &p2, 10);
 
 	if((errno == 0) && ((*p2 == 0) || (*p2) == ',') &&

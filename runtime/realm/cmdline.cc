@@ -83,7 +83,7 @@ namespace Realm {
   template <>
   bool convert_integer_cmdline_argument<int>(const std::string& s, int& target)
   {
-    assert(errno == 0);  // no errors from before
+    errno = 0;  // no errors from before
     char *pos;
     long v = strtol(s.c_str(), &pos, 10);
     if((errno == 0) && (*pos == 0) && (v >= INT_MIN) && (v <= INT_MAX)) {
@@ -96,7 +96,7 @@ namespace Realm {
   template <>
   bool convert_integer_cmdline_argument<unsigned int>(const std::string& s, unsigned int& target)
   {
-    assert(errno == 0);  // no errors from before
+    errno = 0;  // no errors from before
     char *pos;
     unsigned long v = strtoul(s.c_str(), &pos, 10);
     if((errno == 0) && (*pos == 0) && (v >= 0) && (v <= UINT_MAX)) {
@@ -109,7 +109,7 @@ namespace Realm {
   template <>
   bool convert_integer_cmdline_argument<unsigned long>(const std::string& s, unsigned long& target)
   {
-    assert(errno == 0);  // no errors from before
+    errno = 0;  // no errors from before
     char *pos;
     target = strtoul(s.c_str(), &pos, 10);
     if((errno == 0) && (*pos == 0)) {
@@ -121,7 +121,7 @@ namespace Realm {
   template <>
   bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target)
   {
-    assert(errno == 0);  // no errors from before
+    errno = 0;  // no errors from before
     char *pos;
     int v = strtol(s.c_str(), &pos, 10);
     if((errno == 0) && (*pos == 0) && (v >= 0) && (v <= 1)) {
