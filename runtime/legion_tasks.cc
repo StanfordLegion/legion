@@ -6386,9 +6386,6 @@ namespace LegionRuntime {
     void IndividualTask::trigger_remote_state_analysis(UserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(enclosing_contexts.size() == version_infos.size());
-#endif
       std::set<Event> preconditions; 
       if (is_remote())
       {
@@ -6398,6 +6395,9 @@ namespace LegionRuntime {
           ready_event.trigger();
           return;
         }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(enclosing_contexts.size() == version_infos.size());
+#endif
         // Otherwise request state for anything 
         // that was not early mapped 
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
@@ -6421,6 +6421,9 @@ namespace LegionRuntime {
         }
         else
         {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(enclosing_contexts.size() == version_infos.size());
+#endif
           // Otherwise, only request any data for early mapped regions
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
           {
