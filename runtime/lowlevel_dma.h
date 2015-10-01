@@ -61,6 +61,8 @@ namespace LegionRuntime {
     extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
+    extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);
+
     /*
     extern Event enqueue_dma(IndexSpace idx,
 			     RegionInstance src, 

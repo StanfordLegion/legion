@@ -43,6 +43,13 @@
 #define typeof decltype
 #endif
 
+// dma channels are still in old namespace
+namespace LegionRuntime {
+  namespace LowLevel {
+    class MemPairCopierFactory;
+  };
+};
+
 namespace Realm {
 
   class IndexSpaceImpl;
@@ -51,6 +58,8 @@ namespace Realm {
   class ProcessorImpl;
   class RegionInstanceImpl;
   class Module;
+
+  typedef LegionRuntime::LowLevel::MemPairCopierFactory DMAChannel;
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
@@ -217,16 +226,20 @@ namespace Realm {
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
       void add_processor(ProcessorImpl *p);
+      void add_dma_channel(DMAChannel *c);
 
       Memory next_local_memory_id(void);
       Processor next_local_processor_id(void);
       CoreReservationSet& core_reservation_set(void);
+
+      const std::vector<DMAChannel *>& get_dma_channels(void) const;
 
     protected:
       ID::IDType num_local_memories, num_local_processors;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
+      std::vector<DMAChannel *> dma_channels;
     };
 
     extern RuntimeImpl *runtime_singleton;

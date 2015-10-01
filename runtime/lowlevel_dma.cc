@@ -1121,6 +1121,26 @@ namespace LegionRuntime {
     }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemPairCopierFactory
+  //
+
+    MemPairCopierFactory::MemPairCopierFactory(const std::string& _name)
+      : name(_name)
+    {
+    }
+
+    MemPairCopierFactory::~MemPairCopierFactory(void)
+    {
+    }
+
+    const std::string& MemPairCopierFactory::get_name(void) const
+    {
+      return name;
+    }
+
+
     class BufferedMemPairCopier : public MemPairCopier {
     public:
       BufferedMemPairCopier(Memory _src_mem, Memory _dst_mem, size_t _buffer_size = 32768)
@@ -2003,23 +2023,93 @@ namespace LegionRuntime {
       int fd; // file descriptor
     };
      
+    // most of the smarts from MemPairCopier::create_copier are now captured in the various factories
+
+    class MemcpyMemPairCopierFactory : public MemPairCopierFactory {
+    public:
+      MemcpyMemPairCopierFactory(void)
+	: MemPairCopierFactory("memcpy")
+      {}
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold)
+      {
+	// non-reduction copies between anything SYSMEM and/or ZC
+	//  (TODO: really should be anything with a direct CPU pointer, but GPUFBMemory
+	//  returns non-null for that right now...)
+	if(redop_id != 0)
+	  return false;
+
+	MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+	MemoryImpl::MemoryKind src_kind = src_impl->kind;
+	
+	if((src_kind != MemoryImpl::MKIND_SYSMEM) &&
+	   (src_kind != MemoryImpl::MKIND_ZEROCOPY))
+	  return false;
+
+	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+	MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+	
+	if((dst_kind != MemoryImpl::MKIND_SYSMEM) &&
+	   (dst_kind != MemoryImpl::MKIND_ZEROCOPY))
+	  return false;
+
+	return true;
+      }
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold)
+      {
+	return new MemcpyMemPairCopier(src_mem, dst_mem);
+      }
+    };
+
+
+    void create_builtin_dma_channels(Realm::RuntimeImpl *r)
+    {
+      r->add_dma_channel(new MemcpyMemPairCopierFactory);
+    }
+
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem,
 						ReductionOpID redop_id /*= 0*/,
 						bool fold /*= false*/)
     {
+      // try to use new DMA channels first
+      const std::vector<MemPairCopierFactory *>& channels = get_runtime()->get_dma_channels();
+      for(std::vector<MemPairCopierFactory *>::const_iterator it = channels.begin();
+	  it != channels.end();
+	  it++) {
+	if((*it)->can_perform_copy(src_mem, dst_mem, redop_id, fold)) {
+	  // impls and kinds are just for logging now
+	  MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+	  MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+
+	  MemoryImpl::MemoryKind src_kind = src_impl->kind;
+	  MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+	  log_dma.print("copier: " IDFMT "(%d) -> " IDFMT "(%d) = %s",
+			src_mem.id, src_kind, dst_mem.id, dst_kind, (*it)->get_name().c_str());
+	  return (*it)->create_copier(src_mem, dst_mem, redop_id, fold);
+	}
+      }
+
+      // old style - various options in here are being turned into assert(0)'s as they are 
+      //  replaced by DMA channel-provided copiers
+
       MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
       MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
 
       MemoryImpl::MemoryKind src_kind = src_impl->kind;
       MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
-      log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
+      log_dma.print("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
       if(redop_id == 0) {
 	// can we perform simple memcpy's?
 	if(((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
 	   ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-	  return new MemcpyMemPairCopier(src_mem, dst_mem);
+	  assert(0);
+	  //return new MemcpyMemPairCopier(src_mem, dst_mem);
 	}
 
         // can we perform transfer between disk and cpu memory

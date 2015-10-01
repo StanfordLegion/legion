@@ -337,9 +337,19 @@ namespace Realm {
       nodes[gasnet_mynode()].processors.push_back(p);
     }
 
+    void RuntimeImpl::add_dma_channel(DMAChannel *c)
+    {
+      dma_channels.push_back(c);
+    }
+
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
       return core_reservations;
+    }
+
+    const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
+    {
+      return dma_channels;
     }
 
     static void add_proc_mem_affinity(const std::set<Processor>& procs,
@@ -684,6 +694,8 @@ namespace Realm {
       start_handler_threads(active_msg_handler_threads,
 			    core_reservations,
 			    stack_size_in_mb << 20);
+
+      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
 							core_reservations);
@@ -1152,6 +1164,18 @@ namespace Realm {
       return 0;
     }
 
+    template <typename T>
+    void delete_vector_contents(std::vector<T *>& v, bool clear_vector = true)
+    {
+      for(typename std::vector<T *>::iterator it = v.begin();
+	  it != v.end();
+	  it++)
+	delete (*it);
+
+      if(clear_vector)
+	v.clear();
+    }
+
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -1313,15 +1337,8 @@ namespace Realm {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
 	  Node& n = nodes[i];
 
-	  for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
-	      it != n.memories.end();
-	      it++)
-	    delete (*it);
-
-	  for(std::vector<ProcessorImpl *>::iterator it = n.processors.begin();
-	      it != n.processors.end();
-	      it++)
-	    delete (*it);
+	  delete_vector_contents(n.memories);
+	  delete_vector_contents(n.processors);
 	}
 	
 	delete[] nodes;
@@ -1331,6 +1348,9 @@ namespace Realm {
 	delete local_reservation_free_list;
 	delete local_index_space_free_list;
 	delete local_proc_group_free_list;
+
+	// delete all the DMA channels that we were given
+	delete_vector_contents(dma_channels);
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
