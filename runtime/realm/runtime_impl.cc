@@ -911,6 +911,8 @@ namespace Realm {
 	  n->memories.push_back(zcm);
 
 	  gpu_zcmems[gp] = zcm;
+
+	  gp->create_dma_channels(this);
 	}
         // Now pin any CPU memories
         if(pin_sysmem_for_gpu) {

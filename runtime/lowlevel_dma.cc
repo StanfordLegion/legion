@@ -14,9 +14,6 @@
  */
 
 #include "lowlevel_dma.h"
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-#endif
 #include "accessor.h"
 #include "realm/threads.h"
 #include <errno.h>
@@ -1434,183 +1431,6 @@ namespace LegionRuntime {
       std::set<Event> events;
     };
 #endif
-
-#ifdef USE_CUDA     
-    class GPUtoFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
-	: gpu(_gpu)
-      {
-	MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
-	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
-	assert(src_base);
-      }
-
-      virtual ~GPUtoFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
-                                                          dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu write of %zd bytes\n", bytes);
-	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_to_fb_2d(dst_offset, src_base + src_offset,
-                           dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_to_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      const char *src_base;
-      GPUProcessor *gpu;
-    };
-
-    class GPUfromFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
-	: gpu(_gpu)
-      {
-	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(_dst_mem);
-	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
-	assert(dst_base);
-      }
-
-      virtual ~GPUfromFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu read of %zd bytes\n", bytes);
-	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_from_fb_2d(dst_base + dst_offset, src_offset,
-                             dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_from_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      char *dst_base;
-      GPUProcessor *gpu;
-    };
-     
-    class GPUinFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUinFBMemPairCopier(GPUProcessor *_gpu)
-	: gpu(_gpu)
-      {
-      }
-
-      virtual ~GPUinFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu write of %zd bytes\n", bytes);
-	gpu->copy_within_fb(dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_within_fb_2d(dst_offset, src_offset,
-                               dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_within_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      GPUProcessor *gpu;
-    };
-
-    class GPUPeerMemPairCopier : public MemPairCopier {
-    public:
-      GPUPeerMemPairCopier(GPUProcessor *_src, GPUProcessor *_dst)
-        : src(_src), dst(_dst)
-      {
-      }
-
-      virtual ~GPUPeerMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
-                                                              dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-        src->copy_to_peer(dst, dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-                     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        src->copy_to_peer_2d(dst, dst_offset, src_offset,
-                             dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          src->fence_to_peer(req, dst);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      GPUProcessor *src, *dst;
-    };
-#endif
      
     static unsigned rdma_sequence_no = 1;
 
@@ -2128,35 +1948,9 @@ namespace LegionRuntime {
         }
 
 #ifdef USE_CUDA
-	// copy to a framebuffer
-	if(((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
-	   (dst_kind == MemoryImpl::MKIND_GPUFB)) {
-	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	  return new GPUtoFBMemPairCopier(src_mem, dst_gpu);
-	}
-
-	// copy from a framebuffer
-	if((src_kind == MemoryImpl::MKIND_GPUFB) &&
-	   ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	  return new GPUfromFBMemPairCopier(src_gpu, dst_mem);
-	}
-
-	// copy within a framebuffer
-	if((src_kind == MemoryImpl::MKIND_GPUFB) &&
-	   (dst_kind == MemoryImpl::MKIND_GPUFB)) {
-	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	  if (src_gpu == dst_gpu)
-	    return new GPUinFBMemPairCopier(src_gpu);
-	  else if (src_gpu->can_access_peer(dst_gpu))
-	    return new GPUPeerMemPairCopier(src_gpu, dst_gpu);
-	  else
-	    {
-	      fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
-	      assert(false);
-	      return NULL;
-	    }
+	// all of these should be handled by module-provided dma channels now
+	if((src_kind == MemoryImpl::MKIND_GPUFB) || (dst_kind == MemoryImpl::MKIND_GPUFB)) {
+	  assert(0);
 	}
 #endif
 

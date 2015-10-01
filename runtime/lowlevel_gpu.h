@@ -344,6 +344,9 @@ namespace LegionRuntime {
       void fence_from_fb(Realm::Operation *op);
       void fence_within_fb(Realm::Operation *op);
       void fence_to_peer(Realm::Operation *op, GPUProcessor *dst);
+
+      void create_dma_channels(Realm::RuntimeImpl *r);
+
     public:
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);

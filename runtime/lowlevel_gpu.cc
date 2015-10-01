@@ -17,6 +17,8 @@
 
 #include "realm/tasks.h"
 
+#include "lowlevel_dma.h"
+
 #include <stdio.h>
 
 GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
@@ -29,6 +31,16 @@ namespace LegionRuntime {
     extern Logger::Category log_event_graph;
 #endif
     Logger::Category log_stream("gpustream");
+
+    class stringbuilder {
+    public:
+      operator std::string(void) const { return ss.str(); }
+      template <typename T>
+      stringbuilder& operator<<(T data) { ss << data; return *this; }
+    protected:
+      std::stringstream ss;
+    };
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -364,14 +376,418 @@ namespace LegionRuntime {
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
     }
 
-  class stringbuilder {
-  public:
-    operator std::string(void) const { return ss.str(); }
-    template <typename T>
-    stringbuilder& operator<<(T data) { ss << data; return *this; }
-  protected:
-    std::stringstream ss;
-  };
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // mem pair copiers for DMA channels
+
+    class GPUtoFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
+	: gpu(_gpu)
+      {
+	MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
+	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
+	assert(src_base);
+      }
+
+      virtual ~GPUtoFBMemPairCopier(void) { }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
+                                                          dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("gpu write of %zd bytes\n", bytes);
+	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes);
+        record_bytes(bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        gpu->copy_to_fb_2d(dst_offset, src_base + src_offset,
+                           dst_stride, src_stride, bytes, lines);
+        record_bytes(bytes * lines);
+      }
+
+      virtual void flush(DmaRequest *req)
+      {
+        if(total_reqs > 0)
+          gpu->fence_to_fb(req);
+        MemPairCopier::flush(req);
+      }
+
+    protected:
+      const char *src_base;
+      GPUProcessor *gpu;
+    };
+
+    class GPUfromFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
+	: gpu(_gpu)
+      {
+	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(_dst_mem);
+	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+	assert(dst_base);
+      }
+
+      virtual ~GPUfromFBMemPairCopier(void) { }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
+                                                            dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("gpu read of %zd bytes\n", bytes);
+	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes);
+        record_bytes(bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        gpu->copy_from_fb_2d(dst_base + dst_offset, src_offset,
+                             dst_stride, src_stride, bytes, lines);
+        record_bytes(bytes * lines);
+      }
+
+      virtual void flush(DmaRequest *req)
+      {
+        if(total_reqs > 0)
+          gpu->fence_from_fb(req);
+        MemPairCopier::flush(req);
+      }
+
+    protected:
+      char *dst_base;
+      GPUProcessor *gpu;
+    };
+     
+    class GPUinFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUinFBMemPairCopier(GPUProcessor *_gpu)
+	: gpu(_gpu)
+      {
+      }
+
+      virtual ~GPUinFBMemPairCopier(void) { }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
+                                                            dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("gpu write of %zd bytes\n", bytes);
+	gpu->copy_within_fb(dst_offset, src_offset, bytes);
+        record_bytes(bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        gpu->copy_within_fb_2d(dst_offset, src_offset,
+                               dst_stride, src_stride, bytes, lines);
+        record_bytes(bytes * lines);
+      }
+
+      virtual void flush(DmaRequest *req)
+      {
+        if(total_reqs > 0)
+          gpu->fence_within_fb(req);
+        MemPairCopier::flush(req);
+      }
+
+    protected:
+      GPUProcessor *gpu;
+    };
+
+    class GPUPeerMemPairCopier : public MemPairCopier {
+    public:
+      GPUPeerMemPairCopier(GPUProcessor *_src, GPUProcessor *_dst)
+        : src(_src), dst(_dst)
+      {
+      }
+
+      virtual ~GPUPeerMemPairCopier(void) { }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
+                                                              dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+        src->copy_to_peer(dst, dst_offset, src_offset, bytes);
+        record_bytes(bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        src->copy_to_peer_2d(dst, dst_offset, src_offset,
+                             dst_stride, src_stride, bytes, lines);
+        record_bytes(bytes * lines);
+      }
+
+      virtual void flush(DmaRequest *req)
+      {
+        if(total_reqs > 0)
+          src->fence_to_peer(req, dst);
+        MemPairCopier::flush(req);
+      }
+
+    protected:
+      GPUProcessor *src, *dst;
+    };
+
+    class GPUDMAChannel_H2D : public MemPairCopierFactory {
+    public:
+      GPUDMAChannel_H2D(GPUProcessor *_gpu);
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold);
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold);
+
+    protected:
+      GPUProcessor *gpu;
+    };
+
+    class GPUDMAChannel_D2H : public MemPairCopierFactory {
+    public:
+      GPUDMAChannel_D2H(GPUProcessor *_gpu);
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold);
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold);
+
+    protected:
+      GPUProcessor *gpu;
+    };
+
+    class GPUDMAChannel_D2D : public MemPairCopierFactory {
+    public:
+      GPUDMAChannel_D2D(GPUProcessor *_gpu);
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold);
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold);
+
+    protected:
+      GPUProcessor *gpu;
+    };
+
+    class GPUDMAChannel_P2P : public MemPairCopierFactory {
+    public:
+      GPUDMAChannel_P2P(GPUProcessor *_gpu);
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold);
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold);
+
+    protected:
+      GPUProcessor *gpu;
+    };
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUDMAChannel_H2D
+
+    GPUDMAChannel_H2D::GPUDMAChannel_H2D(GPUProcessor *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_h2d (" << _gpu->me << ")")
+      , gpu(_gpu)
+    {}
+
+    bool GPUDMAChannel_H2D::can_perform_copy(Memory src_mem, Memory dst_mem,
+					     ReductionOpID redop_id, bool fold)
+    {
+      // copies from sysmem/zerocopy to _our_ fb, no reduction support
+
+      if(redop_id != 0)
+	return false;
+
+      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+
+      MemoryImpl::MemoryKind src_kind = src_impl->kind;
+      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+      if((src_kind != MemoryImpl::MKIND_SYSMEM) && (src_kind != MemoryImpl::MKIND_ZEROCOPY))
+	return false;
+
+      if((dst_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)dst_impl)->gpu != gpu))
+	return false;
+
+      return true;
+    }
+
+    MemPairCopier *GPUDMAChannel_H2D::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
+    {
+      return new GPUtoFBMemPairCopier(src_mem, gpu);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUDMAChannel_D2H
+
+    GPUDMAChannel_D2H::GPUDMAChannel_D2H(GPUProcessor *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_d2h (" << _gpu->me << ")")
+      , gpu(_gpu)
+    {}
+
+    bool GPUDMAChannel_D2H::can_perform_copy(Memory src_mem, Memory dst_mem,
+					     ReductionOpID redop_id, bool fold)
+    {
+      // copies from _our_ fb to sysmem/zerocopy, no reduction support
+
+      if(redop_id != 0)
+	return false;
+
+      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+
+      MemoryImpl::MemoryKind src_kind = src_impl->kind;
+      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+      if((src_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)src_impl)->gpu != gpu))
+	return false;
+
+      if((dst_kind != MemoryImpl::MKIND_SYSMEM) && (dst_kind != MemoryImpl::MKIND_ZEROCOPY))
+	return false;
+
+      return true;
+    }
+
+    MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
+    {
+      return new GPUfromFBMemPairCopier(gpu, dst_mem);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUDMAChannel_D2D
+
+    GPUDMAChannel_D2D::GPUDMAChannel_D2D(GPUProcessor *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_d2d (" << _gpu->me << ")")
+      , gpu(_gpu)
+    {}
+
+    bool GPUDMAChannel_D2D::can_perform_copy(Memory src_mem, Memory dst_mem,
+					     ReductionOpID redop_id, bool fold)
+    {
+      // copies entirely within our fb, no reduction support
+      // copies from sysmem/zerocopy to _our_ fb, no reduction support
+
+      if(redop_id != 0)
+	return false;
+
+      if(src_mem != dst_mem)
+	return false;  // they can't both be our FB
+
+      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+
+      MemoryImpl::MemoryKind src_kind = src_impl->kind;
+
+      if((src_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)src_impl)->gpu != gpu))
+	return false;
+
+      return true;
+    }
+
+    MemPairCopier *GPUDMAChannel_D2D::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
+    {
+      return new GPUinFBMemPairCopier(gpu);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUDMAChannel_P2P
+
+    GPUDMAChannel_P2P::GPUDMAChannel_P2P(GPUProcessor *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_p2p (" << _gpu->me << ")")
+      , gpu(_gpu)
+    {}
+
+    bool GPUDMAChannel_P2P::can_perform_copy(Memory src_mem, Memory dst_mem,
+					     ReductionOpID redop_id, bool fold)
+    {
+      // copies from _our_ fb to somebody else's fb, no reduction support
+
+      if(redop_id != 0)
+	return false;
+
+      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+
+      MemoryImpl::MemoryKind src_kind = src_impl->kind;
+      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+      if((src_kind != MemoryImpl::MKIND_GPUFB) || (dst_kind != MemoryImpl::MKIND_GPUFB))
+	return false;
+
+      GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
+      GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+
+      if((src_gpu != gpu) || (dst_gpu == gpu))
+	return false;
+
+      // last check - make sure peer-to-peer copies are allowed between these two gpus
+      if(!src_gpu->can_access_peer(dst_gpu)) {
+	log_gpu.warning() << "p2p copy not allowed between " << src_gpu->me << " and " << dst_gpu->me;
+	return false;
+      }
+
+      return true;
+    }
+
+    MemPairCopier *GPUDMAChannel_P2P::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
+    {
+      // TODO: remove this - the p2p copier doesn't actually need it
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+      GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+
+      return new GPUPeerMemPairCopier(gpu, dst_gpu);
+    }
+
+
+    void GPUProcessor::create_dma_channels(Realm::RuntimeImpl *r)
+    {
+      r->add_dma_channel(new GPUDMAChannel_H2D(this));
+      r->add_dma_channel(new GPUDMAChannel_D2H(this));
+      r->add_dma_channel(new GPUDMAChannel_D2D(this));
+      r->add_dma_channel(new GPUDMAChannel_P2P(this));
+    }
 
 
   ////////////////////////////////////////////////////////////////////////
