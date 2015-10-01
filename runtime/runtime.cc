@@ -4681,7 +4681,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::launch(int priority)
+    Event GarbageCollectionEpoch::launch(int priority)
     //--------------------------------------------------------------------------
     {
       // Set remaining to the total number of collections
@@ -4689,6 +4689,7 @@ namespace LegionRuntime {
       GarbageCollectionArgs args;
       args.hlr_id = HLR_DEFERRED_COLLECT_ID;
       args.epoch = this;
+      std::set<Event> events;
       for (std::map<LogicalView*,std::set<Event> >::const_iterator it =
             collections.begin(); it != collections.end(); /*nothing*/)
       {
@@ -4698,12 +4699,14 @@ namespace LegionRuntime {
         // before launching the task
         it++;
         bool done = (it == collections.end());
-        runtime->issue_runtime_meta_task(&args, sizeof(args), 
+        Event e = runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                          HLR_DEFERRED_COLLECT_ID, NULL,
                                          precondition, priority);
+        events.insert(e);
         if (done)
           break;
       }
+      return Event::merge_events(events);
     }
 
     //--------------------------------------------------------------------------
@@ -4800,62 +4803,6 @@ namespace LegionRuntime {
         std::set<Processor> all_locals(local_procs.begin(), local_procs.end());
         all_locals.insert(local_utils.begin(), local_utils.end());
         LegionLogging::initialize_legion_logging(unique, all_locals);
-      }
-#endif
-#ifdef OLD_LEGION_PROF
-      {
-        LegionProf::init_timestamp();
-        // See if we should disable profiling on this node
-        if (Runtime::num_profiling_nodes == 0)
-          LegionProf::disable_profiling();
-        else if (Runtime::num_profiling_nodes > 0)
-        {
-          unsigned address_space_idx = 0;
-          for (std::set<AddressSpaceID>::const_iterator it = 
-                address_spaces.begin(); it != address_spaces.end(); it++)
-          {
-            if (address_space == (*it))
-              break;
-            address_space_idx++;
-          }
-          if (address_space_idx >= unsigned(Runtime::num_profiling_nodes))
-            LegionProf::disable_profiling();
-          else
-            LegionProf::enable_profiling();
-        }
-        // If it's less than zero, then they are all enabled by default
-        else
-          LegionProf::enable_profiling();
-        const std::map<Processor::TaskFuncID,TaskVariantCollection*>& table =
-          Runtime::get_collection_table();
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator it = table.begin(); it != table.end(); it++)
-        {
-          LegionProf::register_task_variant(it->first, it->second->name);
-        }
-        for (std::set<Processor>::const_iterator it = local_procs.begin();
-              it != local_procs.end(); it++)
-        {
-          Processor::Kind kind = it->kind();
-          assert(kind != Processor::UTIL_PROC);
-          LegionProf::initialize_processor(*it, false/*util*/, kind);
-        }
-        for (std::set<Processor>::const_iterator it = local_utils.begin();
-              it != local_utils.end(); it++)
-        {
-          Processor::Kind kind = it->kind();
-          assert(kind == Processor::UTIL_PROC);
-          LegionProf::initialize_processor(*it, true/*util*/, kind);
-        }
-        // Tell the profiler about all the memories and their kinds
-        std::set<Memory> all_mems;
-	machine.get_all_memories(all_mems);
-        for (std::set<Memory>::const_iterator it = all_mems.begin();
-              it != all_mems.end(); it++)
-        {
-          Memory::Kind kind = it->kind();
-          LegionProf::initialize_memory(*it, kind);
-        } 
       }
 #endif
       // Construct a local utility processor group
@@ -5020,29 +4967,6 @@ namespace LegionRuntime {
         all_procs.insert(local_procs.begin(), local_procs.end());
         all_procs.insert(local_utils.begin(), local_utils.end());
         LegionLogging::finalize_legion_logging(all_procs);
-      }
-#endif
-#ifdef OLD_LEGION_PROF
-      {
-        for (std::set<Processor>::const_iterator it = local_procs.begin();
-              it != local_procs.end(); it++)
-        {
-#ifndef NDEBUG
-          Processor::Kind kind = it->kind();
-#endif
-          assert(kind != Processor::UTIL_PROC);
-          LegionProf::finalize_processor(*it);
-        }
-        for (std::set<Processor>::const_iterator it = local_utils.begin();
-              it != local_utils.end(); it++)
-        {
-#ifndef NDEBUG
-          Processor::Kind kind = it->kind();
-#endif
-          assert(kind == Processor::UTIL_PROC);
-          LegionProf::finalize_processor(*it);
-        }
-        LegionProf::finalize_copy_profiler();
       }
 #endif
       if (profiler != NULL)
@@ -12894,9 +12818,6 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, BEGIN_SCHEDULING);
 #endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0/*unique id*/, PROF_BEGIN_SCHEDULER);
-#endif
       log_run.debug("Running scheduler on processor " IDFMT "", proc.id);
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
@@ -12909,9 +12830,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, END_SCHEDULING);
-#endif
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0/*unique id*/, PROF_END_SCHEDULER);
 #endif
     }
 
@@ -12930,17 +12848,11 @@ namespace LegionRuntime {
     void Runtime::process_message_task(const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_BEGIN_MESSAGE);
-#endif
       const char *buffer = (const char*)args;
       AddressSpaceID sender = *((const AddressSpaceID*)buffer);
       buffer += sizeof(sender);
       arglen -= sizeof(sender);
       find_messenger(sender)->process_message(buffer,arglen);
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_END_MESSAGE);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13824,8 +13736,10 @@ namespace LegionRuntime {
       {
         it->second->notify_pending_shutdown();
       }
-      // Launch our last garbage collection epoch
-      current_gc_epoch->launch(0/*priority*/);
+      // Launch our last garbage collection epoch and wait for it to
+      // finish so that we know all messages have been enqueued
+      Event gc_done = current_gc_epoch->launch(0/*priority*/);
+      gc_done.wait();
       // Make sure any messages that we have sent anywhere are handled
       std::set<Event> shutdown_preconditions;
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)

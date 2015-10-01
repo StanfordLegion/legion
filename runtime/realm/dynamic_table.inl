@@ -30,6 +30,10 @@ namespace Realm {
     : level(_level), first_index(_first_index), last_index(_last_index)
   {}
 
+  template <typename LT, typename IT>
+  DynamicTableNodeBase<LT, IT>::~DynamicTableNodeBase(void)
+  {}
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -39,6 +43,10 @@ namespace Realm {
   template <typename ET, size_t _SIZE, typename LT, typename IT>
   DynamicTableNode<ET, _SIZE, LT, IT>::DynamicTableNode(int _level, IT _first_index, IT _last_index)
     : DynamicTableNodeBase<LT, IT>(_level, _first_index, _last_index)
+  {}
+
+  template <typename ET, size_t _SIZE, typename LT, typename IT>
+  DynamicTableNode<ET, _SIZE, LT, IT>::~DynamicTableNode(void)
   {}
 
 
@@ -54,7 +62,9 @@ namespace Realm {
 
   template <typename ALLOCATOR>
   DynamicTable<ALLOCATOR>::~DynamicTable(void)
-  {}
+  {
+    delete root;
+  }
 
   template <typename ALLOCATOR>
   typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)

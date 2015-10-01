@@ -18,6 +18,7 @@
 #include "proc_impl.h"
 #include "runtime_impl.h"
 #include "logging.h"
+#include "threads.h"
 
 #ifdef USE_CUDA
 GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
@@ -61,6 +62,51 @@ namespace Realm {
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
+  class EventTriggeredCondition {
+  public:
+    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen);
+
+    class Callback : public EventWaiter {
+    public:
+      virtual ~Callback(void);
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+      virtual void operator()(void) = 0;
+    };
+
+    void add_callback(Callback& cb) const;
+
+  protected:
+    EventImpl *event;
+    Event::gen_t gen;
+  };
+
+  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen)
+    : event(_event), gen(_gen)
+  {}
+
+  void EventTriggeredCondition::add_callback(Callback& cb) const
+  {
+    event->add_waiter(gen, &cb);
+  }
+
+  EventTriggeredCondition::Callback::~Callback(void)
+  {
+  }
+  
+  bool EventTriggeredCondition::Callback::event_triggered(void)
+  {
+    // call through to the actual callback
+    (*this)();
+    // we don't manage the memory any more
+    return false;
+  }
+
+  void EventTriggeredCondition::Callback::print_info(FILE *f)
+  {
+    fprintf(f, "EventTriggeredCondition (thread unknown)");
+  }  
+
   void Event::wait(void) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -73,41 +119,14 @@ namespace Realm {
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
 
-    // are we a thread that knows how to do something useful while waiting?
-    if(PreemptableThread::preemptable_sleep(*this))
+    Thread *thread = Thread::self();
+    if(thread) {
+      // describe the condition we want the thread to wait on
+      thread->wait_for_condition(EventTriggeredCondition(e, gen));
       return;
+    }
 
-    // maybe a GPU thread?
-#ifdef USE_CUDA
-    void *ptr = gasnett_threadkey_get(gpu_thread_ptr);
-    if(ptr != 0) {
-      //assert(0);
-      //printf("oh, good - we're a gpu thread - we'll spin for now\n");
-      //printf("waiting for " IDFMT "/%d\n", id, gen);
-      while(!e->has_triggered(gen)) {
-#ifdef __SSE2__
-	_mm_pause();
-#else
-	usleep(1000);
-#endif
-      }
-      //printf("done\n");
-      return;
-    }
-#endif
-    // we're probably screwed here - try waiting and polling gasnet while
-    //  we wait
-    //printf("waiting on event, polling gasnet to hopefully not die\n");
-    while(!e->has_triggered(gen)) {
-      // can't poll here - the GPU DMA code sometimes polls from inside an active
-      //  message handler (consider turning polling back on once that's fixed)
-      //do_some_polling();
-#ifdef __SSE2__
-      _mm_pause();
-#endif
-      // no sleep - we don't want an OS-scheduler-latency here
-      //usleep(10000);
-    }
+    assert(0); // if we're not a Thread, we have a problem
     return;
     //assert(ptr != 0);
   }

@@ -3718,6 +3718,12 @@ namespace LegionRuntime {
       // children are disjoint
       IndexSpaceNode *sp_one = get_node(parent);
       IndexSpaceNode *sp_two = get_node(child);
+      if (sp_two->depth < sp_one->depth)
+      {
+        path.clear();
+        if (compute_index_path(child, parent, path))
+          return false;
+      }
       // Bring them up to the same minimum depth
       unsigned depth = sp_one->depth;
       if (sp_two->depth < depth)
@@ -3776,6 +3782,19 @@ namespace LegionRuntime {
       // Now check for a common ancestor and see if the
       // children are disjoint
       IndexSpaceNode *sp_one = get_node(parent);
+      if (part_node->depth < sp_one->depth)
+      {
+        path.clear();
+        if (compute_index_path(part_node->parent->handle, parent, path))
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(path.size() > 2);
+#endif
+          path.pop_back();
+          if (path.back() == part_node->color)
+            return false;
+        }
+      }
       IndexSpaceNode *sp_two = part_node->parent;
       // Bring them up to the same minimum depth
       unsigned depth = sp_one->depth;
@@ -9030,16 +9049,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
-#ifdef OLD_LEGION_PROF
-          if (!use_event.exists())
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = field_size;
-            LegionProf::register_instance_creation(inst.id,
-                location.id, 0/*redop*/, blocking_factor,
-                inst_fields);
-          }
-#endif
         }
       }
       else
@@ -9084,24 +9093,6 @@ namespace LegionRuntime {
                                        use_event, depth);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-          if (!use_event.exists())
-          {
-            std::map<unsigned,size_t> inst_fields;
-            for (std::set<FieldID>::const_iterator it = 
-                  create_fields.begin(); it != create_fields.end(); it++)
-            {
-              std::map<FieldID,FieldInfo>::const_iterator finder = 
-                fields.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
-              assert(finder != fields.end());
-#endif
-              inst_fields[*it] = finder->second.field_size;
-            }
-            LegionProf::register_instance_creation(inst.id, location.id,
-                                0/*redop*/, blocking_factor, inst_fields);
-          }
 #endif
         }
       }
@@ -9162,14 +9153,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
 #endif
-#ifdef OLD_LEGION_PROF
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = reduction_op->sizeof_rhs;
-            LegionProf::register_instance_creation(inst.id, location.id,
-                redop, 1/*blocking factor*/, inst_fields);
-          }
-#endif
         }
       }
       else
@@ -9199,14 +9182,6 @@ namespace LegionRuntime {
                                             reduction_op, ready_event);
 #ifdef DEBUG_HIGH_LEVEL
           assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-          {
-            std::map<FieldID,size_t> inst_fields;
-            inst_fields[fid] = reduction_op->sizeof_rhs;
-            LegionProf::register_instance_creation(inst.id, location.id,
-                redop, 0/*blocking factor*/, inst_fields);
-          }
 #endif
         }
       }
@@ -9250,23 +9225,6 @@ namespace LegionRuntime {
                                          InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
-#endif
-#ifdef OLD_LEGION_PROF
-      {
-        std::map<FieldID,size_t> inst_fields;
-        for (std::set<FieldID>::const_iterator it =
-            create_fields.begin(); it != create_fields.end(); it++)
-        {
-          std::map<FieldID,FieldInfo>::const_iterator finder =
-            fields.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != fields.end());
-#endif
-          inst_fields[*it] = finder->second.field_size;
-        }
-        LegionProf::register_instance_creation(inst.id, location.id,
-            0, blocking_factor, inst_fields);
-      }
 #endif
       return result;
     }
@@ -17474,9 +17432,6 @@ namespace LegionRuntime {
       // Detach any instance views from this node down
       PhysicalDetacher detacher(ctx, detach_mask, detach_target);
       visit_node(&detacher);
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_instance_deletion(detach_target->get_instance().id);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -19968,9 +19923,6 @@ namespace LegionRuntime {
           log_garbage.debug("Garbage collecting physical instance " IDFMT
                                 " in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
-#ifdef OLD_LEGION_PROF
-          LegionProf::register_instance_deletion(instance.id);
-#endif
 #ifndef DISABLE_GC
           instance.destroy(use_event);
 #endif
@@ -20427,9 +20379,6 @@ namespace LegionRuntime {
         log_garbage.debug("Garbage collecting reduction instance " IDFMT
                                 " in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
-#ifdef OLD_LEGION_PROF
-        LegionProf::register_instance_deletion(instance.id);
-#endif
 #ifndef DISABLE_GC
         instance.destroy();
 #endif
@@ -20970,9 +20919,6 @@ namespace LegionRuntime {
                                              const std::set<Event> &term_events)
     //--------------------------------------------------------------------------
     {
- #ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_BEGIN_GC);
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,
@@ -20999,9 +20945,6 @@ namespace LegionRuntime {
             legion_delete(inst_view->as_materialized_view());
         }
       }
-#ifdef OLD_LEGION_PROF
-      LegionProf::register_event(0, PROF_END_GC);
-#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,

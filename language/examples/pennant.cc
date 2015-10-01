@@ -964,7 +964,7 @@ void generate_mesh_raw(
 /// Mapper
 ///
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+static LegionRuntime::Logger::Category log_pennant("pennant");
 
 class PennantMapper : public DefaultMapper
 {
@@ -1151,7 +1151,7 @@ bool PennantMapper::map_inline(Inline *inline_operation)
   req.target_ranking.push_back(local_sysmem);
   // req.target_ranking.push_back(local_regmem);
 
-  log_mapper.debug(
+  log_pennant.debug(
     "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
     req.region.get_index_space().get_id(),
     req.region.get_field_space().get_id(),
@@ -1167,12 +1167,12 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
   switch (mappable->get_mappable_kind()) {
   case Mappable::TASK_MAPPABLE:
     {
-      log_mapper.warning("mapping failed on task");
+      log_pennant.warning("mapping failed on task");
       break;
     }
   case Mappable::COPY_MAPPABLE:
     {
-      log_mapper.warning("mapping failed on copy");
+      log_pennant.warning("mapping failed on copy");
       break;
     }
   case Mappable::INLINE_MAPPABLE:
@@ -1180,7 +1180,7 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
       Inline *_inline = mappable->as_mappable_inline();
       RegionRequirement &req = _inline->requirement;
       LogicalRegion region = req.region;
-      log_mapper.warning(
+      log_pennant.warning(
         "mapping %s on inline region (%d,%d,%d) memory %d",
         (req.mapping_failed ? "failed" : "succeeded"),
         region.get_index_space().get_id(),
@@ -1191,12 +1191,12 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
     }
   case Mappable::ACQUIRE_MAPPABLE:
     {
-      log_mapper.warning("mapping failed on acquire");
+      log_pennant.warning("mapping failed on acquire");
       break;
     }
   case Mappable::RELEASE_MAPPABLE:
     {
-      log_mapper.warning("mapping failed on release");
+      log_pennant.warning("mapping failed on release");
       break;
     }
   }

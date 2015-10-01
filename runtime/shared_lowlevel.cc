@@ -17,9 +17,6 @@
 #include "lowlevel.h"
 #include "accessor.h"
 #include "legion_logging.h"
-#ifdef OLD_LEGION_PROF
-#include "legion_utilities.h"
-#endif
 #include "realm/profiling.h"
 #include "realm/timers.h"
 
@@ -2137,7 +2134,10 @@ namespace LegionRuntime {
             task->usage.proc = proc;
           func(task->args, task->arglen, proc);
           if (task->capture_timeline)
+	  {
             task->timeline.record_end_time();
+	    task->timeline.record_complete_time();
+	  }
         } else {
           process_kill();
         }
@@ -5814,10 +5814,6 @@ namespace LegionRuntime {
                                     Processor::NO_PROC,
                                     done_event->get_event(), COPY_BEGIN);
 #endif
-#ifdef OLD_LEGION_PROF
-      HighLevel::LegionProf::register_copy_event(
-            done_event->get_event().id, LegionRuntime::HighLevel::PROF_BEGIN_COPY);
-#endif
       // A little bit of a hack for the shared lowlevel profiling
       if (capture_usage && !srcs.empty() && !dsts.empty()) {
         usage.source = srcs[0].inst.get_location();
@@ -5869,10 +5865,6 @@ namespace LegionRuntime {
       LegionRuntime::HighLevel::LegionLogging::log_timing_event(
                                       Processor::NO_PROC,
                                       done_event->get_event(), COPY_END);
-#endif
-#ifdef OLD_LEGION_PROF
-      HighLevel::LegionProf::register_copy_event(
-            done_event->get_event().id, LegionRuntime::HighLevel::PROF_END_COPY);
 #endif
       // Trigger the event indicating that we are done
       done_event->trigger();
@@ -6161,9 +6153,6 @@ namespace LegionRuntime {
 
     void DMAQueue::start(void)
     {
-#ifdef OLD_LEGION_PROF
-      pthread_key_create(&HighLevel::LegionProf::copy_profiler_key, 0);
-#endif
       pthread_attr_t attr;
       PTHREAD_SAFE_CALL(pthread_attr_init(&attr));
       for (unsigned idx = 0; idx < num_dma_threads; idx++)
@@ -6221,7 +6210,10 @@ namespace LegionRuntime {
             op->timeline.record_start_time();
           op->perform();
           if (op->capture_timeline)
+	  {
             op->timeline.record_end_time();
+	    op->timeline.record_complete_time();
+	  }
           delete op;
         }
       }
@@ -6244,8 +6236,11 @@ namespace LegionRuntime {
         if (op->capture_timeline)
           op->timeline.record_start_time();
         op->perform();
-        if (op->capture_timeline)
+        if (op->capture_timeline) 
+	{
           op->timeline.record_end_time();
+	  op->timeline.record_complete_time();
+	}
         delete op;
       }
     }

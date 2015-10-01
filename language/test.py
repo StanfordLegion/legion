@@ -25,9 +25,10 @@ class TestFailure(Exception):
         self.command = command
         self.output = output
 
-def run(filename, verbose, flags):
-    args = [os.path.basename(filename)] + flags + (
-        [] if verbose else ['-level', '5'])
+def run(filename, debug, verbose, flags):
+    args = ((['-mg'] if debug else []) +
+            [os.path.basename(filename)] + flags +
+            ([] if verbose else ['-level', '5']))
     proc = regent.regent(
         args,
         stdout = None if verbose else subprocess.PIPE,
@@ -36,7 +37,7 @@ def run(filename, verbose, flags):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(args), str(output))
+        raise TestFailure(' '.join(args), output.decode('utf-8'))
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_prefix(filename, label):
@@ -50,13 +51,13 @@ def find_labeled_prefix(filename, label):
     match_text = '\n'.join([line.strip()[2:].strip() for line in match_lines])
     return match_text
 
-def test_compile_fail(filename, verbose, flags):
+def test_compile_fail(filename, debug, verbose, flags):
     expected_failure = find_labeled_prefix(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
 
     try:
-        run(filename, False, flags)
+        run(filename, debug, False, flags)
     except TestFailure as e:
         failure = '\n'.join(
             itertools.takewhile(
@@ -70,7 +71,7 @@ def test_compile_fail(filename, verbose, flags):
     else:
         raise Exception('Expected failure, but test passed')
 
-def test_run_pass(filename, verbose, flags):
+def test_run_pass(filename, debug, verbose, flags):
     runs_with = [[]]
     runs_with_text = find_labeled_prefix(filename, 'runs-with')
     if runs_with_text is not None:
@@ -78,7 +79,7 @@ def test_run_pass(filename, verbose, flags):
 
     try:
         for params in runs_with:
-            run(filename, verbose, flags + params)
+            run(filename, debug, verbose, flags + params)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -90,11 +91,11 @@ PASS = 'pass'
 FAIL = 'fail'
 INTERRUPT = 'interrupt'
 
-def test_runner(test_name, test_closure, verbose, filename):
+def test_runner(test_name, test_closure, debug, verbose, filename):
     test_fn, test_args = test_closure
     saved_temps = []
     try:
-        test_fn(filename, verbose, *test_args)
+        test_fn(filename, debug, verbose, *test_args)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, None
     # except driver.CompilerException as e:
@@ -123,7 +124,7 @@ tests = [
      )),
 ]
 
-def run_all_tests(thread_count, verbose):
+def run_all_tests(thread_count, debug, verbose):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
@@ -144,7 +145,7 @@ def run_all_tests(thread_count, verbose):
                     ())
 
         for test_path in test_paths:
-            results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, verbose, test_path)))
+            results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
 
     thread_pool.close()
 
@@ -216,6 +217,10 @@ def test_driver(argv):
                         type = int,
                         help = 'number threads used to compile',
                         dest = 'thread_count')
+    parser.add_argument('--debug', '-g',
+                        action = 'store_true',
+                        help = 'enable debug mode',
+                        dest = 'debug')
     parser.add_argument('-v',
                         action = 'store_true',
                         help = 'display verbose output',
@@ -224,6 +229,7 @@ def test_driver(argv):
 
     run_all_tests(
         args.thread_count,
+        args.debug,
         args.verbose)
 
 if __name__ == '__main__':

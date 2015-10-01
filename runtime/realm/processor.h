@@ -72,8 +72,8 @@ namespace Realm {
       enum {
         // Save ID 0 for the force shutdown function
 	TASK_ID_REQUEST_SHUTDOWN   = 0,
-	TASK_ID_PROCESSOR_INIT     = 1, // only called by utility processors
-	TASK_ID_PROCESSOR_SHUTDOWN = 2, // only called by utility processors
+	TASK_ID_PROCESSOR_INIT     = 1,
+	TASK_ID_PROCESSOR_SHUTDOWN = 2,
 	TASK_ID_FIRST_AVAILABLE    = 4,
       };
 
@@ -92,9 +92,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "serialize.h"
-TYPE_IS_SERIALIZABLE(Realm::Processor);
-//include "processor.inl"
+#include "processor.inl"
 
 #endif // ifndef REALM_PROCESSOR_H
 

@@ -19,6 +19,10 @@
 #include "lowlevel_impl.h"
 #include "activemsg.h"
 
+namespace Realm {
+  class CoreReservationSet;
+};
+
 namespace LegionRuntime {
   namespace LowLevel {
     struct RemoteCopyArgs : public BaseMedium {
@@ -54,7 +58,7 @@ namespace LegionRuntime {
 
     extern void init_dma_handler(void);
 
-    extern void start_dma_worker_threads(int count);
+    extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
     /*
