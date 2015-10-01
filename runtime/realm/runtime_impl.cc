@@ -753,9 +753,6 @@ namespace Realm {
 #endif
 
 #ifdef USE_CUDA
-      // Keep track of the local system memories so we can pin them
-      // after we've initialized the GPU
-      std::vector<LocalCPUMemory*> local_mems;
       // Figure out which GPUs support peer access (if any)
       // and prioritize them so they are used first
       std::vector<int> peer_gpus;
@@ -816,9 +813,6 @@ namespace Realm {
 				       n->memories.size(), 0).convert<Memory>(),
 				    cpu_mem_size_in_mb << 20);
 	n->memories.push_back(cpumem);
-#ifdef USE_CUDA
-        local_mems.push_back(cpumem);
-#endif
       } else
 	cpumem = 0;
 #endif
@@ -836,9 +830,6 @@ namespace Realm {
 				    regmem_base,
 				    true);
 	n->memories.push_back(regmem);
-#ifdef USE_CUDA
-        local_mems.push_back(regmem);
-#endif
       } else
 	regmem = 0;
 
@@ -910,9 +901,16 @@ namespace Realm {
 	  gpu_zcmems[gp] = zcm;
 	}
         // Now pin any CPU memories
-        if(pin_sysmem_for_gpu)
-          for (unsigned idx = 0; idx < local_mems.size(); idx++)
-            local_mems[idx]->pin_memory(local_gpus[0]);
+        if(pin_sysmem_for_gpu) {
+	  for(std::vector<MemoryImpl *>::iterator it = n->memories.begin();
+	      it != n->memories.end();
+	      it++)
+	    if((*it)->kind == MemoryImpl::MKIND_SYSMEM) {
+	      LocalCPUMemory *m = (LocalCPUMemory *)(*it);
+	      // TODO: should this really only be the first GPU!?
+	      m->pin_memory(local_gpus[0]);
+	    }
+	}
 
         // Register peer access for any GPUs which support it
         if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
