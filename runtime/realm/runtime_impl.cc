@@ -38,7 +38,7 @@ namespace Realm {
 };
 
 #ifdef USE_CUDA
-#include "lowlevel_gpu.h"
+#include "realm/cuda/cuda_module.h"
 namespace Realm {
   typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
   typedef LegionRuntime::LowLevel::GPUFBMemory GPUFBMemory;

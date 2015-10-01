@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "lowlevel_gpu.h"
+#include "cuda_module.h"
 
 #include "realm/tasks.h"
 

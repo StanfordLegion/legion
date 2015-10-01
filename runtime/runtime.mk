@@ -259,7 +259,7 @@ ASM_SRC		?=
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc
 ifeq ($(strip $(USE_CUDA)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_gpu.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc
 endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
