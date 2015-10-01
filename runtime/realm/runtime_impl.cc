@@ -922,7 +922,7 @@ namespace Realm {
 	    if((*it)->kind == MemoryImpl::MKIND_SYSMEM) {
 	      LocalCPUMemory *m = (LocalCPUMemory *)(*it);
 	      // TODO: should this really only be the first GPU!?
-	      m->pin_memory(local_gpus[0]);
+	      local_gpus[0]->register_host_memory(m);
 	    }
 	}
 

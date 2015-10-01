@@ -360,10 +360,6 @@ namespace LegionRuntime {
 
       oas_by_inst = new OASByInst;
 
-#ifdef USE_CUDA
-      int priority = 0;
-#endif
-
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
@@ -371,7 +367,6 @@ namespace LegionRuntime {
 	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
 
-#ifdef USE_CUDA
         // If either one of the instances is in GPU memory increase priority
         if (priority == 0)
         {
@@ -385,7 +380,6 @@ namespace LegionRuntime {
               priority = 1;
           }
         }
-#endif
 
 	OASVec& oasvec = (*oas_by_inst)[ip];
 
@@ -1947,12 +1941,10 @@ namespace LegionRuntime {
           return new DisktoCPUMemPairCopier(fd, dst_mem);
         }
 
-#ifdef USE_CUDA
-	// all of these should be handled by module-provided dma channels now
+	// GPU FB-related copies should be handled by module-provided dma channels now
 	if((src_kind == MemoryImpl::MKIND_GPUFB) || (dst_kind == MemoryImpl::MKIND_GPUFB)) {
 	  assert(0);
 	}
-#endif
 
 	// try as many things as we can think of
 	if((dst_kind == MemoryImpl::MKIND_REMOTE) ||
@@ -3830,12 +3822,10 @@ namespace Realm {
 #endif
 
 	  int priority = 0;
-#ifdef USE_CUDA
 	  if (get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GPUFB)
 	    priority = 1;
 	  else if (get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GPUFB)
 	    priority = 1;
-#endif
 
 	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
 					   wait_on, ev, priority, requests);

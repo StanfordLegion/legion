@@ -21,10 +21,6 @@
 #include "inst_impl.h"
 #include "runtime_impl.h"
 
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-#endif
-
 namespace Realm {
 
   Logger log_malloc("malloc");
@@ -477,15 +473,6 @@ namespace Realm {
     if(!prealloced)
       delete[] base_orig;
   }
-
-#ifdef USE_CUDA
-  // For pinning CPU memories for use with asynchronous
-  // GPU copies
-  void LocalCPUMemory::pin_memory(GPUProcessor *proc)
-  {
-    proc->register_host_memory(base, size);
-  }
-#endif
 
   RegionInstance LocalCPUMemory::create_instance(IndexSpace r,
 						 const int *linearization_bits,
@@ -1118,9 +1105,7 @@ namespace Realm {
       }
 
     case MemoryImpl::MKIND_ZEROCOPY:
-#ifdef USE_CUDA
     case MemoryImpl::MKIND_GPUFB:
-#endif
       {
 	impl->put_bytes(args.offset, data, datalen);
 	
@@ -1275,9 +1260,7 @@ namespace Realm {
     switch(impl->kind) {
     case MemoryImpl::MKIND_SYSMEM:
     case MemoryImpl::MKIND_ZEROCOPY:
-#ifdef USE_CUDA
     case MemoryImpl::MKIND_GPUFB:
-#endif
     default:
       assert(0);
 

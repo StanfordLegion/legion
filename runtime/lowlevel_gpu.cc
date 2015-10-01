@@ -26,7 +26,8 @@ GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
 namespace LegionRuntime {
   namespace LowLevel {
 
-    extern Logger::Category log_gpu;
+    Logger::Category log_gpu("gpu");
+
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
 #endif
@@ -1279,8 +1280,12 @@ namespace LegionRuntime {
 						       f));
     }
 
-    void GPUProcessor::register_host_memory(void *base, size_t size)
+    void GPUProcessor::register_host_memory(Realm::MemoryImpl *m)
     {
+      size_t size = m->size;
+      void *base = m->get_direct_ptr(0, size);
+      assert(base != 0);
+
       if (true /*SJT: why this? !shutdown*/)
       {
         CHECK_CU( cuCtxPushCurrent(proc_ctx) );

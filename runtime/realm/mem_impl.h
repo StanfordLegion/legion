@@ -28,17 +28,6 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
-#ifdef USE_CUDA
-namespace LegionRuntime {
-  namespace LowLevel {
-    class GPUProcessor;
-  };
-};
-namespace Realm {
-  typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
-};
-#endif
-
 namespace Realm {
 
   class RegionInstanceImpl;
@@ -50,9 +39,11 @@ namespace Realm {
 	MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
 	MKIND_RDMA,    // remote, but accessible via RDMA
 	MKIND_REMOTE,  // not accessible
-#ifdef USE_CUDA
+
+	// defined even if USE_CUDA==0
+	// TODO: make kinds more extensible
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
-#endif
+
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
 	MKIND_DISK,    // disk memory accessible by owner node
 #ifdef USE_HDF
@@ -154,12 +145,6 @@ namespace Realm {
 		     void *prealloc_base = 0, bool _registered = false);
 
       virtual ~LocalCPUMemory(void);
-
-#ifdef USE_CUDA
-      // For pinning CPU memories for use with asynchronous
-      // GPU copies
-      void pin_memory(GPUProcessor *proc);
-#endif
 
       virtual RegionInstance create_instance(IndexSpace r,
 					     const int *linearization_bits,

@@ -348,7 +348,7 @@ namespace LegionRuntime {
       void create_dma_channels(Realm::RuntimeImpl *r);
 
     public:
-      void register_host_memory(void *base, size_t size);
+      void register_host_memory(Realm::MemoryImpl *m);
       void enable_peer_access(GPUProcessor *peer);
       void handle_peer_access(CUcontext peer_ctx);
       bool can_access_peer(GPUProcessor *peer) const;
