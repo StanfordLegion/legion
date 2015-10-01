@@ -6975,10 +6975,8 @@ namespace LegionRuntime {
       rez.serialize(remote_parent_ctx);
       parent_ctx->pack_parent_task(rez);
       if (!is_locally_mapped())
-      {
         pack_version_infos(rez, version_infos);
-        pack_restrict_infos(rez, restrict_infos);
-      }
+      pack_restrict_infos(rez, restrict_infos);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -7005,10 +7003,8 @@ namespace LegionRuntime {
                                              remote_parent_ctx);
       remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
-      {
         unpack_version_infos(derez, version_infos);
-        unpack_restrict_infos(derez, restrict_infos);
-      }
+      unpack_restrict_infos(derez, restrict_infos);
       // Add our enclosing parent regions to the list of 
       // top regions maintained by the remote context
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -10135,13 +10131,11 @@ namespace LegionRuntime {
       rez.serialize(remote_parent_ctx);
       parent_ctx->pack_parent_task(rez);
       if (!is_locally_mapped())
-      {
         pack_version_infos(rez, version_infos);
-        if (is_remote())
-          pack_restrict_infos(rez, restrict_infos);
-        else
-          index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
-      }
+      if (is_remote())
+        pack_restrict_infos(rez, restrict_infos);
+      else
+        index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
@@ -10189,10 +10183,8 @@ namespace LegionRuntime {
                                              remote_parent_ctx);
       remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
-      {
         unpack_version_infos(derez, version_infos);
-        unpack_restrict_infos(derez, restrict_infos);
-      }
+      unpack_restrict_infos(derez, restrict_infos);
       // Add our parent regions to the list of top regions
       for (unsigned idx = 0; idx < regions.size(); idx++)
         remote_ctx->add_top_region(regions[idx].parent);
