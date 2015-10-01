@@ -1058,7 +1058,7 @@ namespace Realm {
 #ifdef USE_CUDA
 	// TODO: actually get gpu<->fb affinity right for multiple gpus
 	add_proc_mem_affinity(procs_by_kind[Processor::TOC_PROC],
-			      mems_by_kind[Memory::FB_MEM],
+			      mems_by_kind[Memory::GPU_FB_MEM],
 			      200, // "big" bandwidth
 			      5,   // "ok" latency
 			      adata, apos);
