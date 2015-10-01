@@ -16,13 +16,19 @@
 #ifndef LOWLEVEL_GPU_H
 #define LOWLEVEL_GPU_H
 
-#include "lowlevel_impl.h"
-#include "cuda.h"
+#include <cuda.h>
+
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
-#include "cuda_runtime.h"
+#include <cuda_runtime.h>
+
+#include "realm/operation.h"
+#include "realm/module.h"
 #include "realm/threads.h"
 #include "realm/circ_queue.h"
+#include "realm/indexspace.h"
+#include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -57,8 +63,38 @@
 } while(0)
 #endif
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
+  namespace Cuda {
+
+    // our interface to the rest of the runtime
+    class CudaModule : public Module {
+    protected:
+      CudaModule(void);
+      
+    public:
+      virtual ~CudaModule(void);
+
+      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+
+      // create any memories provided by this module (default == do nothing)
+      //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
+      virtual void create_memories(RuntimeImpl *runtime);
+
+      // create any processors provided by the module (default == do nothing)
+      //  (each new ProcessorImpl should use a Processor from
+      //   RuntimeImpl::next_local_processor_id)
+      virtual void create_processors(RuntimeImpl *runtime);
+
+      // create any DMA channels provided by the module (default == do nothing)
+      virtual void create_dma_channels(RuntimeImpl *runtime);
+
+      // create any code translators provided by the module (default == do nothing)
+      virtual void create_code_translators(RuntimeImpl *runtime);
+
+      // clean up any common resources created by the module - this will be called
+      //  after all memories/processors/etc. have been shut down and destroyed
+      virtual void cleanup(void);
+    };
 
     enum GPUMemcpyKind {
       GPU_MEMCPY_HOST_TO_DEVICE,
@@ -420,7 +456,7 @@ namespace LegionRuntime {
       cudaError_t internal_setup_argument(const void *arg, size_t size, size_t offset);
       cudaError_t internal_launch(const void *func);
       cudaError_t internal_gpu_memcpy(void *dst, const void *src, size_t size, bool sync);
-      cudaError_t internal_gpu_memcpy_to_symbol(void *dst, const void *src, size_t size,
+      cudaError_t internal_gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
                                        size_t offset, cudaMemcpyKind kind, bool sync);
       cudaError_t internal_gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
                                          size_t offset, cudaMemcpyKind kind, bool sync);
@@ -516,7 +552,7 @@ namespace LegionRuntime {
       static cudaError_t gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
       static cudaError_t gpu_memcpy_async(void *dst, const void *src, size_t size,
                                       cudaMemcpyKind kind, cudaStream_t stream);
-      static cudaError_t gpu_memcpy_to_symbol(void *dst, const void *src, size_t size,
+      static cudaError_t gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
                                               size_t offset, cudaMemcpyKind kind, bool sync);
       static cudaError_t gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
                                                 size_t offset, cudaMemcpyKind kind, bool sync);

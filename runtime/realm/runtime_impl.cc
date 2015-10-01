@@ -39,12 +39,6 @@ namespace Realm {
 
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
-namespace Realm {
-  typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
-  typedef LegionRuntime::LowLevel::GPUFBMemory GPUFBMemory;
-  typedef LegionRuntime::LowLevel::GPUZCMemory GPUZCMemory;
-  typedef LegionRuntime::LowLevel::GPUWorker GPUWorker;
-};
 #endif
 
 #include <unistd.h>
@@ -281,9 +275,9 @@ namespace Realm {
 #endif
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
-    static std::vector<GPUProcessor *> local_gpus;
-    static std::map<GPUProcessor *, GPUFBMemory *> gpu_fbmems;
-    static std::map<GPUProcessor *, GPUZCMemory *> gpu_zcmems;
+    static std::vector<Cuda::GPUProcessor *> local_gpus;
+    static std::map<Cuda::GPUProcessor *, Cuda::GPUFBMemory *> gpu_fbmems;
+    static std::map<Cuda::GPUProcessor *, Cuda::GPUZCMemory *> gpu_zcmems;
 #endif
   
     RuntimeImpl::RuntimeImpl(void)
@@ -885,7 +879,7 @@ namespace Realm {
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
 	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p, core_reservations,
+ 	  Cuda::GPUProcessor *gp = new Cuda::GPUProcessor(p, core_reservations,
                                               (i < peer_gpus.size() ?
                                                 peer_gpus[i] : 
                                                 dumb_gpus[i-peer_gpus.size()]), 
@@ -899,7 +893,7 @@ namespace Realm {
 	  Memory m = ID(ID::ID_MEMORY,
 			gasnet_mynode(),
 			n->memories.size(), 0).convert<Memory>();
-	  GPUFBMemory *fbm = new GPUFBMemory(m, gp);
+	  Cuda::GPUFBMemory *fbm = new Cuda::GPUFBMemory(m, gp);
 	  n->memories.push_back(fbm);
 
 	  gpu_fbmems[gp] = fbm;
@@ -907,7 +901,7 @@ namespace Realm {
 	  Memory m2 = ID(ID::ID_MEMORY,
 			 gasnet_mynode(),
 			 n->memories.size(), 0).convert<Memory>();
-	  GPUZCMemory *zcm = new GPUZCMemory(m2, gp);
+	  Cuda::GPUZCMemory *zcm = new Cuda::GPUZCMemory(m2, gp);
 	  n->memories.push_back(zcm);
 
 	  gpu_zcmems[gp] = zcm;

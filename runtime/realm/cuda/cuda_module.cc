@@ -16,22 +16,28 @@
 #include "cuda_module.h"
 
 #include "realm/tasks.h"
+#include "realm/logging.h"
 
 #include "lowlevel_dma.h"
 
 #include <stdio.h>
 
-GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
+namespace Realm {
+  namespace Cuda {
 
-namespace LegionRuntime {
-  namespace LowLevel {
+    // dma code is still in old namespace
+    typedef LegionRuntime::LowLevel::DmaRequest DmaRequest;
+    typedef LegionRuntime::LowLevel::OASVec OASVec;
+    typedef LegionRuntime::LowLevel::InstPairCopier InstPairCopier;
+    typedef LegionRuntime::LowLevel::MemPairCopier MemPairCopier;
+    typedef LegionRuntime::LowLevel::MemPairCopierFactory MemPairCopierFactory;
 
-    Logger::Category log_gpu("gpu");
+    Logger log_gpu("gpu");
 
 #ifdef EVENT_GRAPH_TRACE
-    extern Logger::Category log_event_graph;
+    extern Logger log_event_graph;
 #endif
-    Logger::Category log_stream("gpustream");
+    Logger log_stream("gpustream");
 
     class stringbuilder {
     public:
@@ -395,10 +401,10 @@ namespace LegionRuntime {
       virtual ~GPUtoFBMemPairCopier(void) { }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
+					OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
-                                                          dst_inst, oas_vec);
+	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
+											  dst_inst, oas_vec);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
@@ -441,10 +447,10 @@ namespace LegionRuntime {
       virtual ~GPUfromFBMemPairCopier(void) { }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
+					OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
+	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
+											    dst_inst, oas_vec);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
@@ -484,10 +490,10 @@ namespace LegionRuntime {
       virtual ~GPUinFBMemPairCopier(void) { }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
+					OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
+	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
+											  dst_inst, oas_vec);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
@@ -526,10 +532,10 @@ namespace LegionRuntime {
       virtual ~GPUPeerMemPairCopier(void) { }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
+					OASVec &oas_vec)
       {
-        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
-                                                              dst_inst, oas_vec);
+        return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
+											  dst_inst, oas_vec);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
@@ -685,8 +691,8 @@ namespace LegionRuntime {
       return true;
     }
 
-    MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
-						    ReductionOpID redop_id, bool fold)
+    LegionRuntime::LowLevel::MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
+									     ReductionOpID redop_id, bool fold)
     {
       return new GPUfromFBMemPairCopier(gpu, dst_mem);
     }
@@ -2057,7 +2063,7 @@ namespace LegionRuntime {
       return local->internal_gpu_memcpy(dst, src, size, false/*sync*/);
     }
 
-    cudaError_t GPUProcessor::internal_gpu_memcpy_to_symbol(void *dst, const void *src,
+    cudaError_t GPUProcessor::internal_gpu_memcpy_to_symbol(const void *dst, const void *src,
                                                             size_t size, size_t offset,
                                                             cudaMemcpyKind kind, bool sync)
     {
@@ -2072,7 +2078,7 @@ namespace LegionRuntime {
       return cudaSuccess;
     }
 
-    /*static*/ cudaError_t GPUProcessor::gpu_memcpy_to_symbol(void *dst, const void *src,
+    /*static*/ cudaError_t GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
                                                               size_t size, size_t offset,
                                                               cudaMemcpyKind kind, bool sync)
     {
@@ -2213,187 +2219,12 @@ namespace LegionRuntime {
       return cudaSuccess;
     }
 
-  }; // namespace LowLevel
-}; // namespace LegionRuntime
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GPUStream
 
-// Our implementation of the CUDA runtime API for Legion
-// so we can intercept all of these calls
 
-// All these extern C methods are for internal implementations
-// of functions of the cuda runtime API that nvcc assumes
-// exists and can be used for code generation. They are all
-// pretty simple to map to the driver API.
 
-extern "C" void** __cudaRegisterFatBinary(void *fat_bin)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::register_fat_binary(fat_bin);
-}
-
-// this is not really a part of CUDA runtime API but used by the regent compiler
-extern "C" void** __cudaRegisterCudaBinary(void *cubin, size_t cubinSize)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::register_cuda_binary(cubin,
-                                                                     cubinSize);
-}
-
-extern "C" void __cudaUnregisterFatBinary(void **fat_bin)
-{
-  LegionRuntime::LowLevel::GPUProcessor::unregister_fat_binary(fat_bin);
-}
-
-extern "C" void __cudaRegisterVar(void **fat_bin,
-                                  char *host_var,
-                                  char *device_addr,
-                                  const char *device_name,
-                                  int ext, int size, int constant, int global)
-{
-  LegionRuntime::LowLevel::GPUProcessor::register_var(fat_bin, host_var, device_addr,
-                                                      device_name, ext, size, 
-                                                      constant, global);
-}
-
-extern "C" void __cudaRegisterFunction(void **fat_bin,
-                                       const char *host_fun,
-                                       char *device_fun,
-                                       const char *device_name,
-                                       int thread_limit,
-                                       uint3 *tid, uint3 *bid,
-                                       dim3 *bDim, dim3 *gDim,
-                                       int *wSize)
-{
-  LegionRuntime::LowLevel::GPUProcessor::register_function(fat_bin, host_fun,
-                                                           device_fun, device_name,
-                                                           thread_limit, tid, bid,
-                                                           bDim, gDim, wSize);
-}
-
-extern "C" char __cudaInitModule(void **fat_bin)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::init_module(fat_bin);
-}
-
-// All the following methods are cuda runtime API calls that we 
-// intercept and then either execute using the driver API or 
-// modify in ways that are important to Legion.
-
-extern cudaError_t cudaStreamCreate(cudaStream_t *stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::stream_create(stream);
-}
-
-extern cudaError_t cudaStreamDestroy(cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::stream_destroy(stream);
-}
-
-extern cudaError_t cudaStreamSynchronize(cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::stream_synchronize(stream);
-}
-
-extern cudaError_t cudaConfigureCall(dim3 grid_dim,
-                                     dim3 block_dim,
-                                     size_t shared_memory,
-                                     cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::configure_call(grid_dim, block_dim,
-                                                               shared_memory, stream);
-}
-
-extern cudaError_t cudaSetupArgument(const void *arg,
-                                     size_t size,
-                                     size_t offset)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::setup_argument(arg, size, offset);
-}
-
-extern cudaError_t cudaLaunch(const void *func)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::launch(func);
-}
-
-extern cudaError_t cudaMalloc(void **ptr, size_t size)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_malloc(ptr, size);
-}
-
-extern cudaError_t cudaFree(void *ptr)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_free(ptr);
-}
-
-extern cudaError_t cudaMemcpy(void *dst, const void *src, 
-                              size_t size, cudaMemcpyKind kind)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy(dst, src, size, kind);
-}
-
-extern cudaError_t cudaMemcpyAsync(void *dst, const void *src,
-                                   size_t size, cudaMemcpyKind kind,
-                                   cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy_async(dst, src, size, kind, stream);
-}
-
-extern cudaError_t cudaDeviceSynchronize(void)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::device_synchronize();
-}
-
-extern cudaError_t cudaMemcpyToSymbol(void *dst, const void *src,
-                                      size_t size, size_t offset,
-                                      cudaMemcpyKind kind)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy_to_symbol(dst, src, size, 
-                                                      offset, kind, true/*sync*/);
-}
-
-extern cudaError_t cudaMemcpyToSymbol(void *dst, const void *src,
-                                      size_t size, size_t offset,
-                                      cudaMemcpyKind kind, cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy_to_symbol(dst, src, size,
-                                                        offset, kind, false/*sync*/);
-}
-
-extern cudaError_t cudaMemcpyFromSymbol(void *dst, const void *src,
-                                        size_t size, size_t offset,
-                                        cudaMemcpyKind kind)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy_from_symbol(dst, src, size,
-                                                        offset, kind, true/*sync*/);
-}
-
-extern cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const void *src,
-                                             size_t size, size_t offset,
-                                             cudaMemcpyKind kind, cudaStream_t stream)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::gpu_memcpy_from_symbol(dst, src, size,
-                                                        offset, kind, false/*sync*/);
-}
-
-extern cudaError_t cudaDeviceSetSharedMemConfig(cudaSharedMemConfig config)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::set_shared_memory_config(config);
-}
-
-extern const char* cudaGetErrorString(cudaError_t error)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::get_error_string(error);
-}
-
-extern cudaError_t cudaGetDevice(int *device)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::get_device(device);
-}
-
-extern cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int device)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::get_device_properties(prop, device);
-}
-
-extern cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr, const void *func)
-{
-  return LegionRuntime::LowLevel::GPUProcessor::get_func_attributes(attr, func);
-}
+  }; // namespace Cuda
+}; // namespace Realm
 
