@@ -75,6 +75,7 @@ namespace LegionRuntime {
       {
         assert(offset_idx < oas_vec.size());
         assert(li->any_left());
+        nbytes = 0;
         int src_idx, dst_idx;
         // cannot exceed the max_req_size
         int todo = min(max_req_size / oas_vec[offset_idx].size, li->continuous_steps(src_idx, dst_idx));
@@ -589,7 +590,7 @@ namespace LegionRuntime {
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_mem = _dst_buf.memory;
+          requests[i].dst_node = ID(_dst_buf.memory).node();
           available_reqs.push(&requests[i]);
         }
       }
@@ -615,6 +616,7 @@ namespace LegionRuntime {
               dst_start = dst_start % dst_buf.buf_size;
               req_size = umin(req_size, dst_buf.buf_size - dst_start);
             }
+            assert(!available_reqs.empty());
             requests[idx] = available_reqs.front();
             available_reqs.pop();
             requests[idx]->is_read_done = false;
@@ -622,7 +624,6 @@ namespace LegionRuntime {
             RemoteWriteRequest* req = (RemoteWriteRequest*) requests[idx];
             req->src_buf = (char*)(src_buf_base + src_start);
             // dst_offset count from the beginning of registered memory
-            req->dst_offset = dst_buf.alloc_offset + dst_start;
             req->dst_buf = (char*)(dst_buf_base + dst_start);
             req->nbytes = req_size;
             src_start += req_size; // here we don't have to mod src_buf.buf_size since it will be performed in next loop
@@ -1437,7 +1438,7 @@ namespace LegionRuntime {
         assert(nr <= capacity);
         for (int i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-          XferDesRemoteWriteMessage::send_request(ID(req->dst_mem).node(), req->dst_buf, req->src_buf, req->nbytes, req);
+          XferDesRemoteWriteMessage::send_request(req->dst_node, req->dst_buf, req->src_buf, req->nbytes, req);
           capacity--;
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();

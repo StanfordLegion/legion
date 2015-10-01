@@ -210,11 +210,9 @@ namespace LegionRuntime{
 
     class RemoteWriteRequest : public Request {
     public:
-      Memory dst_mem;
+      gasnet_node_t dst_node;
       char *src_buf, *dst_buf;
-      off_t dst_offset;
       size_t nbytes;
-      Event complete_event;
     };
 
 #ifdef USE_CUDA
@@ -345,7 +343,7 @@ namespace LegionRuntime{
       // xd_lock is designed to provide thread-safety for
       // SIMULTANEOUS invocation to get_requests,
       // notify_request_read_done, and notify_request_write_done
-      pthread_mutex_t xd_lock;
+      pthread_mutex_t xd_lock, update_read_lock, update_write_lock;
     public:
       XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
@@ -361,10 +359,14 @@ namespace LegionRuntime{
           kind (_kind), order(_order), channel(NULL), complete_fence(_complete_fence)
       {
         pthread_mutex_init(&xd_lock, NULL);
+        pthread_mutex_init(&update_read_lock, NULL);
+        pthread_mutex_init(&update_write_lock, NULL);
       }
 
       virtual ~XferDes() {
         pthread_mutex_destroy(&xd_lock);
+        pthread_mutex_destroy(&update_read_lock);
+        pthread_mutex_destroy(&update_write_lock);
       };
 
       virtual long get_requests(Request** requests, long nr) = 0;
@@ -441,21 +443,25 @@ namespace LegionRuntime{
       void mark_completed();
 
       void update_pre_bytes_write(size_t new_val) {
+        pthread_mutex_lock(&update_write_lock);
         if (pre_bytes_write < new_val)
           pre_bytes_write = new_val;
         /*uint64_t old_val = pre_bytes_write;
         while (old_val < new_val) {
           pre_bytes_write.compare_exchange_strong(old_val, new_val);
         }*/
+        pthread_mutex_unlock(&update_write_lock);
       }
 
       void update_next_bytes_read(size_t new_val) {
+        pthread_mutex_lock(&update_read_lock);
         if (next_bytes_read < new_val)
           next_bytes_read = new_val;
         /*uint64_t old_val = next_bytes_read;
         while (old_val < new_val) {
           next_bytes_read.compare_exchange_strong(old_val, new_val);
         }*/
+        pthread_mutex_unlock(&update_read_lock);
       }
 
       gasnet_node_t find_execution_node() {
@@ -1233,7 +1239,7 @@ namespace LegionRuntime{
         args.req = req;
         args.sender = gasnet_mynode();
         //TODO: need to ask Sean what payload mode we should use
-        Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEPREG, dst_buf);
+        Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
       }
     };
 
@@ -1457,6 +1463,11 @@ namespace LegionRuntime{
         if (execution_node == gasnet_mynode()) {
           pthread_rwlock_rdlock(&guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
+          if (it == guid_to_xd.end()) {
+            // This means this update goes slower than future updates, which marks
+            // completion of xfer des (ID = xd_guid). In this case, it is safe to return
+            return;
+          }
           assert(it != guid_to_xd.end());
           assert(it->second.xd != NULL);
           it->second.xd->update_next_bytes_read(bytes_read);
@@ -1481,7 +1492,6 @@ namespace LegionRuntime{
 
       void destroy_xferDes(XferDesID guid) {
         pthread_rwlock_wrlock(&guid_lock);
-        //printf("destroy xd = %lu\n", guid);
         std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
         assert(it != guid_to_xd.end());
         assert(it->second.xd != NULL);

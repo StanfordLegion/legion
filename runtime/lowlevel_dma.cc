@@ -2771,10 +2771,13 @@ namespace LegionRuntime {
       mark_started();
       std::vector<Memory> mem_path;
       find_shortest_path(src_mem, dst_mem, mem_path);
-      for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
-        path.push_back(get_xdq_singleton()->get_guid(ID(mem_path[idx]).node()));
-      }
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        std::vector<XferDesID> sub_path;
+        for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
+          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).node());
+          sub_path.push_back(new_xdid);
+          path.push_back(new_xdid);
+        }
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
         OASVec oasvec = it->second, oasvec_src, oasvec_dst;
@@ -2791,14 +2794,14 @@ namespace LegionRuntime {
         Buffer src_buf(&src_impl->metadata, src_mem);
         Buffer dst_buf(&dst_impl->metadata, dst_mem);
         Buffer pre_buf;
-        assert(mem_path.size() - 1 == path.size());
+        assert(mem_path.size() - 1 == sub_path.size());
         for (int idx = 0; idx < mem_path.size(); idx ++) {
           if (idx == 0) {
             pre_buf = src_buf;
           } else {
-            XferDesID xd_guid = path[idx - 1];
-            XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : path[idx - 2];
-            XferDesID next_xd_guid = idx == path.size() ? XferDes::XFERDES_NO_GUID : path[idx];
+            XferDesID xd_guid = sub_path[idx - 1];
+            XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : sub_path[idx - 2];
+            XferDesID next_xd_guid = idx == sub_path.size() ? XferDes::XFERDES_NO_GUID : sub_path[idx];
             Buffer cur_buf;
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
             XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
