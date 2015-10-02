@@ -603,26 +603,23 @@ namespace LegionRuntime {
                                      std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      if (!is_locally_mapped())
+      RezCheck z(rez);
+      size_t count = 0;
+      for (unsigned idx = 0; idx < infos.size(); idx++)
       {
-        RezCheck z(rez);
-        size_t count = 0;
+        if (infos[idx].has_restrictions())
+          count++;
+      }
+      rez.serialize(count);
+      if (count > 0)
+      {
+        rez.serialize(runtime->address_space);
         for (unsigned idx = 0; idx < infos.size(); idx++)
         {
           if (infos[idx].has_restrictions())
-            count++;
-        }
-        rez.serialize(count);
-        if (count > 0)
-        {
-          rez.serialize(runtime->address_space);
-          for (unsigned idx = 0; idx < infos.size(); idx++)
           {
-            if (infos[idx].has_restrictions())
-            {
-              rez.serialize(idx);
-              infos[idx].pack_info(rez);
-            }
+            rez.serialize(idx);
+            infos[idx].pack_info(rez);
           }
         }
       }
@@ -633,23 +630,20 @@ namespace LegionRuntime {
                                        std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      if (!is_locally_mapped())
+      DerezCheck z(derez);
+      // Always resize the restrictions
+      infos.resize(regions.size());
+      size_t num_restrictions;
+      derez.deserialize(num_restrictions);
+      if (num_restrictions > 0)
       {
-        DerezCheck z(derez);
-        // Always resize the restrictions
-        infos.resize(regions.size());
-        size_t num_restrictions;
-        derez.deserialize(num_restrictions);
-        if (num_restrictions > 0)
+        AddressSpaceID source;
+        derez.deserialize(source);
+        for (unsigned idx = 0; idx < num_restrictions; idx++)
         {
-          AddressSpaceID source;
-          derez.deserialize(source);
-          for (unsigned idx = 0; idx < num_restrictions; idx++)
-          {
-            unsigned index;
-            derez.deserialize(index);
-            infos[index].unpack_info(derez, source, runtime->forest);
-          }
+          unsigned index;
+          derez.deserialize(index);
+          infos[index].unpack_info(derez, source, runtime->forest);
         }
       }
     }
