@@ -17,8 +17,11 @@
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
+#include "realm/cmdline.h"
 
 #include "lowlevel_dma.h"
+
+#include "realm/cuda/cudart_hijack.h"
 
 #include <stdio.h>
 
@@ -53,7 +56,7 @@ namespace Realm {
   //
   // class GPUStream
 
-    GPUStream::GPUStream(GPUProcessor *_gpu, GPUWorker *_worker)
+    GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker)
       : gpu(_gpu), worker(_worker)
     {
       assert(worker != 0);
@@ -69,7 +72,7 @@ namespace Realm {
       CHECK_CU( cuStreamDestroy(stream) );
     }
 
-    GPUProcessor *GPUStream::get_gpu(void) const
+    GPU *GPUStream::get_gpu(void) const
     {
       return gpu;
     }
@@ -226,7 +229,7 @@ namespace Realm {
   //
   // class GPUMemcpy
 
-    GPUMemcpy::GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind)
+    GPUMemcpy::GPUMemcpy(GPU *_gpu, GPUMemcpyKind _kind)
       : gpu(_gpu), kind(_kind)
     {} 
 
@@ -235,14 +238,14 @@ namespace Realm {
   //
   // class GPUMemcpy1D
 
-    GPUMemcpy1D::GPUMemcpy1D(GPUProcessor *_gpu,
+    GPUMemcpy1D::GPUMemcpy1D(GPU *_gpu,
 			     void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
 			     GPUCompletionNotification *_notification)
       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
 	mask(0), elmt_size(_bytes), notification(_notification)
     {}
 
-    GPUMemcpy1D::GPUMemcpy1D(GPUProcessor *_gpu,
+    GPUMemcpy1D::GPUMemcpy1D(GPU *_gpu,
 			     void *_dst, const void *_src, 
 			     const ElementMask *_mask, size_t _elmt_size,
 			     GPUMemcpyKind _kind,
@@ -329,7 +332,7 @@ namespace Realm {
   //
   // class GPUMemcpy2D
 
-    GPUMemcpy2D::GPUMemcpy2D(GPUProcessor *_gpu,
+    GPUMemcpy2D::GPUMemcpy2D(GPU *_gpu,
 			     void *_dst, const void *_src,
 			     off_t _dst_stride, off_t _src_stride,
 			     size_t _bytes, size_t _lines,
@@ -390,7 +393,7 @@ namespace Realm {
 
     class GPUtoFBMemPairCopier : public MemPairCopier {
     public:
-      GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
+      GPUtoFBMemPairCopier(Memory _src_mem, GPU *_gpu)
 	: gpu(_gpu)
       {
 	MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
@@ -431,12 +434,12 @@ namespace Realm {
 
     protected:
       const char *src_base;
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
     class GPUfromFBMemPairCopier : public MemPairCopier {
     public:
-      GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
+      GPUfromFBMemPairCopier(GPU *_gpu, Memory _dst_mem)
 	: gpu(_gpu)
       {
 	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(_dst_mem);
@@ -477,12 +480,12 @@ namespace Realm {
 
     protected:
       char *dst_base;
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
      
     class GPUinFBMemPairCopier : public MemPairCopier {
     public:
-      GPUinFBMemPairCopier(GPUProcessor *_gpu)
+      GPUinFBMemPairCopier(GPU *_gpu)
 	: gpu(_gpu)
       {
       }
@@ -519,12 +522,12 @@ namespace Realm {
       }
 
     protected:
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
     class GPUPeerMemPairCopier : public MemPairCopier {
     public:
-      GPUPeerMemPairCopier(GPUProcessor *_src, GPUProcessor *_dst)
+      GPUPeerMemPairCopier(GPU *_src, GPU *_dst)
         : src(_src), dst(_dst)
       {
       }
@@ -560,12 +563,12 @@ namespace Realm {
       }
 
     protected:
-      GPUProcessor *src, *dst;
+      GPU *src, *dst;
     };
 
     class GPUDMAChannel_H2D : public MemPairCopierFactory {
     public:
-      GPUDMAChannel_H2D(GPUProcessor *_gpu);
+      GPUDMAChannel_H2D(GPU *_gpu);
 
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
@@ -574,12 +577,12 @@ namespace Realm {
 					   ReductionOpID redop_id, bool fold);
 
     protected:
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
     class GPUDMAChannel_D2H : public MemPairCopierFactory {
     public:
-      GPUDMAChannel_D2H(GPUProcessor *_gpu);
+      GPUDMAChannel_D2H(GPU *_gpu);
 
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
@@ -588,12 +591,12 @@ namespace Realm {
 					   ReductionOpID redop_id, bool fold);
 
     protected:
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
     class GPUDMAChannel_D2D : public MemPairCopierFactory {
     public:
-      GPUDMAChannel_D2D(GPUProcessor *_gpu);
+      GPUDMAChannel_D2D(GPU *_gpu);
 
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
@@ -602,12 +605,12 @@ namespace Realm {
 					   ReductionOpID redop_id, bool fold);
 
     protected:
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
     class GPUDMAChannel_P2P : public MemPairCopierFactory {
     public:
-      GPUDMAChannel_P2P(GPUProcessor *_gpu);
+      GPUDMAChannel_P2P(GPU *_gpu);
 
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
@@ -616,7 +619,7 @@ namespace Realm {
 					   ReductionOpID redop_id, bool fold);
 
     protected:
-      GPUProcessor *gpu;
+      GPU *gpu;
     };
 
 
@@ -624,8 +627,8 @@ namespace Realm {
     //
     // class GPUDMAChannel_H2D
 
-    GPUDMAChannel_H2D::GPUDMAChannel_H2D(GPUProcessor *_gpu)
-      : MemPairCopierFactory(stringbuilder() << "gpu_h2d (" << _gpu->me << ")")
+    GPUDMAChannel_H2D::GPUDMAChannel_H2D(GPU *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_h2d (" << _gpu->proc->me << ")")
       , gpu(_gpu)
     {}
 
@@ -638,15 +641,12 @@ namespace Realm {
 	return false;
 
       MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-
       MemoryImpl::MemoryKind src_kind = src_impl->kind;
-      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
       if((src_kind != MemoryImpl::MKIND_SYSMEM) && (src_kind != MemoryImpl::MKIND_ZEROCOPY))
 	return false;
 
-      if((dst_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)dst_impl)->gpu != gpu))
+      if(dst_mem != gpu->fbmem->me)
 	return false;
 
       return true;
@@ -663,8 +663,8 @@ namespace Realm {
     //
     // class GPUDMAChannel_D2H
 
-    GPUDMAChannel_D2H::GPUDMAChannel_D2H(GPUProcessor *_gpu)
-      : MemPairCopierFactory(stringbuilder() << "gpu_d2h (" << _gpu->me << ")")
+    GPUDMAChannel_D2H::GPUDMAChannel_D2H(GPU *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_d2h (" << _gpu->proc->me << ")")
       , gpu(_gpu)
     {}
 
@@ -676,14 +676,11 @@ namespace Realm {
       if(redop_id != 0)
 	return false;
 
-      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-
-      MemoryImpl::MemoryKind src_kind = src_impl->kind;
-      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
-
-      if((src_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)src_impl)->gpu != gpu))
+      if(src_mem != gpu->fbmem->me)
 	return false;
+
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
       if((dst_kind != MemoryImpl::MKIND_SYSMEM) && (dst_kind != MemoryImpl::MKIND_ZEROCOPY))
 	return false;
@@ -702,8 +699,8 @@ namespace Realm {
     //
     // class GPUDMAChannel_D2D
 
-    GPUDMAChannel_D2D::GPUDMAChannel_D2D(GPUProcessor *_gpu)
-      : MemPairCopierFactory(stringbuilder() << "gpu_d2d (" << _gpu->me << ")")
+    GPUDMAChannel_D2D::GPUDMAChannel_D2D(GPU *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_d2d (" << _gpu->proc->me << ")")
       , gpu(_gpu)
     {}
 
@@ -711,20 +708,14 @@ namespace Realm {
 					     ReductionOpID redop_id, bool fold)
     {
       // copies entirely within our fb, no reduction support
-      // copies from sysmem/zerocopy to _our_ fb, no reduction support
 
       if(redop_id != 0)
 	return false;
 
-      if(src_mem != dst_mem)
+      Memory our_fb = gpu->fbmem->me;
+
+      if((src_mem != our_fb) || (dst_mem != our_fb))
 	return false;  // they can't both be our FB
-
-      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-
-      MemoryImpl::MemoryKind src_kind = src_impl->kind;
-
-      if((src_kind != MemoryImpl::MKIND_GPUFB) || (((GPUFBMemory *)src_impl)->gpu != gpu))
-	return false;
 
       return true;
     }
@@ -740,8 +731,8 @@ namespace Realm {
     //
     // class GPUDMAChannel_P2P
 
-    GPUDMAChannel_P2P::GPUDMAChannel_P2P(GPUProcessor *_gpu)
-      : MemPairCopierFactory(stringbuilder() << "gpu_p2p (" << _gpu->me << ")")
+    GPUDMAChannel_P2P::GPUDMAChannel_P2P(GPU *_gpu)
+      : MemPairCopierFactory(stringbuilder() << "gpu_p2p (" << _gpu->proc->me << ")")
       , gpu(_gpu)
     {}
 
@@ -753,24 +744,25 @@ namespace Realm {
       if(redop_id != 0)
 	return false;
 
-      MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-
-      MemoryImpl::MemoryKind src_kind = src_impl->kind;
-      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
-
-      if((src_kind != MemoryImpl::MKIND_GPUFB) || (dst_kind != MemoryImpl::MKIND_GPUFB))
+      if(src_mem != gpu->fbmem->me)
 	return false;
 
-      GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-      GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+      MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
 
-      if((src_gpu != gpu) || (dst_gpu == gpu))
+      MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+      if(dst_kind != MemoryImpl::MKIND_GPUFB)
+	return false;
+
+      GPU *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+
+      if(dst_gpu == gpu)
 	return false;
 
       // last check - make sure peer-to-peer copies are allowed between these two gpus
-      if(!src_gpu->can_access_peer(dst_gpu)) {
-	log_gpu.warning() << "p2p copy not allowed between " << src_gpu->me << " and " << dst_gpu->me;
+      if(!gpu->can_access_peer(dst_gpu)) {
+	log_gpu.warning() << "p2p copy not allowed between " << gpu->proc->me
+			  << " and " << dst_gpu->proc->me;
 	return false;
       }
 
@@ -782,13 +774,13 @@ namespace Realm {
     {
       // TODO: remove this - the p2p copier doesn't actually need it
       MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-      GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+      GPU *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
 
       return new GPUPeerMemPairCopier(gpu, dst_gpu);
     }
 
 
-    void GPUProcessor::create_dma_channels(Realm::RuntimeImpl *r)
+    void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
       r->add_dma_channel(new GPUDMAChannel_H2D(this));
       r->add_dma_channel(new GPUDMAChannel_D2H(this));
@@ -797,11 +789,9 @@ namespace Realm {
     }
 
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class GPUStream
-
-    static bool fences_use_callbacks = false;
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUWorkFence
 
     GPUWorkFence::GPUWorkFence(Realm::Operation *op)
       : Realm::Operation::AsyncWorkItem(op)
@@ -814,7 +804,7 @@ namespace Realm {
 
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
-      if(fences_use_callbacks) {
+      if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
 	CHECK_CU( cuStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
       } else {
 	stream->add_fence(this);
@@ -829,6 +819,31 @@ namespace Realm {
       me->mark_finished();
     }
 
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUMemcpyFence
+
+    GPUMemcpyFence::GPUMemcpyFence(GPU *_gpu, GPUMemcpyKind _kind,
+				   GPUWorkFence *_fence)
+      : GPUMemcpy(_gpu, _kind), fence(_fence)
+    {
+      //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") created";
+    }
+
+    void GPUMemcpyFence::execute(GPUStream *stream)
+    {
+      //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") executed";
+      fence->enqueue_on_stream(stream);
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CHECK_CU( cuStreamSynchronize(stream->get_stream()) );
+#endif
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUEventPool
 
     GPUEventPool::GPUEventPool(int _batch_size)
       : batch_size(_batch_size), current_size(0), total_size(0)
@@ -903,6 +918,10 @@ namespace Realm {
     }
 
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUTaskScheduler<T>
+
     // we want to subclass the scheduler to replace the execute_task method, but we also want to
     //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
     //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
@@ -911,7 +930,8 @@ namespace Realm {
     template <typename T>
     class GPUTaskScheduler : public T {
     public:
-      GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv, GPUProcessor *_gpu);
+      GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
+		       GPUProcessor *_gpu_proc);
 
       virtual ~GPUTaskScheduler(void);
 
@@ -920,13 +940,14 @@ namespace Realm {
 
       // might also need to override the thread-switching methods to keep TLS up to date
 
-      GPUProcessor *gpu;
+      GPUProcessor *gpu_proc;
     };
 
     template <typename T>
-    GPUTaskScheduler<T>::GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
-					  GPUProcessor *_gpu)
-      : T(_proc, _core_rsrv), gpu(_gpu)
+    GPUTaskScheduler<T>::GPUTaskScheduler(Processor _proc,
+					  Realm::CoreReservation& _core_rsrv,
+					  GPUProcessor *_gpu_proc)
+      : T(_proc, _core_rsrv), gpu_proc(_gpu_proc)
     {
       // nothing else
     }
@@ -947,14 +968,14 @@ namespace Realm {
       //  CUDA RT calls
       // TODO: either eliminate these asserts or do TLS swapping when using user threads
       assert(ThreadLocal::current_gpu_proc == 0);
-      ThreadLocal::current_gpu_proc = gpu;
+      ThreadLocal::current_gpu_proc = gpu_proc;
 
       // push the CUDA context for this GPU onto this thread
-      CHECK_CU( cuCtxPushCurrent(gpu->proc_ctx) );
+      gpu_proc->gpu->push_context();
 
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
-      GPUStream *s = gpu->switch_to_next_task_stream();
+      GPUStream *s = gpu_proc->gpu->switch_to_next_task_stream();
 
       // we'll use a "work fence" to track when the kernels launched by this task actually
       //  finish - this must be added to the task _BEFORE_ we execute
@@ -972,31 +993,25 @@ namespace Realm {
 #endif
 
       // pop the CUDA context for this GPU back off
-      CUcontext popped;
-      CHECK_CU( cuCtxPopCurrent(&popped) );
-      assert(popped == gpu->proc_ctx);
+      gpu_proc->gpu->pop_context();
 
-      assert(ThreadLocal::current_gpu_proc == gpu);
+      assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
 
       return ok;
     }
 
-    static bool use_background_workers = false;
-    static bool use_shared_worker = true;
-    static GPUWorker *shared_worker = 0;
-    static int shared_worker_users = 0;
 
-    GPUProcessor::GPUProcessor(Processor _me, Realm::CoreReservationSet& crs, 
-			       int _gpu_index, 
-                               size_t _zcmem_size, size_t _fbmem_size, 
-                               size_t _stack_size,
-                               int streams)
-      : LocalTaskProcessor(_me, Processor::TOC_PROC),
-        gpu_index(_gpu_index), zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
-        zcmem_reserve(16 << 20), fbmem_reserve(32 << 20),
-        current_stream(0)
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUProcessor
+
+    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
+                               size_t _stack_size)
+      : LocalTaskProcessor(_me, Processor::TOC_PROC)
+      , gpu(_gpu)
     {
+#if 0
       assert(streams > 0);
       task_streams.resize(streams);
       // Make our context and then immediately pop it off
@@ -1047,7 +1062,7 @@ namespace Realm {
       event_pool.init_pool();
 
       CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
-
+#endif
       Realm::CoreReservationParameters params;
       params.set_num_cores(1);
       params.set_alu_usage(params.CORE_USAGE_SHARED);
@@ -1071,12 +1086,10 @@ namespace Realm {
 
     GPUProcessor::~GPUProcessor(void)
     {
-      // empty the event pool
-      event_pool.empty_pool();
-
       delete core_rsrv;
     }
 
+#if 0
     void* GPUProcessor::get_zcmem_cpu_base(void) const
     {
       return ((char *)zcmem_cpu_base) + zcmem_reserve;
@@ -1096,149 +1109,134 @@ namespace Realm {
     {
       return fbmem_size;
     }
+#endif
 
-    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
-				  GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
+			 GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
+					fbmem->base + dst_offset,
 					src, bytes, GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src,
-				  const ElementMask *mask, size_t elmt_size,
-				  GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_to_fb(off_t dst_offset, const void *src,
+			 const ElementMask *mask, size_t elmt_size,
+			 GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-					src, mask, elmt_size, GPU_MEMCPY_HOST_TO_DEVICE, notification);
+					fbmem->base + dst_offset,
+					src, mask, elmt_size,
+					GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
-				    GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
+			   GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
+					dst, fbmem->base + src_offset,
 					bytes, GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     } 
 
-    void GPUProcessor::copy_from_fb(void *dst, off_t src_offset,
-				    const ElementMask *mask, size_t elmt_size,
-				    GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_from_fb(void *dst, off_t src_offset,
+			   const ElementMask *mask, size_t elmt_size,
+			   GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					dst, ((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-					mask, elmt_size, GPU_MEMCPY_DEVICE_TO_HOST, notification);
+					dst, fbmem->base + src_offset,
+					mask, elmt_size,
+					GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      size_t bytes,
-				      GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_within_fb(off_t dst_offset, off_t src_offset,
+			     size_t bytes,
+			     GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-					((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
+					fbmem->base + dst_offset,
+					fbmem->base + src_offset,
 					bytes, GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_within_fb(off_t dst_offset, off_t src_offset,
-				      const ElementMask *mask, size_t elmt_size,
-				      GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_within_fb(off_t dst_offset, off_t src_offset,
+			     const ElementMask *mask, size_t elmt_size,
+			     GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					((char *)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-					((char *)fbmem_gpu_base) + (fbmem_reserve + src_offset),
+					fbmem->base + dst_offset,
+					fbmem->base + src_offset,
 					mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE,
 					notification);
       device_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_to_fb_2d(off_t dst_offset, const void *src, 
+    void GPU::copy_to_fb_2d(off_t dst_offset, const void *src, 
                                      off_t dst_stride, off_t src_stride,
                                      size_t bytes, size_t lines,
 				     GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					((char*)fbmem_gpu_base)+
-					(fbmem_reserve + dst_offset),
+					fbmem->base + dst_offset,
 					src, dst_stride, src_stride, bytes, lines,
 					GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_from_fb_2d(void *dst, off_t src_offset,
-                                       off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-				       GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_from_fb_2d(void *dst, off_t src_offset,
+			      off_t dst_stride, off_t src_stride,
+			      size_t bytes, size_t lines,
+			      GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this, dst,
-					((char*)fbmem_gpu_base)+
-					(fbmem_reserve + src_offset),
+					fbmem->base + src_offset,
 					dst_stride, src_stride, bytes, lines,
 					GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
+    void GPU::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                                          off_t dst_stride, off_t src_stride,
                                          size_t bytes, size_t lines,
 					 GPUCompletionNotification *notification /*= 0*/)
     {
-      GPUMemcpy *copy =new GPUMemcpy2D(this,
-				       ((char*)fbmem_gpu_base) + (fbmem_reserve + dst_offset),
-				       ((char*)fbmem_gpu_base) + (fbmem_reserve + src_offset),
-				       dst_stride, src_stride, bytes, lines,
-				       GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+      GPUMemcpy *copy = new GPUMemcpy2D(this,
+					fbmem->base + dst_offset,
+					fbmem->base + src_offset,
+					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_to_peer(GPUProcessor *dst, off_t dst_offset,
-                                    off_t src_offset, size_t bytes,
-				    GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_to_peer(GPU *dst, off_t dst_offset,
+			   off_t src_offset, size_t bytes,
+			   GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					((char*)dst->fbmem_gpu_base) + (dst->fbmem_reserve + dst_offset),
-					((char*)fbmem_gpu_base) + (fbmem_reserve + src_offset),
+					dst->fbmem->base + dst_offset,
+					fbmem->base + src_offset,
 					bytes, GPU_MEMCPY_PEER_TO_PEER, notification);
       peer_to_peer_stream->add_copy(copy);
     }
 
-    void GPUProcessor::copy_to_peer_2d(GPUProcessor *dst,
-                                       off_t dst_offset, off_t src_offset,
-                                       off_t dst_stride, off_t src_stride,
-                                       size_t bytes, size_t lines,
-				       GPUCompletionNotification *notification /*= 0*/)
+    void GPU::copy_to_peer_2d(GPU *dst,
+			      off_t dst_offset, off_t src_offset,
+			      off_t dst_stride, off_t src_stride,
+			      size_t bytes, size_t lines,
+			      GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					((char*)dst->fbmem_gpu_base) + (dst->fbmem_reserve + dst_offset),
-					((char*)fbmem_gpu_base) + (fbmem_reserve + src_offset),
+					dst->fbmem->base + dst_offset,
+					fbmem->base + src_offset,
 					dst_stride, src_stride, bytes, lines,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
       peer_to_peer_stream->add_copy(copy);
     }
 
-    GPUMemcpyFence::GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
-				   GPUWorkFence *_fence)
-      : GPUMemcpy(_gpu, _kind), fence(_fence)
-    {
-      //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") created";
-    }
-
-    void GPUMemcpyFence::execute(GPUStream *stream)
-    {
-      //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") executed";
-      fence->enqueue_on_stream(stream);
-#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( cuStreamSynchronize(stream->get_stream()) );
-#endif
-    }
-
-    void GPUProcessor::fence_to_fb(Realm::Operation *op)
+    void GPU::fence_to_fb(Realm::Operation *op)
     {
       GPUWorkFence *f = new GPUWorkFence(op);
 
@@ -1250,7 +1248,7 @@ namespace Realm {
 							 f));
     }
 
-    void GPUProcessor::fence_from_fb(Realm::Operation *op)
+    void GPU::fence_from_fb(Realm::Operation *op)
     {
       GPUWorkFence *f = new GPUWorkFence(op);
 
@@ -1262,7 +1260,7 @@ namespace Realm {
 							 f));
     }
 
-    void GPUProcessor::fence_within_fb(Realm::Operation *op)
+    void GPU::fence_within_fb(Realm::Operation *op)
     {
       GPUWorkFence *f = new GPUWorkFence(op);
 
@@ -1274,7 +1272,7 @@ namespace Realm {
 							   f));
     }
 
-    void GPUProcessor::fence_to_peer(Realm::Operation *op, GPUProcessor *dst)
+    void GPU::fence_to_peer(Realm::Operation *op, GPU *dst)
     {
       GPUWorkFence *f = new GPUWorkFence(op);
 
@@ -1286,6 +1284,7 @@ namespace Realm {
 						       f));
     }
 
+#if 0
     void GPUProcessor::register_host_memory(Realm::MemoryImpl *m)
     {
       size_t size = m->size;
@@ -1312,18 +1311,19 @@ namespace Realm {
       CHECK_CU( cuCtxEnablePeerAccess(peer_ctx, 0) );
       CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
     }
+#endif
 
-    bool GPUProcessor::can_access_peer(GPUProcessor *peer) const
+    bool GPU::can_access_peer(GPU *peer)
     {
-      return (peer_gpus.find(peer) != peer_gpus.end());
+      return(info->peers.count(peer->info->device) > 0);
     }
 
-    GPUStream *GPUProcessor::get_current_task_stream(void)
+    GPUStream *GPU::get_current_task_stream(void)
     {
       return task_streams[current_stream];
     }
 
-    GPUStream *GPUProcessor::switch_to_next_task_stream(void)
+    GPUStream *GPU::switch_to_next_task_stream(void)
     {
       current_stream++;
       if(current_stream >= task_streams.size())
@@ -1331,12 +1331,7 @@ namespace Realm {
       return task_streams[current_stream];
     }
 
-    void GPUProcessor::load_context(void)
-    {
-      // Push our context onto the stack
-      CHECK_CU( cuCtxPushCurrent(proc_ctx) );
-    }
-
+#if 0
     void GPUProcessor::initialize_cuda_stuff(void)
     {
       // load any modules, functions, and variables that we deferred
@@ -1389,31 +1384,24 @@ namespace Realm {
       log_gpu.info("gpu initialized: zcmem=%p/%p fbmem=%p",
 		   zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
     }
-
-    void GPUProcessor::cleanup_cuda_stuff(void)
-    {
-      // delete all the streams
-      delete host_to_device_stream;
-      delete device_to_host_stream;
-      delete device_to_device_stream;
-      delete peer_to_peer_stream;
-
-      for(unsigned idx = 0; idx < task_streams.size(); idx++)
-	delete task_streams[idx];
-    }
+#endif
 
     void GPUProcessor::shutdown(void)
     {
       log_gpu.info("shutting down");
 
-      // Synchronize the device so we can flush any printf buffers
-      CHECK_CU( cuCtxPushCurrent(proc_ctx) );
-      CHECK_CU( cuCtxSynchronize() );
-      CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
-
       // shut down threads/scheduler
       LocalTaskProcessor::shutdown();
 
+      // synchronize the device so we can flush any printf buffers - do
+      //  this after shutting down the threads so that we know all work is done
+      {
+	AutoGPUContext agc(gpu);
+
+	CHECK_CU( cuCtxSynchronize() );
+      }
+
+#if 0
       // now clean up the GPU worker
       if(use_shared_worker) {
 	shared_worker_users -= 1;
@@ -1427,13 +1415,8 @@ namespace Realm {
 	  gpu_worker->shutdown_background_thread();
 	delete gpu_worker;
       }
-
-      cleanup_cuda_stuff();
+#endif
     }
-
-    /*static*/ GPUProcessor** GPUProcessor::node_gpus;
-    /*static*/ size_t GPUProcessor::num_node_gpus;
-    static std::vector<pthread_t> dma_threads;
 
     GPUWorker::GPUWorker(void)
       : condvar(lock)
@@ -1544,17 +1527,50 @@ namespace Realm {
     }
 
 
-    // framebuffer memory
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPU
 
-    GPUFBMemory::GPUFBMemory(Memory _me, GPUProcessor *_gpu)
-      : MemoryImpl(_me, _gpu->get_fbmem_size(), MKIND_GPUFB, 512, Memory::GPU_FB_MEM),
-	gpu(_gpu)
+    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size)
+      : MemoryImpl(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM)
+      , gpu(_gpu), base(_base)
     {
-      base = (char *)(gpu->get_fbmem_gpu_base());
       free_blocks[0] = size;
     }
 
     GPUFBMemory::~GPUFBMemory(void) {}
+
+    RegionInstance GPUFBMemory::create_instance(IndexSpace is,
+						const int *linearization_bits,
+						size_t bytes_needed,
+						size_t block_size,
+						size_t element_size,
+						const std::vector<size_t>& field_sizes,
+						ReductionOpID redopid,
+						off_t list_size,
+						const Realm::ProfilingRequestSet &reqs,
+						RegionInstance parent_inst)
+    {
+      return create_instance_local(is, linearization_bits, bytes_needed,
+				   block_size, element_size, field_sizes, redopid,
+				   list_size, reqs, parent_inst);
+    }
+
+    void GPUFBMemory::destroy_instance(RegionInstance i, 
+				       bool local_destroy)
+    {
+      destroy_instance_local(i, local_destroy);
+    }
+
+    off_t GPUFBMemory::alloc_bytes(size_t size)
+    {
+      return alloc_bytes_local(size);
+    }
+
+    void GPUFBMemory::free_bytes(off_t offset, size_t size)
+    {
+      free_bytes_local(offset, size);
+    }
 
     // these work, but they are SLOW
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -1571,17 +1587,82 @@ namespace Realm {
       CHECK_CU( cuStreamSynchronize(gpu->host_to_device_stream->get_stream()) );
     }
 
-    // zerocopy memory
-
-    GPUZCMemory::GPUZCMemory(Memory _me, GPUProcessor *_gpu)
-      : MemoryImpl(_me, _gpu->get_zcmem_size(), MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM),
-	gpu(_gpu)
+    void *GPUFBMemory::get_direct_ptr(off_t offset, size_t size)
     {
-      cpu_base = (char *)(gpu->get_zcmem_cpu_base());
+      return (base + offset);
+    }
+
+    int GPUFBMemory::get_home_node(off_t offset, size_t size)
+    {
+      return -1;
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUZCMemory
+
+    GPUZCMemory::GPUZCMemory(Memory _me, GPU *_gpu,
+			     char *_gpu_base, char *_cpu_base, size_t _size)
+      : MemoryImpl(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM)
+      , gpu(_gpu), gpu_base(_gpu_base), cpu_base(_cpu_base)
+    {
       free_blocks[0] = size;
     }
 
     GPUZCMemory::~GPUZCMemory(void) {}
+
+    RegionInstance GPUZCMemory::create_instance(IndexSpace is,
+						const int *linearization_bits,
+						size_t bytes_needed,
+						size_t block_size,
+						size_t element_size,
+						const std::vector<size_t>& field_sizes,
+						ReductionOpID redopid,
+						off_t list_size,
+						const Realm::ProfilingRequestSet &reqs,
+						RegionInstance parent_inst)
+    {
+      return create_instance_local(is, linearization_bits, bytes_needed,
+				   block_size, element_size, field_sizes, redopid,
+				   list_size, reqs, parent_inst);
+    }
+
+    void GPUZCMemory::destroy_instance(RegionInstance i, 
+				       bool local_destroy)
+    {
+      destroy_instance_local(i, local_destroy);
+    }
+
+    off_t GPUZCMemory::alloc_bytes(size_t size)
+    {
+      return alloc_bytes_local(size);
+    }
+
+    void GPUZCMemory::free_bytes(off_t offset, size_t size)
+    {
+      free_bytes_local(offset, size);
+    }
+
+    void GPUZCMemory::get_bytes(off_t offset, void *dst, size_t size)
+    {
+      memcpy(dst, cpu_base+offset, size);
+    }
+
+    void GPUZCMemory::put_bytes(off_t offset, const void *src, size_t size)
+    {
+      memcpy(cpu_base+offset, src, size);
+    }
+
+    void *GPUZCMemory::get_direct_ptr(off_t offset, size_t size)
+    {
+      return (cpu_base + offset);
+    }
+
+    int GPUZCMemory::get_home_node(off_t offset, size_t size)
+    {
+      return ID(me).node();
+    }
 
 #ifdef POINTER_CHECKS
     static unsigned *get_gpu_valid_mask(RegionMetaDataUntyped region)
@@ -1602,11 +1683,12 @@ namespace Realm {
 #endif
 
     // Helper methods for emulating the cuda runtime
-    /*static*/ GPUProcessor* GPUProcessor::find_local_gpu(void)
+    /*static*/ GPUProcessor* GPUProcessor::get_current_gpu_proc(void)
     {
       return ThreadLocal::current_gpu_proc;
     }
 
+#if 0
     /*static*/ std::map<void*,void**>& GPUProcessor::get_deferred_modules(void)
     {
       static std::map<void*,void**> deferred_modules;
@@ -1632,6 +1714,7 @@ namespace Realm {
       static std::deque<DeferredVariable> deferred_variables;
       return deferred_variables;
     }
+#endif
 
     void** GPUProcessor::internal_register_fat_binary(void *fat_bin)
     {
@@ -1663,6 +1746,20 @@ namespace Realm {
       return handle;
     }
 
+    void GPUProcessor::stream_synchronize(cudaStream_t stream)
+    {
+      // same as device_synchronize for now
+      GPUStream *current = gpu->get_current_task_stream();
+      CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+    }
+
+    void GPUProcessor::device_synchronize(void)
+    {
+      GPUStream *current = gpu->get_current_task_stream();
+      CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+    }
+
+#if 0
     /*static*/ void** GPUProcessor::defer_module_load(void *fat_bin)
     {
       void **handle = (void**)malloc(sizeof(void**));
@@ -1883,14 +1980,6 @@ namespace Realm {
       free(log_error_buffer);
     }
 
-    void GPUProcessor::find_function_handle(const void *func, CUfunction *handle)
-    {
-      std::map<const void*,CUfunction>::const_iterator finder = 
-        device_functions.find(func);
-      assert(finder != device_functions.end());
-      *handle = finder->second;
-    }
-
     /*static*/ char GPUProcessor::init_module(void **fat_bin)
     {
       GPUProcessor *local = find_local_gpu();
@@ -1898,219 +1987,127 @@ namespace Realm {
         return 1;
       return local->internal_init_module(fat_bin);
     }
+#endif
+    
+    GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
+      : grid(_grid), block(_block), shared(_shared)
+    {}
 
-    // Helper methods for replacing the CUDA runtime API calls
-    /*static*/ cudaError_t GPUProcessor::stream_create(cudaStream_t *stream)
+    void GPUProcessor::configure_call(dim3 grid_dim,
+				      dim3 block_dim,
+				      size_t shared_mem,
+				      cudaStream_t stream)
     {
-      log_gpu.error("Stream creation not permitted in Legion CUDA!");
-      assert(false);
-      return cudaSuccess;
+      launch_configs.push_back(LaunchConfig(grid_dim, block_dim, shared_mem));
     }
 
-    /*static*/ cudaError_t GPUProcessor::stream_destroy(cudaStream_t stream)
+    void GPUProcessor::setup_argument(const void *arg,
+				      size_t size, size_t offset)
     {
-      log_gpu.error("Stream destruction not permitted in Legion CUDA!");
-      assert(false);
-      return cudaSuccess;
+      size_t required = offset + size;
+
+      if(required > kernel_args.size())
+	kernel_args.resize(required);
+
+      memcpy(&kernel_args[offset], arg, size);
     }
 
-    cudaError_t GPUProcessor::internal_stream_synchronize(void)
+    void GPUProcessor::launch(const void *func)
     {
-      GPUStream *current = get_current_task_stream();
-      CHECK_CU( cuStreamSynchronize(current->get_stream()) );
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::stream_synchronize(cudaStream_t stream)
-    {
-      // Just ignore whatever stream they passed in and synchronize on our stream
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_stream_synchronize();
-    }
-
-    cudaError_t GPUProcessor::internal_configure_call(dim3 grid_dim,
-                                                      dim3 block_dim,
-                                                      size_t shared_mem)
-    {
-      LaunchConfig config;
-      config.grid = grid_dim;
-      config.block = block_dim;
-      config.shared = shared_mem;
-      launch_configs.push_back(config);
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::configure_call(dim3 grid_dim, dim3 block_dim,
-                                                        size_t shared_memory, 
-                                                        cudaStream_t stream)
-    {
-      // Ignore their stream, it is meaningless
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_configure_call(grid_dim, block_dim, shared_memory);
-    }
-
-    cudaError_t GPUProcessor::internal_setup_argument(const void *arg,
-                                                       size_t size, size_t offset)
-    {
-      const size_t required = offset + size;
-      // If we need more memory, allocate it now
-      if (required > kernel_buffer_size)
-      {
-        // Just make it twice as big to be safe
-        size_t needed = required * 2;
-        // Allocate a new buffer
-        char *new_buffer; 
-        CHECK_CU( cuMemAllocHost((void**)&new_buffer, needed) );
-        // Copy over the old data
-        memcpy(new_buffer, kernel_arg_buffer, kernel_arg_size);
-        // Free the old buffer
-        CHECK_CU( cuMemFreeHost(kernel_arg_buffer) );
-        // Update our buffer
-        kernel_arg_buffer = new_buffer;
-        kernel_buffer_size = needed;
-      }
-      memcpy(kernel_arg_buffer+offset, arg, size);
-      if (required > kernel_arg_size)
-        kernel_arg_size = required;
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::setup_argument(const void *arg, 
-                                                        size_t size, size_t offset)
-    {
-      GPUProcessor *local = find_local_gpu();  
-      assert(local != NULL);
-      return local->internal_setup_argument(arg, size, offset);
-    }
-
-    cudaError_t GPUProcessor::internal_launch(const void *func)
-    {
-      // Ready to do the launch 
+      // make sure we have a launch config
       assert(!launch_configs.empty());
       LaunchConfig &config = launch_configs.back();
+
       // Find our function
-      CUfunction f;
-      std::map<const void*,CUfunction>::const_iterator finder = 
-        device_functions.find(func);
-      assert(finder != device_functions.end());
-      f = finder->second;
-      void *args[] = { 
-        CU_LAUNCH_PARAM_BUFFER_POINTER, kernel_arg_buffer,
-        CU_LAUNCH_PARAM_BUFFER_SIZE, (void*)&kernel_arg_size,
+      CUfunction f = gpu->lookup_function(func);
+
+      size_t arg_size = kernel_args.size();
+      void *extra[] = { 
+        CU_LAUNCH_PARAM_BUFFER_POINTER, &kernel_args[0],
+        CU_LAUNCH_PARAM_BUFFER_SIZE, &arg_size,
         CU_LAUNCH_PARAM_END
       };
 
       // Launch the kernel on our stream dammit!
-      CHECK_CU( cuLaunchKernel(f, config.grid.x, config.grid.y, config.grid.z,
+      CHECK_CU( cuLaunchKernel(f, 
+			       config.grid.x, config.grid.y, config.grid.z,
                                config.block.x, config.block.y, config.block.z,
                                config.shared,
-			       get_current_task_stream()->get_stream(),
-			       NULL, args) );
-      // Clean everything up from the launch
+			       gpu->get_current_task_stream()->get_stream(),
+			       NULL, extra) );
+
+      // pop the config we just used
       launch_configs.pop_back();
-      // Reset the kernel arg size
-      kernel_arg_size = 0;
-      return cudaSuccess;
+
+      // clear out the kernel args
+      kernel_args.clear();
     }
 
-    /*static*/ cudaError_t GPUProcessor::launch(const void *func)
+    void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
+				  cudaMemcpyKind kind)
     {
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_launch(func); 
-    }
-
-    /*static*/ cudaError_t GPUProcessor::gpu_malloc(void **ptr, size_t size)
-    {
-      CHECK_CU( cuMemAlloc((CUdeviceptr*)ptr, size) );
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::gpu_free(void *ptr)
-    {
-      CHECK_CU( cuMemFree((CUdeviceptr)ptr) );
-      return cudaSuccess;
-    }
-
-    cudaError_t GPUProcessor::internal_gpu_memcpy(void *dst, const void *src,
-                                                   size_t size, bool sync)
-    {
-      CUstream current = get_current_task_stream()->get_stream();
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      // the synchronous copy still uses cuMemcpyAsync so that we can limit the
+      //  synchronization to just the right stream
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
-      if (sync)
-      {
-        CHECK_CU( cuStreamSynchronize(current) );
-      }
-      return cudaSuccess;
+      CHECK_CU( cuStreamSynchronize(current) );
     }
 
-    /*static*/ cudaError_t GPUProcessor::gpu_memcpy(void *dst, const void *src, 
-                                                    size_t size, cudaMemcpyKind kind)
+    void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
+					cudaMemcpyKind kind, cudaStream_t stream)
     {
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_gpu_memcpy(dst, src, size, true/*sync*/);
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
+      // no synchronization here
     }
 
-    /*static*/ cudaError_t GPUProcessor::gpu_memcpy_async(void *dst, const void *src,
-                                                          size_t size, cudaMemcpyKind kind,
-                                                          cudaStream_t stream)
+    void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
+					    size_t size, size_t offset,
+					    cudaMemcpyKind kind)
     {
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_gpu_memcpy(dst, src, size, false/*sync*/);
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUdeviceptr var_base = gpu->lookup_variable(dst);
+      CHECK_CU( cuMemcpyAsync(var_base + offset,
+			      (CUdeviceptr)src, size, current) );
+      CHECK_CU( cuStreamSynchronize(current) );
     }
 
-    cudaError_t GPUProcessor::internal_gpu_memcpy_to_symbol(const void *dst, const void *src,
-                                                            size_t size, size_t offset,
-                                                            cudaMemcpyKind kind, bool sync)
+    void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
+						  size_t size, size_t offset,
+						  cudaMemcpyKind kind, cudaStream_t stream)
     {
-      std::map<const void*,VarInfo>::const_iterator finder = device_variables.find(dst);
-      assert(finder != device_variables.end());
-      CUstream current = get_current_task_stream()->get_stream();
-      CHECK_CU( cuMemcpyAsync(finder->second.ptr+offset, (CUdeviceptr)src, size, current) );
-      if (sync)
-      {
-        CHECK_CU( cuStreamSynchronize(current) );
-      }
-      return cudaSuccess;
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUdeviceptr var_base = gpu->lookup_variable(dst);
+      CHECK_CU( cuMemcpyAsync(var_base + offset,
+			      (CUdeviceptr)src, size, current) );
+      // no synchronization here
     }
 
-    /*static*/ cudaError_t GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
-                                                              size_t size, size_t offset,
-                                                              cudaMemcpyKind kind, bool sync)
+    void GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src,
+					      size_t size, size_t offset,
+					      cudaMemcpyKind kind)
     {
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_gpu_memcpy_to_symbol(dst, src, size, offset, kind, sync);
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUdeviceptr var_base = gpu->lookup_variable(src);
+      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
+			      var_base + offset,
+			      size, current) );
+      CHECK_CU( cuStreamSynchronize(current) );
     }
 
-    cudaError_t GPUProcessor::internal_gpu_memcpy_from_symbol(void *dst, const void *src,
-                                                              size_t size, size_t offset,
-                                                              cudaMemcpyKind kind, bool sync)
+    void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
+						    size_t size, size_t offset,
+						    cudaMemcpyKind kind, cudaStream_t stream)
     {
-      std::map<const void*,VarInfo>::const_iterator finder = device_variables.find(dst);
-      assert(finder != device_variables.end());
-      CUstream current = get_current_task_stream()->get_stream();
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, finder->second.ptr+offset, size, current) );
-      if (sync)
-      {
-        CHECK_CU( cuStreamSynchronize(current) );
-      }
-      return cudaSuccess;
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUdeviceptr var_base = gpu->lookup_variable(src);
+      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
+			      var_base + offset,
+			      size, current) );
+      // no synchronization here
     }
 
-    /*static*/ cudaError_t GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src,
-                                                                size_t size, size_t offset,
-                                                                cudaMemcpyKind kind, bool sync)
-    {
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_gpu_memcpy_from_symbol(dst, src, size, offset, kind, sync);
-    }
-
+#if 0
     /*static*/ cudaError_t GPUProcessor::device_synchronize(void)
     {
       // Users are dumb, never let them mess us up
@@ -2218,11 +2215,245 @@ namespace Realm {
       attr->sharedSizeBytes = tmp;
       return cudaSuccess;
     }
+#endif
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class GPUStream
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPU
 
+    GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker,
+	     int num_streams)
+      : module(_module), info(_info), worker(_worker)
+      , proc(0), fbmem(0), current_stream(0)
+    {
+      // create a CUDA context for our device - automatically becomes current
+      CHECK_CU( cuCtxCreate(&context, 
+			    CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
+			    info->device) );
+
+      event_pool.init_pool();
+
+      host_to_device_stream = new GPUStream(this, worker);
+      device_to_host_stream = new GPUStream(this, worker);
+      device_to_device_stream = new GPUStream(this, worker);
+      peer_to_peer_stream = new GPUStream(this, worker);
+
+      task_streams.reserve(num_streams);
+      for(int idx = 0; idx < num_streams; idx++)
+	task_streams[idx] = new GPUStream(this, worker);
+
+      pop_context();
+
+      // now hook into the cuda runtime fatbin/etc. registration path
+      GlobalRegistrations::add_gpu_context(this);
+    }
+
+    GPU::~GPU(void)
+    {
+      push_context();
+
+      event_pool.empty_pool();
+
+      // destroy streams
+      delete host_to_device_stream;
+      delete device_to_host_stream;
+      delete device_to_device_stream;
+      delete peer_to_peer_stream;
+      while(!task_streams.empty()) {
+	delete task_streams.back();
+	task_streams.pop_back();
+      }
+
+      CHECK_CU( cuCtxDestroy(context) );
+    }
+
+    void GPU::push_context(void)
+    {
+      CHECK_CU( cuCtxPushCurrent(context) );
+    }
+
+    void GPU::pop_context(void)
+    {
+      // the context we pop had better be ours...
+      CUcontext popped;
+      CHECK_CU( cuCtxPopCurrent(&popped) );
+      assert(popped == context);
+    }
+
+    CUfunction GPU::lookup_function(const void *func)
+    {
+      std::map<const void *,CUfunction>::iterator finder = device_functions.find(func);
+      assert(finder != device_functions.end());
+      return finder->second;
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class AutoGPUContext
+
+    AutoGPUContext::AutoGPUContext(GPU& _gpu)
+      : gpu(&_gpu)
+    {
+      gpu->push_context();
+    }
+
+    AutoGPUContext::AutoGPUContext(GPU *_gpu)
+      : gpu(_gpu)
+    {
+      gpu->push_context();
+    }
+
+    AutoGPUContext::~AutoGPUContext(void)
+    {
+      gpu->pop_context();
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class CudaModule
+
+    // our interface to the rest of the runtime
+
+    REGISTER_REALM_MODULE(CudaModule);
+
+    CudaModule::CudaModule(void)
+      : Module("cuda")
+      , cfg_zc_mem_size_in_mb(64)
+      , cfg_fb_mem_size_in_mb(256)
+      , cfg_num_gpus(0)
+      , cfg_gpu_streams(12)
+      , cfg_use_background_workers(true)
+      , cfg_use_shared_worker(true)
+      , cfg_fences_use_callbacks(false)
+      , shared_worker(0)
+    {}
+      
+    CudaModule::~CudaModule(void)
+    {}
+
+    /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
+						 std::vector<std::string>& cmdline)
+    {
+      // before we do anything, make sure there's a CUDA driver and GPUs to talk to
+      std::vector<GPUInfo *> infos;
+      {
+	CUresult ret = cuInit(0);
+	if(ret != CUDA_SUCCESS) {
+	  log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
+	  return 0;
+	}
+
+	int num_devices;
+	CHECK_CU( cuDeviceGetCount(&num_devices) );
+	for(int i = 0; i < num_devices; i++) {
+	  GPUInfo *info = new GPUInfo;
+
+	  // TODO: consider environment variables or other ways to tell if certain
+	  //  GPUs should be ignored
+
+	  info->index = i;
+	  CHECK_CU( cuDeviceGet(&info->device, i) );
+	  CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
+	  CHECK_CU( cuDeviceComputeCapability(&info->compute_major,
+					      &info->compute_minor,
+					      info->device) );
+	  CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
+	  CHECK_CU( cuDeviceGetProperties(&info->props, info->device) );
+
+	  log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
+			 << info->compute_major << '.' << info->compute_minor
+			 << ") " << (info->total_mem >> 20) << " MB";
+
+	  infos.push_back(info);
+	}
+
+	if(infos.empty()) {
+	  log_gpu.warning() << "no CUDA-capable GPUs found - module not loaded";
+	  return 0;
+	}
+
+	// query peer-to-peer access (all pairs)
+	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
+	    it1 != infos.end();
+	    it1++)
+	  for(std::vector<GPUInfo *>::iterator it2 = infos.begin();
+	      it2 != infos.end();
+	      it2++)
+	    if(it1 != it2) {
+	      int can_access;
+	      CHECK_CU( cuDeviceCanAccessPeer(&can_access,
+					      (*it1)->device,
+					      (*it2)->device) );
+	      if(can_access)
+		(*it1)->peers.insert((*it2)->device);
+	    }
+      }
+
+      CudaModule *m = new CudaModule;
+
+      // first order of business - read command line parameters
+      {
+	CommandLineParser cp;
+
+	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
+	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)
+	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
+	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
+	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
+	  .add_option_int("-ll:pin", m->cfg_pin_sysmem);
+	
+	bool ok = cp.parse_command_line(cmdline);
+	if(!ok) {
+	  log_gpu.error() << "error reading CUDA command line parameters";
+	  exit(1);
+	}
+      }
+
+      return m;
+    }
+
+    // do any general initialization - this is called after all configuration is
+    //  complete
+    void CudaModule::initialize(void)
+    {
+      Module::initialize();
+    }
+
+    // create any memories provided by this module (default == do nothing)
+    //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
+    void CudaModule::create_memories(RuntimeImpl *runtime)
+    {
+      Module::create_memories(runtime);
+    }
+
+    // create any processors provided by the module (default == do nothing)
+    //  (each new ProcessorImpl should use a Processor from
+    //   RuntimeImpl::next_local_processor_id)
+    void CudaModule::create_processors(RuntimeImpl *runtime)
+    {
+      Module::create_processors(runtime);
+    }
+
+    // create any DMA channels provided by the module (default == do nothing)
+    void CudaModule::create_dma_channels(RuntimeImpl *runtime)
+    {
+      Module::create_dma_channels(runtime);
+    }
+
+    // create any code translators provided by the module (default == do nothing)
+    void CudaModule::create_code_translators(RuntimeImpl *runtime)
+    {
+      Module::create_code_translators(runtime);
+    }
+
+    // clean up any common resources created by the module - this will be called
+    //  after all memories/processors/etc. have been shut down and destroyed
+    void CudaModule::cleanup(void)
+    {
+      Module::cleanup();
+    }
 
 
   }; // namespace Cuda
