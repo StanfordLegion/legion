@@ -1993,7 +1993,8 @@ namespace LegionRuntime {
             unsigned parent_index = op->find_parent_index(index);
             UserEvent wait_on = UserEvent::create_user_event();
             mat_view->make_persistent(op->get_parent(), parent_index,
-                                      runtime->address_space, wait_on);
+                                      runtime->address_space, wait_on,
+                                      version_info.get_upper_bound_node());
             // Have to wait for the persistence to be confirmed
             wait_on.wait();
           }
@@ -21462,7 +21463,8 @@ namespace LegionRuntime {
       UserEvent ready_event = UserEvent::create_user_event();
       view->make_persistent(attach_op->get_parent(), 
                             attach_op->find_parent_index(0),
-                            context->runtime->address_space, ready_event);
+                            context->runtime->address_space, ready_event,
+                            version_info.get_upper_bound_node());
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(ctx, version_info);
       update_valid_views(state, attach_mask, false/*dirty*/, view);
@@ -25153,6 +25155,8 @@ namespace LegionRuntime {
           rez.serialize(did);
           rez.serialize(parent_idx);
           rez.serialize(to_trigger);
+          if (MAKE)
+            rez.serialize(upper);
         }
         if (MAKE)
           runtime->send_make_persistent(target, rez);
@@ -25166,10 +25170,11 @@ namespace LegionRuntime {
     void MaterializedView::make_persistent(SingleTask *parent_ctx,
                                            unsigned parent_idx,
                                            AddressSpaceID source, 
-                                           UserEvent to_trigger)
+                                           UserEvent to_trigger,
+                                           RegionTreeNode *upper_bound_node)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
+      if (logical_node == upper_bound_node)
       {
         // Mark that we are persistent, then figure out who else needs updates
         if (!persistent_view)
@@ -25198,12 +25203,14 @@ namespace LegionRuntime {
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(logical_node->is_region());
+          assert(upper_bound_node->is_region());
 #endif
           // We're the owner, so send out any notifications to other
           // views to inform them that this instance is now persistent
           std::set<Event> done_events;
           PersistenceFunctor<true> functor(source, runtime, parent_ctx,
                                      logical_node->as_region_node()->handle,
+                                     upper_bound_node->as_region_node()->handle,
                                      did, parent_idx, done_events);
           map_over_remote_instances(functor);
           to_trigger.trigger(Event::merge_events(done_events));
@@ -25224,6 +25231,10 @@ namespace LegionRuntime {
             rez.serialize(did);
             rez.serialize(parent_idx);
             rez.serialize(to_trigger);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(upper_bound_node->is_region());
+#endif
+            rez.serialize(upper_bound_node->as_region_node()->handle);
           }
           runtime->send_make_persistent(owner_space, rez);
         }
@@ -25234,7 +25245,8 @@ namespace LegionRuntime {
         }
       }
       else
-        parent->make_persistent(parent_ctx, parent_idx, source, to_trigger);
+        parent->make_persistent(parent_ctx, parent_idx, source, 
+                                to_trigger, upper_bound_node);
     }
 
     //--------------------------------------------------------------------------
@@ -25276,6 +25288,7 @@ namespace LegionRuntime {
           std::set<Event> done_events;
           PersistenceFunctor<false> functor(source, runtime, parent_ctx,
                                      logical_node->as_region_node()->handle,
+                                     LogicalRegion::NO_REGION,
                                      did, parent_idx, done_events);
           map_over_remote_instances(functor);
           to_trigger.trigger(Event::merge_events(done_events));
@@ -27436,10 +27449,13 @@ namespace LegionRuntime {
       derez.deserialize(parent_idx);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
+      LogicalRegion upper;
+      derez.deserialize(upper);
 
       SingleTask *parent_ctx = runtime->find_remote_context(remote_owner_uid,
                                                             remote_ctx);
       RegionTreeNode *node = runtime->forest->get_node(handle);
+      RegionTreeNode *upper_bound = runtime->forest->get_node(upper);
       LogicalView *view = node->find_view(did);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->is_instance_view());
@@ -27447,7 +27463,8 @@ namespace LegionRuntime {
 #endif
       MaterializedView *mat_view = 
         view->as_instance_view()->as_materialized_view();
-      mat_view->make_persistent(parent_ctx, parent_idx, source, to_trigger);
+      mat_view->make_persistent(parent_ctx, parent_idx, source, 
+                                to_trigger, upper_bound);
     }
 
     //--------------------------------------------------------------------------

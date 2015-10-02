@@ -1514,6 +1514,8 @@ namespace LegionRuntime {
       void set_upper_bound_node(RegionTreeNode *node);
       inline bool is_upper_bound_node(RegionTreeNode *node) const
         { return (node == upper_bound_node); }
+      inline RegionTreeNode* get_upper_bound_node(void) const 
+        { return upper_bound_node; }
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
@@ -3691,10 +3693,11 @@ namespace LegionRuntime {
       public:
         PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
                            SingleTask *p, LogicalRegion h,
+                           LogicalRegion u,
                            DistributedID id, unsigned pidx, 
                            std::set<Event> &d)
           : source(s), runtime(rt), parent(p), handle(h),
-            did(id), parent_idx(pidx), done_events(d) { }
+            upper(u), did(id), parent_idx(pidx), done_events(d) { }
       public:
         void apply(AddressSpaceID target);
       protected:
@@ -3702,6 +3705,7 @@ namespace LegionRuntime {
         Runtime *runtime;
         SingleTask *parent;
         LogicalRegion handle;
+        LogicalRegion upper;
         DistributedID did;
         unsigned parent_idx;
         std::set<Event> &done_events;
@@ -3731,7 +3735,8 @@ namespace LegionRuntime {
     public:
       bool is_persistent(void) const;
       void make_persistent(SingleTask *parent_ctx, unsigned parent_idx,
-                           AddressSpaceID source, UserEvent to_trigger);
+                           AddressSpaceID source, UserEvent to_trigger,
+                           RegionTreeNode *top_node);
       void unmake_persistent(SingleTask *parent_ctx, unsigned parent_idx,
                              AddressSpaceID source, UserEvent to_trigger);
     public:
