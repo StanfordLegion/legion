@@ -707,6 +707,11 @@ namespace Realm {
                                         lock_trace_exp_arrv_rate);
 #endif
 	
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->initialize();
+
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
