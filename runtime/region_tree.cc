@@ -2919,12 +2919,6 @@ namespace LegionRuntime {
 #endif
       IndexSpaceNode *row_src = get_node(r.index_space);
       FieldSpaceNode *col_src = get_node(r.field_space);
-#ifdef DEBUG_HIGH_LEVEL
-      if (parent != NULL)
-        assert(row_src->parent != NULL);
-      else
-        assert(row_src->parent == NULL);
-#endif
       RegionNode *result = new RegionNode(r, parent, row_src, 
                                           col_src, this);
 #ifdef DEBUG_HIGH_LEVEL
