@@ -15845,6 +15845,13 @@ namespace LegionRuntime {
             post_mapped_args->task->handle_post_mapped();
             break;
           }
+        case HLR_DEFERRED_EXECUTE_ID:
+          {
+            const Operation::DeferredExecuteArgs *deferred_execute_args = 
+              (const Operation::DeferredExecuteArgs*)args;
+            deferred_execute_args->proxy_this->complete_execution();
+            break;
+          }
         case HLR_DEFERRED_COMPLETE_ID:
           {
             const Operation::DeferredCompleteArgs *deferred_complete_args =

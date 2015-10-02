@@ -394,6 +394,17 @@ namespace LegionRuntime {
     void Operation::complete_execution(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
+      if (!wait_on.has_triggered())
+      {
+        // We have to defer the execution of this operation
+        DeferredExecuteArgs args;
+        args.hlr_id = HLR_DEFERRED_EXECUTE_ID;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_EXECUTE_ID,
+                                         this, wait_on);
+        return;
+      }
       // Tell our parent context that we are done mapping
       // It's important that this is done before we mark that we
       // are executed to avoid race conditions
@@ -406,11 +417,11 @@ namespace LegionRuntime {
         executed = true;
       }
 #endif
-      // Merge together all three events to find the precondition for completion
-      Event trigger_pre = 
-        Event::merge_events(mapped_event, resolved_event, wait_on);
-      if (!trigger_pre.has_triggered())
+      // Now see if we are ready to complete this operation
+      if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
+        Event trigger_pre = 
+          Event::merge_events(mapped_event, resolved_event);
         DeferredCompleteArgs args;
         args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         args.proxy_this = this;
