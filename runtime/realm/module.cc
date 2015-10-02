@@ -54,7 +54,7 @@ namespace Realm {
     return name;
   }
 
-  void Module::initialize(void)
+  void Module::initialize(RuntimeImpl *runtime)
   {
     log_module.debug() << "module " << name << " initialize";
   }

@@ -1716,6 +1716,7 @@ namespace Realm {
     }
 #endif
 
+#if 0
     void** GPUProcessor::internal_register_fat_binary(void *fat_bin)
     {
       void **handle = (void**)malloc(sizeof(void**));
@@ -1745,6 +1746,7 @@ namespace Realm {
       task_modules.insert(handle);
       return handle;
     }
+#endif
 
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
@@ -2280,13 +2282,31 @@ namespace Realm {
       assert(popped == context);
     }
 
+    void GPU::register_fat_binary(FatBin *data)
+    {
+    }
+    
+    void GPU::register_variable(RegisteredVariable *var)
+    {
+    }
+    
+    void GPU::register_function(RegisteredFunction *func)
+    {
+    }
+
     CUfunction GPU::lookup_function(const void *func)
     {
-      std::map<const void *,CUfunction>::iterator finder = device_functions.find(func);
+      std::map<const void *, CUfunction>::iterator finder = device_functions.find(func);
       assert(finder != device_functions.end());
       return finder->second;
     }
 
+    CUdeviceptr GPU::lookup_variable(const void *var)
+    {
+      std::map<const void *, CUdeviceptr>::iterator finder = device_variables.find(var);
+      assert(finder != device_variables.end());
+      return finder->second;
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -2416,9 +2436,59 @@ namespace Realm {
 
     // do any general initialization - this is called after all configuration is
     //  complete
-    void CudaModule::initialize(void)
+    void CudaModule::initialize(RuntimeImpl *runtime)
     {
-      Module::initialize();
+      Module::initialize(runtime);
+
+      // sanity-check: do we even have enough gpus?
+      if(cfg_num_gpus > gpu_info.size()) {
+	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_info.size() << " available!";
+	assert(false);
+      }
+
+      // if we are using a shared worker, create that next
+      if(cfg_use_shared_worker) {
+	shared_worker = new GPUWorker;
+
+	if(cfg_use_background_workers)
+	  shared_worker->start_background_thread(runtime->core_reservation_set(),
+						 1); // hardcoded worker stack size
+      }
+
+      // just use the GPUs in order right now
+      gpus.resize(cfg_num_gpus);
+      for(int i = 0; i < cfg_num_gpus; i++) {
+	// either create a worker for this GPU or use the shared one
+	GPUWorker *worker;
+	if(cfg_use_shared_worker) {
+	  worker = shared_worker;
+	} else {
+	  worker = new GPUWorker;
+
+	  if(cfg_use_background_workers)
+	    worker->start_background_thread(runtime->core_reservation_set(),
+					    1); // hardcoded worker stack size
+	}
+
+	GPU *g = new GPU(this, gpu_info[i], worker, cfg_gpu_streams);
+
+	if(!cfg_use_shared_worker)
+	  dedicated_workers[g] = worker;
+
+	gpus[i] = g;
+      }
+#if 0
+        if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
+        {
+          printf("Requested %d GPUs, but only %ld GPUs exist on node %d\n",
+            num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
+          assert(false);
+        }
+
+	// TODO: let the CUDA module actually parse config variables
+	assert(gpu_worker_thread == true);
+
+#endif
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -2426,6 +2496,23 @@ namespace Realm {
     void CudaModule::create_memories(RuntimeImpl *runtime)
     {
       Module::create_memories(runtime);
+#if 0
+	  Memory m = ID(ID::ID_MEMORY,
+			gasnet_mynode(),
+			n->memories.size(), 0).convert<Memory>();
+	  Cuda::GPUFBMemory *fbm = new Cuda::GPUFBMemory(m, gp);
+	  n->memories.push_back(fbm);
+
+	  gpu_fbmems[gp] = fbm;
+
+	  Memory m2 = ID(ID::ID_MEMORY,
+			 gasnet_mynode(),
+			 n->memories.size(), 0).convert<Memory>();
+	  Cuda::GPUZCMemory *zcm = new Cuda::GPUZCMemory(m2, gp);
+	  n->memories.push_back(zcm);
+
+	  gpu_zcmems[gp] = zcm;
+#endif
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -2434,12 +2521,67 @@ namespace Realm {
     void CudaModule::create_processors(RuntimeImpl *runtime)
     {
       Module::create_processors(runtime);
+
+#if 0
+	  Processor p = ID(ID::ID_PROCESSOR, 
+			   gasnet_mynode(), 
+			   n->processors.size()).convert<Processor>();
+	  //printf("GPU's ID is " IDFMT "\n", p.id);
+ 	  Cuda::GPUProcessor *gp = new Cuda::GPUProcessor(p, core_reservations,
+                                              (i < peer_gpus.size() ?
+                                                peer_gpus[i] : 
+                                                dumb_gpus[i-peer_gpus.size()]), 
+                                              zc_mem_size_in_mb << 20,
+                                              fb_mem_size_in_mb << 20,
+                                              stack_size_in_mb << 20,
+                                              num_gpu_streams);
+	  n->processors.push_back(gp);
+	  local_gpus.push_back(gp);
+#endif
     }
 
     // create any DMA channels provided by the module (default == do nothing)
     void CudaModule::create_dma_channels(RuntimeImpl *runtime)
     {
       Module::create_dma_channels(runtime);
+#if 0
+      gp->create_dma_channels(this);
+        // Now pin any CPU memories
+        if(pin_sysmem_for_gpu) {
+	  for(std::vector<MemoryImpl *>::iterator it = n->memories.begin();
+	      it != n->memories.end();
+	      it++)
+	    if((*it)->kind == MemoryImpl::MKIND_SYSMEM) {
+	      LocalCPUMemory *m = (LocalCPUMemory *)(*it);
+	      // TODO: should this really only be the first GPU!?
+	      local_gpus[0]->register_host_memory(m);
+	    }
+	}
+
+        // Register peer access for any GPUs which support it
+        if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
+        {
+          unsigned peer_count = (num_local_gpus < peer_gpus.size()) ? 
+                                  num_local_gpus : peer_gpus.size();
+          // Needs to go both ways so register in all directions
+          for (unsigned i = 0; i < peer_count; i++)
+          {
+            CUdevice device;
+            CHECK_CU( cuDeviceGet(&device, peer_gpus[i]) );
+            for (unsigned j = 0; j < peer_count; j++)
+            {
+              if (i == j) continue;
+              CUdevice peer;
+              CHECK_CU( cuDeviceGet(&peer, peer_gpus[j]) );
+              int can_access;
+              CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
+              if (can_access)
+                local_gpus[i]->enable_peer_access(local_gpus[j]);
+            }
+          }
+        }
+      }
+#endif
     }
 
     // create any code translators provided by the module (default == do nothing)
@@ -2452,6 +2594,32 @@ namespace Realm {
     //  after all memories/processors/etc. have been shut down and destroyed
     void CudaModule::cleanup(void)
     {
+      // clean up worker(s)
+      if(shared_worker) {
+	if(cfg_use_background_workers)
+	  shared_worker->shutdown_background_thread();
+
+	delete shared_worker;
+	shared_worker = 0;
+      }
+      for(std::map<GPU *, GPUWorker *>::iterator it = dedicated_workers.begin();
+	  it != dedicated_workers.end();
+	  it++) {
+	GPUWorker *worker = it->second;
+
+	if(cfg_use_background_workers)
+	  worker->shutdown_background_thread();
+
+	delete worker;
+      }
+      dedicated_workers.clear();
+
+      for(std::vector<GPU *>::iterator it = gpus.begin();
+	  it != gpus.end();
+	  it++)
+	delete *it;
+      gpus.clear();
+      
       Module::cleanup();
     }
 

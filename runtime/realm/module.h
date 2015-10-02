@@ -56,7 +56,7 @@ namespace Realm {
 
     // do any general initialization - this is called after all configuration is
     //  complete
-    virtual void initialize(void);
+    virtual void initialize(RuntimeImpl *runtime);
 
     // create any memories provided by this module (default == do nothing)
     //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)

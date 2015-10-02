@@ -82,7 +82,7 @@ namespace Realm {
 
       // do any general initialization - this is called after all configuration is
       //  complete
-      virtual void initialize(void);
+      virtual void initialize(RuntimeImpl *runtime);
 
       // create any memories provided by this module (default == do nothing)
       //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
@@ -352,7 +352,7 @@ namespace Realm {
     //  processor, and an FB memory (the ZC memory is shared across all GPUs)
     class GPU {
     public:
-      GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *shared_worker,
+      GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
 	  int num_streams);
       ~GPU(void);
 
@@ -446,6 +446,7 @@ namespace Realm {
       GPUEventPool event_pool;
 
       std::map<const void *, CUfunction> device_functions;
+      std::map<const void *, CUdeviceptr> device_variables;
     };
 
     // helper to push/pop a GPU's context by scope

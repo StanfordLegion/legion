@@ -37,10 +37,6 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
-#ifdef USE_CUDA
-#include "realm/cuda/cuda_module.h"
-#endif
-
 #include <unistd.h>
 #include <signal.h>
 
@@ -274,11 +270,6 @@ namespace Realm {
     static std::vector<LocalTaskProcessor *> local_io_procs;
 #endif
     static size_t stack_size_in_mb;
-#ifdef USE_CUDA
-    static std::vector<Cuda::GPUProcessor *> local_gpus;
-    static std::map<Cuda::GPUProcessor *, Cuda::GPUFBMemory *> gpu_fbmems;
-    static std::map<Cuda::GPUProcessor *, Cuda::GPUZCMemory *> gpu_zcmems;
-#endif
   
     RuntimeImpl::RuntimeImpl(void)
       : machine(0), nodes(0), global_memory(0),
@@ -498,22 +489,6 @@ namespace Realm {
 	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
 	.add_option_bool("-ll:show_rsrv", show_reservations);
 
-#ifdef USE_CUDA
-      size_t zc_mem_size_in_mb = 64;
-      size_t fb_mem_size_in_mb = 256;
-      unsigned num_local_gpus = 0;
-      unsigned num_gpu_streams = 12;
-      bool     gpu_worker_thread = true;
-      bool pin_sysmem_for_gpu = true;
-
-      cp.add_option_int("-ll:fsize", fb_mem_size_in_mb)
-	.add_option_int("-ll:zsize", zc_mem_size_in_mb)
-	.add_option_int("-ll:gpu", num_local_gpus)
-	.add_option_int("-ll:streams", num_gpu_streams)
-	.add_option_bool("-ll:gpuworker", gpu_worker_thread)
-	.add_option_int("-ll:pin", pin_sysmem_for_gpu);
-#endif
-
       std::string event_trace_file, lock_trace_file;
 
       cp.add_option_string("-ll:eventtrace", event_trace_file)
@@ -710,7 +685,7 @@ namespace Realm {
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
 	  it++)
-	(*it)->initialize();
+	(*it)->initialize(this);
 
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
@@ -763,7 +738,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_CUDA
+#ifdef OLD_USE_CUDA
       // Figure out which GPUs support peer access (if any)
       // and prioritize them so they are used first
       std::vector<int> peer_gpus;
@@ -867,7 +842,7 @@ namespace Realm {
 
 
 
-#ifdef USE_CUDA
+#ifdef OLD_USE_CUDA
       if(num_local_gpus > 0) {
         if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
         {
@@ -1066,7 +1041,7 @@ namespace Realm {
 			     50,  // "high" latency
 			     adata, apos);
 
-#ifdef USE_CUDA
+	// this adds things only when USE_CUDA==1
 	// TODO: actually get gpu<->fb affinity right for multiple gpus
 	add_proc_mem_affinity(procs_by_kind[Processor::TOC_PROC],
 			      mems_by_kind[Memory::GPU_FB_MEM],
@@ -1091,7 +1066,6 @@ namespace Realm {
 				3,   // "small" latency
 				adata, apos);
 	}
-#endif
 
 	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
