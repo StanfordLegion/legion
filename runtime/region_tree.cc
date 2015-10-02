@@ -3090,7 +3090,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space)
+    FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -3131,7 +3131,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::get_node(LogicalRegion handle)
+    RegionNode* RegionTreeForest::get_node(LogicalRegion handle,
+                                           bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -3146,8 +3147,11 @@ namespace LegionRuntime {
         if (it != region_nodes.end())
           return it->second;
         // Check to see if we have the top level region
-        has_top_level_region = 
-          (tree_nodes.find(handle.get_tree_id()) != tree_nodes.end());
+        if (need_check)
+          has_top_level_region = 
+            (tree_nodes.find(handle.get_tree_id()) != tree_nodes.end());
+        else
+          has_top_level_region = true;
       }
       // If we don't have the top-level region, we need to request it before
       // we go crawling up the tree so we know where to stop
@@ -3166,6 +3170,15 @@ namespace LegionRuntime {
         runtime->send_top_level_region_request(owner, rez);
         // Wait for the result
         wait_on.wait();
+        // Retake the lock and see if we were the top-level
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<LogicalRegion,RegionNode*>::const_iterator it = 
+          region_nodes.find(handle);
+        if (it != region_nodes.end())
+          return it->second;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(tree_nodes.find(handle.get_tree_id()) != tree_nodes.end());
+#endif
       }
       // Otherwise it hasn't been made yet, so make it
       IndexSpaceNode *index_node = get_node(handle.index_space);
@@ -3178,7 +3191,7 @@ namespace LegionRuntime {
                               index_node->parent->handle, handle.field_space);
         // Note this request can recursively build more nodes, but we
         // are guaranteed that the top level node exists
-        PartitionNode *parent = get_node(parent_handle);
+        PartitionNode *parent = get_node(parent_handle, false/*need check*/);
         // Now make our node and then return it
         return create_node(handle, parent);
       }
@@ -3186,7 +3199,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PartitionNode* RegionTreeForest::get_node(LogicalPartition handle)
+    PartitionNode* RegionTreeForest::get_node(LogicalPartition handle,
+                                              bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -3209,7 +3223,7 @@ namespace LegionRuntime {
                                   handle.field_space);
       // Note this request can recursively build more nodes, but we
       // are guaranteed that the top level node exists
-      RegionNode *parent = get_node(parent_handle);
+      RegionNode *parent = get_node(parent_handle, need_check);
       // Now create our node and return it
       return create_node(handle, parent);
     }

@@ -473,8 +473,8 @@ namespace LegionRuntime {
       IndexSpaceNode* get_node(IndexSpace space);
       IndexPartNode*  get_node(IndexPartition part);
       FieldSpaceNode* get_node(FieldSpace space);
-      RegionNode*     get_node(LogicalRegion handle);
-      PartitionNode*  get_node(LogicalPartition handle);
+      RegionNode*     get_node(LogicalRegion handle, bool need_check = false);
+      PartitionNode*  get_node(LogicalPartition handle,bool need_check = false);
       RegionNode*     get_tree(RegionTreeID tid);
     public:
       bool has_node(IndexSpace space) const;
