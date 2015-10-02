@@ -2260,6 +2260,8 @@ namespace LegionRuntime {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
+      static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
+    public:
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
                                                bool capture = true)
@@ -2736,6 +2738,10 @@ namespace LegionRuntime {
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
+    public:
+      static void handle_top_level_request(RegionTreeForest *forest,
+                                   Deserializer &derez, AddressSpaceID source);
+      static void handle_top_level_return(Deserializer &derez);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

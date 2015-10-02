@@ -3270,6 +3270,17 @@ namespace LegionRuntime {
               runtime->handle_field_space_return(derez);
               break;
             }
+          case SEND_TOP_LEVEL_REGION_REQUEST:
+            {
+              runtime->handle_top_level_region_request(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_TOP_LEVEL_REGION_RETURN:
+            {
+              runtime->handle_top_level_region_return(derez);
+              break;
+            }
           case SEND_DISTRIBUTED_ALLOC:
             {
               runtime->handle_distributed_alloc_request(derez);
@@ -10765,6 +10776,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_top_level_region_request(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_REQUEST,
+                                LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_top_level_region_return(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_RETURN,
+                                  LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_distributed_alloc_request(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11492,6 +11521,21 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_node_return(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_top_level_region_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode::handle_top_level_request(forest, derez, source); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_top_level_region_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode::handle_top_level_return(derez);   
     }
 
     //--------------------------------------------------------------------------

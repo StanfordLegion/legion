@@ -3138,12 +3138,34 @@ namespace LegionRuntime {
       PerfTracer tracer(this, GET_NODE_CALL);
 #endif
       // Check to see if the node already exists
+      bool has_top_level_region;
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<LogicalRegion,RegionNode*>::const_iterator it = 
           region_nodes.find(handle);
         if (it != region_nodes.end())
           return it->second;
+        // Check to see if we have the top level region
+        has_top_level_region = 
+          (tree_nodes.find(handle.get_tree_id()) != tree_nodes.end());
+      }
+      // If we don't have the top-level region, we need to request it before
+      // we go crawling up the tree so we know where to stop
+      if (!has_top_level_region)
+      {
+        AddressSpaceID owner = 
+          RegionTreeNode::get_owner_space(handle.get_tree_id(), runtime);
+#ifdef DEBUG_HIGH_LEVEL
+        // Should never be local
+        assert(owner != runtime->address_space);
+#endif
+        UserEvent wait_on = UserEvent::create_user_event();
+        Serializer rez;
+        rez.serialize(handle.get_tree_id());
+        rez.serialize(wait_on);
+        runtime->send_top_level_region_request(owner, rez);
+        // Wait for the result
+        wait_on.wait();
       }
       // Otherwise it hasn't been made yet, so make it
       IndexSpaceNode *index_node = get_node(handle.index_space);
@@ -16101,6 +16123,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID RegionTreeNode::get_owner_space(RegionTreeID tid,
+                                                              Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (tid % runtime->runtime_stride);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::set_restricted_fields(ContextID ctx,
                                                FieldMask &child_restricted)
     //--------------------------------------------------------------------------
@@ -21535,6 +21565,31 @@ namespace LegionRuntime {
       const void *buffer = derez.get_current_pointer();
       derez.advance_pointer(size);
       forest->attach_semantic_information(handle, tag, source, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionNode::handle_top_level_request(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      RegionNode *node = forest->get_tree(tid);
+      node->send_node(source);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      Serializer rez;
+      rez.serialize(done_event);
+      forest->runtime->send_top_level_region_return(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionNode::handle_top_level_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      done_event.trigger();
     }
 
     //--------------------------------------------------------------------------
