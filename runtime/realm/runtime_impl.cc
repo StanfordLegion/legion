@@ -925,6 +925,11 @@ namespace Realm {
       }
 #endif
 
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_dma_channels(this);
+
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested

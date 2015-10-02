@@ -69,6 +69,7 @@ namespace Realm {
     class GPU;
     class GPUWorker;
     struct GPUInfo;
+    class GPUZCMemory;
 
     // our interface to the rest of the runtime
     class CudaModule : public Module {
@@ -109,12 +110,13 @@ namespace Realm {
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
 
-    protected:
       // "global" variables live here too
       GPUWorker *shared_worker;
       std::map<GPU *, GPUWorker *> dedicated_workers;
       std::vector<GPUInfo *> gpu_info;
       std::vector<GPU *> gpus;
+      void *zcmem_cpu_base;
+      GPUZCMemory *zcmem;
     };
 
     struct GPUInfo {
@@ -359,12 +361,15 @@ namespace Realm {
       void push_context(void);
       void pop_context(void);
 
-      void register_fat_binary(FatBin *data);
-      void register_variable(RegisteredVariable *var);
-      void register_function(RegisteredFunction *func);
+      void register_fat_binary(const FatBin *data);
+      void register_variable(const RegisteredVariable *var);
+      void register_function(const RegisteredFunction *func);
 
       CUfunction lookup_function(const void *func);
       CUdeviceptr lookup_variable(const void *var);
+
+      void create_processor(RuntimeImpl *runtime, size_t stack_size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -426,6 +431,9 @@ namespace Realm {
       GPUStream *switch_to_next_task_stream(void);
       GPUStream *get_current_task_stream(void);
 
+    protected:
+      CUmodule load_cuda_module(const void *data);
+
     public:
       CudaModule *module;
       GPUInfo *info;
@@ -434,6 +442,13 @@ namespace Realm {
       GPUFBMemory *fbmem;
 
       CUcontext context;
+      CUdeviceptr fbmem_base;
+
+      // which system memories have been registered and can be used for cuMemcpyAsync
+      std::set<Memory> pinned_sysmems;
+
+      // which other FBs we have peer access to
+      std::set<Memory> peer_fbs;
 
       // streams for different copy types and a pile for actual tasks
       GPUStream *host_to_device_stream;
@@ -445,6 +460,7 @@ namespace Realm {
 
       GPUEventPool event_pool;
 
+      std::map<const FatBin *, CUmodule> device_modules;
       std::map<const void *, CUfunction> device_functions;
       std::map<const void *, CUdeviceptr> device_variables;
     };
@@ -649,7 +665,7 @@ namespace Realm {
 
     class GPUFBMemory : public MemoryImpl {
     public:
-      GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
+      GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
 
       virtual ~GPUFBMemory(void);
 
@@ -681,12 +697,12 @@ namespace Realm {
 
     public:
       GPU *gpu;
-      char *base;
+      CUdeviceptr base;
     };
 
     class GPUZCMemory : public MemoryImpl {
     public:
-      GPUZCMemory(Memory _me, GPU *_gpu, char *_gpu_base, char *_cpu_base, size_t _size);
+      GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
       virtual ~GPUZCMemory(void);
 
@@ -717,8 +733,7 @@ namespace Realm {
       virtual int get_home_node(off_t offset, size_t size);
 
     public:
-      GPU *gpu;
-      char *gpu_base;
+      CUdeviceptr gpu_base;
       char *cpu_base;
     };
 

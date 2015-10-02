@@ -20,19 +20,19 @@ namespace Realm {
     //
     // struct RegisteredFunction
 
-    RegisteredFunction::RegisteredFunction(void **_handle, const char *_host_fun,
+    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
 					   const char *_device_fun)
-      : handle(_handle), host_fun(_host_fun), device_fun(_device_fun)
+      : fat_bin(_fat_bin), host_fun(_host_fun), device_fun(_device_fun)
     {}
      
     ////////////////////////////////////////////////////////////////////////
     //
     // struct RegisteredVariable
 
-    RegisteredVariable::RegisteredVariable(void **_handle, char *_host_var,
+    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
 					   const char *_device_name, bool _external,
 					   int _size, bool _constant, bool _global)
-      : handle(_handle), host_var(_host_var), device_name(_device_name),
+      : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
 	external(_external), size(_size), constant(_constant), global(_global)
     {}
 
@@ -161,12 +161,16 @@ namespace Realm {
 
     // these are all "C" functions
     extern "C" {
-      void** __cudaRegisterFatBinary(void *fat_bin)
+      void** __cudaRegisterFatBinary(const void *fat_bin)
       {
 	// we make a "handle" that just holds the pointer
 	void **handle = new void *;
-	*handle = fat_bin;
-	log_cudart.info() << "registering fat binary " << fat_bin << ", handle = " << handle;
+	*handle = (void *)fat_bin;
+//define DEBUG_CUDART_REGISTRATION
+#ifdef DEBUG_CUDART_REGISTRATION
+	// can't use logger here - this happens at startup
+	std::cout << "registering fat binary " << fat_bin << ", handle = " << handle << std::endl;
+#endif
 	GlobalRegistrations::register_fat_binary((FatBin *)fat_bin);
 	return handle;
       }
@@ -174,19 +178,24 @@ namespace Realm {
       void __cudaUnregisterFatBinary(void **handle)
       {
 	FatBin *fat_bin = *(FatBin **)handle;
-	log_cudart.info() << "unregistering fat binary " << fat_bin << ", handle = " << handle;
+#ifdef DEBUG_CUDART_REGISTRATION
+	std::cout << "unregistering fat binary " << fat_bin << ", handle = " << handle << std::endl;
+#endif
 	GlobalRegistrations::unregister_fat_binary(fat_bin);
 	// TODO: free storage for handle?
       }
 
       void __cudaRegisterVar(void **handle,
-			     char *host_var,
+			     const void *host_var,
 			     char *device_addr,
 			     const char *device_name,
 			     int ext, int size, int constant, int global)
       {
-	log_cudart.info() << "registering variable " << host_var;
-	GlobalRegistrations::register_variable(new RegisteredVariable(handle,
+#ifdef DEBUG_CUDART_REGISTRATION
+	std::cout << "registering variable " << device_name << std::endl;
+#endif
+	const FatBin *fat_bin = *(const FatBin **)handle;
+	GlobalRegistrations::register_variable(new RegisteredVariable(fat_bin,
 								      host_var,
 								      device_name,
 								      ext != 0,
@@ -196,7 +205,7 @@ namespace Realm {
       }
       
       void __cudaRegisterFunction(void **handle,
-				  const char *host_fun,
+				  const void *host_fun,
 				  char *device_fun,
 				  const char *device_name,
 				  int thread_limit,
@@ -204,8 +213,11 @@ namespace Realm {
 				  dim3 *bDim, dim3 *gDim,
 				  int *wSize)
       {
-	log_cudart.info() << "registering function " << host_fun;
-	GlobalRegistrations::register_function(new RegisteredFunction(handle,
+#ifdef DEBUG_CUDART_REGISTRATION
+	std::cout << "registering function " << device_fun << ", handle = " << handle << std::endl;
+#endif
+	const FatBin *fat_bin = *(const FatBin **)handle;
+	GlobalRegistrations::register_function(new RegisteredFunction(fat_bin,
 								      host_fun,
 								      device_fun));
       }

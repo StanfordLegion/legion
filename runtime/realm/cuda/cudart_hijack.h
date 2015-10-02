@@ -40,24 +40,24 @@ namespace Realm {
     };
 
     struct RegisteredFunction {
-      void **handle;
-      const char *host_fun;
+      const FatBin *fat_bin;
+      const void *host_fun;
       const char *device_fun;
 
-      RegisteredFunction(void **_handle, const char *_host_fun,
+      RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
 			 const char *_device_fun);
     };
      
     struct RegisteredVariable {
-      void **handle;
-      char *host_var;
+      const FatBin *fat_bin;
+      const void *host_var;
       const char *device_name;
       bool external;
       int size;
       bool constant;
       bool global;
 
-      RegisteredVariable(void **_handle, char *_host_var,
+      RegisteredVariable(const FatBin  *_fat_bin, const void *_host_var,
 			 const char *_device_name, bool _external,
 			 int _size, bool _constant, bool _global);
     };
