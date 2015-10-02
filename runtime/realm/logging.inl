@@ -35,8 +35,10 @@ namespace Realm {
   }
 
   // the static early outs are exactly to identify dead code, so ignore
-  //  compiler warnings related to that
+  //  compiler warnings related to that (and warnings for compilers that 
+  //  don't understand -Wtautological-compare...)
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic ignored "-Wtautological-compare"
   inline LoggerMessage Logger::spew(void)
   {
