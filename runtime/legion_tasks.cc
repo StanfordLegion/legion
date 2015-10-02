@@ -5300,9 +5300,7 @@ namespace LegionRuntime {
             }
           }
         }
-      }
-      // Mark that we are done executing this task
-      task_executed = true;
+      } 
 
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
@@ -5391,6 +5389,12 @@ namespace LegionRuntime {
       // there are guaranteed to be no children
       {
         AutoLock o_lock(op_lock);
+        // Now that we know the last registration has taken place we
+        // can mark that we are done executing
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!task_executed);
+#endif
+        task_executed = true;
         if (executing_children.empty() && executed_children.empty())
         {
           if (!children_complete_invoked)
