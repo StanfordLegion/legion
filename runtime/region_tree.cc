@@ -20878,7 +20878,9 @@ namespace LegionRuntime {
       }
       if (success)
       {
-        closer.update_node_views(this, state);
+        // Only need to do the updates if we actually selected targets
+        if (!closer.needs_targets())
+          closer.update_node_views(this, state);
         // Now flush any reductions which need to be closed
         if (!!state->reduction_mask)
         {
