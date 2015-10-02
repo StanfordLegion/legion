@@ -99,7 +99,7 @@ namespace Realm {
     errno = 0;  // no errors from before
     char *pos;
     unsigned long v = strtoul(s.c_str(), &pos, 10);
-    if((errno == 0) && (*pos == 0) && (v >= 0) && (v <= UINT_MAX)) {
+    if((errno == 0) && (*pos == 0) && (v <= UINT_MAX)) {
       target = v;
       return true;
     } else 
