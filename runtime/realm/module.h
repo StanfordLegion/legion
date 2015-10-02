@@ -54,6 +54,10 @@ namespace Realm {
     //
     // static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
 
+    // do any general initialization - this is called after all configuration is
+    //  complete
+    virtual void initialize(void);
+
     // create any memories provided by this module (default == do nothing)
     //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
     virtual void create_memories(RuntimeImpl *runtime);
