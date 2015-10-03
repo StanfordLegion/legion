@@ -6650,6 +6650,7 @@ namespace LegionRuntime {
             // Only need to send back the pointer to the task instance
             rez.serialize(orig_task);
             rez.serialize(applied_condition);
+            rez.serialize<size_t>(0);
             runtime->send_individual_remote_mapped(orig_proc, rez);
           }
           // Mark that we have completed mapping
@@ -7107,42 +7108,37 @@ namespace LegionRuntime {
     void IndividualTask::unpack_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing more to unpack, we know everything is mapped
-      // so tell everyone that we are mapped
-      if (!is_locally_mapped())
+      Event applied;
+      derez.deserialize(applied);
+      if (applied.exists())
+        map_applied_conditions.insert(applied);
+      size_t num_virtual_instances;
+      derez.deserialize(num_virtual_instances);
+      for (unsigned idx = 0; idx < num_virtual_instances; idx++)
       {
-        Event applied;
-        derez.deserialize(applied);
-        if (applied.exists())
-          map_applied_conditions.insert(applied);
-        size_t num_virtual_instances;
-        derez.deserialize(num_virtual_instances);
-        for (unsigned idx = 0; idx < num_virtual_instances; idx++)
+        unsigned index;
+        derez.deserialize(index);
+        CompositeRef &virtual_ref = virtual_instances[index];
+        virtual_ref.unpack_reference(runtime, derez);
+        if (virtual_ref.has_ref())
         {
-          unsigned index;
-          derez.deserialize(index);
-          CompositeRef &virtual_ref = virtual_instances[index];
-          virtual_ref.unpack_reference(runtime, derez);
-          if (virtual_ref.has_ref())
-          {
-            // Do what we need to in order to make this view local
-            CompositeView *composite_view = virtual_ref.get_view();
-            // We need to make this local before our mapping is complete
-            composite_view->make_local(map_applied_conditions);
-            // Now we need to register this instance in our parent
-            // task's context as the result of our mapping
-            // Yes this is very dangerous, see the note about why it is 
-            // safe in initialize_region_tree_contexts
-            runtime->forest->register_virtual_region(enclosing_contexts[index],
-                                                composite_view, regions[index],
-                                                version_infos[index]);
-          }
+          // Do what we need to in order to make this view local
+          CompositeView *composite_view = virtual_ref.get_view();
+          // We need to make this local before our mapping is complete
+          composite_view->make_local(map_applied_conditions);
+          // Now we need to register this instance in our parent
+          // task's context as the result of our mapping
+          // Yes this is very dangerous, see the note about why it is 
+          // safe in initialize_region_tree_contexts
+          runtime->forest->register_virtual_region(enclosing_contexts[index],
+                                              composite_view, regions[index],
+                                              version_infos[index]);
         }
-        if (!map_applied_conditions.empty())
-          complete_mapping(Event::merge_events(map_applied_conditions));
-        else
-          complete_mapping();
       }
+      if (!map_applied_conditions.empty())
+        complete_mapping(Event::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     } 
 
     //--------------------------------------------------------------------------
