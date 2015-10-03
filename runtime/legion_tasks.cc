@@ -7032,6 +7032,8 @@ namespace LegionRuntime {
       // task as being mapped
       if (is_locally_mapped() && is_leaf())
         complete_mapping();
+      // If we're remote, we've already resolved speculation for now
+      resolve_speculation();
 #ifdef LEGION_LOGGING
       LegionLogging::log_point_point(Processor::get_executing_processor(),
                                      remote_unique_id,
