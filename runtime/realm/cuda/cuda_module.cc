@@ -2436,6 +2436,7 @@ namespace Realm {
       , cfg_gpu_streams(12)
       , cfg_use_background_workers(true)
       , cfg_use_shared_worker(true)
+      , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , shared_worker(0), zcmem_cpu_base(0), zcmem(0)
     {}
