@@ -52,6 +52,7 @@ mapping_pat              = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) 
 close_pat                = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 fence_pat                = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+fill_op_pat              = re.compile(prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 acquire_op_pat           = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 release_op_pat           = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 deletion_pat             = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
@@ -187,6 +188,10 @@ def parse_log_line(line, state):
     m = copy_op_pat.match(line)
     if m <> None:
         if state.add_copy_op(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = fill_op_pat.match(line)
+    if m <> None:
+        if state.add_fill_op(int(m.group('ctx')), int(m.group('uid'))):
             return True
     m = acquire_op_pat.match(line)
     if m <> None:
