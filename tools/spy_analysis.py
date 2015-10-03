@@ -1677,6 +1677,7 @@ class FillOp(object):
         self.logical_incoming = set() 
         self.logical_outgoing = set()
         self.logical_mark = 0
+        self.op_instances = set()
         self.node_name = 'fill_node_'+str(uid)
 
     def get_name(self):
