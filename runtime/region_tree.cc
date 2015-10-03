@@ -25195,7 +25195,7 @@ namespace LegionRuntime {
                                            RegionTreeNode *upper_bound_node)
     //--------------------------------------------------------------------------
     {
-      if (logical_node == upper_bound_node)
+      if ((parent == NULL) || (logical_node == upper_bound_node))
       {
         // Mark that we are persistent, then figure out who else needs updates
         if (!persistent_view)
