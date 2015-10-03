@@ -2335,6 +2335,8 @@ namespace LegionRuntime {
                                    bool record_close_operations,
                                    const ColorPoint &next_child,
                                    FieldMask &open_below);
+      // Note that 'allow_next_child' and 
+      // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
                                     const FieldMask &closing_mask,
                                     FieldState &closing_state,
@@ -2343,8 +2345,9 @@ namespace LegionRuntime {
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
                                     bool record_close_operations,
+                                    bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
-                                    FieldMask &need_open);
+                                    FieldMask &output_mask);
       void merge_new_field_state(CurrentState &state, 
                                  const FieldState &new_state);
       void merge_new_field_states(CurrentState &state, 

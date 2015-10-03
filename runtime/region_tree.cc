@@ -17006,6 +17006,7 @@ namespace LegionRuntime {
                                  next_child, false/*allow next*/,
                                  false/*upgrade*/, false/*leave open*/,
                                  false/*record close operations*/,
+                                 false/*record closed fields*/,
                                  dummy_states, already_open);
         // Remove the state if it is now empty
         if (!it->valid_fields)
@@ -17064,6 +17065,7 @@ namespace LegionRuntime {
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
                                  false/*record close operations*/,
+                                 false/*record closed fields*/,
                                  new_states, already_open);
         // Remove the state if it is now empty
         if (!it->valid_fields)
@@ -17145,13 +17147,16 @@ namespace LegionRuntime {
                 it++;
                 continue;
               }
-              flushed_fields |= overlap;
+              FieldMask closed_child_fields;
               perform_close_operations(closer, overlap, *it,
                                        next_child, false/*allow_next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
                                        record_close_operations,
-                                       new_states, open_below);
+                                       true/*record closed fields*/,
+                                       new_states, closed_child_fields);
+              // We only really flushed fields that were actually closed
+              flushed_fields |= closed_child_fields;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -17219,6 +17224,7 @@ namespace LegionRuntime {
                                          needs_upgrade,
                                          false/*permit leave open*/,
                                          false/*record_close_operations*/,
+                                         false/*record closed fields*/,
                                          new_states, already_open);
                 open_below |= already_open;
                 if (needs_upgrade && !!already_open)
@@ -17240,6 +17246,7 @@ namespace LegionRuntime {
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
                                        record_close_operations,
+                                       false/*record closed fields*/,
                                        new_states, open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -17344,6 +17351,7 @@ namespace LegionRuntime {
                                            true/*needs upgrade*/,
                                            false/*permit leave open*/,
                                            record_close_operations,
+                                           false/*record closed fields*/,
                                            new_states, already_open);
                   open_below |= already_open;
                   if (!!already_open)
@@ -17367,6 +17375,7 @@ namespace LegionRuntime {
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
                                          record_close_operations,
+                                         false/*record closed fields*/,
                                          new_states, already_open);
                 open_below |= already_open;
               }
@@ -17405,6 +17414,7 @@ namespace LegionRuntime {
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
                                          record_close_operations,
+                                         false/*record closed fields*/,
                                          new_states, already_open);
 #ifdef DEBUG_HIGH_LEVEL
                 assert(!already_open); // should all be closed now
@@ -17440,10 +17450,16 @@ namespace LegionRuntime {
                                             bool upgrade_next_child,
                                             bool permit_leave_open,
                                             bool record_close_operations,
+                                            bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
-                                            FieldMask &already_open)
+                                            FieldMask &output_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      // These two things have to be mutually exclusive because
+      // they cannot both share the output_mask
+      assert(!allow_next_child || !record_closed_fields);
+#endif
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, PERFORM_LOGICAL_CLOSE_CALL);
 #endif
@@ -17462,7 +17478,7 @@ namespace LegionRuntime {
           {
             if (allow_next_child)
             {
-              already_open |= close_mask;
+              output_mask |= close_mask;
               if (upgrade_next_child)
               {
                 finder->second -= close_mask;
@@ -17490,6 +17506,9 @@ namespace LegionRuntime {
               }
               if (!finder->second)
                 state.open_children.erase(finder);
+              // Record the closed fields if necessary
+              if (record_closed_fields)
+                output_mask |= close_mask;
             }
           }
           // Otherwise disjoint fields, nothing to do
@@ -17516,7 +17535,7 @@ namespace LegionRuntime {
               ((next_child) == it->first))
           {
             FieldMask open_fields = close_mask;
-            already_open |= open_fields;
+            output_mask |= open_fields;
             if (upgrade_next_child)
             {
               it->second -= open_fields;
@@ -17548,6 +17567,8 @@ namespace LegionRuntime {
           {
             new_states.push_back(FieldState(closer.user,close_mask,it->first));
           }
+          if (record_closed_fields)
+            output_mask |= close_mask;
         }
         // Remove the children that can be deleted
         for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
