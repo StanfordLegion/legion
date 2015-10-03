@@ -8523,6 +8523,7 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -8540,6 +8541,7 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -8561,9 +8563,10 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      perform_logging();
     }
 
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
                             LogicalRegion parent,
                             const std::set<FieldID> &fields, const Future &f,
@@ -8579,6 +8582,27 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::perform_logging(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_fill_operation(parent_ctx->get_unique_task_id(), 
+                                    unique_op_id);
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+#endif
     }
 
     //--------------------------------------------------------------------------

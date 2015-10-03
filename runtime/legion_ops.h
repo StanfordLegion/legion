@@ -1724,6 +1724,7 @@ namespace LegionRuntime {
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
+      void perform_logging(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
