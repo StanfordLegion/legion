@@ -1754,7 +1754,7 @@ class FillOp(object):
             'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
             'shape=record,penwidth=2];')
 
-      def print_igraph_node(self, printer):
+    def print_igraph_node(self, printer):
         printer.println(self.node_name+' [style=filled,label="'+\
                 'Fill (UID: '+str(self.uid)+') in '+self.ctx.name+'",'+\
                 'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
