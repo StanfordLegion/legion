@@ -1674,8 +1674,8 @@ class FillOp(object):
         self.uid = uid
         self.ctx = ctx
         self.requirement = None
-        self.logical_incoming = None
-        self.logical_outgoing = None
+        self.logical_incoming = set() 
+        self.logical_outgoing = set()
         self.logical_mark = 0
         self.node_name = 'fill_node_'+str(uid)
 
