@@ -34,12 +34,6 @@ namespace Realm {
     return log_level;
   }
 
-  // the static early outs are exactly to identify dead code, so ignore
-  //  compiler warnings related to that (and warnings for compilers that 
-  //  don't understand -Wtautological-compare...)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wtautological-compare"
   inline LoggerMessage Logger::spew(void)
   {
     if((REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW) ||  // static early out
@@ -197,7 +191,6 @@ namespace Realm {
     fatal().vprintf(fmt, args);
     va_end(args);
   }
-#pragma GCC diagnostic pop
 
   ////////////////////////////////////////////////////////////////////////
   //
