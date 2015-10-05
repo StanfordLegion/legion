@@ -4801,11 +4801,11 @@ namespace LegionRuntime {
       dma_queue = 0;
     }
 
-    void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs
+    void start_dma_system(int count, int max_nr
 #ifdef USE_CUDA
                           ,std::vector<GPUProcessor*> &local_gpus
 #endif
-                         )
+                          ,Realm::CoreReservationSet& crs)
     {
       //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
 #ifdef USE_CUDA
