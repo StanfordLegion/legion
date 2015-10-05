@@ -1016,58 +1016,6 @@ namespace Realm {
       : LocalTaskProcessor(_me, Processor::TOC_PROC)
       , gpu(_gpu)
     {
-#if 0
-      assert(streams > 0);
-      task_streams.resize(streams);
-      // Make our context and then immediately pop it off
-      CHECK_CU( cuDeviceGet(&proc_dev, gpu_index) );
-
-      CHECK_CU( cuCtxCreate(&proc_ctx, CU_CTX_MAP_HOST |
-                            CU_CTX_SCHED_BLOCKING_SYNC, proc_dev) );
-
-      // allocate zero-copy memory
-      CHECK_CU( cuMemHostAlloc(&zcmem_cpu_base,
-                               zcmem_size + zcmem_reserve,
-                               (CU_MEMHOSTALLOC_PORTABLE |
-                                CU_MEMHOSTALLOC_DEVICEMAP)) );
-      CHECK_CU( cuMemHostGetDevicePointer((CUdeviceptr*)&zcmem_gpu_base,
-                                          zcmem_cpu_base, 0) );
-
-      // allocate frame buffer memory
-      CHECK_CU( cuMemAlloc((CUdeviceptr*)&fbmem_gpu_base, fbmem_size + fbmem_reserve) );
-
-      // allocate pinned buffer for kernel arguments
-      kernel_buffer_size = 8192; // default four pages
-      kernel_arg_size = 0;
-      CHECK_CU( cuMemAllocHost((void**)&kernel_arg_buffer, kernel_buffer_size) );
-      
-      // get/create our worker
-      if(use_shared_worker) {
-	// we're the first, so go create it
-	if(shared_worker_users == 0) {
-	  shared_worker = new GPUWorker;
-
-	  // shared worker ALWAYS uses a background thread
-	  shared_worker->start_background_thread(crs, _stack_size);
-	}
-
-	shared_worker_users++;
-	gpu_worker = shared_worker;
-      } else {
-	// build our own worker
-	gpu_worker = new GPUWorker;
-
-	if(use_background_workers)
-	  gpu_worker->start_background_thread(crs, _stack_size);
-      }
-
-      initialize_cuda_stuff();
-
-      // prime the event pool
-      event_pool.init_pool();
-
-      CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
-#endif
       Realm::CoreReservationParameters params;
       params.set_num_cores(1);
       params.set_alu_usage(params.CORE_USAGE_SHARED);
@@ -1093,28 +1041,6 @@ namespace Realm {
     {
       delete core_rsrv;
     }
-
-#if 0
-    void* GPUProcessor::get_zcmem_cpu_base(void) const
-    {
-      return ((char *)zcmem_cpu_base) + zcmem_reserve;
-    }
-
-    void* GPUProcessor::get_fbmem_gpu_base(void) const
-    {
-      return ((char *)fbmem_gpu_base) + fbmem_reserve;
-    }
-
-    size_t GPUProcessor::get_zcmem_size(void) const
-    {
-      return zcmem_size;
-    }
-
-    size_t GPUProcessor::get_fbmem_size(void) const
-    {
-      return fbmem_size;
-    }
-#endif
 
     void GPU::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
 			 GPUCompletionNotification *notification /*= 0*/)
@@ -1289,42 +1215,6 @@ namespace Realm {
 						       f));
     }
 
-#if 0
-    void GPUProcessor::register_host_memory(Realm::MemoryImpl *m)
-    {
-      size_t size = m->size;
-      void *base = m->get_direct_ptr(0, size);
-      assert(base != 0);
-
-      if (true /*SJT: why this? !shutdown*/)
-      {
-        CHECK_CU( cuCtxPushCurrent(proc_ctx) );
-        CHECK_CU( cuMemHostRegister(base, size, CU_MEMHOSTREGISTER_PORTABLE) ); 
-        CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
-      }
-    }
-
-    void GPUProcessor::enable_peer_access(GPUProcessor *peer)
-    {
-      peer->handle_peer_access(proc_ctx);
-      peer_gpus.insert(peer);
-    }
-
-    void GPUProcessor::handle_peer_access(CUcontext peer_ctx)
-    {
-      CHECK_CU( cuCtxPushCurrent(proc_ctx) );
-      CHECK_CU( cuCtxEnablePeerAccess(peer_ctx, 0) );
-      CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
-    }
-#endif
-
-#if 0
-    bool GPU::can_access_peer(GPU *peer)
-    {
-      return(info->peers.count(peer->info->device) > 0);
-    }
-#endif
-
     GPUStream *GPU::get_current_task_stream(void)
     {
       return task_streams[current_stream];
@@ -1337,61 +1227,6 @@ namespace Realm {
 	current_stream = 0;
       return task_streams[current_stream];
     }
-
-#if 0
-    void GPUProcessor::initialize_cuda_stuff(void)
-    {
-      // load any modules, functions, and variables that we deferred
-      const std::map<void*,void**> &deferred_modules = get_deferred_modules();
-      for (std::map<void*,void**>::const_iterator it = deferred_modules.begin();
-            it != deferred_modules.end(); it++)
-      {
-        ModuleInfo &info = modules[it->second];
-        FatBin *fatbin_args = (FatBin*)it->first;
-        assert((fatbin_args->data != NULL) ||
-               (fatbin_args->filename_or_fatbins != NULL));
-        if (fatbin_args->data != NULL)
-        {
-          load_module(&(info.module), fatbin_args->data);
-        } else {
-          CHECK_CU( cuModuleLoad(&(info.module), 
-                (const char*)fatbin_args->filename_or_fatbins) );
-        }
-      }
-      const std::map<void*,void**> &deferred_cubins = get_deferred_cubins();
-      for (std::map<void*,void**>::const_iterator it = deferred_cubins.begin();
-            it != deferred_cubins.end(); it++)
-      {
-        ModuleInfo &info = modules[it->second];
-        CHECK_CU( cuModuleLoadData(&(info.module), it->first) );
-      }
-      const std::deque<DeferredFunction> &deferred_functions = get_deferred_functions();
-      for (std::deque<DeferredFunction>::const_iterator it = deferred_functions.begin();
-            it != deferred_functions.end(); it++)
-      {
-        internal_register_function(it->handle, it->host_fun, it->device_fun);
-      }
-      const std::deque<DeferredVariable> &deferred_variables = get_deferred_variables();
-      for (std::deque<DeferredVariable>::const_iterator it = deferred_variables.begin();
-            it != deferred_variables.end(); it++)
-      {
-        internal_register_var(it->handle, it->host_var, it->device_name, 
-                              it->external, it->size, it->constant, it->global);
-      } 
-
-      // initialize the streams for copy operations
-      host_to_device_stream = new GPUStream(this, gpu_worker);
-      device_to_host_stream = new GPUStream(this, gpu_worker);
-      device_to_device_stream = new GPUStream(this, gpu_worker);
-      peer_to_peer_stream = new GPUStream(this, gpu_worker);
-
-      for(unsigned idx = 0; idx < task_streams.size(); idx++)
-	task_streams[idx] = new GPUStream(this, gpu_worker);
-
-      log_gpu.info("gpu initialized: zcmem=%p/%p fbmem=%p",
-		   zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
-    }
-#endif
 
     void GPUProcessor::shutdown(void)
     {
@@ -1407,22 +1242,6 @@ namespace Realm {
 
 	CHECK_CU( cuCtxSynchronize() );
       }
-
-#if 0
-      // now clean up the GPU worker
-      if(use_shared_worker) {
-	shared_worker_users -= 1;
-	if(shared_worker_users == 0) {
-	  shared_worker->shutdown_background_thread();
-	  delete shared_worker;
-	  shared_worker = 0;
-	}
-      } else {
-	if(use_background_workers)
-	  gpu_worker->shutdown_background_thread();
-	delete gpu_worker;
-      }
-#endif
     }
 
     GPUWorker::GPUWorker(void)
@@ -1695,66 +1514,6 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
-#if 0
-    /*static*/ std::map<void*,void**>& GPUProcessor::get_deferred_modules(void)
-    {
-      static std::map<void*,void**> deferred_modules;
-      return deferred_modules;
-    }
-
-    /*static*/ std::map<void*,void**>& GPUProcessor::get_deferred_cubins(void)
-    {
-      static std::map<void*,void**> deferred_cubins;
-      return deferred_cubins;
-    }
-
-    /*static*/ std::deque<GPUProcessor::DeferredFunction>&
-                                      GPUProcessor::get_deferred_functions(void)
-    {
-      static std::deque<DeferredFunction> deferred_functions;
-      return deferred_functions;
-    }
-
-    /*static*/ std::deque<GPUProcessor::DeferredVariable>&
-                                      GPUProcessor::get_deferred_variables(void)
-    {
-      static std::deque<DeferredVariable> deferred_variables;
-      return deferred_variables;
-    }
-#endif
-
-#if 0
-    void** GPUProcessor::internal_register_fat_binary(void *fat_bin)
-    {
-      void **handle = (void**)malloc(sizeof(void**));
-      *handle = fat_bin;
-      ModuleInfo &info = modules[handle];
-      FatBin *fatbin_args = (FatBin*)fat_bin;
-      assert((fatbin_args->data != NULL) ||
-             (fatbin_args->filename_or_fatbins != NULL));
-      if (fatbin_args->data != NULL)
-      {
-        load_module(&(info.module), fatbin_args->data);
-      } else {
-        CHECK_CU( cuModuleLoad(&(info.module), (const char*)fatbin_args->filename_or_fatbins) );
-      }
-      // add this to the list of local modules to be created during this task
-      task_modules.insert(handle);
-      return handle;
-    }
-
-    void** GPUProcessor::internal_register_cuda_binary(void *cubin)
-    {
-      void **handle = (void**)malloc(sizeof(void**));
-      *handle = cubin;
-      ModuleInfo &info = modules[handle];
-      CHECK_CU( cuModuleLoadData(&(info.module), cubin) );
-      // add this to the list of local modules to be created during this task
-      task_modules.insert(handle);
-      return handle;
-    }
-#endif
-
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
       // same as device_synchronize for now
@@ -1767,185 +1526,6 @@ namespace Realm {
       GPUStream *current = gpu->get_current_task_stream();
       CHECK_CU( cuStreamSynchronize(current->get_stream()) );
     }
-
-#if 0
-    /*static*/ void** GPUProcessor::defer_module_load(void *fat_bin)
-    {
-      void **handle = (void**)malloc(sizeof(void**));
-      *handle = fat_bin;
-      // Assume we don't need a lock here because all this is sequential
-      get_deferred_modules()[fat_bin] = handle;
-      return handle;
-    }
-
-    /*static*/ void** GPUProcessor::defer_cubin_load(void *cubin)
-    {
-      void **handle = (void**)malloc(sizeof(void**));
-      *handle = cubin;
-      // Assume we don't need a lock here because all this is sequential
-      get_deferred_cubins()[cubin] = handle;
-      return handle;
-    }
-
-    /*static*/ void** GPUProcessor::register_fat_binary(void *fat_bin)
-    {
-      GPUProcessor *local = find_local_gpu(); 
-      // Ignore anything that goes on during start-up
-      if (local == NULL)
-        return GPUProcessor::defer_module_load(fat_bin);
-      return local->internal_register_fat_binary(fat_bin);
-    }
-
-    /*static*/ void** GPUProcessor::register_cuda_binary(void *cubin,
-                                                         size_t cubinSize)
-    {
-      void* cubinCopy = malloc(cubinSize);
-      memcpy(cubinCopy, cubin, cubinSize);
-      GPUProcessor *local = find_local_gpu();
-      // Ignore anything that goes on during start-up
-      if (local == NULL)
-        return GPUProcessor::defer_cubin_load(cubinCopy);
-      return local->internal_register_cuda_binary(cubinCopy);
-    }
-
-    void GPUProcessor::internal_unregister_fat_binary(void **fat_bin)
-    {
-      // It's never safe to unload our modules here
-      // We need to wait until we synchronize the current
-      // task stream with all the things that we've done
-      CHECK_CU( cuCtxSynchronize() );
-      std::map<void**,ModuleInfo>::iterator finder = modules.find(fat_bin);
-      assert(finder != modules.end());
-      CHECK_CU( cuModuleUnload(finder->second.module) );
-      for (std::set<const void*>::const_iterator it = finder->second.host_aliases.begin();
-            it != finder->second.host_aliases.end(); it++)
-      {
-        device_functions.erase(*it);
-      }
-      for (std::set<const void*>::const_iterator it = finder->second.var_aliases.begin();
-            it != finder->second.var_aliases.end(); it++)
-      {
-        device_variables.erase(*it);
-      }
-      modules.erase(finder);
-      free(fat_bin);
-    }
-    
-    /*static*/ void GPUProcessor::unregister_fat_binary(void **fat_bin)
-    {
-      // Do nothing, our task contexts will clean themselves up after they are done
-    }
-
-    void GPUProcessor::internal_register_var(void **fat_bin, char *host_var,
-                                             const char *device_name,
-                                             bool ext, int size, bool constant, bool global)
-    {
-      std::map<void**,ModuleInfo>::iterator mod_finder = modules.find(fat_bin);
-      assert(mod_finder != modules.end());
-      ModuleInfo &info = mod_finder->second;
-      // Check to see if we already have this symbol
-      std::map<const void*,VarInfo>::const_iterator var_finder = 
-        device_variables.find(host_var);
-      if (var_finder == device_variables.end())
-      {
-        VarInfo target;
-        CHECK_CU( cuModuleGetGlobal(&(target.ptr), &(target.size), info.module, device_name) );
-        target.name = device_name;
-        device_variables[host_var] = target;
-        info.var_aliases.insert(host_var);
-      }
-    }
-
-    /*static*/ void GPUProcessor::defer_variable_load(void **fat_bin,
-                                                                char *host_var,
-                                                                const char *device_name,
-                                                                bool ext, int size,
-                                                                bool constant, bool global)
-    {
-      DeferredVariable var;
-      var.handle = fat_bin;
-      var.host_var = host_var;
-      var.device_name = device_name;
-      var.external = ext;
-      var.size = size;
-      var.constant = constant;
-      var.global = global;
-      get_deferred_variables().push_back(var);
-    }
-
-    /*static*/ void GPUProcessor::register_var(void **fat_bin, char *host_var,
-                                               char *device_addr, const char *device_name,
-                                               int ext, int size, int constant, int global)
-    {
-      GPUProcessor *local = find_local_gpu();
-      if (local == NULL)
-      {
-        GPUProcessor::defer_variable_load(fat_bin, host_var, device_name,
-                                                    (ext == 1), size, 
-                                                    (constant == 1), (global == 1));
-        return;
-      }
-      local->internal_register_var(fat_bin, host_var, device_name, 
-                                   (ext == 1), size, (constant == 1), (global == 1));
-    }
-
-    void GPUProcessor::internal_register_function(void **fat_bin, const char *host_fun,
-                                                  const char *device_fun) 
-    {
-      // Check to see if we already loaded this function
-      std::map<const void*,CUfunction>::const_iterator func_finder = 
-        device_functions.find(host_fun);
-      if (func_finder != device_functions.end())
-        return;
-      // Otherwise we need to load it
-      std::map<void**,ModuleInfo>::iterator mod_finder = modules.find(fat_bin);
-      assert(mod_finder != modules.end());
-      ModuleInfo &info = mod_finder->second;      
-      info.host_aliases.insert(host_fun);
-      CUfunction *func = &(device_functions[host_fun]); 
-      CHECK_CU( cuModuleGetFunction(func, info.module, device_fun) );
-    }
-
-    /*static*/ void GPUProcessor::defer_function_load(void **fat_bin,
-                                                                const char *host_fun,
-                                                                const char *device_fun)
-    {
-      DeferredFunction df;
-      df.handle = fat_bin;
-      df.host_fun = host_fun;
-      df.device_fun = device_fun;
-      // Assume we don't need a lock here
-      get_deferred_functions().push_back(df); 
-    }
-
-    /*static*/ void GPUProcessor::register_function(void **fat_bin, const char *host_fun,
-                                                    char *device_fun, const char *device_name,
-                                                    int thread_limit, uint3 *tid, uint3 *bid,
-                                                    dim3 *bDim, dim3 *gDim, int *wSize)
-    {
-      GPUProcessor *local = find_local_gpu();
-      if (local == NULL)
-      {
-        GPUProcessor::defer_function_load(fat_bin, host_fun, device_fun);
-        return;
-      }
-      local->internal_register_function(fat_bin, host_fun, device_fun);
-    }
-
-    char GPUProcessor::internal_init_module(void **fat_bin)
-    {
-      // We don't really care about managed runtimes
-      return 1;
-    }
-
-    /*static*/ char GPUProcessor::init_module(void **fat_bin)
-    {
-      GPUProcessor *local = find_local_gpu();
-      if (local == NULL)
-        return 1;
-      return local->internal_init_module(fat_bin);
-    }
-#endif
     
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
       : grid(_grid), block(_block), shared(_shared)
@@ -2065,115 +1645,6 @@ namespace Realm {
       // no synchronization here
     }
 
-#if 0
-    /*static*/ cudaError_t GPUProcessor::device_synchronize(void)
-    {
-      // Users are dumb, never let them mess us up
-      GPUProcessor *local = find_local_gpu();
-      assert(local != NULL);
-      return local->internal_stream_synchronize();
-    }
-
-    /*static*/ cudaError_t GPUProcessor::set_shared_memory_config(cudaSharedMemConfig config)
-    {
-      CHECK_CU( cuCtxSetSharedMemConfig(
-        (config == cudaSharedMemBankSizeDefault) ? CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE :
-        (config == cudaSharedMemBankSizeFourByte) ? CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE :
-                                                    CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE) );
-      return cudaSuccess;
-    }
-
-    /*static*/ const char* GPUProcessor::get_error_string(cudaError_t error)
-    {
-      const char *result;
-      CHECK_CU( cuGetErrorString((CUresult)error, &result) );
-      return result;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::get_device(int *device)
-    {
-      GPUProcessor *local = find_local_gpu();
-      CHECK_CU( cuDeviceGet(device, local->gpu_index) );
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::get_device_properties(cudaDeviceProp *prop, int device)
-    {
-      CHECK_CU( cuDeviceGetName(prop->name, 255, device) );
-      CHECK_CU( cuDeviceTotalMem(&(prop->totalGlobalMem), device) );
-#define GET_DEVICE_PROP(member, name)   \
-      {                                 \
-        int tmp;                        \
-        CHECK_CU( cuDeviceGetAttribute(&tmp, CU_DEVICE_ATTRIBUTE_##name, device) ); \
-        prop->member = tmp;             \
-      }
-      // SCREW TEXTURES AND SURFACES FOR NOW!
-      GET_DEVICE_PROP(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK);
-      GET_DEVICE_PROP(regsPerBlock, MAX_REGISTERS_PER_BLOCK);
-      GET_DEVICE_PROP(warpSize, WARP_SIZE);
-      GET_DEVICE_PROP(memPitch, MAX_PITCH);
-      GET_DEVICE_PROP(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK);
-      GET_DEVICE_PROP(maxThreadsDim[0], MAX_BLOCK_DIM_X);
-      GET_DEVICE_PROP(maxThreadsDim[1], MAX_BLOCK_DIM_Y);
-      GET_DEVICE_PROP(maxThreadsDim[2], MAX_BLOCK_DIM_Z);
-      GET_DEVICE_PROP(maxGridSize[0], MAX_GRID_DIM_X);
-      GET_DEVICE_PROP(maxGridSize[1], MAX_GRID_DIM_Y);
-      GET_DEVICE_PROP(maxGridSize[2], MAX_GRID_DIM_Z);
-      GET_DEVICE_PROP(clockRate, CLOCK_RATE);
-      GET_DEVICE_PROP(totalConstMem, TOTAL_CONSTANT_MEMORY);
-      GET_DEVICE_PROP(major, COMPUTE_CAPABILITY_MAJOR);
-      GET_DEVICE_PROP(minor, COMPUTE_CAPABILITY_MINOR);
-      GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
-      GET_DEVICE_PROP(multiProcessorCount, MULTIPROCESSOR_COUNT);
-      GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
-      GET_DEVICE_PROP(integrated, INTEGRATED);
-      GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
-      GET_DEVICE_PROP(computeMode, COMPUTE_MODE);
-      GET_DEVICE_PROP(concurrentKernels, CONCURRENT_KERNELS);
-      GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
-      GET_DEVICE_PROP(pciBusID, PCI_BUS_ID);
-      GET_DEVICE_PROP(pciDeviceID, PCI_DEVICE_ID);
-      GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
-      GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
-      GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
-      GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
-      GET_DEVICE_PROP(memoryClockRate, MEMORY_CLOCK_RATE);
-      GET_DEVICE_PROP(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH);
-      GET_DEVICE_PROP(l2CacheSize, L2_CACHE_SIZE);
-      GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR);
-      GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
-      GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
-      GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
-      GET_DEVICE_PROP(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
-      GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
-      GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
-      GET_DEVICE_PROP(isMultiGpuBoard, MULTI_GPU_BOARD);
-      GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
-#undef GET_DEVICE_PROP
-      return cudaSuccess;
-    }
-
-    /*static*/ cudaError_t GPUProcessor::get_func_attributes(cudaFuncAttributes *attr,
-                                                             const void *func)
-    {
-      CUfunction handle;
-      GPUProcessor *local = find_local_gpu();
-      local->find_function_handle(func, &handle);
-      CHECK_CU( cuFuncGetAttribute(&(attr->binaryVersion), CU_FUNC_ATTRIBUTE_BINARY_VERSION, handle) );
-      CHECK_CU( cuFuncGetAttribute(&(attr->cacheModeCA), CU_FUNC_ATTRIBUTE_CACHE_MODE_CA, handle) );
-      int tmp;
-      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, handle) );
-      attr->constSizeBytes = tmp;
-      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, handle) );
-      attr->localSizeBytes = tmp;
-      CHECK_CU( cuFuncGetAttribute(&(attr->maxThreadsPerBlock), CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, handle) );
-      CHECK_CU( cuFuncGetAttribute(&(attr->numRegs), CU_FUNC_ATTRIBUTE_NUM_REGS, handle) );
-      CHECK_CU( cuFuncGetAttribute(&(attr->ptxVersion), CU_FUNC_ATTRIBUTE_PTX_VERSION, handle) );
-      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, handle) );
-      attr->sharedSizeBytes = tmp;
-      return cudaSuccess;
-    }
-#endif
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -2586,18 +2057,6 @@ namespace Realm {
 
 	gpus[i] = g;
       }
-#if 0
-        if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
-        {
-          printf("Requested %d GPUs, but only %ld GPUs exist on node %d\n",
-            num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
-          assert(false);
-        }
-
-	// TODO: let the CUDA module actually parse config variables
-	assert(gpu_worker_thread == true);
-
-#endif
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -2650,24 +2109,6 @@ namespace Realm {
 	  }
 	}
       }
-
-#if 0
-	  Memory m = ID(ID::ID_MEMORY,
-			gasnet_mynode(),
-			n->memories.size(), 0).convert<Memory>();
-	  Cuda::GPUFBMemory *fbm = new Cuda::GPUFBMemory(m, gp);
-	  n->memories.push_back(fbm);
-
-	  gpu_fbmems[gp] = fbm;
-
-	  Memory m2 = ID(ID::ID_MEMORY,
-			 gasnet_mynode(),
-			 n->memories.size(), 0).convert<Memory>();
-	  Cuda::GPUZCMemory *zcm = new Cuda::GPUZCMemory(m2, gp);
-	  n->memories.push_back(zcm);
-
-	  gpu_zcmems[gp] = zcm;
-#endif
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -2683,22 +2124,6 @@ namespace Realm {
 	  it++)
 	(*it)->create_processor(runtime,
 				2 << 20); // TODO: don't use hardcoded stack size...
-#if 0
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  Cuda::GPUProcessor *gp = new Cuda::GPUProcessor(p, core_reservations,
-                                              (i < peer_gpus.size() ?
-                                                peer_gpus[i] : 
-                                                dumb_gpus[i-peer_gpus.size()]), 
-                                              zc_mem_size_in_mb << 20,
-                                              fb_mem_size_in_mb << 20,
-                                              stack_size_in_mb << 20,
-                                              num_gpu_streams);
-	  n->processors.push_back(gp);
-	  local_gpus.push_back(gp);
-#endif
     }
 
     // create any DMA channels provided by the module (default == do nothing)
@@ -2761,44 +2186,6 @@ namespace Realm {
 	(*it)->create_dma_channels(runtime);
 
       Module::create_dma_channels(runtime);
-#if 0
-      gp->create_dma_channels(this);
-        // Now pin any CPU memories
-        if(pin_sysmem_for_gpu) {
-	  for(std::vector<MemoryImpl *>::iterator it = n->memories.begin();
-	      it != n->memories.end();
-	      it++)
-	    if((*it)->kind == MemoryImpl::MKIND_SYSMEM) {
-	      LocalCPUMemory *m = (LocalCPUMemory *)(*it);
-	      // TODO: should this really only be the first GPU!?
-	      local_gpus[0]->register_host_memory(m);
-	    }
-	}
-
-        // Register peer access for any GPUs which support it
-        if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
-        {
-          unsigned peer_count = (num_local_gpus < peer_gpus.size()) ? 
-                                  num_local_gpus : peer_gpus.size();
-          // Needs to go both ways so register in all directions
-          for (unsigned i = 0; i < peer_count; i++)
-          {
-            CUdevice device;
-            CHECK_CU( cuDeviceGet(&device, peer_gpus[i]) );
-            for (unsigned j = 0; j < peer_count; j++)
-            {
-              if (i == j) continue;
-              CUdevice peer;
-              CHECK_CU( cuDeviceGet(&peer, peer_gpus[j]) );
-              int can_access;
-              CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-              if (can_access)
-                local_gpus[i]->enable_peer_access(local_gpus[j]);
-            }
-          }
-        }
-      }
-#endif
     }
 
     // create any code translators provided by the module (default == do nothing)

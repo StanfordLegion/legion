@@ -481,29 +481,8 @@ namespace Realm {
                    size_t _stack_size);
       virtual ~GPUProcessor(void);
 
-#if 0
-    protected:
-      void initialize_cuda_stuff(void);
-      void cleanup_cuda_stuff(void);
-#endif
-
     public:
       virtual void shutdown(void);
-
-#if 0
-      void *get_zcmem_cpu_base(void) const;
-      void *get_fbmem_gpu_base(void) const;
-      size_t get_zcmem_size(void) const;
-      size_t get_fbmem_size(void) const;
-    public:
-    public:
-      void register_host_memory(Realm::MemoryImpl *m);
-      void enable_peer_access(GPUProcessor *peer);
-      void handle_peer_access(CUcontext peer_ctx);
-      void handle_complete_copy(GPUMemcpy *copy);
-    public:
-      void load_context(void);
-#endif
 
       static GPUProcessor *get_current_gpu_proc(void);
 
@@ -544,123 +523,7 @@ namespace Realm {
       std::vector<char> kernel_args;
 
     protected:
-#if 0
-      const int gpu_index;
-      const size_t zcmem_size, fbmem_size;
-      const size_t zcmem_reserve, fbmem_reserve;
-      GPUWorker *gpu_worker;
-      void *zcmem_cpu_base;
-      void *zcmem_gpu_base;
-      void *fbmem_gpu_base;
-#endif
       Realm::CoreReservation *core_rsrv;
-    protected:
-#if 0
-      std::set<GPUProcessor*> peer_gpus;
-#endif
-    public:
-#if 0
-      // Our CUDA context that we will create
-      CUdevice  proc_dev;
-      CUcontext proc_ctx;
-
-      GPUStream *switch_to_next_task_stream(void);
-#endif
-#if 0
-    protected:
-      size_t current_stream;
-      std::vector<GPUStream *> task_streams;
-#endif
-    public:
-      // Our helper cuda calls
-      void** internal_register_fat_binary(void *fat_bin);
-      void** internal_register_cuda_binary(void *cubin);
-      void internal_unregister_fat_binary(void **fat_bin);
-      void internal_register_var(void **fat_bin, char *host_var, 
-                                 const char *device_name, bool ext, 
-                                 int size, bool constant, bool global);
-      void internal_register_function(void **fat_bin ,const char *host_fun,
-                                      const char *device_fun);
-      char internal_init_module(void **fat_bin);
-      void load_module(CUmodule *module, const void *image);
-      void find_function_handle(const void *func, CUfunction *handle);
-    public:
-#if 0
-      // Our cuda calls
-      cudaError_t internal_configure_call(dim3 gird_dim, dim3 block_dim, size_t shared_mem);
-      cudaError_t internal_setup_argument(const void *arg, size_t size, size_t offset);
-      cudaError_t internal_launch(const void *func);
-      cudaError_t internal_gpu_memcpy(void *dst, const void *src, size_t size, bool sync);
-      cudaError_t internal_gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
-                                       size_t offset, cudaMemcpyKind kind, bool sync);
-      cudaError_t internal_gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-                                         size_t offset, cudaMemcpyKind kind, bool sync);
-#endif
-    private:
-      struct VarInfo {
-      public:
-        const char *name;
-        CUdeviceptr ptr;
-        size_t size;
-      };
-      struct ModuleInfo {
-        CUmodule module;
-        std::set<const void*> host_aliases;
-        std::set<const void*> var_aliases;
-      };
-    private:
-      // Support for our internal cuda runtime
-      std::map<void** /*fatbin*/,ModuleInfo> modules;
-      std::map<const void*,CUfunction> device_functions;
-      std::map<const void*,VarInfo> device_variables;
-      // Modules allocated just during this task's lifetime
-      std::set<void**> task_modules;
-    public:
-      // Support for deferring loading of modules and functions
-      // until after we have initialized the runtime
-#if 0
-      static std::map<void*,void**>& get_deferred_modules(void);
-      static std::map<void*,void**>& get_deferred_cubins(void);
-      static std::deque<DeferredFunction>& get_deferred_functions(void);
-      static std::deque<DeferredVariable>& get_deferred_variables(void);
-      static void** defer_module_load(void *fat_bin);
-      static void** defer_cubin_load(void *cubin);
-      static void defer_function_load(void **fat_bin, const char *host_fun,
-                                      const char *device_fun);
-      static void defer_variable_load(void **fat_bin, char *host_var,
-                                      const char *device_name,
-                                      bool ext, int size,
-                                      bool constant, bool global);
-#endif
-    public:
-      // Helper methods for intercepting CUDA calls
-      static GPUProcessor* find_local_gpu(void);
-      static void** register_fat_binary(void *fat_bin);
-      static void** register_cuda_binary(void *cubin, size_t cubinSize);
-      static void unregister_fat_binary(void **fat_bin);
-      static void register_var(void **fat_bin, char *host_var,
-                               char *device_addr, const char *device_name,
-                               int ext, int size, int constant, int global);
-      static void register_function(void **fat_bin, const char *host_fun,
-                                    char *device_fun, const char *device_name,
-                                    int thread_limit, uint3 *tid, uint3 *bid,
-                                    dim3 *bDim, dim3 *gDim, int *wSize);
-      static char init_module(void **fat_bin);
-    public:
-      // Helper methods for replacing CUDA calls
-#if 0
-      static cudaError_t stream_create(cudaStream_t *stream);
-      static cudaError_t stream_destroy(cudaStream_t stream);
-      static cudaError_t configure_call(dim3 grid_dim, dim3 block_dim,
-                                        size_t shared_memory, cudaStream_t stream);
-      static cudaError_t setup_argument(const void *arg, size_t size, size_t offset);
-      static cudaError_t launch(const void *func);
-      static cudaError_t set_shared_memory_config(cudaSharedMemConfig config);
-      static const char* get_error_string(cudaError_t error);
-      static cudaError_t get_device(int *device);
-      static cudaError_t get_device_properties(cudaDeviceProp *prop, int device);
-      static cudaError_t get_func_attributes(cudaFuncAttributes *attr, const void *func);
-#endif
     };
 
     class GPUFBMemory : public MemoryImpl {

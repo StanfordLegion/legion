@@ -264,11 +264,6 @@ namespace Realm {
     RuntimeImpl *runtime_singleton = 0;
 
   // these should probably be member variables of RuntimeImpl?
-#ifdef OLD_INIT
-    static std::vector<LocalTaskProcessor *> local_cpus;
-    static std::vector<LocalTaskProcessor *> local_util_procs;
-    static std::vector<LocalTaskProcessor *> local_io_procs;
-#endif
     static size_t stack_size_in_mb;
   
     RuntimeImpl::RuntimeImpl(void)
@@ -365,13 +360,6 @@ namespace Realm {
 	  pma.bandwidth = bandwidth;
 	  pma.latency = latency;
 	  machine->add_proc_mem_affinity(pma);
-#if 0
-	  adata[apos++] = NODE_ANNOUNCE_PMA;
-	  adata[apos++] = (*it1).id;
-	  adata[apos++] = (*it2).id;
-	  adata[apos++] = bandwidth;
-	  adata[apos++] = latency;
-#endif
 	}
     }
 
@@ -393,13 +381,6 @@ namespace Realm {
 	  mma.bandwidth = bandwidth;
 	  mma.latency = latency;
 	  machine->add_mem_mem_affinity(mma);
-#if 0
-	  adata[apos++] = NODE_ANNOUNCE_MMA;
-	  adata[apos++] = (*it1).id;
-	  adata[apos++] = (*it2).id;
-	  adata[apos++] = bandwidth;
-	  adata[apos++] = latency;
-#endif
 	}
     }
 
@@ -472,20 +453,11 @@ namespace Realm {
 #else
       size_t gasnet_mem_size_in_mb = 0;
 #endif
-#ifdef OLD_INIT
-      size_t cpu_mem_size_in_mb = 512;
-#endif
       size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
-#ifdef OLD_INIT
-      unsigned num_local_cpus = 1;
-      unsigned num_util_procs = 1;
-      unsigned num_io_procs = 0;
-      unsigned concurrent_io_threads = 1; // Legion does not support values > 1 right now
-#endif
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -732,101 +704,6 @@ namespace Realm {
 	  it++)
 	(*it)->create_processors(this);
 
-#ifdef OLD_INIT
-      // create utility processors (if any)
-      if (num_util_procs > 0)
-      {
-        for(unsigned i = 0; i < num_util_procs; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, core_reservations,
-								stack_size_in_mb << 20);
-          n->processors.push_back(up);
-          local_util_procs.push_back(up);
-        }
-      }
-      // create i/o processors (if any)
-      if (num_io_procs > 0)
-      {
-        for (unsigned i = 0; i < num_io_procs; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-	  LocalIOProcessor *io = new LocalIOProcessor(p, core_reservations,
-						      stack_size_in_mb << 20,
-						      concurrent_io_threads);
-          n->processors.push_back(io);
-          local_io_procs.push_back(io);
-        }
-      }
-#endif
-
-#ifdef OLD_USE_CUDA
-      // Figure out which GPUs support peer access (if any)
-      // and prioritize them so they are used first
-      std::vector<int> peer_gpus;
-      std::vector<int> dumb_gpus;
-      // only do this if gpus have been requested
-      if(num_local_gpus > 0) {
-	// Initialize the driver API
-	CHECK_CU( cuInit(0) );
-	{
-	  int num_devices;
-	  CHECK_CU( cuDeviceGetCount(&num_devices) );
-	  for (int i = 0; i < num_devices; i++)
-	  {
-	    CUdevice device;
-	    CHECK_CU( cuDeviceGet(&device, i) );
-	    bool has_peer = false;
-	    // Go through all the other devices and see
-	    // if we have peer access to them
-	    for (int j = 0; j < num_devices; j++)
-            {
-	      if (i == j) continue;
-	      CUdevice peer;
-	      CHECK_CU( cuDeviceGet(&peer, j) );
-	      int can_access;
-	      CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-	      if (can_access)
-	      {
-		has_peer = true;
-		break;
-	      }
-	    }
-	    if (has_peer)
-	      peer_gpus.push_back(i);
-	    else
-	      dumb_gpus.push_back(i);
-	  }
-	}
-      }
-#endif
-
-#ifdef OLD_INIT
-      // create local processors
-      for(unsigned i = 0; i < num_local_cpus; i++) {
-	Processor p = ID(ID::ID_PROCESSOR, 
-			 gasnet_mynode(), 
-			 n->processors.size()).convert<Processor>();
-        LocalTaskProcessor *lp;
-	lp = new LocalCPUProcessor(p, core_reservations, stack_size_in_mb << 20);
-	n->processors.push_back(lp);
-	local_cpus.push_back(lp);
-      }
-
-      // create local memory
-      LocalCPUMemory *cpumem;
-      if(cpu_mem_size_in_mb > 0) {
-	cpumem = new LocalCPUMemory(ID(ID::ID_MEMORY, 
-				       gasnet_mynode(),
-				       n->memories.size(), 0).convert<Memory>(),
-				    cpu_mem_size_in_mb << 20);
-	n->memories.push_back(cpumem);
-      } else
-	cpumem = 0;
-#endif
-
       LocalCPUMemory *regmem;
       if(reg_mem_size_in_mb > 0) {
 	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
@@ -862,91 +739,6 @@ namespace Realm {
                                 gasnet_mynode(),
                                 n->memories.size(), 0).convert<Memory>());
       n->memories.push_back(hdfmem);
-#endif
-
-
-
-#ifdef OLD_USE_CUDA
-      if(num_local_gpus > 0) {
-        if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
-        {
-          printf("Requested %d GPUs, but only %ld GPUs exist on node %d\n",
-            num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
-          assert(false);
-        }
-
-	// TODO: let the CUDA module actually parse config variables
-	assert(gpu_worker_thread == true);
-
-	for(unsigned i = 0; i < num_local_gpus; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  Cuda::GPUProcessor *gp = new Cuda::GPUProcessor(p, core_reservations,
-                                              (i < peer_gpus.size() ?
-                                                peer_gpus[i] : 
-                                                dumb_gpus[i-peer_gpus.size()]), 
-                                              zc_mem_size_in_mb << 20,
-                                              fb_mem_size_in_mb << 20,
-                                              stack_size_in_mb << 20,
-                                              num_gpu_streams);
-	  n->processors.push_back(gp);
-	  local_gpus.push_back(gp);
-
-	  Memory m = ID(ID::ID_MEMORY,
-			gasnet_mynode(),
-			n->memories.size(), 0).convert<Memory>();
-	  Cuda::GPUFBMemory *fbm = new Cuda::GPUFBMemory(m, gp);
-	  n->memories.push_back(fbm);
-
-	  gpu_fbmems[gp] = fbm;
-
-	  Memory m2 = ID(ID::ID_MEMORY,
-			 gasnet_mynode(),
-			 n->memories.size(), 0).convert<Memory>();
-	  Cuda::GPUZCMemory *zcm = new Cuda::GPUZCMemory(m2, gp);
-	  n->memories.push_back(zcm);
-
-	  gpu_zcmems[gp] = zcm;
-
-	  gp->create_dma_channels(this);
-	}
-        // Now pin any CPU memories
-        if(pin_sysmem_for_gpu) {
-	  for(std::vector<MemoryImpl *>::iterator it = n->memories.begin();
-	      it != n->memories.end();
-	      it++)
-	    if((*it)->kind == MemoryImpl::MKIND_SYSMEM) {
-	      LocalCPUMemory *m = (LocalCPUMemory *)(*it);
-	      // TODO: should this really only be the first GPU!?
-	      local_gpus[0]->register_host_memory(m);
-	    }
-	}
-
-        // Register peer access for any GPUs which support it
-        if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
-        {
-          unsigned peer_count = (num_local_gpus < peer_gpus.size()) ? 
-                                  num_local_gpus : peer_gpus.size();
-          // Needs to go both ways so register in all directions
-          for (unsigned i = 0; i < peer_count; i++)
-          {
-            CUdevice device;
-            CHECK_CU( cuDeviceGet(&device, peer_gpus[i]) );
-            for (unsigned j = 0; j < peer_count; j++)
-            {
-              if (i == j) continue;
-              CUdevice peer;
-              CHECK_CU( cuDeviceGet(&peer, peer_gpus[j]) );
-              int can_access;
-              CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-              if (can_access)
-                local_gpus[i]->enable_peer_access(local_gpus[j]);
-            }
-          }
-        }
-      }
 #endif
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
@@ -1057,24 +849,6 @@ namespace Realm {
 			       15,  // "low" bandwidth
 			       50  // "high" latency
 			       );
-
-#if 0
-	// this adds things only when USE_CUDA==1
-	// TODO: actually get gpu<->fb affinity right for multiple gpus
-	add_proc_mem_affinities(machine,
-				procs_by_kind[Processor::TOC_PROC],
-				mems_by_kind[Memory::GPU_FB_MEM],
-				200, // "big" bandwidth
-				5   // "ok" latency
-				);
-
-	add_proc_mem_affinities(machine,
-				procs_by_kind[Processor::TOC_PROC],
-				mems_by_kind[Memory::Z_COPY_MEM],
-				20,  // "medium" bandwidth
-				200 // "bad" latency
-				);
-#endif
 
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
@@ -1268,26 +1042,6 @@ namespace Realm {
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
-
-#ifdef OLD_INIT
-	spawn_on_all(local_util_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-
-	spawn_on_all(local_cpus,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-
-	spawn_on_all(local_io_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-
-#ifdef USE_CUDA
-	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-#endif
-#endif
       } else {
 	log_task.info("no processor init task");
       }
@@ -1362,30 +1116,6 @@ namespace Realm {
 	  it++)
 	(*it)->shutdown();
 
-#ifdef OLD_INIT
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_util_procs.begin();
-	  it != local_util_procs.end();
-	  it++)
-	(*it)->shutdown();
-
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_io_procs.begin();
-          it != local_io_procs.end();
-          it++)
-	(*it)->shutdown();
-
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_cpus.begin();
-	  it != local_cpus.end();
-	  it++)
-	(*it)->shutdown();
-
-#ifdef USE_CUDA
-      for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
-	  it != local_gpus.end();
-	  it++)
-	(*it)->shutdown();
-#endif
-#endif
-
       // delete processors, memories, nodes, etc.
       {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
@@ -1453,22 +1183,6 @@ namespace Realm {
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
-#ifdef OLD_INIT
-	spawn_on_all(local_cpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-	spawn_on_all(local_util_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-	spawn_on_all(local_io_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-#ifdef USE_CUDA
-	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-#endif
-#endif
       } else {
 	log_task.info("no processor shutdown task");
       }
@@ -1569,30 +1283,6 @@ namespace Realm {
 	  ReservationImpl *impl = n->reservations.lookup_entry(id.index(), id.node());
 	  assert(impl->me == id.convert<Reservation>());
 	  return impl;
-#if 0
-	  std::vector<ReservationImpl>& locks = nodes[id.node()].locks;
-
-	  unsigned index = id.index();
-	  if(index >= n->num_locks) {
-	    AutoHSLLock a(n->mutex); // take lock before we actually resize
-
-	    // grow our array to mirror additions by other nodes
-	    //  this should never happen for our own node
-	    assert(id.node() != gasnet_mynode());
-
-	    unsigned oldsize = n->locks.size();
-	    assert(oldsize < MAX_LOCAL_LOCKS);
-	    if(index >= oldsize) { // only it's still too small
-              assert((index+1) < MAX_LOCAL_LOCKS);
-	      n->locks.resize(index + 1);
-	      for(unsigned i = oldsize; i <= index; i++)
-		n->locks[i].init(ID(ID::ID_LOCK, id.node(), i).convert<Reservation>(),
-				 id.node());
-	      n->num_locks = index + 1;
-	    }
-	  }
-	  return &(locks[index]);
-#endif
 	}
 
       case ID::ID_INDEXSPACE:
@@ -1658,25 +1348,6 @@ namespace Realm {
       IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.index(), id.node());
       assert(impl->me == id.convert<IndexSpace>());
       return impl;
-#if 0
-      unsigned index = id.index();
-      if(index >= n->index_spaces.size()) {
-	AutoHSLLock a(n->mutex); // take lock before we actually resize
-
-	if(index >= n->index_spaces.size())
-	  n->index_spaces.resize(index + 1);
-      }
-
-      if(!n->index_spaces[index]) { // haven't seen this metadata before?
-	//printf("UNKNOWN METADATA " IDFMT "\n", id.id());
-	AutoHSLLock a(n->mutex); // take lock before we actually allocate
-	if(!n->index_spaces[index]) {
-	  n->index_spaces[index] = new IndexSpaceImpl(id.convert<IndexSpace>());
-	} 
-      }
-
-      return n->index_spaces[index];
-#endif
     }
 
     RegionInstanceImpl *RuntimeImpl::get_instance_impl(ID id)
