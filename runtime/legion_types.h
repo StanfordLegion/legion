@@ -194,6 +194,12 @@ namespace LegionRuntime {
         "Window Wait",                                            \
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
+        "Index Space Semantic Request"                            \
+        "Index Partition Semantic Request"                        \
+        "Field Space Semantic Request"                            \
+        "Field Semantic Request"                                  \
+        "Region Semantic Request"                                 \
+        "Partition Semantic Request"                              \
       };
 
     enum VirtualChannelKind {
