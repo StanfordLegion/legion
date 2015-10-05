@@ -1257,6 +1257,44 @@ class State(object):
                 memory.emit_svg(printer)
         printer.close()
 
+    def show_copy_matrix(self, output_prefix):
+        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof_copy.html.template")
+        tsv_file_name = output_prefix + ".tsv"
+        html_file_name = output_prefix + ".html"
+        print 'Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name)
+
+        def node_id(memory):
+            return (memory.mem_id >> 23) & ((1 << 5) - 1)
+        memories = sorted(self.memories.itervalues())
+
+        tsv_file = open(tsv_file_name, "w")
+        tsv_file.write("source\ttarget\tremote\ttotal\tcount\taverage\n")
+        for i in range(0, len(memories)):
+            for j in range(0, len(memories)):
+                src = memories[i]
+                dst = memories[j]
+                is_remote = node_id(src) <> node_id(dst) or \
+                    src.kind == memory_kinds[0] or \
+                    dst.kind == memory_kinds[0]
+                sum = 0.0
+                cnt = 0
+                channel = self.find_channel(src, dst)
+                for copy in channel.copies:
+                    sum = sum + (copy.stop - copy.start) * 1e-6
+                    cnt = cnt + 1
+                tsv_file.write(str(i)+"\t"+str(j)+"\t"+str(int(is_remote))+"\t"+str(sum)+\
+                        "\t"+str(cnt)+"\t"+str(sum / cnt * 1000 if cnt > 0 else 0)+"\n")
+        tsv_file.close()
+
+        template_file = open(template_file_name, "r")
+        template = template_file.read()
+        template_file.close()
+        html_file = open(html_file_name, "w")
+        html_file.write(template % (repr([str(mem).replace("Memory ", "") for mem in memories]),
+                                    repr(tsv_file_name)))
+        html_file.close()
+
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
     print '  -p : include processors in visualization'
@@ -1269,7 +1307,7 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:s')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:sC')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -1280,7 +1318,9 @@ def main():
     show_procs = False
     show_channels = False
     show_instances = False
+    show_copy_matrix = False
     output_prefix = 'legion_prof'
+    copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
     if '-p' in opts:
@@ -1301,6 +1341,9 @@ def main():
         US_PER_PIXEL = int(opts['-m'])
     if '-o' in opts:
         output_prefix = opts['-o']
+        copy_output_prefix = output_prefix + "_copy"
+    if '-C' in opts:
+        show_copy_matrix = True
     if show_all:
         show_procs = True
         show_channels = True
@@ -1326,6 +1369,9 @@ def main():
 
     state.emit_visualization(output_prefix, show_procs, 
                              show_channels, show_instances) 
+
+    if show_copy_matrix:
+        state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
     main()
