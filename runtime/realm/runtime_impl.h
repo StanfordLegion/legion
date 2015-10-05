@@ -228,6 +228,9 @@ namespace Realm {
       void add_processor(ProcessorImpl *p);
       void add_dma_channel(DMAChannel *c);
 
+      void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
+      void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
+
       Memory next_local_memory_id(void);
       Processor next_local_processor_id(void);
       CoreReservationSet& core_reservation_set(void);

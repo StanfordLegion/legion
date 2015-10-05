@@ -327,6 +327,16 @@ namespace Realm {
       dma_channels.push_back(c);
     }
 
+    void RuntimeImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
+    {
+      machine->add_proc_mem_affinity(pma);
+    }
+
+    void RuntimeImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
+    {
+      machine->add_mem_mem_affinity(mma);
+    }
+
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
       return core_reservations;
@@ -337,12 +347,11 @@ namespace Realm {
       return dma_channels;
     }
 
-    static void add_proc_mem_affinity(const std::set<Processor>& procs,
-				      const std::set<Memory>& mems,
-				      int bandwidth,
-				      int latency,
-				      size_t *adata,
-				      unsigned& apos)
+    static void add_proc_mem_affinities(MachineImpl *machine,
+					const std::set<Processor>& procs,
+					const std::set<Memory>& mems,
+					int bandwidth,
+					int latency)
     {
       for(std::set<Processor>::const_iterator it1 = procs.begin();
 	  it1 != procs.end();
@@ -350,20 +359,27 @@ namespace Realm {
 	for(std::set<Memory>::const_iterator it2 = mems.begin();
 	    it2 != mems.end();
 	    it2++) {
+	  Machine::ProcessorMemoryAffinity pma;
+	  pma.p = *it1;
+	  pma.m = *it2;
+	  pma.bandwidth = bandwidth;
+	  pma.latency = latency;
+	  machine->add_proc_mem_affinity(pma);
+#if 0
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
 	  adata[apos++] = (*it1).id;
 	  adata[apos++] = (*it2).id;
 	  adata[apos++] = bandwidth;
 	  adata[apos++] = latency;
+#endif
 	}
     }
 
-    static void add_mem_mem_affinity(const std::set<Memory>& mems1,
-				     const std::set<Memory>& mems2,
-				     int bandwidth,
-				     int latency,
-				     size_t *adata,
-				     unsigned& apos)
+    static void add_mem_mem_affinities(MachineImpl *machine,
+				       const std::set<Memory>& mems1,
+				       const std::set<Memory>& mems2,
+				       int bandwidth,
+				       int latency)
     {
       for(std::set<Memory>::const_iterator it1 = mems1.begin();
 	  it1 != mems1.end();
@@ -371,11 +387,19 @@ namespace Realm {
 	for(std::set<Memory>::const_iterator it2 = mems2.begin();
 	    it2 != mems2.end();
 	    it2++) {
+	  Machine::MemoryMemoryAffinity mma;
+	  mma.m1 = *it1;
+	  mma.m2 = *it2;
+	  mma.bandwidth = bandwidth;
+	  mma.latency = latency;
+	  machine->add_mem_mem_affinity(mma);
+#if 0
 	  adata[apos++] = NODE_ANNOUNCE_MMA;
 	  adata[apos++] = (*it1).id;
 	  adata[apos++] = (*it2).id;
 	  adata[apos++] = bandwidth;
 	  adata[apos++] = latency;
+#endif
 	}
     }
 
@@ -945,6 +969,127 @@ namespace Realm {
       }
 
       {
+        // iterate over all local processors and add affinities for them
+	// all of this should eventually be moved into appropriate modules
+	std::map<Processor::Kind, std::set<Processor> > procs_by_kind;
+
+	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
+	    it != n->processors.end();
+	    it++)
+	  if(*it) {
+	    Processor p = (*it)->me;
+	    Processor::Kind k = (*it)->me.kind();
+
+	    procs_by_kind[k].insert(p);
+	  }
+
+	// now iterate over memories too
+	std::map<Memory::Kind, std::set<Memory> > mems_by_kind;
+	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+	    it != n->memories.end();
+	    it++)
+	  if(*it) {
+	    Memory m = (*it)->me;
+	    Memory::Kind k = (*it)->me.kind();
+
+	    mems_by_kind[k].insert(m);
+	  }
+
+	if(global_memory)
+	  mems_by_kind[Memory::GLOBAL_MEM].insert(global_memory->me);
+
+	std::set<Processor::Kind> local_cpu_kinds;
+	local_cpu_kinds.insert(Processor::LOC_PROC);
+	local_cpu_kinds.insert(Processor::UTIL_PROC);
+	local_cpu_kinds.insert(Processor::IO_PROC);
+
+	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+	    it != local_cpu_kinds.end();
+	    it++) {
+	  Processor::Kind k = *it;
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::SYSTEM_MEM],
+				  100, // "large" bandwidth
+				  1   // "small" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::REGDMA_MEM],
+				  80,  // "large" bandwidth
+				  5   // "small" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::DISK_MEM],
+				  5,   // "low" bandwidth
+				  100 // "high" latency
+				  );
+	  
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::HDF_MEM],
+				  5,   // "low" bandwidth
+				  100 // "high" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::GLOBAL_MEM],
+				  10,  // "lower" bandwidth
+				  50  // "higher" latency
+				  );
+	}
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::GLOBAL_MEM],
+			       30,  // "lower" bandwidth
+			       25  // "higher" latency
+			       );
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::DISK_MEM],
+			       15,  // "low" bandwidth
+			       50  // "high" latency
+			       );
+
+#if 0
+	// this adds things only when USE_CUDA==1
+	// TODO: actually get gpu<->fb affinity right for multiple gpus
+	add_proc_mem_affinities(machine,
+				procs_by_kind[Processor::TOC_PROC],
+				mems_by_kind[Memory::GPU_FB_MEM],
+				200, // "big" bandwidth
+				5   // "ok" latency
+				);
+
+	add_proc_mem_affinities(machine,
+				procs_by_kind[Processor::TOC_PROC],
+				mems_by_kind[Memory::Z_COPY_MEM],
+				20,  // "medium" bandwidth
+				200 // "bad" latency
+				);
+#endif
+
+	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+	    it != local_cpu_kinds.end();
+	    it++) {
+	  Processor::Kind k = *it;
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::Z_COPY_MEM],
+				  40,  // "large" bandwidth
+				  3   // "small" latency
+				  );
+	}
+      }
+      {
 	const unsigned ADATA_SIZE = 4096;
 	size_t adata[ADATA_SIZE];
 	unsigned apos = 0;
@@ -952,9 +1097,7 @@ namespace Realm {
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 
-        // iterate over all local processors and add announcements for them
-	std::map<Processor::Kind, std::set<Processor> > procs_by_kind;
-
+	// announce each processor and its affinities
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
 	    it != n->processors.end();
 	    it++)
@@ -967,11 +1110,21 @@ namespace Realm {
 	    adata[apos++] = p.id;
 	    adata[apos++] = k;
 
-	    procs_by_kind[k].insert(p);
+	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
+	    machine->get_proc_mem_affinity(pmas, p);
+
+	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
+		it2 != pmas.end();
+		it2++) {
+	      adata[apos++] = NODE_ANNOUNCE_PMA;
+	      adata[apos++] = it2->p.id;
+	      adata[apos++] = it2->m.id;
+	      adata[apos++] = it2->bandwidth;
+	      adata[apos++] = it2->latency;
+	    }
 	  }
 
-	// now iterate over memories too
-	std::map<Memory::Kind, std::set<Memory> > mems_by_kind;
+	// now each memory and its affinities with other memories
 	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
 	    it != n->memories.end();
 	    it++)
@@ -986,101 +1139,22 @@ namespace Realm {
 	    adata[apos++] = (*it)->size;
 	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
 
-	    mems_by_kind[k].insert(m);
+	    std::vector<Machine::MemoryMemoryAffinity> mmas;
+	    machine->get_mem_mem_affinity(mmas, m);
+
+	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
+		it2 != mmas.end();
+		it2++) {
+	      adata[apos++] = NODE_ANNOUNCE_MMA;
+	      adata[apos++] = it2->m1.id;
+	      adata[apos++] = it2->m2.id;
+	      adata[apos++] = it2->bandwidth;
+	      adata[apos++] = it2->latency;
+	    }
 	  }
-
-	if(global_memory)
-	  mems_by_kind[Memory::GLOBAL_MEM].insert(global_memory->me);
-
-	// affinities for now are a big hack
-	std::set<Processor::Kind> local_cpu_kinds;
-	local_cpu_kinds.insert(Processor::LOC_PROC);
-	local_cpu_kinds.insert(Processor::UTIL_PROC);
-	local_cpu_kinds.insert(Processor::IO_PROC);
-
-	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
-	    it != local_cpu_kinds.end();
-	    it++) {
-	  Processor::Kind k = *it;
-
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::SYSTEM_MEM],
-				100, // "large" bandwidth
-				1,   // "small" latency
-				adata, apos);
-
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::REGDMA_MEM],
-				80,  // "large" bandwidth
-				5,   // "small" latency
-				adata, apos);
-
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::DISK_MEM],
-				5,   // "low" bandwidth
-				100, // "high" latency
-				adata, apos);
-	  
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::HDF_MEM],
-				5,   // "low" bandwidth
-				100, // "high" latency
-				adata, apos);
-
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::GLOBAL_MEM],
-				10,  // "lower" bandwidth
-				50,  // "higher" latency
-				adata, apos);
-	}
-
-	add_mem_mem_affinity(mems_by_kind[Memory::SYSTEM_MEM],
-			     mems_by_kind[Memory::GLOBAL_MEM],
-			     30,  // "lower" bandwidth
-			     25,  // "higher" latency
-			     adata, apos);
-
-	add_mem_mem_affinity(mems_by_kind[Memory::SYSTEM_MEM],
-			     mems_by_kind[Memory::DISK_MEM],
-			     15,  // "low" bandwidth
-			     50,  // "high" latency
-			     adata, apos);
-
-	// this adds things only when USE_CUDA==1
-	// TODO: actually get gpu<->fb affinity right for multiple gpus
-	add_proc_mem_affinity(procs_by_kind[Processor::TOC_PROC],
-			      mems_by_kind[Memory::GPU_FB_MEM],
-			      200, // "big" bandwidth
-			      5,   // "ok" latency
-			      adata, apos);
-
-	add_proc_mem_affinity(procs_by_kind[Processor::TOC_PROC],
-			      mems_by_kind[Memory::Z_COPY_MEM],
-			      20,  // "medium" bandwidth
-			      200, // "bad" latency
-			      adata, apos);
-
-	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
-	    it != local_cpu_kinds.end();
-	    it++) {
-	  Processor::Kind k = *it;
-
-	  add_proc_mem_affinity(procs_by_kind[k],
-				mems_by_kind[Memory::Z_COPY_MEM],
-				40,  // "large" bandwidth
-				3,   // "small" latency
-				adata, apos);
-	}
 
 	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
-
-	// parse our own data (but don't create remote proc/mem objects)
-	machine->parse_node_announce_data(gasnet_mynode(),
-					  num_procs,
-					  num_memories,
-					  adata, apos*sizeof(adata[0]), 
-					  false);
 
 #ifdef DEBUG_REALM_STARTUP
 	if(gasnet_mynode() == 0) {

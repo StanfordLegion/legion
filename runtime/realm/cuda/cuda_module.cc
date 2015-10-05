@@ -2248,6 +2248,21 @@ namespace Realm {
 			      runtime->core_reservation_set(),
 			      stack_size);
       runtime->add_processor(proc);
+
+      // this processor is able to access its own FB and the ZC mem (if any)
+      Machine::ProcessorMemoryAffinity pma;
+      pma.p = p;
+      pma.m = fbmem->me;
+      pma.bandwidth = 200;  // "big"
+      pma.latency = 5;      // "ok"
+      runtime->add_proc_mem_affinity(pma);
+
+      if(module->zcmem) {
+	pma.m = module->zcmem->me;
+	pma.bandwidth = 20; // "medium"
+	pma.latency = 200;  // "bad"
+	runtime->add_proc_mem_affinity(pma);
+      }
     }
 
     void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size)
