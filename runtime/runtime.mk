@@ -314,7 +314,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh
-RM	:= rm -f
+RM	:= rm
 LS	:= ls
 MKDIR	:= mkdir
 MV	:= mv
@@ -346,16 +346,38 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
-ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+# generate libraries for Legion and Realm
+SLIB_LEGION     := liblegion.a
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+SLIB_REALM      := librealm.a
+LEGION_LD_FLAGS := -L. -llegion -lrealm
+else
+SLIB_SHAREDLLR  := libsharedllr.a
+LEGION_LD_FLAGS := -L. -llegion -lsharedllr
+endif
 
 ifndef NO_BUILD_RULES
 .PHONY: all
 all: $(OUTFILE)
 
 # If we're using the general low-level runtime we have to link with nvcc
-$(OUTFILE) : $(ALL_OBJS)
+$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
+	$(GCC) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LEGION_LD_FLAGS) $(LD_FLAGS) $(GASNET_FLAGS)
+
+$(SLIB_LEGION) : $(HIGH_RUNTIME_OBJS) $(MAPPER_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+$(SLIB_REALM) : $(LOW_RUNTIME_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+else
+$(SLIB_SHAREDLLR) : $(LOW_RUNTIME_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+endif
 
 $(GEN_OBJS) : %.o : %.cc
 	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
@@ -379,6 +401,7 @@ $(GPU_RUNTIME_OBJS): %.o : %.cu
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
 
 clean:
-	@$(RM) -rf $(ALL_OBJS) $(OUTFILE)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+
 endif
 

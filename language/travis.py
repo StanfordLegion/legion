@@ -21,12 +21,14 @@ def install_dependencies():
     env = dict(os.environ.iteritems())
 
     if platform.system() == 'Darwin':
+        # root_url = 'http://llvm.org/releases/3.5.2'
+        root_url = 'http://legion.stanford.edu/~eslaught/llvm-deb-mirror/releases/3.5.2'
         clang_tarball = 'clang+llvm-3.5.2-x86_64-apple-darwin.tar.xz'
         clang_dir = os.path.abspath('clang+llvm-3.5.2-x86_64-apple-darwin')
 
-        print('http://llvm.org/releases/3.5.2/%s' % clang_tarball)
+        print('%s/%s' % (root_url, clang_tarball))
         subprocess.check_call(
-            ['curl', '-O', 'http://llvm.org/releases/3.5.2/%s' % clang_tarball])
+            ['curl', '-O', '%s/%s' % (root_url, clang_tarball)])
         shasum = subprocess.Popen(['shasum', '-c'], stdin=subprocess.PIPE)
         shasum.communicate(
             '547d9a359258ce918750fd8647cd6e1b47feaa51  %s' % clang_tarball)
