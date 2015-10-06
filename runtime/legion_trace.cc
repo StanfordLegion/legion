@@ -22,8 +22,7 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
-    // Extern declarations for loggers
-    extern Logger::Category log_run;
+    LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
     // LegionTrace 

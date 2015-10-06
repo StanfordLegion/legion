@@ -303,6 +303,9 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
 		    $(LG_RT_DIR)/legion_trace.cc \
 		    $(LG_RT_DIR)/legion_spy.cc \
 		    $(LG_RT_DIR)/legion_profiling.cc \
+		    $(LG_RT_DIR)/legion_instances.cc \
+		    $(LG_RT_DIR)/legion_views.cc \
+		    $(LG_RT_DIR)/legion_analysis.cc \
 		    $(LG_RT_DIR)/region_tree.cc \
 		    $(LG_RT_DIR)/runtime.cc \
 		    $(LG_RT_DIR)/garbage_collection.cc

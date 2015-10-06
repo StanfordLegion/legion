@@ -20,6 +20,8 @@
 #include "legion_trace.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#include "legion_instances.h"
+#include "legion_views.h"
 #include <algorithm>
 
 #define PRINT_REG(reg) (reg).index_space.id,(reg).field_space.id, (reg).tree_id
@@ -27,17 +29,7 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
-    // Extern declarations for loggers
-    extern Logger::Category log_run;
-    extern Logger::Category log_task;
-    extern Logger::Category log_region;
-    extern Logger::Category log_index;
-    extern Logger::Category log_field;
-    extern Logger::Category log_inst;
-    extern Logger::Category log_spy;
-    extern Logger::Category log_garbage;
-    extern Logger::Category log_leak;
-    extern Logger::Category log_variant; 
+    LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
     // Task Operation 

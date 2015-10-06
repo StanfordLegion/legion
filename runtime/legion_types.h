@@ -417,7 +417,6 @@ namespace LegionRuntime {
     class PathTraverser;
     class NodeTraverser;
     class PremapTraverser;
-    template<bool RESTRICTED>
     class MappingTraverser;
     class RestrictInfo;
 
@@ -425,6 +424,7 @@ namespace LegionRuntime {
     class PhysicalState;
     class VersionState;
     class VersionInfo;
+    class RestrictInfo;
 
     class DistributedCollectable;
     class LayoutDescription;
@@ -742,6 +742,20 @@ namespace LegionRuntime {
     friend class TreeStateLogger;                 \
     friend class BindingLib::Utility;             \
     friend class CObjectWrapper;                  
+
+#define LEGION_EXTERN_LOGGER_DECLARATIONS         \
+    extern Logger::Category log_run;              \
+    extern Logger::Category log_task;             \
+    extern Logger::Category log_index;            \
+    extern Logger::Category log_field;            \
+    extern Logger::Category log_region;           \
+    extern Logger::Category log_inst;             \
+    extern Logger::Category log_leak;             \
+    extern Logger::Category log_variant;          \
+    extern Logger::Category log_allocation;       \
+    extern Logger::Category log_prof;             \
+    extern Logger::Category log_garbage;          \
+    extern Logger::Category log_spy;
 
     // Timing events
     enum {

@@ -21,6 +21,7 @@
 #include "region_tree.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
+#include "legion_analysis.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
