@@ -37,12 +37,12 @@ INC_FLAGS	:=
 CC_FLAGS	?=
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
-LD_FLAGS	:=
+LD_FLAGS	:= -lcudart
 
 ###########################################################################
 #
 #   Don't change anything below here
-#   
+#
 ###########################################################################
 
 include $(LG_RT_DIR)/runtime.mk
