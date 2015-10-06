@@ -100,7 +100,7 @@ ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/legion -I$(LG_RT_DIR)/mappers
 ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
 else
@@ -288,27 +288,27 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
-MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc \
-		   $(LG_RT_DIR)/shim_mapper.cc \
-		   $(LG_RT_DIR)/mapping_utilities.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
+		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
+		   $(LG_RT_DIR)/mappers/mapping_utilities.cc
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifeq ($(strip $(ALT_MAPPERS)),1)
-MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
 
-HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
-		    $(LG_RT_DIR)/legion_c.cc \
-		    $(LG_RT_DIR)/legion_ops.cc \
-		    $(LG_RT_DIR)/legion_tasks.cc \
-		    $(LG_RT_DIR)/legion_trace.cc \
-		    $(LG_RT_DIR)/legion_spy.cc \
-		    $(LG_RT_DIR)/legion_profiling.cc \
-		    $(LG_RT_DIR)/legion_instances.cc \
-		    $(LG_RT_DIR)/legion_views.cc \
-		    $(LG_RT_DIR)/legion_analysis.cc \
-		    $(LG_RT_DIR)/region_tree.cc \
-		    $(LG_RT_DIR)/runtime.cc \
-		    $(LG_RT_DIR)/garbage_collection.cc
+HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
+		    $(LG_RT_DIR)/legion/legion_c.cc \
+		    $(LG_RT_DIR)/legion/legion_ops.cc \
+		    $(LG_RT_DIR)/legion/legion_tasks.cc \
+		    $(LG_RT_DIR)/legion/legion_trace.cc \
+		    $(LG_RT_DIR)/legion/legion_spy.cc \
+		    $(LG_RT_DIR)/legion/legion_profiling.cc \
+		    $(LG_RT_DIR)/legion/legion_instances.cc \
+		    $(LG_RT_DIR)/legion/legion_views.cc \
+		    $(LG_RT_DIR)/legion/legion_analysis.cc \
+		    $(LG_RT_DIR)/legion/region_tree.cc \
+		    $(LG_RT_DIR)/legion/runtime.cc \
+		    $(LG_RT_DIR)/legion/garbage_collection.cc
 
 # General shell commands
 SHELL	:= /bin/sh

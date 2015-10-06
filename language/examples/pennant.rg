@@ -38,6 +38,8 @@ local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
+  local legion_dir = root_dir .. "../../runtime/legion"
+  local mapper_dir = root_dir .. "../../runtime/mappers"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -52,13 +54,15 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
                  pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
+  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir,
+                                             "-I", mapper_dir, "-I", legion_dir})
 end
 
 local c = regentlib.c
