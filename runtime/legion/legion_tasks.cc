@@ -5338,6 +5338,11 @@ namespace LegionRuntime {
       handle_future(res, res_size, owned);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
+      // Also test for whether we need to trigger any of our child
+      // complete or committed operations before marking that we
+      // are done executing
+      bool need_complete = false;
+      bool need_commit = false;
       if (!is_leaf())
       {
         std::set<Event> preconditions;
@@ -5356,36 +5361,41 @@ namespace LegionRuntime {
           {
             preconditions.insert((*it)->get_mapped_event());
           }
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!task_executed);
+#endif
+          // Now that we know the last registration has taken place we
+          // can mark that we are done executing
+          task_executed = true;
+          if (executing_children.empty() && executed_children.empty())
+          {
+            if (!children_complete_invoked)
+            {
+              need_complete = true;
+              children_complete_invoked = true;
+            }
+            if (complete_children.empty() && 
+                !children_commit_invoked)
+            {
+              need_commit = true;
+              children_commit_invoked = true;
+            }
+          }
         }
         if (!preconditions.empty())
           handle_post_mapped(Event::merge_events(preconditions));
         else
           handle_post_mapped();
       }
-      // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered() || !profiling_done.has_triggered())
-      {
-        Event exec_precondition = 
-          Event::merge_events(pending_done, profiling_done);
-        complete_execution(exec_precondition);
-      }
       else
-        complete_execution();
-      // Mark that we are done executing and then see if we need to
-      // trigger any of our mapping, completion, or commit methods
-      bool need_complete = false;
-      bool need_commit = false;
-      // If we're a leaf with no virtual mappings then
-      // there are guaranteed to be no children
       {
+        // Handle the leaf task case
         AutoLock o_lock(op_lock);
-        // Now that we know the last registration has taken place we
-        // can mark that we are done executing
 #ifdef DEBUG_HIGH_LEVEL
         assert(!task_executed);
 #endif
+        // Now that we know the last registration has taken place we
+        // can mark that we are done executing
         task_executed = true;
         if (executing_children.empty() && executed_children.empty())
         {
@@ -5401,7 +5411,18 @@ namespace LegionRuntime {
             children_commit_invoked = true;
           }
         }
-      } 
+      }
+      // Mark that we are done executing this operation
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered() || !profiling_done.has_triggered())
+      {
+        Event exec_precondition = 
+          Event::merge_events(pending_done, profiling_done);
+        complete_execution(exec_precondition);
+      }
+      else
+        complete_execution();
       if (need_complete)
         trigger_children_complete();
       if (need_commit)
@@ -6808,8 +6829,6 @@ namespace LegionRuntime {
       // Invalidate any state that we had if we didn't already
       if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
         invalidate_region_tree_contexts();
-      // Mark that this operation is complete
-      complete_operation();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
@@ -6822,6 +6841,8 @@ namespace LegionRuntime {
           children_commit_invoked = true;
         }
       }
+      // Mark that this operation is complete
+      complete_operation();
       if (need_commit)
         trigger_children_committed();
     }
@@ -7528,8 +7549,6 @@ namespace LegionRuntime {
       // operations can begin committing
       if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
         invalidate_region_tree_contexts();
-      // Mark that this operation is now complete
-      complete_operation();
       // See if we need to trigger that our children are complete
       bool need_commit = false;
       {
@@ -7540,6 +7559,8 @@ namespace LegionRuntime {
           children_commit_invoked = true;
         }
       }
+      // Mark that this operation is now complete
+      complete_operation();
       if (need_commit)
         trigger_children_committed();
     }
