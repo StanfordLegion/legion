@@ -132,7 +132,7 @@ void top_level_task(const Task *task,
   //struct timespec ts_start, ts_end;
   //clock_gettime(CLOCK_MONOTONIC, &ts_start);
   double ts_start, ts_end;
-  ts_start = LegionRuntime::TimeStamp::get_current_time_in_micros();
+  ts_start = Realm::Clock::current_time_in_microseconds();
   // Run the main loop
   bool simulation_success = true;
   for (int i = 0; i < num_loops; i++)
@@ -145,7 +145,7 @@ void top_level_task(const Task *task,
                                                   perform_checks, simulation_success,
                                                   ((i+1)==num_loops));
   }
-  ts_end = LegionRuntime::TimeStamp::get_current_time_in_micros();
+  ts_end = Realm::Clock::current_time_in_microseconds();
   if (simulation_success)
     printf("SUCCESS!\n");
   else
