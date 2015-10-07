@@ -383,25 +383,25 @@ $(SLIB_SHAREDLLR) : $(LOW_RUNTIME_OBJS)
 endif
 
 $(GEN_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(ASM_OBJS) : %.o : %.S
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(LOW_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(HIGH_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(MAPPER_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(GEN_GPU_OBJS) : %.o : %.cu
-	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 $(GPU_RUNTIME_OBJS): %.o : %.cu
-	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 clean:
 	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
