@@ -118,6 +118,8 @@ namespace Realm {
       {
 	return T::create_module(runtime, cmdline);
       }
+
+      int FORCE_LINKAGE;
     };
 
     // called by the module registration helpers
@@ -127,14 +129,17 @@ namespace Realm {
     RuntimeImpl *runtime;
     std::vector<void *> sofile_handles;
   };
-
-
-#ifdef REALM_MODULE_IS_DYNAMIC
-  #define REGISTER_REALM_MODULE(classname) extern "C" { Module *create_realm_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); }
-#else
-  #define REGISTER_REALM_MODULE(classname) namespace { ModuleRegistrar::StaticRegistration<classname> registration; }
-#endif
 	
+#ifdef REALM_MODULE_REGISTRATION_STATIC
+#define REGISTER_REALM_MODULE(classname) ModuleRegistrar::StaticRegistration<classname> classname ## _registration
+#else
+#ifdef REALM_MODULE_REGISTRATION_DYNAMIC
+#define REGISTER_REALM_MODULE(classname) extern "C" { Module *create_realm_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); }
+#else
+#define REGISTER_REALM_MODULE(classname) /* nothing */
+#endif
+#endif
+
 }; // namespace Realm
 
 #endif // ifndef REALM_MODULE_H

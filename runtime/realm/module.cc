@@ -15,6 +15,7 @@
 
 // Realm modules
 
+#define REALM_MODULE_REGISTRATION_STATIC
 #include "module.h"
 
 #include "logging.h"
@@ -27,6 +28,11 @@
 #ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
 #endif
+
+// TODO: replace this with Makefile (or maybe cmake) magic that adapts automatically
+//  to the build-system-controlled list of statically-linked Realm modules
+#include "realm/runtime_impl.h"
+#include "realm/cuda/cuda_module.h"
 
 namespace Realm {
 

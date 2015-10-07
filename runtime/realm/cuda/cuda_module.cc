@@ -37,6 +37,7 @@ namespace Realm {
 
     Logger log_gpu("gpu");
     Logger log_gpudma("gpudma");
+    Logger log_cudart("cudart");
 
 #ifdef EVENT_GRAPH_TRACE
     extern Logger log_event_graph;
@@ -966,6 +967,15 @@ namespace Realm {
       static __thread GPUProcessor *current_gpu_proc = 0;
     };
 
+    // this flag will be set on the first call into any of the hijack code in
+    //  cudart_hijack.cc
+    //  an application is linked with -lcudart, we will NOT be hijacking the
+    //  application's calls, and the cuda module needs to know that)
+    /*extern*/ bool cudart_hijack_active = false;
+
+    // used in GPUTaskScheduler<T>::execute_task below
+    static bool already_issued_hijack_warning = false;
+
     template <typename T>
     bool GPUTaskScheduler<T>::execute_task(Task *task)
     {
@@ -996,6 +1006,21 @@ namespace Realm {
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( cuStreamSynchronize(s->get_stream()) );
 #endif
+
+      // if our hijack code is not active, the application may have put some work for this
+      //  task on streams we don't know about, so it takes an expensive device synchronization
+      //  to guarantee that any work enqueued on a stream in the future is ordered with respect
+      //  to this task's results
+      if(!cudart_hijack_active) {
+	// print a warning if this is the first time and it hasn't been suppressed
+	if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
+	     already_issued_hijack_warning)) {
+	  already_issued_hijack_warning = true;
+	  log_gpu.warning() << "CUDART hijack code not active"
+			    << " - device synchronizations required after every GPU task!";
+	}
+	CHECK_CU( cuCtxSynchronize() );
+      }
 
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
@@ -1948,8 +1973,6 @@ namespace Realm {
 
     // our interface to the rest of the runtime
 
-    REGISTER_REALM_MODULE(CudaModule);
-
     CudaModule::CudaModule(void)
       : Module("cuda")
       , cfg_zc_mem_size_in_mb(64)
@@ -1960,6 +1983,7 @@ namespace Realm {
       , cfg_use_shared_worker(true)
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
+      , cfg_suppress_hijack_warning(false)
       , shared_worker(0), zcmem_cpu_base(0), zcmem(0)
     {}
       
@@ -2038,7 +2062,9 @@ namespace Realm {
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
-	  .add_option_int("-ll:pin", m->cfg_pin_sysmem);
+	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
+	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
+	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning);
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
@@ -2268,6 +2294,146 @@ namespace Realm {
       gpus.clear();
       
       Module::cleanup();
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct RegisteredFunction
+
+    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
+					   const char *_device_fun)
+      : fat_bin(_fat_bin), host_fun(_host_fun), device_fun(_device_fun)
+    {}
+     
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct RegisteredVariable
+
+    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
+					   const char *_device_name, bool _external,
+					   int _size, bool _constant, bool _global)
+      : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
+	external(_external), size(_size), constant(_constant), global(_global)
+    {}
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GlobalRegistrations
+
+    GlobalRegistrations::GlobalRegistrations(void)
+    {}
+
+    GlobalRegistrations::~GlobalRegistrations(void)
+    {}
+
+    /*static*/ GlobalRegistrations& GlobalRegistrations::get_global_registrations(void)
+    {
+      static GlobalRegistrations reg;
+      return reg;
+    }
+
+    // called by a GPU when it has created its context - will result in calls back
+    //  into the GPU for any modules/variables/whatever already registered
+    /*static*/ void GlobalRegistrations::add_gpu_context(GPU *gpu)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      // add this gpu to the list
+      assert(g.active_gpus.count(gpu) == 0);
+      g.active_gpus.insert(gpu);
+
+      // and now tell it about all the previous-registered stuff
+      for(std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
+	  it != g.fat_binaries.end();
+	  it++)
+	gpu->register_fat_binary(*it);
+
+      for(std::vector<RegisteredVariable *>::iterator it = g.variables.begin();
+	  it != g.variables.end();
+	  it++)
+	gpu->register_variable(*it);
+
+      for(std::vector<RegisteredFunction *>::iterator it = g.functions.begin();
+	  it != g.functions.end();
+	  it++)
+	gpu->register_function(*it);
+    }
+
+    /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      assert(g.active_gpus.count(gpu) > 0);
+      g.active_gpus.erase(gpu);
+    }
+
+    // called by __cuda(un)RegisterFatBinary
+    /*static*/ void GlobalRegistrations::register_fat_binary(FatBin *fatbin)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      // add the fat binary to the list and tell any gpus we know of about it
+      g.fat_binaries.push_back(fatbin);
+
+      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
+	  it != g.active_gpus.end();
+	  it++)
+	(*it)->register_fat_binary(fatbin);
+    }
+
+    /*static*/ void GlobalRegistrations::unregister_fat_binary(FatBin *fatbin)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      // remove the fatbin from the list - don't bother telling gpus
+      std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
+      while(it != g.fat_binaries.end())
+	if(*it == fatbin)
+	  it = g.fat_binaries.erase(it);
+	else
+	  it++;
+    }
+
+    // called by __cudaRegisterVar
+    /*static*/ void GlobalRegistrations::register_variable(RegisteredVariable *var)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      // add the variable to the list and tell any gpus we know
+      g.variables.push_back(var);
+
+      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
+	  it != g.active_gpus.end();
+	  it++)
+	(*it)->register_variable(var);
+    }
+
+    // called by __cudaRegisterFunction
+    /*static*/ void GlobalRegistrations::register_function(RegisteredFunction *func)
+    {
+      GlobalRegistrations& g = get_global_registrations();
+
+      AutoHSLLock al(g.mutex);
+
+      // add the function to the list and tell any gpus we know
+      g.functions.push_back(func);
+
+      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
+	  it != g.active_gpus.end();
+	  it++)
+	(*it)->register_function(func);
     }
 
 

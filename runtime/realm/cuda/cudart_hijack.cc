@@ -6,6 +6,11 @@
 // exists and can be used for code generation. They are all
 // pretty simple to map to the driver API.
 
+// NOTE: This file must only include CUDA runtime API calls and any helpers used
+//  ONLY by those calls - there may be NO references to symbols defined in this file
+//  by any other parts of Realm, or it will mess up the ability to let an app link
+//  against the real libcudart.so
+
 #include "cudart_hijack.h"
 
 #include "realm/cuda/cuda_module.h"
@@ -14,146 +19,7 @@
 namespace Realm {
   namespace Cuda {
 
-    Logger log_cudart("cudart");
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredFunction
-
-    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
-					   const char *_device_fun)
-      : fat_bin(_fat_bin), host_fun(_host_fun), device_fun(_device_fun)
-    {}
-     
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredVariable
-
-    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
-					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global)
-      : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
-	external(_external), size(_size), constant(_constant), global(_global)
-    {}
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GlobalRegistrations
-
-    GlobalRegistrations::GlobalRegistrations(void)
-    {}
-
-    GlobalRegistrations::~GlobalRegistrations(void)
-    {}
-
-    /*static*/ GlobalRegistrations& GlobalRegistrations::get_global_registrations(void)
-    {
-      static GlobalRegistrations reg;
-      return reg;
-    }
-
-    // called by a GPU when it has created its context - will result in calls back
-    //  into the GPU for any modules/variables/whatever already registered
-    /*static*/ void GlobalRegistrations::add_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      // add this gpu to the list
-      assert(g.active_gpus.count(gpu) == 0);
-      g.active_gpus.insert(gpu);
-
-      // and now tell it about all the previous-registered stuff
-      for(std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-	  it != g.fat_binaries.end();
-	  it++)
-	gpu->register_fat_binary(*it);
-
-      for(std::vector<RegisteredVariable *>::iterator it = g.variables.begin();
-	  it != g.variables.end();
-	  it++)
-	gpu->register_variable(*it);
-
-      for(std::vector<RegisteredFunction *>::iterator it = g.functions.begin();
-	  it != g.functions.end();
-	  it++)
-	gpu->register_function(*it);
-    }
-
-    /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      assert(g.active_gpus.count(gpu) > 0);
-      g.active_gpus.erase(gpu);
-    }
-
-    // called by __cuda(un)RegisterFatBinary
-    /*static*/ void GlobalRegistrations::register_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      // add the fat binary to the list and tell any gpus we know of about it
-      g.fat_binaries.push_back(fatbin);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_fat_binary(fatbin);
-    }
-
-    /*static*/ void GlobalRegistrations::unregister_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      // remove the fatbin from the list - don't bother telling gpus
-      std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-      while(it != g.fat_binaries.end())
-	if(*it == fatbin)
-	  it = g.fat_binaries.erase(it);
-	else
-	  it++;
-    }
-
-    // called by __cudaRegisterVar
-    /*static*/ void GlobalRegistrations::register_variable(RegisteredVariable *var)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      // add the variable to the list and tell any gpus we know
-      g.variables.push_back(var);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_variable(var);
-    }
-
-    // called by __cudaRegisterFunction
-    /*static*/ void GlobalRegistrations::register_function(RegisteredFunction *func)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoHSLLock al(g.mutex);
-
-      // add the function to the list and tell any gpus we know
-      g.functions.push_back(func);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_function(func);
-    }
+    extern Logger log_cudart;
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -163,6 +29,9 @@ namespace Realm {
     extern "C" {
       void** __cudaRegisterFatBinary(const void *fat_bin)
       {
+	// mark that the hijack code is active
+	cudart_hijack_active = true;
+
 	// we make a "handle" that just holds the pointer
 	void **handle = new void *;
 	*handle = (void *)fat_bin;
@@ -177,6 +46,9 @@ namespace Realm {
 
       void __cudaUnregisterFatBinary(void **handle)
       {
+	// mark that the hijack code is active
+	cudart_hijack_active = true;
+
 	FatBin *fat_bin = *(FatBin **)handle;
 #ifdef DEBUG_CUDART_REGISTRATION
 	std::cout << "unregistering fat binary " << fat_bin << ", handle = " << handle << std::endl;
@@ -191,6 +63,9 @@ namespace Realm {
 			     const char *device_name,
 			     int ext, int size, int constant, int global)
       {
+	// mark that the hijack code is active
+	cudart_hijack_active = true;
+
 #ifdef DEBUG_CUDART_REGISTRATION
 	std::cout << "registering variable " << device_name << std::endl;
 #endif
@@ -213,6 +88,9 @@ namespace Realm {
 				  dim3 *bDim, dim3 *gDim,
 				  int *wSize)
       {
+	// mark that the hijack code is active
+	cudart_hijack_active = true;
+
 #ifdef DEBUG_CUDART_REGISTRATION
 	std::cout << "registering function " << device_fun << ", handle = " << handle << std::endl;
 #endif
@@ -224,6 +102,9 @@ namespace Realm {
       
       char __cudaInitModule(void **fat_bin)
       {
+	// mark that the hijack code is active
+	cudart_hijack_active = true;
+
 	// don't care - return 1 to make caller happy
 	return 1;
       }
@@ -234,6 +115,9 @@ namespace Realm {
 
       static GPUProcessor *get_gpu_or_die(const char *funcname)
       {
+	// mark that the hijack code is active - this covers the calls below
+	cudart_hijack_active = true;
+
 	GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
 	if(!p) {
 	  log_cudart.fatal() << funcname << "() called outside CUDA task";

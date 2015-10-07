@@ -29,6 +29,11 @@
 namespace Realm {
   namespace Cuda {
 
+    // this flag will be set on the first call into any of this hijack code - if
+    //  an application is linked with -lcudart, we will NOT be hijacking the
+    //  application's calls, and the cuda module needs to know that)
+    extern bool cudart_hijack_active;
+
     // files compiled with nvcc will use global registrations of modules, variables, etc.
     //  that get broadcast to all contexts
 

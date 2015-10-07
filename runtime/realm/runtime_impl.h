@@ -155,6 +155,8 @@ namespace Realm {
       size_t sysmem_size_in_mb, stack_size_in_mb;
     };
 
+    REGISTER_REALM_MODULE(CoreModule);
+
     class RuntimeImpl {
     public:
       RuntimeImpl(void);

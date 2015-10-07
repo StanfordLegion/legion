@@ -157,8 +157,6 @@ namespace Realm {
   // class CoreModule
   //
 
-  REGISTER_REALM_MODULE(CoreModule);
-
   CoreModule::CoreModule(void)
     : Module("core")
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)

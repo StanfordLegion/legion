@@ -109,6 +109,7 @@ namespace Realm {
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
+      bool cfg_suppress_hijack_warning;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -118,6 +119,8 @@ namespace Realm {
       void *zcmem_cpu_base;
       GPUZCMemory *zcmem;
     };
+
+    REGISTER_REALM_MODULE(CudaModule);
 
     struct GPUInfo {
       int index;  // index used by CUDA runtime
