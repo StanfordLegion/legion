@@ -489,6 +489,11 @@ namespace Realm {
       // calls that come from the CUDA runtime API
       void stream_synchronize(cudaStream_t stream);
       void device_synchronize(void);
+
+      void event_create(cudaEvent_t *event, int flags);
+      void event_destroy(cudaEvent_t event);
+      void event_record(cudaEvent_t event, cudaStream_t stream);
+      void event_synchronize(cudaEvent_t event);
       
       void configure_call(dim3 grid_dim, dim3 block_dim,
 			  size_t shared_memory, cudaStream_t stream);

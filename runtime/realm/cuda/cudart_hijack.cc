@@ -242,18 +242,56 @@ namespace Realm {
 	return p;
       }
 
+      cudaError_t cudaEventCreate(cudaEvent_t *event)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventCreate");
+	p->event_create(event, cudaEventDefault);
+	return cudaSuccess;
+      }
+	
+      cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
+					   unsigned int flags)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventCreateWithFlags");
+	p->event_create(event, flags);
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream = 0)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventRecord");
+	p->event_record(event, stream);
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaEventSynchronize(cudaEvent_t event)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventSynchronize");
+	p->event_synchronize(event);
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaEventDestroy(cudaEvent_t event)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventDestroy");
+	p->event_destroy(event);
+	return cudaSuccess;
+      }
+	
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
-	log_cudart.fatal("Stream creation not permitted in Legion CUDA!");
-	assert(false);
-	return cudaErrorInvalidValue;
+	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamCreate");
+	// TODO: actually create sub-streams and connect them up - for now we provide a dummy stream
+	CUstream s = 0;
+	*stream = s;
+	return cudaSuccess;
       }
 
       cudaError_t cudaStreamDestroy(cudaStream_t stream)
       {
-	log_cudart.fatal("Stream destruction not permitted in Legion CUDA!");
-	assert(false);
-	return cudaErrorInvalidResourceHandle;
+	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamDestroy");
+	assert(stream == 0);
+	return cudaSuccess;
       }
 
       cudaError_t cudaStreamSynchronize(cudaStream_t stream)
@@ -261,6 +299,15 @@ namespace Realm {
 	GPUProcessor *p = get_gpu_or_die("cudaStreamSynchronize");
 	p->stream_synchronize(stream);
 	return cudaSuccess;
+      }
+
+      cudaError_t cudaStreamWaitEvent(cudaStream_t stream,
+				      cudaEvent_t event,
+				      unsigned int flags)
+      {
+	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamWaitEvent");
+	// since we don't support user-level streams yet, this falls through to cudaWaitSynchronize
+	return cudaEventSynchronize(event);
       }
 
       cudaError_t cudaConfigureCall(dim3 grid_dim,
@@ -453,6 +500,18 @@ namespace Realm {
 	GET_DEVICE_PROP(isMultiGpuBoard, MULTI_GPU_BOARD);
 	GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
 #undef GET_DEVICE_PROP
+	return cudaSuccess;
+      }
+      
+      cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attr, int index)
+      {
+	// doesn't need a current device - the index is supplied
+	CUdevice device;
+	CHECK_CU( cuDeviceGet(&device, index) );
+	// the runtime and device APIs appear to agree on attribute IDs, so just send it through
+	//  and hope for the best
+	CUdevice_attribute cu_attr = (CUdevice_attribute)attr;
+	CHECK_CU( cuDeviceGetAttribute(value, cu_attr, device) );
 	return cudaSuccess;
       }
 

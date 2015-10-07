@@ -1527,6 +1527,42 @@ namespace Realm {
       CHECK_CU( cuStreamSynchronize(current->get_stream()) );
     }
     
+    void GPUProcessor::event_create(cudaEvent_t *event, int flags)
+    {
+      // int cu_flags = CU_EVENT_DEFAULT;
+      // if((flags & cudaEventBlockingSync) != 0)
+      // 	cu_flags |= CU_EVENT_BLOCKING_SYNC;
+      // if((flags & cudaEventDisableTiming) != 0)
+      // 	cu_flags |= CU_EVENT_DISABLE_TIMING;
+
+      // get an event from our event pool (ignoring the flags for now)
+      CUevent e = gpu->event_pool.get_event();
+      *event = e;
+    }
+
+    void GPUProcessor::event_destroy(cudaEvent_t event)
+    {
+      // assume the event is one of ours and put it back in the pool
+      CUevent e = event;
+      if(e)
+	gpu->event_pool.return_event(e);
+    }
+
+    void GPUProcessor::event_record(cudaEvent_t event, cudaStream_t stream)
+    {
+      // ignore the provided stream and record the event on this task's assigned stream
+      CUevent e = event;
+      GPUStream *current = gpu->get_current_task_stream();
+      CHECK_CU( cuEventRecord(e, current->get_stream()) );
+    }
+
+    void GPUProcessor::event_synchronize(cudaEvent_t event)
+    {
+      // TODO: consider suspending task rather than busy-waiting here...
+      CUevent e = event;
+      CHECK_CU( cuEventSynchronize(e) );
+    }
+      
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
       : grid(_grid), block(_block), shared(_shared)
     {}
