@@ -76,10 +76,6 @@
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
 #endif
-// Default number of leaf directory entries for precise information
-#ifndef DEFAULT_MAX_DIRECTORY_SIZE
-#define DEFAULT_MAX_DIRECTORY_SIZE      64
-#endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline
 #ifndef DEFAULT_SUPERSCALAR_WIDTH
@@ -296,6 +292,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_ALLOCATOR_REQUEST = 129,
   ERROR_ILLEGAL_DETACH_OPERATION = 130,
   ERROR_NO_PROCESSORS = 131,
+  ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING = 132,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

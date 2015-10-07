@@ -26,6 +26,9 @@ legion_dir = os.path.dirname(root_dir)
 terra_dir = os.path.join(root_dir, 'terra')
 
 runtime_dir = os.path.join(legion_dir, 'runtime')
+realm_dir = os.path.join(runtime_dir, 'realm')
+mapper_dir = os.path.join(runtime_dir, 'mappers')
+legion_runtime_dir = os.path.join(runtime_dir, 'legion')
 bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
 # CUDA directoy is hard-coded, but should be entered via an shell variable
 cuda_dir = "/usr/local/cuda/include"
@@ -42,6 +45,9 @@ include_path = [
     bindings_dir,
     runtime_dir,
     cuda_dir,
+    realm_dir,
+    mapper_dir,
+    legion_runtime_dir,
 ]
 
 LD_LIBRARY_PATH = 'LD_LIBRARY_PATH'

@@ -21,6 +21,7 @@
 #include "region_tree.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
+#include "legion_analysis.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -44,6 +45,7 @@ namespace LegionRuntime {
         DELETION_OP_KIND,
         INTER_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
+        VIRTUAL_CLOSE_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -71,6 +73,7 @@ namespace LegionRuntime {
         "Deletion",                 \
         "Inter Close",              \
         "Post Close",               \
+        "Virtual Close",            \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -93,13 +96,52 @@ namespace LegionRuntime {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
-        MustEpochOp *must_epoch;
-        GenerationID must_epoch_gen;
       };
-      struct DeferredCompleteArgs {
+      struct DeferredResolutionArgs {
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+      };
+      struct DeferredExecuteArgs {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
+      };
+      struct DeferredCompleteArgs {
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+      };
+      struct DeferredCommitArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+        GenerationID gen;
+      };
+      struct StateAnalysisArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_op;
+        UserEvent ready_event;
+      };
+    public:
+      class MappingDependenceTracker {
+      public:
+        inline void add_mapping_dependence(Event dependence)
+          { mapping_dependences.insert(dependence); }
+        inline void add_resolution_dependence(Event dependence)
+          { resolution_dependences.insert(dependence); }
+        void issue_stage_triggers(Operation *op, Runtime *runtime, 
+                                  MustEpochOp *must_epoch);
+      private:
+        std::set<Event> mapping_dependences;
+        std::set<Event> resolution_dependences;
+      };
+      class CommitDependenceTracker {
+      public:
+        inline void add_commit_dependence(Event dependence)
+          { commit_dependences.insert(dependence); }
+        bool issue_commit_trigger(Operation *op, Runtime *runtime);
+      private:
+        std::set<Event> commit_dependences;
       };
     public:
       Operation(Runtime *rt);
@@ -116,11 +158,14 @@ namespace LegionRuntime {
       void deactivate_operation(void);
     public:
       inline GenerationID get_generation(void) const { return gen; }
-      inline Event get_children_mapped(void) const { return children_mapped; }
+      inline Event get_mapped_event(void) const { return mapped_event; }
+      inline Event get_resolved_event(void) const { return resolved_event; }
       inline Event get_completion_event(void) const { return completion_event; }
+      inline Event get_commit_event(void) const { return commit_event; }
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
+      inline bool is_tracking_parent(void) const { return track_parent; } 
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
@@ -151,7 +196,6 @@ namespace LegionRuntime {
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
       void initialize_operation(SingleTask *ctx, bool track,
-                                Event children_mapped,
                                 unsigned num_regions = 0); 
     public:
       // The following two calls may be implemented
@@ -165,6 +209,12 @@ namespace LegionRuntime {
       // In general put this on the ready queue so the runtime
       // can invoke the trigger mapping call.
       virtual void trigger_mapping(void);
+      // For operations which are operating in a context which
+      // has remote state, this call will be invoked by the 
+      // runtime prior to calling trigger_execution to allow
+      // the operation to specify an event precondition to wait
+      // on for all remote state to arrive on the necessary node.
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       // The function to call for executing an operation
       // Note that this one is not invoked by the Operation class
       // but by the runtime, therefore any operations must be
@@ -174,22 +224,33 @@ namespace LegionRuntime {
       // The function to trigger once speculation is
       // ready to be resolved
       virtual void trigger_resolution(void);
-      // Helper function for deferring complete operations
-      // (only used in a limited set of operations and not
-      // part of the default pipeline)
-      virtual void deferred_complete(void);
       // The function to call once the operation is ready to complete
       virtual void trigger_complete(void);
       // The function to call when commit the operation is
       // ready to commit
       virtual void trigger_commit(void);
+      // Helper function for deferring complete operations
+      // (only used in a limited set of operations and not
+      // part of the default pipeline)
+      virtual void deferred_execute(void);
+      // Helper function for deferring commit operations
+      virtual void deferred_commit(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
-      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      // A method for reporting other region requirements that 
+      // interfere with a close operation generated by a 
+      // different region requirement in the same op.
+      virtual void report_interfering_close_requirement(unsigned idx);
       // A method for finding the parent index of a region
       // requirement for an operation which is necessary for
       // issuing close operation on behalf of the operation.
       virtual unsigned find_parent_index(unsigned idx);
+      // A method for computing a fat region tree path for a
+      // region requirement. This is only called for projection
+      // region requirements so pretty much only index tasks.
+      // The caller owns the resulting data structure.
+      virtual FatTreePath* compute_fat_path(unsigned idx);
       // This is a special helper method for tracing which
       // needs to know explicitly about close operations
       virtual bool is_close_op(void) const { return false; }
@@ -200,12 +261,12 @@ namespace LegionRuntime {
       // indicate mapping, execution, resolution, completion, and commit
       //
       // Indicate that we are done mapping this operation
-      void complete_mapping(void); 
+      void complete_mapping(Event wait_on = Event::NO_EVENT); 
       // Indicate when this operation has finished executing
-      void complete_execution(void);
+      void complete_execution(Event wait_on = Event::NO_EVENT);
       // Indicate when we have resolved the speculation for
       // this operation
-      void resolve_speculation(void);
+      void resolve_speculation(Event wait_on = Event::NO_EVENT);
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
       void complete_operation(void);
@@ -256,9 +317,8 @@ namespace LegionRuntime {
       bool perform_registration(GenerationID our_gen, 
                                 Operation *op, GenerationID op_gen,
                                 bool &registered_dependence,
-                                unsigned &op_mapping_deps,
-                                unsigned &op_speculation_deps,
-                                Event &children_mapped);
+                                MappingDependenceTracker *tracker,
+                                Event other_commit_event);
       // Check to see if the operation is still valid
       // for the given GenerationID.  This method is not precise
       // and may return false when the operation has committed.
@@ -270,6 +330,8 @@ namespace LegionRuntime {
       // additional dependences can be registered.
       void add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
+      // Ask the operation to perform the state analysis
+      Event invoke_state_analysis(void);
     public:
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
@@ -278,12 +340,6 @@ namespace LegionRuntime {
                                     get_logical_records(void);
       void clear_logical_records(void);
     public:
-      // Notify when a mapping dependence is met (flows down edges)
-      void notify_mapping_dependence(GenerationID gen);
-      // Notify when a speculation dependence is met (flows down edges)
-      void notify_speculation_dependence(GenerationID gen);
-      // Notify when an operation has committed (flows up edges)
-      void notify_commit_dependence(GenerationID gen);
       // Notify when a region from a dependent task has 
       // been verified (flows up edges)
       void notify_regions_verified(const std::set<unsigned> &regions,
@@ -298,12 +354,6 @@ namespace LegionRuntime {
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
       std::map<Operation*,GenerationID> outgoing;
-      // Number of outstanding mapping dependences before triggering map
-      unsigned outstanding_mapping_deps;
-      // Number of outstanding speculation dependences 
-      unsigned outstanding_speculation_deps;
-      // Number of outstanding commit dependences before triggering commit
-      unsigned outstanding_commit_deps;
       // Number of outstanding mapping references, once this goes to 
       // zero then the set of outgoing edges is fixed
       unsigned outstanding_mapping_references;
@@ -314,7 +364,8 @@ namespace LegionRuntime {
       std::map<Operation*,std::set<unsigned> > verify_regions;
       // Set of events from operations we depend that describe when
       // all of their children have mapped
-      std::set<Event> dependent_children_mapped;
+      //std::set<Event> dependent_children_mapped;
+#ifdef DEBUG_HIGH_LEVEL
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -322,9 +373,7 @@ namespace LegionRuntime {
       bool executed;
       // Whether speculation for this operation has been resolved
       bool resolved;
-      // Whether the physical instances for this region have been
-      // hardened by copying them into reslient memories
-      bool hardened;
+#endif
       // Whether this operation has completed, cannot commit until
       // both completed is set, and outstanding mapping references
       // has been gone to zero.
@@ -333,12 +382,9 @@ namespace LegionRuntime {
       // commited is set to prevent any additional dependences from
       // begin registered.
       bool committed;
-      // Track whether trigger mapped has been invoked
-      bool trigger_mapping_invoked;
-      // Track whether trigger resolution has been invoked
-      bool trigger_resolution_invoked;
-      // Track whether trigger complete has been invoked
-      bool trigger_complete_invoked;
+      // Whether the physical instances for this region have been
+      // hardened by copying them into reslient memories
+      bool hardened;
       // Track whether trigger_commit has already been invoked
       bool trigger_commit_invoked;
       // Keep track of whether an eary commit was requested
@@ -350,22 +396,31 @@ namespace LegionRuntime {
       bool track_parent;
       // The enclosing context for this operation
       SingleTask *parent_ctx;
+      // The mapped event for this operation
+      UserEvent mapped_event;
+      // The resolved event for this operation
+      UserEvent resolved_event;
       // The event for when any children this operation has are mapped
-      Event children_mapped;
+      //Event children_mapped;
       // The completion event for this operation
       UserEvent completion_event;
+      // The commit event for this operation
+      UserEvent commit_event;
       // The trace for this operation if any
       LegionTrace *trace;
       // Track whether we are tracing this operation
       bool tracing;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
-      // Generation for out mapping epoch
-      GenerationID must_epoch_gen;
       // The index in the must epoch
       unsigned must_epoch_index;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
+      // A dependence tracker for this operation
+      union {
+        MappingDependenceTracker *mapping;
+        CommitDependenceTracker  *commit;
+      } dependence_tracker;
     };
 
     /**
@@ -435,7 +490,6 @@ namespace LegionRuntime {
       void deactivate_speculative(void);
     public:
       void initialize_speculation(SingleTask *ctx, bool track, 
-                                  Event child_event,
                                   unsigned regions, const Predicate &p);
       void register_predicate_dependence(void);
       bool is_predicated(void) const;
@@ -449,7 +503,7 @@ namespace LegionRuntime {
       // depending on the value of the predicate operation.
       virtual void trigger_mapping(void);
       virtual void trigger_resolution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
     public:
       // Call this method for inheriting classes 
       // to indicate when they should map
@@ -509,8 +563,10 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -528,8 +584,8 @@ namespace LegionRuntime {
       UserEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
-      RegionTreePath mapping_path;
       unsigned parent_req_index;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
     };
 
@@ -561,9 +617,11 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
-      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual void trigger_commit(void);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual void report_interfering_close_requirement(unsigned idx);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
@@ -583,10 +641,10 @@ namespace LegionRuntime {
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
-      std::vector<RegionTreePath> src_mapping_paths; 
-      std::vector<RegionTreePath> dst_mapping_paths;
       std::vector<unsigned>       src_parent_indexes;
       std::vector<unsigned>       dst_parent_indexes;
+      std::vector<VersionInfo>    src_versions;
+      std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrictions;
       std::vector<RestrictInfo>   dst_restrictions;
     };
@@ -626,7 +684,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
     protected:
       FenceKind fence_kind;
     };
@@ -650,6 +708,7 @@ namespace LegionRuntime {
       FrameOp& operator=(const FrameOp &rhs);
     public:
       void initialize(SingleTask *ctx);
+      void set_previous(Event previous);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -657,7 +716,9 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
+    protected:
+      Event previous_completion;
     };
 
     /**
@@ -750,10 +811,12 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void) = 0;
       virtual bool is_close_op(void) const { return true; }
     public:
-      virtual void deferred_complete(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
+      virtual void trigger_commit(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo  version_info;
       RestrictInfo restrict_info;
     };
 
@@ -772,11 +835,13 @@ namespace LegionRuntime {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets, 
-                      bool leave_open, const ColorPoint &next_child, 
+                      const std::set<ColorPoint> &targets, bool leave_open, 
                       LegionTrace *trace, int close_idx, 
+                      const VersionInfo &close_info,
+                      const VersionInfo &version_info,
                       const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
+      void add_next_child(const ColorPoint &next_child);
     public:
       const RegionRequirement& get_region_requirement(void) const;
       const std::set<ColorPoint>& get_target_children(void) const;
@@ -792,10 +857,13 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      inline int get_close_index(void) const { return close_idx; }
     protected:
       std::set<ColorPoint> target_children;
       bool leave_open;
-      ColorPoint next_child;
+      std::set<ColorPoint> next_children;
       unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing
@@ -835,8 +903,38 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       InstanceRef reference;
+      unsigned parent_idx;
+    };
+
+    /**
+     * \class VirtualCloseOp
+     * Virtual close operations are issued by the runtime for
+     * closing up virtual mappings to a composite instance
+     * that can then be propagated back to the enclosing
+     * parent task.
+     */
+    class VirtualCloseOp : public CloseOp {
+    public:
+      VirtualCloseOp(Runtime *runtime);
+      VirtualCloseOp(const VirtualCloseOp &rhs);
+      virtual ~VirtualCloseOp(void);
+    public:
+      VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, unsigned index);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
       unsigned parent_idx;
     };
 
@@ -866,11 +964,13 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
-      virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -887,11 +987,9 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
-#ifdef DEBUG_HIGH_LEVEL
-      RegionTreePath    mapping_path;
-#endif
     };
 
     /**
@@ -920,11 +1018,13 @@ namespace LegionRuntime {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
-      virtual void deferred_complete(void);
+      virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -941,11 +1041,9 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      VersionInfo       version_info;
       RestrictInfo      restrict_info;
-      unsigned parent_req_index;
-#ifdef DEBUG_HIGH_LEVEL
-      RegionTreePath    mapping_path;
-#endif
+      unsigned          parent_req_index;
     };
 
     /**
@@ -973,7 +1071,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
       virtual void trigger_complete(void);
     protected:
       Future future;
@@ -1158,6 +1256,7 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
@@ -1169,6 +1268,7 @@ namespace LegionRuntime {
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
     public:
+      void add_mapping_dependence(Event precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
       void set_future(const DomainPoint &point, 
@@ -1520,7 +1620,6 @@ namespace LegionRuntime {
       inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);
@@ -1570,21 +1669,24 @@ namespace LegionRuntime {
       inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
+      virtual FatTreePath* compute_fat_path(unsigned idx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
     protected:
       UserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       IndexPartition partition_handle;
       Domain color_space;
@@ -1624,6 +1726,7 @@ namespace LegionRuntime {
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
+      void perform_logging(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -1633,19 +1736,21 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
+      virtual void deferred_execute(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
-      RegionTreePath mapping_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
       void *value;
@@ -1680,8 +1785,10 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     public:
       PhysicalInstance create_instance(const Domain &dom, 
                                        const std::vector<size_t> &field_sizes);
@@ -1691,6 +1798,7 @@ namespace LegionRuntime {
     public:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
@@ -1721,14 +1829,17 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
     public:
       InstanceRef reference;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
     };

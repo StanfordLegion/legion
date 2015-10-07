@@ -19,6 +19,8 @@ local ccircuit
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
+  local legion_dir = root_dir .. "../../runtime/legion"
+  local mapper_dir = root_dir .. "../../runtime/mappers"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -33,13 +35,15 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
                  circuit_cc .. " -o " .. circuit_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. circuit_cc)
     assert(false)
   end
   terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
+  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir, 
+                                             "-I", mapper_dir, "-I", legion_dir})
 end
 
 local c = regentlib.c
