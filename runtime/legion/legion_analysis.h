@@ -904,7 +904,7 @@ namespace LegionRuntime {
     public:
       FatTreePath& operator=(const FatTreePath &rhs);
     public:
-      inline const std::map<ColorPoint,FatTreePath*> get_children(void) const
+      inline const std::map<ColorPoint,FatTreePath*>& get_children(void) const
         { return children; }
       void add_child(const ColorPoint &child_color, FatTreePath *child);
       bool add_child(const ColorPoint &child_color, FatTreePath *child,

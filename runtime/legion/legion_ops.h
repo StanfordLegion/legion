@@ -1673,6 +1673,7 @@ namespace LegionRuntime {
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
+      virtual FatTreePath* compute_fat_path(unsigned idx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

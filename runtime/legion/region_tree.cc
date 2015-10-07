@@ -582,7 +582,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == REG_PROJECTION);
       assert(req.privilege_fields.size() == 1);
 #endif
       IndexPartNode *pending_node = get_node(pending);
@@ -706,7 +706,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == REG_PROJECTION);
       assert(req.privilege_fields.size() == 1);
 #endif
       IndexPartNode *pending_node = get_node(pending);
@@ -3664,6 +3664,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_full_fat_path(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      return compute_full_fat_path(node); 
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_full_fat_path(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = get_node(handle);
+      return compute_full_fat_path(node);
+    }
+
+    //--------------------------------------------------------------------------
     FatTreePath* RegionTreeForest::compute_fat_path(IndexTreeNode *child,
                                                     IndexTreeNode *parent,
                                  std::map<IndexTreeNode*,FatTreePath*> &storage,
@@ -3734,6 +3750,38 @@ namespace LegionRuntime {
       if (test_overlap)
         overlap = false;
       return current_path;
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_full_fat_path(IndexSpaceNode *node)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ColorPoint,IndexPartNode*> children;
+      node->get_children(children);
+      FatTreePath *result = new FatTreePath();
+      for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        FatTreePath *child_path = compute_full_fat_path(it->second);
+        result->add_child(it->first, child_path);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* RegionTreeForest::compute_full_fat_path(IndexPartNode *node)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ColorPoint,IndexSpaceNode*> children;
+      node->get_children(children);
+      FatTreePath *result = new FatTreePath();
+      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        FatTreePath *child_path = compute_full_fat_path(it->second);
+        result->add_child(it->first, child_path);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

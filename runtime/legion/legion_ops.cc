@@ -8094,7 +8094,9 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/); 
       partition_kind = BY_FIELD;
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      // Projection region requirement since we need the whole sub-tree
+      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
+                                      EXCLUSIVE, parent);
       requirement.add_field(fid);
       requirement.initialize_mapping_fields();
       partition_handle = pid;
@@ -8114,6 +8116,7 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/);
       partition_kind = BY_IMAGE;
+      // Projection region requirement since we need the whole sub-tree
       requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
@@ -8134,7 +8137,9 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/);
       partition_kind = BY_PREIMAGE;
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      // Projection region requirement since we need the whole sub-tree
+      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
+                                      EXCLUSIVE, parent);
       requirement.add_field(fid);
       requirement.initialize_mapping_fields();
       partition_handle = pid;
@@ -8314,6 +8319,25 @@ namespace LegionRuntime {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    FatTreePath* DependentPartitionOp::compute_fat_path(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      if (requirement.handle_type == PART_PROJECTION)
+      {
+        IndexPartition handle = requirement.partition.get_index_partition();
+        return runtime->forest->compute_full_fat_path(handle);
+      }
+      else
+      {
+        IndexSpace handle = requirement.region.get_index_space();
+        return runtime->forest->compute_full_fat_path(handle);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -518,10 +518,14 @@ namespace LegionRuntime {
                                     IndexPartition parent,
                                std::map<IndexTreeNode*,FatTreePath*> &storage,
                                bool test_overlap, bool &overlap);
+      FatTreePath* compute_full_fat_path(IndexSpace handle);
+      FatTreePath* compute_full_fat_path(IndexPartition handle);
     protected:
       FatTreePath* compute_fat_path(IndexTreeNode *child, IndexTreeNode *parent,
                                  std::map<IndexTreeNode*,FatTreePath*> &storage,
                                  bool test_overlap, bool &overlap);
+      FatTreePath* compute_full_fat_path(IndexSpaceNode *node);
+      FatTreePath* compute_full_fat_path(IndexPartNode *node);
     public:
       // Interfaces to the low-level runtime
       Event issue_copy(const Domain &dom, Operation *op,
