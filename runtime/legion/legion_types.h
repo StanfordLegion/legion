@@ -88,11 +88,12 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      HLR_TASK_ID           = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
-      HLR_PROFILING_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
+      INIT_FUNC_ID            = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_FUNC_ID        = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      HLR_TASK_ID             = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
+      HLR_LEGION_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      HLR_MAPPER_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      TASK_ID_AVAILABLE       = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -105,8 +106,13 @@ namespace LegionRuntime {
       HLR_SCHEDULER_ID,
       HLR_MESSAGE_ID,
       HLR_POST_END_ID,
-      HLR_DEFERRED_MAPPING_ID,
+      HLR_DEFERRED_MAPPING_TRIGGER_ID,
+      HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
+      HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+      HLR_DEFERRED_POST_MAPPED_ID,
+      HLR_DEFERRED_EXECUTE_ID,
       HLR_DEFERRED_COMPLETE_ID,
+      HLR_DEFERRED_COMMIT_ID,
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
       HLR_TRIGGER_DEPENDENCE_ID,
@@ -124,13 +130,24 @@ namespace LegionRuntime {
       HLR_RESOLVE_FUTURE_PRED_ID,
       HLR_MPI_RANK_ID,
       HLR_CONTRIBUTE_COLLECTIVE_ID,
-      HLR_CHECK_STATE_ID,
+      HLR_STATE_ANALYSIS_ID,
       HLR_MAPPER_TASK_ID,
       HLR_DISJOINTNESS_TASK_ID,
       HLR_PART_INDEPENDENCE_TASK_ID,
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
       HLR_DECREMENT_PENDING_TASK_ID,
+      HLR_SEND_VERSION_STATE_TASK_ID,
+      HLR_ADD_TO_DEP_QUEUE_TASK_ID,
+      HLR_WINDOW_WAIT_TASK_ID,
+      HLR_ISSUE_FRAME_TASK_ID,
+      HLR_CONTINUATION_TASK_ID,
+      HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -141,8 +158,13 @@ namespace LegionRuntime {
         "Scheduler",                                              \
         "Remote Message",                                         \
         "Post-Task Execution",                                    \
-        "Deferred Mapping",                                       \
+        "Deferred Mapping Trigger",                               \
+        "Deferred Resolution Trigger",                            \
+        "Deferred Execution Trigger",                             \
+        "Deferred Post Mapped",                                   \
+        "Deferred Execute",                                       \
         "Deferred Complete",                                      \
+        "Deferred Commit",                                        \
         "Reclaim Local Field",                                    \
         "Garbage Collection",                                     \
         "Logical Dependence Analysis",                            \
@@ -160,14 +182,116 @@ namespace LegionRuntime {
         "Resolve Future Predicate",                               \
         "Update MPI Rank Info",                                   \
         "Contribute Collective",                                  \
-        "Check State",                                            \
+        "State Analaysis",                                        \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
+        "Send Version State",                                     \
+        "Add to Dependence Queue",                                \
+        "Window Wait",                                            \
+        "Issue Frame",                                            \
+        "Legion Continuation",                                    \
+        "Index Space Semantic Request"                            \
+        "Index Partition Semantic Request"                        \
+        "Field Space Semantic Request"                            \
+        "Field Semantic Request"                                  \
+        "Region Semantic Request"                                 \
+        "Partition Semantic Request"                              \
       };
+
+    enum VirtualChannelKind {
+      DEFAULT_VIRTUAL_CHANNEL = 0,
+      INDEX_AND_FIELD_VIRTUAL_CHANNEL = 1,
+      LOGICAL_TREE_VIRTUAL_CHANNEL = 2,
+      DISTRIBUTED_VIRTUAL_CHANNEL = 3,
+      MAPPER_VIRTUAL_CHANNEL = 4,
+      SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
+      MAX_NUM_VIRTUAL_CHANNELS = 6, // this one must be last
+    };
+
+    enum MessageKind {
+      TASK_MESSAGE,
+      STEAL_MESSAGE,
+      ADVERTISEMENT_MESSAGE,
+      SEND_INDEX_SPACE_NODE,
+      SEND_INDEX_SPACE_REQUEST,
+      SEND_INDEX_SPACE_RETURN,
+      SEND_INDEX_SPACE_CHILD_REQUEST,
+      SEND_INDEX_PARTITION_NODE,
+      SEND_INDEX_PARTITION_REQUEST,
+      SEND_INDEX_PARTITION_RETURN,
+      SEND_FIELD_SPACE_NODE,
+      SEND_FIELD_SPACE_REQUEST,
+      SEND_FIELD_SPACE_RETURN,
+      SEND_TOP_LEVEL_REGION_REQUEST,
+      SEND_TOP_LEVEL_REGION_RETURN,
+      SEND_DISTRIBUTED_ALLOC,
+      SEND_DISTRIBUTED_UPGRADE,
+      SEND_LOGICAL_REGION_NODE,
+      INDEX_SPACE_DESTRUCTION_MESSAGE,
+      INDEX_PARTITION_DESTRUCTION_MESSAGE,
+      FIELD_SPACE_DESTRUCTION_MESSAGE,
+      LOGICAL_REGION_DESTRUCTION_MESSAGE,
+      LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
+      FIELD_ALLOCATION_MESSAGE,
+      FIELD_DESTRUCTION_MESSAGE,
+      INDIVIDUAL_REMOTE_MAPPED,
+      INDIVIDUAL_REMOTE_COMPLETE,
+      INDIVIDUAL_REMOTE_COMMIT,
+      SLICE_REMOTE_MAPPED,
+      SLICE_REMOTE_COMPLETE,
+      SLICE_REMOTE_COMMIT,
+      DISTRIBUTED_REMOTE_REGISTRATION,
+      DISTRIBUTED_VALID_UPDATE,
+      DISTRIBUTED_GC_UPDATE,
+      DISTRIBUTED_RESOURCE_UPDATE,
+      VIEW_REMOTE_REGISTRATION,
+      VIEW_VALID_UPDATE,
+      VIEW_GC_UPDATE,
+      VIEW_RESOURCE_UPDATE,
+      SEND_BACK_ATOMIC,
+      SEND_MATERIALIZED_VIEW,
+      SEND_MATERIALIZED_UPDATE,
+      SEND_COMPOSITE_VIEW,
+      SEND_FILL_VIEW,
+      SEND_DEFERRED_UPDATE,
+      SEND_REDUCTION_VIEW,
+      SEND_REDUCTION_UPDATE,
+      SEND_INSTANCE_MANAGER,
+      SEND_REDUCTION_MANAGER,
+      SEND_FUTURE,
+      SEND_FUTURE_RESULT,
+      SEND_FUTURE_SUBSCRIPTION,
+      SEND_MAKE_PERSISTENT,
+      SEND_UNMAKE_PERSISTENT,
+      SEND_MAPPER_MESSAGE,
+      SEND_MAPPER_BROADCAST,
+      SEND_INDEX_SPACE_SEMANTIC_REQ,
+      SEND_INDEX_PARTITION_SEMANTIC_REQ,
+      SEND_FIELD_SPACE_SEMANTIC_REQ,
+      SEND_FIELD_SEMANTIC_REQ,
+      SEND_LOGICAL_REGION_SEMANTIC_REQ,
+      SEND_LOGICAL_PARTITION_SEMANTIC_REQ,
+      SEND_INDEX_SPACE_SEMANTIC_INFO,
+      SEND_INDEX_PARTITION_SEMANTIC_INFO,
+      SEND_FIELD_SPACE_SEMANTIC_INFO,
+      SEND_FIELD_SEMANTIC_INFO,
+      SEND_LOGICAL_REGION_SEMANTIC_INFO,
+      SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
+      SEND_SUBSCRIBE_REMOTE_CONTEXT,
+      SEND_FREE_REMOTE_CONTEXT,
+      SEND_VERSION_STATE_PATH,
+      SEND_VERSION_STATE_INIT,
+      SEND_VERSION_STATE_REQUEST,
+      SEND_VERSION_STATE_RESPONSE,
+      SEND_INSTANCE_CREATION,
+      SEND_REDUCTION_CREATION,
+      SEND_CREATION_RESPONSE,
+      SEND_BACK_LOGICAL_STATE,
+    };
 
     // Forward declarations for user level objects
     // legion.h
@@ -243,6 +367,7 @@ namespace LegionRuntime {
     class CloseOp;
     class InterCloseOp;
     class PostCloseOp;
+    class VirtualCloseOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -269,6 +394,7 @@ namespace LegionRuntime {
     class IndexTask;
     class SliceTask;
     class RemoteTask;
+    class MinimalPoint;
     
     // legion_trace.h
     class LegionTrace;
@@ -277,7 +403,6 @@ namespace LegionRuntime {
 
     // region_tree.h
     class RegionTreeForest;
-    class StateDirectory;
     class IndexTreeNode;
     class IndexSpaceNode;
     class IndexPartNode;
@@ -288,18 +413,20 @@ namespace LegionRuntime {
 
     class RegionTreeContext;
     class RegionTreePath;
+    class FatTreePath;
     class PathTraverser;
     class NodeTraverser;
     class PremapTraverser;
-    template<bool RESTRICTED>
     class MappingTraverser;
     class RestrictInfo;
 
-    struct LogicalState;
-    class PhysicalVersion;
+    class CurrentState;
+    class PhysicalState;
+    class VersionState;
+    class VersionInfo;
+    class RestrictInfo;
 
     class DistributedCollectable;
-    class HierarchicalCollectable;
     class LayoutDescription;
     class PhysicalManager; // base class for instance and reduction
     class LogicalView; // base class for instance and reduction
@@ -309,10 +436,12 @@ namespace LegionRuntime {
     class DeferredView;
     class MaterializedView;
     class CompositeView;
+    class CompositeVersionInfo;
     class CompositeNode;
     class FillView;
     class MappingRef;
     class InstanceRef;
+    class CompositeRef;
     class InnerTaskView;
     class ReductionManager;
     class ListReductionManager;
@@ -332,6 +461,7 @@ namespace LegionRuntime {
     struct TraceInfo;
     struct LogicalCloser;
     struct PhysicalCloser;
+    struct CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;
@@ -569,6 +699,7 @@ namespace LegionRuntime {
     friend class CloseOp;                         \
     friend class InterCloseOp;                    \
     friend class PostCloseOp;                     \
+    friend class VirtualCloseOp;                  \
     friend class AcquireOp;                       \
     friend class ReleaseOp;                       \
     friend class NotPredOp;                       \
@@ -610,8 +741,21 @@ namespace LegionRuntime {
     friend class FoldReductionManager;            \
     friend class TreeStateLogger;                 \
     friend class BindingLib::Utility;             \
-    friend class CObjectWrapper;                  \
-    friend class StateDirectory;
+    friend class CObjectWrapper;                  
+
+#define LEGION_EXTERN_LOGGER_DECLARATIONS         \
+    extern Logger::Category log_run;              \
+    extern Logger::Category log_task;             \
+    extern Logger::Category log_index;            \
+    extern Logger::Category log_field;            \
+    extern Logger::Category log_region;           \
+    extern Logger::Category log_inst;             \
+    extern Logger::Category log_leak;             \
+    extern Logger::Category log_variant;          \
+    extern Logger::Category log_allocation;       \
+    extern Logger::Category log_prof;             \
+    extern Logger::Category log_garbage;          \
+    extern Logger::Category log_spy;
 
     // Timing events
     enum {

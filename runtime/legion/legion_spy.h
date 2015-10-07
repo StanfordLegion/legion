@@ -185,8 +185,13 @@ namespace LegionRuntime {
       static inline void log_mapping_operation(UniqueID context,
                                                UniqueID unique_id)
       {
-        log_spy.info("Mapping Operation %llu %llu",
-            context, unique_id);
+        log_spy.info("Mapping Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_fill_operation(UniqueID context,
+                                            UniqueID unique_id)
+      {
+        log_spy.info("Fill Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_close_operation(UniqueID context,

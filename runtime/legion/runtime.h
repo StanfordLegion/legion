@@ -172,17 +172,16 @@ namespace LegionRuntime {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
     public:
-      virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void notify_active(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void notify_new_remote(AddressSpaceID);
+      virtual void notify_inactive(void);
     public:
       void register_dependence(Operation *consumer_op);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      bool send_future(AddressSpaceID sid);
+      void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
     public:
       static void handle_future_send(Deserializer &derez, Runtime *rt, 
@@ -423,12 +422,6 @@ namespace LegionRuntime {
      */
     class ProcessorManager {
     public:
-      struct DeferredTriggerArgs {
-      public:
-        HLRTaskID hlr_id;
-        ProcessorManager *manager;
-        Operation *op;
-      };
       struct TriggerOpArgs {
       public:
         HLRTaskID hlr_id;
@@ -474,40 +467,10 @@ namespace LegionRuntime {
       void replace_default_mapper(Mapper *m);
       Mapper* find_mapper(MapperID mid) const; 
     public:
-      // 1 argument, no return
-      template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1);
-      // 1 argument with return
-      template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1);
-      // 2 arguments, no return
-      template<typename T1, typename T2, 
-               void (Mapper::*CALL)(T1,T2), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, const T2 &arg2);
-      // 2 arguments with return
-      template<typename T, typename T1, typename T2, 
-               T (Mapper::*CALL)(T1,T2), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, const T2 &args);
-      // 3 arguments, no return
-      template<typename T1, typename T2, 
-               typename T3, void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, 
-                         const T2 &arg2, const T3 &arg3);
-      // 3 arguments with return
-      template<typename T, typename T1, typename T2, 
-               typename T3, T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, 
-                      const T1 &arg1, const T2 &arg2, const T3 &arg3);
-      // 4 arguments, no return
-      template<typename T1, typename T2, typename T3, 
-               typename T4, void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-      void invoke_mapper(MapperID map_id, const T1 &arg1, 
-                         const T2 &arg2, const T3 &arg3, const T4 &arg4);
-      // 4 argument with return
-      template<typename T, typename T1, typename T2, typename T3, 
-               typename T4, T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, 
-                      const T2 &arg2, const T3 &arg3, const T4 &arg4);
+      template<typename MAPPER_CONTINUATION>
+      void invoke_mapper(MapperID map_id, MAPPER_CONTINUATION &continuation,
+                         bool block, bool has_lock);
+      void check_mapper_messages(MapperID map_id, bool need_lock);
     public:
       // Functions that perform mapping calls
       // We really need variadic templates here
@@ -578,7 +541,6 @@ namespace LegionRuntime {
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
-      void add_to_dependence_queue(Operation *op);
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
@@ -605,10 +567,6 @@ namespace LegionRuntime {
       const bool stealing_disabled;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
-    protected:
-      // Dependence analysis state
-      Reservation dependence_lock;
-      std::vector<Event> dependence_preconditions;
     protected:
       // Local queue state
       Reservation local_queue_lock;
@@ -675,18 +633,6 @@ namespace LegionRuntime {
       void allocate_physical_instance(PhysicalManager *manager);
       void free_physical_instance(PhysicalManager *manager);
     public:
-      void recycle_physical_instance(InstanceManager *manager);
-      bool reclaim_physical_instance(InstanceManager *manager);
-    public:
-      PhysicalInstance find_physical_instance(size_t field_size,
-                                              const Domain &dom, 
-                                              const unsigned depth,
-                                              Event &use_event);
-      PhysicalInstance find_physical_instance(
-                          const std::vector<size_t> &field_sizes,
-                          const Domain &dom, const size_t blocking_factor,
-                          const unsigned depth, Event &use_event);
-    public:
       // Method for mapper introspection
       size_t sample_allocated_space(void);
       size_t sample_free_space(void);
@@ -709,10 +655,62 @@ namespace LegionRuntime {
       // Current set of reduction instances and their sizes
       LegionMap<ReductionManager*, size_t,
                 MEMORY_REDUCTION_ALLOC>::tracked reduction_instances;
-      // Set of physical instances which are currently eligible for recycling
-      LegionSet<InstanceManager*,
-                MEMORY_AVAILABLE_ALLOC>::tracked available_instances;
     };
+
+    /**
+     * \class VirtualChannel
+     * This class provides the basic support for sending and receiving
+     * messages for a single virtual channel.
+     */
+    class VirtualChannel {
+    public:
+      // Implement a three-state state-machine for sending
+      // messages.  Either fully self-contained messages
+      // or chains of partial messages followed by a final
+      // message.
+      enum MessageHeader {
+        FULL_MESSAGE,
+        PARTIAL_MESSAGE,
+        FINAL_MESSAGE,
+      };
+    public:
+      VirtualChannel(VirtualChannelKind kind, 
+          AddressSpaceID local_address_space, size_t max_message_size);
+      VirtualChannel(const VirtualChannel &rhs);
+      ~VirtualChannel(void);
+    public:
+      VirtualChannel& operator=(const VirtualChannel &rhs);
+    public:
+      void package_message(Serializer &rez, MessageKind k, bool flush,
+                           Runtime *runtime, Processor target);
+      void process_message(const void *args, size_t arglen, 
+                         Runtime *runtime, AddressSpaceID remote_address_space);
+    private:
+      void send_message(bool complete, Runtime *runtime, Processor target);
+      void handle_messages(unsigned num_messages, Runtime *runtime, 
+                           AddressSpaceID remote_address_space,
+                           const char *args, size_t arglen);
+      void buffer_messages(unsigned num_messages,
+                           const void *args, size_t arglen);
+    public:
+      Event notify_pending_shutdown(void);
+    private:
+      Reservation send_lock;
+      char *const sending_buffer;
+      unsigned sending_index;
+      const size_t sending_buffer_size;
+      Event last_message_event;
+      MessageHeader header;
+      unsigned packaged_messages;
+      bool partial;
+      // State for receiving messages
+      // No lock for receiving messages since we know
+      // that they are ordered
+      char *receiving_buffer;
+      unsigned receiving_index;
+      size_t receiving_buffer_size;
+      unsigned received_messages;
+    }; 
 
     /**
      * \class MessageManager
@@ -732,91 +730,7 @@ namespace LegionRuntime {
      * manager waits until it has received all the active messages
      * before handling the message.
      */
-    class MessageManager {
-    public:
-      enum MessageKind {
-        TASK_MESSAGE,
-        STEAL_MESSAGE,
-        ADVERTISEMENT_MESSAGE,
-        SEND_INDEX_SPACE_NODE,
-        SEND_INDEX_SPACE_REQUEST,
-        SEND_INDEX_SPACE_RETURN,
-        SEND_INDEX_PARTITION_NODE,
-        SEND_INDEX_PARTITION_REQUEST,
-        SEND_INDEX_PARTITION_RETURN,
-        SEND_FIELD_SPACE_NODE,
-        SEND_FIELD_SPACE_REQUEST,
-        SEND_FIELD_SPACE_RETURN,
-        SEND_LOGICAL_REGION_NODE,
-        INDEX_SPACE_DESTRUCTION_MESSAGE,
-        INDEX_PARTITION_DESTRUCTION_MESSAGE,
-        FIELD_SPACE_DESTRUCTION_MESSAGE,
-        LOGICAL_REGION_DESTRUCTION_MESSAGE,
-        LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-        FIELD_ALLOCATION_MESSAGE,
-        FIELD_DESTRUCTION_MESSAGE,
-        INDIVIDUAL_REMOTE_MAPPED,
-        INDIVIDUAL_REMOTE_COMPLETE,
-        INDIVIDUAL_REMOTE_COMMIT,
-        SLICE_REMOTE_MAPPED,
-        SLICE_REMOTE_COMPLETE,
-        SLICE_REMOTE_COMMIT,
-        DISTRIBUTED_REMOVE_RESOURCE,
-        DISTRIBUTED_REMOVE_REMOTE,
-        DISTRIBUTED_ADD_REMOTE,
-        HIERARCHICAL_REMOVE_RESOURCE,
-        HIERARCHICAL_REMOVE_REMOTE,
-        SEND_BACK_USER,
-        SEND_BACK_ATOMIC,
-        SEND_SUBSCRIBER,
-        SEND_MATERIALIZED_VIEW,
-        SEND_MATERIALIZED_UPDATE,
-        SEND_BACK_MATERIALIZED_VIEW,
-        SEND_COMPOSITE_VIEW,
-        SEND_BACK_COMPOSITE_VIEW,
-        SEND_COMPOSITE_UPDATE,
-        SEND_FILL_VIEW,
-        SEND_BACK_FILL_VIEW,
-        SEND_FILL_UPDATE,
-        SEND_REDUCTION_VIEW,
-        SEND_REDUCTION_UPDATE,
-        SEND_BACK_REDUCTION_VIEW,
-        SEND_INSTANCE_MANAGER,
-        SEND_REDUCTION_MANAGER,
-        SEND_REGION_STATE,
-        SEND_PARTITION_STATE,
-        SEND_BACK_REGION_STATE,
-        SEND_BACK_PARTITION_STATE,
-        SEND_REMOTE_REFERENCES,
-        SEND_INDIVIDUAL_REQUEST,
-        SEND_INDIVIDUAL_RETURN,
-        SEND_SLICE_REQUEST,
-        SEND_SLICE_RETURN,
-        SEND_FUTURE,
-        SEND_FUTURE_RESULT,
-        SEND_FUTURE_SUBSCRIPTION,
-        SEND_MAKE_PERSISTENT,
-        SEND_MAPPER_MESSAGE,
-        SEND_MAPPER_BROADCAST,
-        SEND_INDEX_SPACE_SEMANTIC_INFO,
-        SEND_INDEX_PARTITION_SEMANTIC_INFO,
-        SEND_FIELD_SPACE_SEMANTIC_INFO,
-        SEND_FIELD_SEMANTIC_INFO,
-        SEND_LOGICAL_REGION_SEMANTIC_INFO,
-        SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
-        SEND_FREE_REMOTE_CONTEXT,
-        SEND_VALIDATE_REMOTE_STATE,
-        SEND_INVALIDATE_REMOTE_STATE,
-      };
-      // Implement a three-state state-machine for sending
-      // messages.  Either fully self-contained messages
-      // or chains of partial messages followed by a final
-      // message.
-      enum MessageHeader {
-        FULL_MESSAGE,
-        PARTIAL_MESSAGE,
-        FINAL_MESSAGE,
-      };
+    class MessageManager { 
     public:
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
@@ -826,113 +740,19 @@ namespace LegionRuntime {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      // Methods for sending tasks
-      void send_task(Serializer &rez, bool flush);
-      void send_steal_request(Serializer &rez, bool flush);
-      void send_advertisement(Serializer &rez, bool flush);
-      void send_index_space_node(Serializer &rez, bool flush);
-      void send_index_space_request(Serializer &rez, bool flush);
-      void send_index_space_return(Serializer &rez, bool flush);
-      void send_index_partition_node(Serializer &rez, bool flush);
-      void send_index_partition_request(Serializer &rez, bool flush);
-      void send_index_partition_return(Serializer &rez, bool flush);
-      void send_field_space_node(Serializer &rez, bool flush);
-      void send_field_space_request(Serializer &rez, bool flush);
-      void send_field_space_return(Serializer &rez, bool flush);
-      void send_logical_region_node(Serializer &rez, bool flush);
-      void send_index_space_destruction(Serializer &rez, bool flush);
-      void send_index_partition_destruction(Serializer &rez, bool flush);
-      void send_field_space_destruction(Serializer &rez, bool flush);
-      void send_logical_region_destruction(Serializer &rez, bool flush);
-      void send_logical_partition_destruction(Serializer &rez, bool flush);
-      void send_field_allocation(Serializer &rez, bool flush);
-      void send_field_destruction(Serializer &rez, bool flush);
-      void send_individual_remote_mapped(Serializer &rez, bool flush);
-      void send_individual_remote_complete(Serializer &rez, bool flush);
-      void send_individual_remote_commit(Serializer &rez, bool flush);
-      void send_slice_remote_mapped(Serializer &rez, bool flush);
-      void send_slice_remote_complete(Serializer &rez, bool flush);
-      void send_slice_remote_commit(Serializer &rez, bool flush);
-      void send_remove_distributed_resource(Serializer &rez, bool flush);
-      void send_remove_distributed_remote(Serializer &rez, bool flush);
-      void send_add_distributed_remote(Serializer &rez, bool flush);
-      void send_remove_hierarchical_resource(Serializer &rez, bool flush);
-      void send_remove_hierarchical_remote(Serializer &rez, bool flush);
-      void send_back_user(Serializer &rez, bool flush);
-      void send_back_atomic(Serializer &rez, bool flush);
-      void send_subscriber(Serializer &rez, bool flush);
-      void send_materialized_view(Serializer &rez, bool flush);
-      void send_back_materialized_view(Serializer &rez, bool flush);
-      void send_materialized_update(Serializer &rez, bool flush);
-      void send_composite_view(Serializer &rez, bool flush);
-      void send_composite_update(Serializer &rez, bool flush);
-      void send_back_composite_view(Serializer &rez, bool flush);
-      void send_fill_view(Serializer &rez, bool flush);
-      void send_back_fill_view(Serializer &rez, bool flush);
-      void send_fill_update(Serializer &rez, bool flush);
-      void send_reduction_view(Serializer &rez, bool flush);
-      void send_reduction_update(Serializer &rez, bool flush);
-      void send_back_reduction_view(Serializer &rez, bool flush);
-      void send_instance_manager(Serializer &rez, bool flush);
-      void send_reduction_manager(Serializer &rez, bool flush);
-      void send_region_state(Serializer &rez, bool flush);
-      void send_partition_state(Serializer &rez, bool flush);
-      void send_back_region_state(Serializer &rez, bool flush);
-      void send_back_partition_state(Serializer &rez, bool flush);
-      void send_remote_references(Serializer &rez, bool flush);
-      void send_individual_request(Serializer &rez, bool flush);
-      void send_individual_return(Serializer &rez, bool flush);
-      void send_slice_request(Serializer &rez, bool flush);
-      void send_slice_return(Serializer &rez, bool flush);
-      void send_future(Serializer &rez, bool flush);
-      void send_future_result(Serializer &rez, bool flush);
-      void send_future_subscription(Serializer &rez, bool flush);
-      void send_make_persistent(Serializer &rez, bool flush);
-      void send_mapper_message(Serializer &rez, bool flush);
-      void send_mapper_broadcast(Serializer &rez, bool flush);
-      void send_index_space_semantic_info(Serializer &rez, bool flush);
-      void send_index_partition_semantic_info(Serializer &rez, bool flush);
-      void send_field_space_semantic_info(Serializer &rez, bool flush);
-      void send_field_semantic_info(Serializer &rez, bool flush);
-      void send_logical_region_semantic_info(Serializer &rez, bool flush);
-      void send_logical_partition_semantic_info(Serializer &rez, bool flush);
-      void send_free_remote_context(Serializer &rez, bool flush);
-      void send_validate_remote_state(Serializer &rez, bool flush);
-      void send_invalidate_remote_state(Serializer &rez, bool flush);
-    public:
-      // Receiving message method
-      void process_message(const void *args, size_t arglen);
-    private:
-      void package_message(Serializer &rez, MessageKind k, bool flush);
-      void send_message(bool complete);
-      void handle_messages(unsigned num_messages, 
-                           const char *args, size_t arglen);
-      void buffer_messages(unsigned num_messages,
-                           const void *args, size_t arglen);
-    public:
       Event notify_pending_shutdown(void);
     public:
-      const AddressSpaceID local_address_space;
+      void send_message(Serializer &rez, MessageKind kind, 
+                        VirtualChannelKind channel, bool flush);
+
+      void receive_message(const void *args, size_t arglen);
+    public:
       const AddressSpaceID remote_address_space;
     private:
       Runtime *const runtime;
       // State for sending messages
       Processor target;
-      Reservation send_lock;
-      char *const sending_buffer;
-      unsigned sending_index;
-      const size_t sending_buffer_size;
-      Event last_message_event;
-      MessageHeader header;
-      unsigned packaged_messages;
-      bool partial;
-      // State for receiving messages
-      // No lock for receiving messages since we know
-      // that they are ordered
-      char *receiving_buffer;
-      unsigned receiving_index;
-      size_t receiving_buffer_size;
-      unsigned received_messages; 
+      VirtualChannel *const channels; 
     };
 
     /**
@@ -986,6 +806,24 @@ namespace LegionRuntime {
     private:
       int ctx;
     };
+
+    /**
+     * \class LegionContinuation
+     * A generic interface class for issuing a continuation
+     */
+    class LegionContinuation {
+    public:
+      struct ContinuationArgs {
+        HLRTaskID hlr_id;
+        LegionContinuation *continuation;
+      };
+    public:
+      Event defer(Runtime *runtime, Event precondition = Event::NO_EVENT);
+    public:
+      virtual void execute(void) = 0;
+    public:
+      static void handle_continuation(const void *args);
+    }; 
  
     /**
      * \class Runtime
@@ -1033,7 +871,8 @@ namespace LegionRuntime {
         MapperID map_id;
         Processor proc;
         Event event;
-      };
+        RemoteTask *context;
+      }; 
     public:
       struct ProcessorGroupInfo {
       public:
@@ -1502,18 +1341,7 @@ namespace LegionRuntime {
       MemoryManager* find_memory(Memory mem);
       void allocate_physical_instance(PhysicalManager *instance);
       void free_physical_instance(PhysicalManager *instance);
-    public:
-      // Functions for recycling physical instances
-      void recycle_physical_instance(InstanceManager *instance);
-      bool reclaim_physical_instance(InstanceManager *instance);
-      PhysicalInstance find_physical_instance(Memory mem, size_t field_size,
-                   const Domain &dom, const unsigned depth, Event &use_event);
-      PhysicalInstance find_physical_instance(Memory mem, 
-                                     const std::vector<size_t> &field_sizes,
-                                     const Domain &dom, 
-                                     const size_t blocking_factor,
-                                     const unsigned depth,
-                                     Event &use_event);
+      AddressSpaceID find_address_space(Memory handle) const;
     public:
       // Mapper introspection methods
       size_t sample_allocated_space(Memory mem);
@@ -1534,12 +1362,20 @@ namespace LegionRuntime {
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_child_request(AddressSpaceID target, 
+                                          Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
       void send_index_partition_return(AddressSpaceID target, Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
+      void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
+      void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
+      void send_distributed_alloc_request(AddressSpaceID target, 
+                                          Serializer &rez);
+      void send_distributed_alloc_upgrade(AddressSpaceID target,
+                                          Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -1563,47 +1399,44 @@ namespace LegionRuntime {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
-      void send_remove_distributed_resource(AddressSpaceID target,
-                                            Serializer &rez);
-      void send_remove_distributed_remote(AddressSpaceID target,
-                                          Serializer &rez);
-      void send_add_distributed_remote(AddressSpaceID target, Serializer &rez);
-      void send_remove_hierarchical_resource(AddressSpaceID target,
-                                             Serializer &rez);
-      void send_remove_hierarchical_remote(AddressSpaceID target, 
+      void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
-      void send_back_user(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_registration(AddressSpaceID target,Serializer &rez);
+      void send_view_remote_valid_update(AddressSpaceID target,Serializer &rez);
+      void send_view_remote_gc_update(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_resource_update(AddressSpaceID target,
+                                            Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
-      void send_subscriber(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
-      void send_back_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
-      void send_composite_update(AddressSpaceID target, Serializer &rez);
-      void send_back_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
-      void send_back_fill_view(AddressSpaceID target, Serializer &rez);
-      void send_fill_update(AddressSpaceID target, Serializer &rez);
+      void send_deferred_update(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_update(AddressSpaceID target, Serializer &rez);
-      void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
-      void send_region_state(AddressSpaceID target, Serializer &rez);
-      void send_partition_state(AddressSpaceID target, Serializer &rez);
-      void send_back_region_state(AddressSpaceID target, Serializer &rez);
-      void send_back_partition_state(AddressSpaceID target, Serializer &rez);
-      void send_remote_references(AddressSpaceID target, Serializer &rez);
-      void send_individual_request(AddressSpaceID target, Serializer &rez);
-      void send_individual_return(AddressSpaceID target, Serializer &rez);
-      void send_slice_request(AddressSpaceID target, Serializer &rez);
-      void send_slice_return(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
+      void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_index_space_semantic_request(AddressSpaceID target, 
+                                             Serializer &rez);
+      void send_index_partition_semantic_request(AddressSpaceID target,
+                                                 Serializer &rez);
+      void send_field_space_semantic_request(AddressSpaceID target,
+                                             Serializer &rez);
+      void send_field_semantic_request(AddressSpaceID target, Serializer &rez);
+      void send_logical_region_semantic_request(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_logical_partition_semantic_request(AddressSpaceID target,
+                                                   Serializer &rez);
       void send_index_space_semantic_info(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_partition_semantic_info(AddressSpaceID target,
@@ -1615,9 +1448,19 @@ namespace LegionRuntime {
                                              Serializer &rez);
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
+      void send_subscribe_remote_context(AddressSpaceID target,Serializer &rez);
       void send_free_remote_context(AddressSpaceID target, Serializer &rez);
-      void send_validate_remote_state(AddressSpaceID target, Serializer &rez);
-      void send_invalidate_remote_state(AddressSpaceID target, Serializer &rez);
+      void send_version_state_path_only(AddressSpaceID target, Serializer &rez);
+      void send_version_state_initialization(AddressSpaceID target, 
+                                             Serializer &rez);
+      void send_version_state_request(AddressSpaceID target, Serializer &rez);
+      void send_version_state_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_instance_creation_request(AddressSpaceID target,
+                                                 Serializer &rez);
+      void send_remote_reduction_creation_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
+      void send_back_logical_state(AddressSpaceID, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1627,6 +1470,7 @@ namespace LegionRuntime {
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez); 
+      void handle_index_space_child_request(Deserializer &derez); 
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_index_partition_request(Deserializer &derez,
@@ -1636,6 +1480,11 @@ namespace LegionRuntime {
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_field_space_return(Deserializer &derez);
+      void handle_top_level_region_request(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_top_level_region_return(Deserializer &derez);
+      void handle_distributed_alloc_request(Deserializer &derez);
+      void handle_distributed_alloc_upgrade(Deserializer &derez);
       void handle_logical_region_node(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez,
@@ -1650,79 +1499,88 @@ namespace LegionRuntime {
                                                 AddressSpaceID source);
       void handle_field_allocation(Deserializer &derez, AddressSpaceID source);
       void handle_field_destruction(Deserializer &derez, AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez, 
-                                           AddressSpaceID source);
+      void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
-      void handle_distributed_remove_resource(Deserializer &derez);
-      void handle_distributed_remove_remote(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_distributed_add_remote(Deserializer &derez);
-      void handle_hierarchical_remove_resource(Deserializer &derez);
-      void handle_hierarchical_remove_remote(Deserializer &derez);
-      void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
+      void handle_did_remote_registration(Deserializer &derez, 
+                                          AddressSpaceID source);
+      void handle_did_remote_valid_update(Deserializer &derez);
+      void handle_did_remote_gc_update(Deserializer &derez);
+      void handle_did_remote_resource_update(Deserializer &derez);
+      void handle_view_remote_registration(Deserializer &derez, 
+                                           AddressSpaceID source);
+      void handle_view_remote_valid_update(Deserializer &derez);
+      void handle_view_remote_gc_update(Deserializer &derez);
+      void handle_view_remote_resource_update(Deserializer &derez);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
-      void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
       void handle_send_materialized_update(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_send_back_materialized_view(Deserializer &derez,
-                                              AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
-      void handle_send_composite_update(Deserializer &derez,
-                                        AddressSpaceID source);
-      void handle_send_back_composite_view(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
-      void handle_send_back_fill_view(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_send_fill_update(Deserializer &derez, AddressSpaceID source);
+      void handle_send_deferred_update(Deserializer &derez, 
+                                       AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_reduction_update(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_send_back_reduction_view(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_send_region_state(Deserializer &derez, AddressSpaceID source);
-      void handle_send_partition_state(Deserializer &derez, 
-                                       AddressSpaceID source);
-      void handle_send_back_region_state(Deserializer &derez, 
-                                         AddressSpaceID source);
-      void handle_send_back_partition_state(Deserializer &derez, 
-                                            AddressSpaceID source);
-      void handle_send_remote_references(Deserializer &derez);
-      void handle_individual_request(Deserializer &derez, 
-                                     AddressSpaceID source);
-      void handle_individual_return(Deserializer &derez);
-      void handle_slice_request(Deserializer &derez, AddressSpaceID source);
-      void handle_slice_return(Deserializer &derez);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
+      void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
-      void handle_index_space_semantic_info(Deserializer &derez);
-      void handle_index_partition_semantic_info(Deserializer &derez);
-      void handle_field_space_semantic_info(Deserializer &derez);
-      void handle_field_semantic_info(Deserializer &derez);
-      void handle_logical_region_semantic_info(Deserializer &derez);
-      void handle_logical_partition_semantic_info(Deserializer &derez);
+      void handle_index_space_semantic_request(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_index_partition_semantic_request(Deserializer &derez,
+                                                   AddressSpaceID source);
+      void handle_field_space_semantic_request(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_field_semantic_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_logical_region_semantic_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_logical_partition_semantic_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_index_space_semantic_info(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_index_partition_semantic_info(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_field_space_semantic_info(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_field_semantic_info(Deserializer &derez,
+                                      AddressSpaceID source);
+      void handle_logical_region_semantic_info(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_logical_partition_semantic_info(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_subscribe_remote_context(Deserializer &derez,
+                                           AddressSpaceID source);
       void handle_free_remote_context(Deserializer &derez);
-      void handle_validate_remote_state(Deserializer &derez, 
-                                        AddressSpaceID source);
-      void handle_invalidate_remote_state(Deserializer &derez,
+      void handle_version_state_path_only(Deserializer &derez,
                                           AddressSpaceID source);
+      void handle_version_state_initialization(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_version_state_request(Deserializer &derez);
+      void handle_version_state_response(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_remote_instance_creation(Deserializer &derez, 
+                                           AddressSpaceID source);
+      void handle_remote_reduction_creation(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_remote_creation_response(Deserializer &derez);
+      void handle_logical_state_return(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1805,7 +1663,7 @@ namespace LegionRuntime {
                                const TaskArgument &arg);
       void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
-      //inline Processor find_utility_group(void) { return utility_group; }
+      inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);
       Event issue_runtime_meta_task(const void *args, size_t arglen,
                                     HLRTaskID tid, Operation *op = NULL,
@@ -1816,19 +1674,19 @@ namespace LegionRuntime {
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
     public:
-      DistributedID get_available_distributed_id(void);
+      DistributedID get_available_distributed_id(bool need_cont, 
+                                                 bool has_lock = false);
       void free_distributed_id(DistributedID did);
       void recycle_distributed_id(DistributedID did, Event recycle_event);
     public:
       void register_distributed_collectable(DistributedID did,
-                                            DistributedCollectable *dc);
+                                            DistributedCollectable *dc,
+                                            bool needs_lock = true);
       void unregister_distributed_collectable(DistributedID did);
+      bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
-    public:
-      void register_hierarchical_collectable(DistributedID did,
-                                             HierarchicalCollectable *hc);
-      void unregister_hierarchical_collectable(DistributedID did);
-      HierarchicalCollectable* find_hierarchical_collectable(DistributedID did);
+      DistributedCollectable* weak_find_distributed_collectable(
+                                                           DistributedID did);
     public:
       void register_future(DistributedID did, Future::Impl *impl);
       void unregister_future(DistributedID did);
@@ -1844,34 +1702,68 @@ namespace LegionRuntime {
       void decrement_outstanding_top_level_tasks(void);
       void initiate_runtime_shutdown(void);
     public:
-      IndividualTask*       get_available_individual_task(void);
-      PointTask*            get_available_point_task(void);
-      IndexTask*            get_available_index_task(void);
-      SliceTask*            get_available_slice_task(void);
-      RemoteTask*           get_available_remote_task(void);
-      InlineTask*           get_available_inline_task(void);
-      MapOp*                get_available_map_op(void);
-      CopyOp*               get_available_copy_op(void);
-      FenceOp*              get_available_fence_op(void);
-      FrameOp*              get_available_frame_op(void);
-      DeletionOp*           get_available_deletion_op(void);
-      InterCloseOp*         get_available_inter_close_op(void);
-      PostCloseOp*          get_available_post_close_op(void);
-      DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
-      FuturePredOp*         get_available_future_pred_op(void);
-      NotPredOp*            get_available_not_pred_op(void);
-      AndPredOp*            get_available_and_pred_op(void);
-      OrPredOp*             get_available_or_pred_op(void);
-      AcquireOp*            get_available_acquire_op(void);
-      ReleaseOp*            get_available_release_op(void);
-      TraceCaptureOp*       get_available_capture_op(void);
-      TraceCompleteOp*      get_available_trace_op(void);
-      MustEpochOp*          get_available_epoch_op(void);
-      PendingPartitionOp*   get_available_pending_partition_op(void);
-      DependentPartitionOp* get_available_dependent_partition_op(void);
-      FillOp*               get_available_fill_op(void);
-      AttachOp*             get_available_attach_op(void);
-      DetachOp*             get_available_detach_op(void);
+      template<typename T>
+      inline T* get_available(Reservation reservation,
+                              std::deque<T*> &queue, bool has_lock);
+    public:
+      IndividualTask*       get_available_individual_task(bool need_cont,
+                                                  bool has_lock = false);
+      PointTask*            get_available_point_task(bool need_cont,
+                                                  bool has_lock = false);
+      IndexTask*            get_available_index_task(bool need_cont,
+                                                  bool has_lock = false);
+      SliceTask*            get_available_slice_task(bool need_cont,
+                                                  bool has_lock = false);
+      RemoteTask*           get_available_remote_task(bool need_cont,
+                                                  bool has_lock = false);
+      InlineTask*           get_available_inline_task(bool need_cont,
+                                                  bool has_lock = false);
+      MapOp*                get_available_map_op(bool need_cont,
+                                                  bool has_lock = false);
+      CopyOp*               get_available_copy_op(bool need_cont,
+                                                  bool has_lock = false);
+      FenceOp*              get_available_fence_op(bool need_cont,
+                                                  bool has_lock = false);
+      FrameOp*              get_available_frame_op(bool need_cont,
+                                                  bool has_lock = false);
+      DeletionOp*           get_available_deletion_op(bool need_cont,
+                                                  bool has_lock = false);
+      InterCloseOp*         get_available_inter_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      PostCloseOp*          get_available_post_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      VirtualCloseOp*       get_available_virtual_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      DynamicCollectiveOp*  get_available_dynamic_collective_op(bool need_cont,
+                                                  bool has_lock = false);
+      FuturePredOp*         get_available_future_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      NotPredOp*            get_available_not_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      AndPredOp*            get_available_and_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      OrPredOp*             get_available_or_pred_op(bool need_cont,
+                                                  bool has_lock = false);
+      AcquireOp*            get_available_acquire_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReleaseOp*            get_available_release_op(bool need_cont,
+                                                  bool has_lock = false);
+      TraceCaptureOp*       get_available_capture_op(bool need_cont,
+                                                  bool has_lock = false);
+      TraceCompleteOp*      get_available_trace_op(bool need_cont,
+                                                  bool has_lock = false);
+      MustEpochOp*          get_available_epoch_op(bool need_cont,
+                                                  bool has_lock = false);
+      PendingPartitionOp*   get_available_pending_partition_op(bool need_cont,
+                                                  bool has_lock = false);
+      DependentPartitionOp* get_available_dependent_partition_op(bool need_cont,
+                                                  bool has_lock = false);
+      FillOp*               get_available_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      AttachOp*             get_available_attach_op(bool need_cont,
+                                                  bool has_lock = false);
+      DetachOp*             get_available_detach_op(bool need_cont,
+                                                  bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1886,6 +1778,7 @@ namespace LegionRuntime {
       void free_deletion_op(DeletionOp *op);
       void free_inter_close_op(InterCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
+      void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
       void free_future_predicate_op(FuturePredOp *op);
       void free_not_predicate_op(NotPredOp *op);
@@ -1902,7 +1795,10 @@ namespace LegionRuntime {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
     public:
-      RemoteTask* find_or_init_remote_context(UniqueID uid); 
+      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
+                                              SingleTask *remote_parent_ctx); 
+      SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
+    public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
     public:
@@ -1941,6 +1837,8 @@ namespace LegionRuntime {
       static void high_level_runtime_task(
                           const void *args, size_t arglen, Processor p);
       static void profiling_runtime_task(
+                          const void *args, size_t arglen, Processor p);
+      static void profiling_mapper_task(
                           const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
@@ -2034,9 +1932,6 @@ namespace LegionRuntime {
       Reservation distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
                 RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
-      Reservation hierarchical_collectable_lock;
-      LegionMap<DistributedID,HierarchicalCollectable*,
-                RUNTIME_HIER_COLLECT_ALLOC>::tracked hier_collectables;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
@@ -2089,6 +1984,7 @@ namespace LegionRuntime {
       Reservation deletion_op_lock;
       Reservation inter_close_op_lock;
       Reservation post_close_op_lock;
+      Reservation virtual_close_op_lock;
       Reservation dynamic_collective_op_lock;
       Reservation future_pred_op_lock;
       Reservation not_pred_op_lock;
@@ -2118,6 +2014,7 @@ namespace LegionRuntime {
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<InterCloseOp*>         available_inter_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
+      std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
       std::deque<FuturePredOp*>         available_future_pred_ops;
       std::deque<NotPredOp*>            available_not_pred_ops;
@@ -2141,7 +2038,6 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
-      std::set<AcquireOp*>      out_acquire_ops; 
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
@@ -2150,7 +2046,6 @@ namespace LegionRuntime {
       void print_out_index_tasks(FILE *f = stdout, int cnt = -1);
       void print_out_slice_tasks(FILE *f = stdout, int cnt = -1);
       void print_out_point_tasks(FILE *f = stdout, int cnt = -1);
-      void print_out_acquire_ops(FILE *f = stdout, int cnt = -1);
       void print_outstanding_tasks(FILE *f = stdout, int cnt = -1);
 #endif
     public:
@@ -2228,7 +2123,6 @@ namespace LegionRuntime {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
-      static unsigned initial_directory_size;
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;
@@ -2264,6 +2158,375 @@ namespace LegionRuntime {
     public:
       static unsigned num_profiling_nodes;
     };
+
+    /**
+     * \class GetAvailableContinuation
+     * Continuation class for obtaining resources from the runtime
+     */
+    template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
+    class GetAvailableContinuation : public LegionContinuation {
+    public:
+      GetAvailableContinuation(Runtime *rt, Reservation r)
+        : runtime(rt), reservation(r) { }
+    public:
+      inline T get_result(void)
+      {
+        // Try to take the reservation, see if we get it
+        Event acquire_event = reservation.acquire();
+        if (acquire_event.has_triggered())
+        {
+          // We got it! Do it now!
+          result = (runtime->*FUNC_PTR)(false/*do continuation*/,
+                                        true/*has lock*/);
+          reservation.release();
+          return result;
+        }
+        // Otherwise we didn't get so issue the deferred task
+        // to avoid waiting for a reservation in an application task
+        Event done_event = defer(runtime, acquire_event);
+        done_event.wait();
+        return result;
+      }
+      virtual void execute(void)
+      {
+        // If we got here we know we have the reservation
+        result = (runtime->*FUNC_PTR)(false/*do continuation*/,
+                                      true/*has lock*/); 
+        // Now release the reservation 
+        reservation.release();
+      }
+    protected:
+      Runtime *const runtime;
+      Reservation reservation;
+      T result;
+    };
+
+    /**
+     * \class RegisterDistributedContinuation
+     * Continuation class for registration of distributed collectables
+     */
+    class RegisterDistributedContinuation : public LegionContinuation {
+    public:
+      RegisterDistributedContinuation(DistributedID id,
+                                      DistributedCollectable *d,
+                                      Runtime *rt)
+        : did(id), dc(d), runtime(rt) { }
+    public:
+      virtual void execute(void)
+      {
+        runtime->register_distributed_collectable(did, dc, false/*need lock*/);
+      }
+    protected:
+      const DistributedID did;
+      DistributedCollectable *const dc;
+      Runtime *const runtime;
+    };
+
+    /**
+     * \class CheckMessagesContinuation
+     * A helper class for doing continuation for checking mapper messages
+     */
+    class CheckMessagesContinuation : public LegionContinuation {
+    public:
+      CheckMessagesContinuation(ProcessorManager *m, MapperID mid)
+        : manager(m), map_id(mid) { }
+    public:
+      virtual void execute(void)
+      {
+        manager->check_mapper_messages(map_id, false/*need lock*/);
+      }
+    protected:
+      ProcessorManager *const manager;
+      MapperID map_id;
+    };
+
+    /**
+     * \class MapperContinuation
+     * A series of templated classes for mapper calls with varying
+     * numbers of arguments. It would be really nice to use 
+     * variadic templates here.
+     */
+    class MapperContinuation : public LegionContinuation {
+    public:
+      MapperContinuation(ProcessorManager *m, MapperID mid)
+        : manager(m), map_id(mid) 
+      { done_event = UserEvent::create_user_event(); }
+    public:
+      inline void complete_mapping(void)
+      {
+        done_event.trigger();
+      }
+      virtual void execute(void) = 0;
+    protected:
+      ProcessorManager *const manager;
+      MapperID map_id;
+      UserEvent done_event;
+    };
+
+    template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
+    class MapperContinuation1NoRet : public MapperContinuation {
+    public:
+      MapperContinuation1NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1)
+        : MapperContinuation(m, mid), arg1(a1) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+    };
+
+    template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
+    class MapperContinuation1Ret : public MapperContinuation {
+    public:
+      MapperContinuation1Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1)
+        : MapperContinuation(m, mid), arg1(a1), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      T result;
+    };
+
+    template<typename T1, typename T2, void (Mapper::*CALL)(T1,T2), bool BLOCK>
+    class MapperContinuation2NoRet : public MapperContinuation {
+    public:
+      MapperContinuation2NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+    };
+
+    template<typename T, typename T1, typename T2, 
+             T (Mapper::*CALL)(T1,T2), bool BLOCK>
+    class MapperContinuation2Ret : public MapperContinuation {
+    public:
+      MapperContinuation2Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1, const T2 &a2)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      T result;
+    };
+
+    template<typename T1, typename T2, typename T3,
+             void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+    class MapperContinuation3NoRet : public MapperContinuation {
+    public:
+      MapperContinuation3NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2, const T3 &a3)
+        : MapperContinuation(m, mid), arg1(a1), arg2(a2), arg3(a3) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2, arg3);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+    };
+
+    template<typename T, typename T1, typename T2, typename T3, 
+             T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+    class MapperContinuation3Ret : public MapperContinuation {
+    public:
+      MapperContinuation3Ret(ProcessorManager *m, MapperID mid, T init,
+                             const T1 &a1, const T2 &a2, const T3 &a3)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2, arg3);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      T result;
+    };
+
+    template<typename T1, typename T2, typename T3, typename T4,
+             void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+    class MapperContinuation4NoRet : public MapperContinuation {
+    public:
+      MapperContinuation4NoRet(ProcessorManager *m, MapperID mid,
+                               const T1 &a1, const T2 &a2, 
+                               const T3 &a3, const T4 &a4)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
+    public:
+      inline void perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        (mapper->*CALL)(arg1, arg2, arg3, arg4);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      const T4 &arg4;
+    };
+
+    template<typename T, typename T1, typename T2, 
+             typename T3, typename T4,
+             T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+    class MapperContinuation4Ret : public MapperContinuation {
+    public:
+      MapperContinuation4Ret(ProcessorManager *m, MapperID mid,
+                             T init, const T1 &a1, const T2 &a2, 
+                             const T3 &a3, const T4 &a4)
+        : MapperContinuation(m, mid), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4), result(init) { }
+    public:
+      inline T perform_mapping(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
+        if (!done_event.has_triggered())
+          done_event.wait();
+        return result;
+      }
+      inline void invoke_mapper(Mapper *mapper)
+      {
+        result = (mapper->*CALL)(arg1, arg2, arg3, arg4);
+      }
+      virtual void execute(void)
+      {
+        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+      }
+    protected:
+      const T1 &arg1;
+      const T2 &arg2;
+      const T3 &arg3;
+      const T4 &arg4;
+      T result;
+    };
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline T* Runtime::get_available(Reservation reservation, 
+                                     std::deque<T*> &queue, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      T *result = NULL;
+      if (!has_lock)
+      {
+        AutoLock r_lock(reservation);
+        if (!queue.empty())
+        {
+          result = queue.front();
+          queue.pop_front();
+        }
+      }
+      else
+      {
+        if (!queue.empty())
+        {
+          result = queue.front();
+          queue.pop_front();
+        }
+      }
+      // Couldn't find one so make one
+      if (result == NULL)
+        result = legion_new<T>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

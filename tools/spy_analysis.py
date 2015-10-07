@@ -54,6 +54,7 @@ ACQUIRE_OP = 7
 RELEASE_OP = 8
 DEPENDENT_PARTITION_OP = 9
 PENDING_PARTITION_OP = 10
+FILL_OP = 11
 
 # Instance Kinds
 TASK_INST = 0
@@ -1366,7 +1367,7 @@ class Mapping(object):
         inst_string = ''
         if self.state.verbose:
             if (logical):
-                inst_string = '\\n'+requirement.dot_requirement()
+                inst_string = '\\n'+self.requirement.dot_requirement()
             else:
                 inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+\
                     self.requirement.dot_requirement()
@@ -1666,6 +1667,118 @@ class CopyOp(object):
                 self.instances[0].node_name,
                 edge_type='dashed',
                 edge_label='copy across '+hex(self.uid)+' (fields: '+fields+')')
+
+class FillOp(object):
+    def __init__(self, state, uid, ctx):
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.requirement = None
+        self.logical_incoming = set() 
+        self.logical_outgoing = set()
+        self.logical_mark = 0
+        self.op_instances = set()
+        self.node_name = 'fill_node_'+str(uid)
+
+    def get_name(self):
+        return "Fill "+str(self.uid)
+
+    def get_op_kind(self):
+        return FILL_OP
+
+    def add_requirement(self, idx, req):
+        assert idx == 0
+        assert self.requirement is None
+        self.requirement = req
+
+    def get_requirement(self, idx):
+        assert idx == 0
+        assert self.requirement is not None
+        return self.requirement
+
+    def add_req_field(self, idx, fid):
+        assert idx == 0
+        assert self.requirement <> None
+        self.requirement.add_field(fid)
+        return True
+
+    def add_logical_incoming(self, op):
+        assert self <> op
+        self.logical_incoming.add(op)
+
+    def add_logical_outgoing(self, op):
+        assert self <> op
+        self.logical_outgoing.add(op)
+
+    def has_logical_path(self, target, mark):
+        if target == self:
+            return True
+        if self.logical_mark == mark:
+            return False
+        # Otherwise check all the outgoing edges
+        for op in self.logical_outgoing:
+            if op.has_logical_path(target, mark):
+                return True
+        self.logical_mark = mark
+        return False
+
+    def get_reachable(self, reachable, forward):
+        if self in reachable:
+            return
+        reachable.add(self)
+        if forward:
+            for op in self.logical_outgoing:
+                op.get_reachable(reachable, True)
+        else:
+            for op in self.logical_incoming:
+                op.get_reachable(reachable, False)
+
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
+    def print_base_node(self, printer, logical):
+        ranges = list_to_ranges(self.requirement.fields)
+        field_string = ','.join([r for r in ranges])
+        inst_string = ''
+        if self.state.verbose:
+            if (logical):
+                inst_string = '\\n'+self.requirement.dot_requirement()
+        printer.println(self.node_name+' [style=filled,label="'+\
+            'Fill\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
+            field_string+'\}\\nReq: '+\
+            self.requirement.to_summary_string()+\
+            ('' if self.requirement.region_node.name == None
+                else '\\n('+self.requirement.region_node.name+')')+'",'+\
+            'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
+            'shape=record,penwidth=2];')
+
+    def print_igraph_node(self, printer):
+        printer.println(self.node_name+' [style=filled,label="'+\
+                'Fill (UID: '+str(self.uid)+') in '+self.ctx.name+'",'+\
+                'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_igraph_edges(self, printer):
+        self.instance.print_incoming_edge(printer, self.node_name)
+
+    def compute_dependence_diff(self, verbose):
+        # No need to do anything
+        pass
+
+    def find_dependences(self, op):
+        op.find_individual_dependences(self, self.requirement)
+
+    def find_individual_dependences(self, other_op, other_req):
+        dtype = self.state.compute_dependence(other_req, self.requirement)
+        if is_mapping_dependence(dtype):
+            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
+
+    def check_data_flow(self):
+        # No need to do anything
+        pass
 
 class AcquireOp(object):
     def __init__(self, state, uid, ctx):
@@ -3710,6 +3823,14 @@ class State(object):
         if ctx not in self.ops:
             return False
         self.ops[uid] = CopyOp(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def add_fill_op(self, ctx, uid):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = FillOp(self, uid, self.ops[ctx])
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 

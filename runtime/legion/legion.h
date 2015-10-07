@@ -2407,7 +2407,7 @@ namespace LegionRuntime {
        *                   passed on the command line to the -hl:window flag.
        *                   Setting the value less than or equal to zero will
        *                   disable the maximum.
-       * hystersis_percentage - set the percentage of the maximum task window
+       * hysteresis_percentage - set the percentage of the maximum task window
        *                   that should be outstanding before a context starts
        *                   issuing tasks again. Hysteresis avoids jitter and
        *                   enables a more efficient execution at the potential
@@ -5007,9 +5007,6 @@ namespace LegionRuntime {
        *              has been compiled with the macro INORDER_EXECUTION.
        *              By default when compiling with INORDER_EXECUTION
        *              all applications will run in program order.
-       * -hl:directory <int> Control the maximum number of leaf entries
-       *              for the runtime should maintain precise information
-       *              for remote region tree contexts. The default is 64.
        * -------------
        *  Messaging
        * -------------
@@ -5743,7 +5740,7 @@ namespace LegionRuntime {
     inline bool IndexPartition::operator==(const IndexPartition &rhs) const
     //--------------------------------------------------------------------------
     {
-      if (id != rhs.tid)
+      if (id != rhs.id)
         return false;
       if (tid != rhs.tid)
         return false;

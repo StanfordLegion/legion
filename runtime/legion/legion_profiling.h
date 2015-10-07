@@ -181,6 +181,18 @@ namespace LegionRuntime {
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
     public:
+      // Alternate versions of the one above with op ids
+      void add_task_request(Realm::ProfilingRequestSet &requests, 
+                            Processor::TaskFuncID tid, UniqueID uid);
+      void add_meta_request(Realm::ProfilingRequestSet &requests,
+                            HLRTaskID tid, UniqueID uid);
+      void add_copy_request(Realm::ProfilingRequestSet &requests, 
+                            UniqueID uid);
+      void add_fill_request(Realm::ProfilingRequestSet &requests,
+                            UniqueID uid);
+      void add_inst_request(Realm::ProfilingRequestSet &requests,
+                            UniqueID uid);
+    public:
       // Process low-level runtime profiling results
       void process_results(Processor p, const void *buffer, size_t size);
     public:
