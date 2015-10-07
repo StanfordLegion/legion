@@ -41,10 +41,10 @@ endif
 SLIB_LEGION     := liblegion.a
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 SLIB_REALM      := librealm.a
-LEGION_LD_FLAGS := -L. -llegion -lrealm
+LEGION_LIBS     := -L. -llegion -lrealm
 else
 SLIB_SHAREDLLR  := libsharedllr.a
-LEGION_LD_FLAGS := -L. -llegion -lsharedllr
+LEGION_LIBS     := -L. -llegion -lsharedllr
 endif
 
 # Handle some of the common machines we frequent
@@ -366,7 +366,7 @@ all: $(OUTFILE)
 # If we're using the general low-level runtime we have to link with nvcc
 $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(GCC) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+	$(GCC) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
 $(SLIB_LEGION) : $(HIGH_RUNTIME_OBJS) $(MAPPER_OBJS)
 	rm -f $@
