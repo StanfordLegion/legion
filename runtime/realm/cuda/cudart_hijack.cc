@@ -222,16 +222,6 @@ namespace Realm {
 								      device_fun));
       }
       
-      // this is not really a part of CUDA runtime API but used by the regent compiler
-      void** __cudaRegisterCudaBinary(void *cubin, size_t cubinSize)
-      {
-	assert(0);
-#if 0
-	return GPUProcessor::register_cuda_binary(cubin,
-						  cubinSize);
-#endif
-      }
-
       char __cudaInitModule(void **fat_bin)
       {
 	// don't care - return 1 to make caller happy
