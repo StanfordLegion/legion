@@ -59,22 +59,23 @@ namespace LegionRuntime {
       {
         int index = 0, subtotal = 1;
         Point<IDIM> local_p = p;
+        unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
           switch (dim_kind[i]) {
             case DIM_X:
-              index += (local_p.x[0] % dim_size[i]) * subtotal;
+              index += (local_p.x[x_idx] % dim_size[i]) * subtotal;
               subtotal *= dim_size[i];
-              local_p.x[0] /= dim_size[i];
+              local_p.x[x_idx] /= dim_size[i];
               break;
             case DIM_Y:
-              index += (local_p.x[1] % dim_size[i]) * subtotal;
+              index += (local_p.x[x_idx] % dim_size[i]) * subtotal;
               subtotal *= dim_size[i];
-              local_p.x[1] /= dim_size[i];
+              local_p.x[y_idx] /= dim_size[i];
               break;
             case DIM_Z:
-              index += (local_p.x[DIM-1] % dim_size[i]) * subtotal;
+              index += (local_p.x[z_idx] % dim_size[i]) * subtotal;
               subtotal *= dim_size[i];
-              local_p.x[DIM-1] /= dim_size[i];
+              local_p.x[z_idx] /= dim_size[i];
               break;
             default:
               assert(0);
@@ -106,26 +107,27 @@ namespace LegionRuntime {
         for (unsigned i = 0; i < IDIM; i++)
           strides[i] = Point<ODIM>::ZEROES();
         int subtotal = 1;
+        unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
           switch (dim_kind[i]) {
             case DIM_X:
-              if (strides[0][0] == 0) {
-                strides[0].x[0] = subtotal;
-                subrect.hi.x[0] = r.lo.x[0] - r.lo.x[0] % dim_size[i] + dim_size[i] - 1;
+              if (strides[x_idx][0] == 0) {
+                strides[x_idx].x[0] = subtotal;
+                subrect.hi.x[x_idx] = r.lo.x[x_idx] - r.lo.x[x_idx] % dim_size[i] + dim_size[i] - 1;
               }
               subtotal *= dim_size[i];
               break;
             case DIM_Y:
-              if (strides[1][0] == 0) {
-                strides[1].x[0] = subtotal;
-                subrect.hi.x[1] = r.lo.x[1] - r.lo.x[1] % dim_size[i] + dim_size[i] - 1;
+              if (strides[y_idx][0] == 0) {
+                strides[y_idx].x[0] = subtotal;
+                subrect.hi.x[y_idx] = r.lo.x[y_idx] - r.lo.x[y_idx] % dim_size[i] + dim_size[i] - 1;
               }
               subtotal *= dim_size[i];
               break;
             case DIM_Z:
-              if (strides[2][0] == 0) {
-                strides[2].x[0] = subtotal;
-                subrect.hi.x[2] = r.lo.x[2] - r.lo.x[2] % dim_size[i] + dim_size[i] - 1;
+              if (strides[z_idx][0] == 0) {
+                strides[z_idx].x[0] = subtotal;
+                subrect.hi.x[z_idx] = r.lo.x[z_idx] - r.lo.x[z_idx] % dim_size[i] + dim_size[i] - 1;
               }
               subtotal *= dim_size[i];
               break;
@@ -141,21 +143,22 @@ namespace LegionRuntime {
         assert(ODIM == 1);
         int index = p.x[0];
         Point<IDIM> ret = Point<IDIM>::ZEROES(), dim_base = Point<IDIM>::ONES();
+        unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
           switch (dim_kind[i]) {
             case DIM_X:
-              ret.x[0] += dim_base[0] * (index % dim_size[i]);
-              dim_base.x[0] *= dim_size[i];
+              ret.x[x_idx] += dim_base[x_idx] * (index % dim_size[i]);
+              dim_base.x[x_idx] *= dim_size[i];
               index /= dim_size[i];
               break;
             case DIM_Y:
-              ret.x[1] += dim_base[1] * (index % dim_size[i]);
-              dim_base.x[1] *= dim_size[i];
+              ret.x[y_idx] += dim_base[y_idx] * (index % dim_size[i]);
+              dim_base.x[y_idx] *= dim_size[i];
               index /= dim_size[i];
               break;
             case DIM_Z:
-              ret.x[DIM-1] += dim_base[DIM-1] * (index % dim_size[i]);
-              dim_base.x[DIM-1] *= dim_size[i];
+              ret.x[z_idx] += dim_base[z_idx] * (index % dim_size[i]);
+              dim_base.x[z_idx] *= dim_size[i];
               index /= dim_size[i];
               break;
             default:
