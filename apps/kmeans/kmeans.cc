@@ -39,42 +39,58 @@ void top_level_task(const Task *task,
   log_kmeans.print("Running kmeans with %d points and %d centers", 
                     num_points, num_centers);
 
+  // Make our two logical regions
   PointSet points(ctx, runtime, num_points); 
   CenterSet centers(ctx, runtime, num_centers);
 
+  // Figure out how many chunks to partition our points into
   const int num_chunks = runtime->get_tunable_value(ctx, CHUNK_TUNABLE);
   points.partition_set(num_points, num_chunks);
 
+  // Set up the queue for pending futures
   std::deque<Future> pending_energies;
   const size_t max_energy_depth = runtime->get_tunable_value(ctx, PREDICATION_DEPTH_TUNABLE);
 
+  // Initialize our input with some random points
   InitializeTask init_task(points, centers, &num_centers);
   init_task.dispatch(ctx, runtime);
 
   Predicate loop_pred = Predicate::TRUE_PRED;
 
+  // Do the first energy computation
   KmeansEnergyTask init_energy_task(points, centers, loop_pred);
   Future energy = init_energy_task.dispatch(ctx, runtime);
   pending_energies.push_back(energy);
 
+  // Keep iterating until we converge, note that all tasks
+  // issued in an iteration are predicated on the previous
+  // iteration not having converged
+  int iteration = 0;
   while (true) {
+    // Update the locations of the centers
     UpdateCentersTask update_center_task(centers, loop_pred);
     update_center_task.dispatch(ctx, runtime);
 
+    // Recompute the kmeans energy
     KmeansEnergyTask energy_task(points, centers, loop_pred);
     Future next_energy = energy_task.dispatch(ctx, runtime);
 
+    // Issue our test for convergence so we can get the predicate for the next iteration
     ConvergenceTask convergence_test(pending_energies.back(), next_energy, loop_pred);
     loop_pred = convergence_test.dispatch(ctx, runtime);
     pending_energies.push_back(next_energy);
 
+    // If we are far enough ahead then test to see if we actually converged
+    // so we can stop issuing predicated tasks
     if (pending_energies.size() >= max_energy_depth) {
+      // Pop the first future off the queue
       double old_energy = pending_energies.front().get_result<double>();
-      log_kmeans.print("Energy is %.8g\n", old_energy); 
+      log_kmeans.print("Energy is %.8g for iteration %d", old_energy, iteration++); 
       pending_energies.pop_front();
+      // Check it against the next future
       double new_energy = pending_energies.front().get_result<double>();
       if (old_energy == new_energy) {
-        log_kmeans.print("Converged at energy %.8g", new_energy);
+        log_kmeans.print("Converged at energy %.8g on iteration %d", new_energy, iteration);
         break;
       }
     }
@@ -319,9 +335,9 @@ double KmeansEnergyTask::cpu_variant(const Task *task,
   RegionAccessor<AccessorType::Generic, double> acc_centers = 
     regions[1].get_field_accessor(CenterSet::FID_LOCATION).typeify<double>();
   RegionAccessor<AccessorType::Generic, double> acc_sum = 
-    regions[2].get_field_accessor(CenterSet::FID_PENDING_SUM).typeify<double>();
+    regions[2].get_accessor().typeify<double>();
   RegionAccessor<AccessorType::Generic, int> acc_count = 
-    regions[3].get_field_accessor(CenterSet::FID_PENDING_COUNT).typeify<int>();
+    regions[3].get_accessor().typeify<int>();
 
   double total_energy = 0.0;
 
@@ -334,7 +350,7 @@ double KmeansEnergyTask::cpu_variant(const Task *task,
   double *centers = (double*)malloc(total_centers * sizeof(double));
   unsigned center_idx = 0;
   for (Domain::DomainPointIterator itr(center_dom); itr; itr++, center_idx++)
-    centers[center_idx++] = acc_centers.read(itr.p);
+    centers[center_idx] = acc_centers.read(itr.p);
 
   for (Domain::DomainPointIterator itr(point_dom); itr; itr++)
   {
@@ -350,9 +366,8 @@ double KmeansEnergyTask::cpu_variant(const Task *task,
       } 
     }
     assert(nearest_idx >= 0);
-    DomainPoint center = DomainPoint::from_point<1>(Point<1>(nearest_idx));
-    acc_sum.reduce<DoubleSum,DomainPoint>(center, point);
-    acc_count.reduce<IntegerSum,DomainPoint>(center, 1);
+    acc_sum.reduce<DoubleSum>(nearest_idx, point);
+    acc_count.reduce<IntegerSum>(nearest_idx, 1);
     total_energy += nearest_distance;
   }
 
@@ -382,7 +397,7 @@ UpdateCentersTask::UpdateCentersTask(const CenterSet &centers,
   RegionRequirement rr_output(centers.get_region(), WRITE_DISCARD,
                               EXCLUSIVE, centers.get_region());
   rr_output.add_field(CenterSet::FID_LOCATION);
-  add_region_requirement(rr_input);
+  add_region_requirement(rr_output);
 }
 
 void UpdateCentersTask::dispatch(Context ctx, HighLevelRuntime *runtime)
