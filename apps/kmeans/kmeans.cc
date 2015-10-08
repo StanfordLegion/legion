@@ -89,8 +89,8 @@ void top_level_task(const Task *task,
       pending_energies.pop_front();
       // Check it against the next future
       double new_energy = pending_energies.front().get_result<double>();
-      if (old_energy == new_energy) {
-        log_kmeans.print("Converged at energy %.8g on iteration %d", new_energy, iteration);
+      if (old_energy <= new_energy) {
+        log_kmeans.print("Converged at energy %.8g on iteration %d", old_energy, iteration);
         break;
       }
     }
@@ -475,7 +475,7 @@ bool ConvergenceTask::cpu_variant(const Task *task,
   Future next_future = task->futures[1];
   double prev = prev_future.get_result<double>();
   double next = next_future.get_result<double>();
-  return (prev == next);
+  return (prev <= next);
 }
 
 /*static*/
