@@ -23,6 +23,8 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
+#include "activemsg.h"
+
 #include <stdio.h>
 
 namespace Realm {

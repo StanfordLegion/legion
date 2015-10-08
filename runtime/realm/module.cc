@@ -32,7 +32,9 @@
 // TODO: replace this with Makefile (or maybe cmake) magic that adapts automatically
 //  to the build-system-controlled list of statically-linked Realm modules
 #include "realm/runtime_impl.h"
+#ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
+#endif
 
 namespace Realm {
 
