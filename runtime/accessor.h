@@ -328,20 +328,6 @@ namespace LegionRuntime {
 	    write(ptr, val);
 	  }
 
-          template<typename REDOP, typename PTRTYPE>
-          inline void reduce(PTRTYPE ptr, typename REDOP::RHS newval) const
-          {
-#ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(priv, region);
-#endif
-#ifdef CHECK_BOUNDS 
-	    check_bounds(region, ptr);
-#endif
-            T val = read(ptr);
-            REDOP::template apply<true>(val, newval);
-            write(ptr, val);
-          }
-
 	  typedef AOS<sizeof(PT)> AOS_TYPE;
 
 	  template <typename AT>
