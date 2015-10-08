@@ -12842,108 +12842,111 @@ namespace LegionRuntime {
                 it->first->as_instance_view()->get_location());
           }
         }
-        std::vector<Memory> chosen_order;
-        context->runtime->invoke_mapper_rank_copy_sources(info.local_proc,
+        if (available_memories.size() > 0)
+        {
+          std::vector<Memory> chosen_order;
+          context->runtime->invoke_mapper_rank_copy_sources(info.local_proc,
                                                         info.op->get_mappable(),
-                                                          available_memories,
-                                                          dst->get_location(),
-                                                          chosen_order);
-        for (std::vector<Memory>::const_iterator mit = chosen_order.begin();
-              !copy_ready && (mit != chosen_order.end()); mit++)
-        {
-          available_memories.erase(*mit);
-          std::vector<LogicalView*> to_erase;
-          // Go through all the valid instances and issue copies
-          // from instances in the given memory
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                copy_instances.begin(); it != copy_instances.end(); it++)
+                                                        available_memories,
+                                                        dst->get_location(),
+                                                        chosen_order);
+          for (std::vector<Memory>::const_iterator mit = chosen_order.begin();
+                !copy_ready && (mit != chosen_order.end()); mit++)
           {
-            if (it->first->is_deferred_view())
-              continue;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(it->first->is_instance_view());
-            assert(it->first->as_instance_view()->as_materialized_view());
-#endif
-            MaterializedView *current_view = 
-              it->first->as_instance_view()->as_materialized_view();
-            if ((*mit) != current_view->get_location())
-              continue;
-            // Check to see if there are any valid fields in the copy mask
-            FieldMask op_mask = copy_mask & it->second;
-            if (!!op_mask)
+            available_memories.erase(*mit);
+            std::vector<LogicalView*> to_erase;
+            // Go through all the valid instances and issue copies
+            // from instances in the given memory
+            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+                  copy_instances.begin(); it != copy_instances.end(); it++)
             {
-              // No need to do anything if they are the same instance
-              if ((dst != current_view) || (dst->manager->get_instance() != 
-                                    current_view->manager->get_instance()))
+              if (it->first->is_deferred_view())
+                continue;
+#ifdef DEBUG_HIGH_LEVEL
+              assert(it->first->is_instance_view());
+              assert(it->first->as_instance_view()->as_materialized_view());
+#endif
+              MaterializedView *current_view = 
+                it->first->as_instance_view()->as_materialized_view();
+              if ((*mit) != current_view->get_location())
+                continue;
+              // Check to see if there are any valid fields in the copy mask
+              FieldMask op_mask = copy_mask & it->second;
+              if (!!op_mask)
               {
-                LegionMap<MaterializedView*,FieldMask>::aligned::iterator 
-                  finder = src_instances.find(current_view);
-                if (finder == src_instances.end())
-                  src_instances[current_view] = op_mask;
-                else
-                  finder->second |= op_mask;
+                // No need to do anything if they are the same instance
+                if ((dst != current_view) || (dst->manager->get_instance() != 
+                                      current_view->manager->get_instance()))
+                {
+                  LegionMap<MaterializedView*,FieldMask>::aligned::iterator 
+                    finder = src_instances.find(current_view);
+                  if (finder == src_instances.end())
+                    src_instances[current_view] = op_mask;
+                  else
+                    finder->second |= op_mask;
+                }
+                // Update the copy mask
+                copy_mask -= op_mask;
+                if (!copy_mask)
+                {
+                  copy_ready = true;
+                  break;
+                }
               }
-              // Update the copy mask
-              copy_mask -= op_mask;
-              if (!copy_mask)
-              {
-                copy_ready = true;
-                break;
-              }
+              to_erase.push_back(it->first);
             }
-            to_erase.push_back(it->first);
+            // Erase any instances we considered and used
+            for (unsigned idx = 0; idx < to_erase.size(); idx++)
+              copy_instances.erase(to_erase[idx]);
           }
-          // Erase any instances we considered and used
-          for (unsigned idx = 0; idx < to_erase.size(); idx++)
-            copy_instances.erase(to_erase[idx]);
-        }
-        // Now do any remaining memories not put in order by the mapper
-        for (std::set<Memory>::const_iterator mit = 
-              available_memories.begin(); !copy_ready && (mit != 
-              available_memories.end()); mit++)
-        {
-          std::vector<LogicalView*> to_erase;
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                copy_instances.begin(); it != copy_instances.end(); it++)
+          // Now do any remaining memories not put in order by the mapper
+          for (std::set<Memory>::const_iterator mit = 
+                available_memories.begin(); !copy_ready && (mit != 
+                available_memories.end()); mit++)
           {
-            if (it->first->is_deferred_view())
-              continue;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(it->first->is_instance_view());
-            assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-            MaterializedView *current_view = 
-              it->first->as_instance_view()->as_materialized_view();
-            if ((*mit) != current_view->get_location())
-              continue;
-            // Check to see if there are any valid fields in the copy mask
-            FieldMask op_mask = copy_mask & it->second;
-            if (!!op_mask)
+            std::vector<LogicalView*> to_erase;
+            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+                  copy_instances.begin(); it != copy_instances.end(); it++)
             {
-              // No need to do anything if they are the same instance
-              if ((dst != current_view) || (dst->manager->get_instance() != 
-                                     current_view->manager->get_instance()))
+              if (it->first->is_deferred_view())
+                continue;
+#ifdef DEBUG_HIGH_LEVEL
+              assert(it->first->is_instance_view());
+              assert(it->first->as_instance_view()->is_materialized_view());
+#endif
+              MaterializedView *current_view = 
+                it->first->as_instance_view()->as_materialized_view();
+              if ((*mit) != current_view->get_location())
+                continue;
+              // Check to see if there are any valid fields in the copy mask
+              FieldMask op_mask = copy_mask & it->second;
+              if (!!op_mask)
               {
-                LegionMap<MaterializedView*,FieldMask>::aligned::iterator 
-                  finder = src_instances.find(current_view);
-                if (finder == src_instances.end())
-                  src_instances[current_view] = op_mask;
-                else
-                  finder->second |= op_mask;
+                // No need to do anything if they are the same instance
+                if ((dst != current_view) || (dst->manager->get_instance() != 
+                                       current_view->manager->get_instance()))
+                {
+                  LegionMap<MaterializedView*,FieldMask>::aligned::iterator 
+                    finder = src_instances.find(current_view);
+                  if (finder == src_instances.end())
+                    src_instances[current_view] = op_mask;
+                  else
+                    finder->second |= op_mask;
+                }
+                // Update the copy mask
+                copy_mask -= op_mask;
+                if (!copy_mask)
+                {
+                  copy_ready = true;
+                  break;
+                }
               }
-              // Update the copy mask
-              copy_mask -= op_mask;
-              if (!copy_mask)
-              {
-                copy_ready = true;
-                break;
-              }
+              to_erase.push_back(it->first);
             }
-            to_erase.push_back(it->first);
+            // Erase any instances we've checked
+            for (unsigned idx = 0; idx < to_erase.size(); idx++)
+              copy_instances.erase(to_erase[idx]);
           }
-          // Erase any instances we've checked
-          for (unsigned idx = 0; idx < to_erase.size(); idx++)
-            copy_instances.erase(to_erase[idx]);
         }
         // Lastly, if we are still not done, see if we have
         // any composite instances to issue copies from
