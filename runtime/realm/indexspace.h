@@ -28,6 +28,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
+#include "sparsity.h"
 
 namespace Realm {
 
@@ -1098,9 +1099,119 @@ namespace Realm {
       return total;
     }
 
+  // new stuff here - the "Z" prefix will go away once we delete the old stuff
+
+  template <int N, typename T = int> struct ZPoint;
+  template <int N, typename T = int> struct ZRect;
+  template <int N, typename T = int> struct ZIndexSpace;
+  template <int N, typename T = int> struct ZIndexSpaceIterator;
+  template <int N, typename T = int> class SparsityMap;
+
+  // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
+  //  for each dimension is int, but 64-bit indices are supported as well
+
+  // only a few methods exist directly on a Point<N,T>:
+  // 1) trivial constructor
+  // 2) [for N <= 4] constructor taking N arguments of type T
+  // 3) default copy constructor
+  // 4) default assignment operator
+  // 5) operator[] to access individual components
+
+  // specializations for N <= 4 defined in indexspace.inl
+  template <int N, typename T>
+  struct ZPoint {
+    T x, y, z, w;  T rest[N - 4];
+    ZPoint(void);
+    T& operator[](int index);
+    const T& operator[](int index) const;
+  };
+
+  // component-wise operators defined on Point<N,T>
+  template <int N, typename T> bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+
+  template <int N, typename T> ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T> ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+
+  // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
+  //  the bounds are INCLUSIVE
+
+  template <int N, typename T>
+  struct ZRect {
+    ZPoint<N,T> lo, hi;
+    ZRect(void);
+    ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi);
+
+    bool empty(void) const;
+    size_t volume(void) const;
+
+    // true if all points in other are in this rectangle
+    bool contains(const ZRect<N,T>& other) const;
+
+    // true if there are any points in the intersection of the two rectangles
+    bool overlaps(const ZRect<N,T>& other) const;
+
+    ZRect<N,T> intersection(const ZRect<N,T>& other) const;
+  };
+
+  // an IndexSpace is a POD type that contains a bounding rectangle and an optional SparsityMap - the
+  //  contents of the IndexSpace are the intersection of the bounding rectangle's volume and the
+  //  optional SparsityMap's contents
+  // application code may directly manipulate the bounding rectangle - this will be common for structured
+  //  index spaces
+  template <int N, typename T>
+  struct ZIndexSpace {
+    ZRect<N,T> bounds;
+    SparsityMap<N,T> sparsity;
+
+    ZIndexSpace(void);  // results in an empty index space
+    ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
+
+    // true if we're SURE that there are no points in the space (may be imprecise due to
+    //  lazy loading of sparsity data)
+    bool empty(void) const;
+    
+    // true if there is no sparsity map (i.e. the bounds fully define the domain)
+    bool dense(void) const;
+
+    // as an alternative to IndexSpaceIterator's, this will internally iterate over rectangles
+    //  and call your callable/lambda for each subrectangle
+    template <typename LAMBDA>
+    void foreach_subrect(LAMBDA lambda);
+    template <typename LAMBDA>
+    void foreach_subrect(LAMBDA lambda, const ZRect<N,T>& restriction);
+  };
+
+  // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
+  template <int N, typename T>
+  struct ZIndexSpaceIterator {
+    ZRect<N,T> rect;
+    ZIndexSpace<N,T> space;
+    bool valid;
+    // probably more goo here for iterating over SparsityMap's
+
+    ZIndexSpaceIterator(void);
+    ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space);
+    ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space, const ZRect<N,T>& _restrict);
+
+    void reset(const ZIndexSpace<N,T>& _space);
+    void reset(const ZIndexSpace<N,T>& _space, const ZRect<N,T>& _restrict);
+
+    // steps to the next subrect, returning true if a next subrect exists
+    bool step(void);
+  };
+
 }; // namespace Realm
 
-//include "indexspace.inl"
+#include "indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H
 
