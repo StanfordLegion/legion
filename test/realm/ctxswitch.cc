@@ -35,7 +35,8 @@ struct SwitchTestArgs {
   Reservation release_me;
 };
 
-void switch_task(const void *args, size_t arglen, Processor p)
+void switch_task(const void *args, size_t arglen, 
+		 const void *userdata, size_t userlen, Processor p)
 {
   assert(arglen == sizeof(SwitchTestArgs));
   const SwitchTestArgs& c_args = *(const SwitchTestArgs *)args;
@@ -68,7 +69,8 @@ struct SleepTestArgs {
   int sleep_useconds;
 };
 
-void sleep_task(const void *args, size_t arglen, Processor p)
+void sleep_task(const void *args, size_t arglen, 
+		const void *userdata, size_t userlen, Processor p)
 {
   assert(arglen == sizeof(SleepTestArgs));
   const SleepTestArgs& c_args = *(const SleepTestArgs *)args;
@@ -90,7 +92,8 @@ static int timeout_seconds = 10;
 static int sleep_useconds = 500000;
 static int concurrent_io = 1;
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen, 
+		    const void *userdata, size_t userlen, Processor p)
 {
   int errors = 0;
 
