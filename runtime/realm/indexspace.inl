@@ -249,6 +249,13 @@ namespace Realm {
   {}
 
   template <int N, typename T>
+  inline ZIndexSpace<N,T>::ZIndexSpace(const ZRect<N,T>& _bounds)
+    : bounds(_bounds)
+  {
+    sparsity.id = 0;
+  }
+
+  template <int N, typename T>
   inline ZIndexSpace<N,T>::ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity)
     : bounds(_bounds), sparsity(_sparsity)
   {}

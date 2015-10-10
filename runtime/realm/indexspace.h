@@ -1173,6 +1173,7 @@ namespace Realm {
     SparsityMap<N,T> sparsity;
 
     ZIndexSpace(void);  // results in an empty index space
+    ZIndexSpace(const ZRect<N,T>& _bounds);
     ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
     // true if we're SURE that there are no points in the space (may be imprecise due to
