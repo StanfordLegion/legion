@@ -105,6 +105,20 @@ namespace LegionRuntime {
                           point.point_data[1], point.point_data[2]);
       }
 
+      static inline void log_index_space_independence(IDType parent_id,
+                                    IDType unique_id1, IDType unique_id2)
+      {
+        log_spy.info("Index Space Independence " IDFMT " " IDFMT " " IDFMT "",
+                      parent_id, unique_id1, unique_id2);
+      }
+      
+      static inline void log_index_partition_independence(IDType parent_id,
+                                       IDType unique_id1, IDType unique_id2)
+      {
+        log_spy.info("Index Partition Independence " IDFMT " " IDFMT " " 
+                      IDFMT "", parent_id, unique_id1, unique_id2);
+      }
+
       static inline void log_field_space(unsigned unique_id)
       {
         log_spy.info("Field Space %u", unique_id);
