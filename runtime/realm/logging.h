@@ -54,7 +54,7 @@ namespace Realm {
       LEVEL_NONE,  // if you really want to turn EVERYTHING off
     };
 
-    static void configure_from_cmdline(int argc, const char *argv[]);
+    static void configure_from_cmdline(std::vector<std::string>& cmdline);
 
     const std::string& get_name(void) const;
     LoggingLevel get_level(void) const;

@@ -6724,7 +6724,13 @@ namespace LegionRuntime {
         dma_queue = new DMAQueue(num_dma_threads);
 
         // Initialize the logger
-	Realm::Logger::configure_from_cmdline(*argc, (const char**)*argv);
+	// this now wants std::vector<std::string> instead of argc/argv
+	{
+	  std::vector<std::string> cmdline(*argc - 1);
+	  for(int i = 1; i < *argc; i++)
+	    cmdline[i - 1] = (*argv)[i];
+	  Realm::Logger::configure_from_cmdline(cmdline);
+	}
 	
         // Fill in the tables
         // find in proc 0 with NULL

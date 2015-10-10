@@ -23,6 +23,8 @@
 
 #include "activemsg.h"
 
+#include "cmdline.h"
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -34,16 +36,6 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
   typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
-
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-namespace Realm {
-  typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
-  typedef LegionRuntime::LowLevel::GPUFBMemory GPUFBMemory;
-  typedef LegionRuntime::LowLevel::GPUZCMemory GPUZCMemory;
-  typedef LegionRuntime::LowLevel::GPUWorker GPUWorker;
-};
-#endif
 
 #include <unistd.h>
 #include <signal.h>
@@ -162,28 +154,124 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class CoreModule
+  //
+
+  CoreModule::CoreModule(void)
+    : Module("core")
+    , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
+    , concurrent_io_threads(1)  // Legion does not support values > 1 right now
+    , sysmem_size_in_mb(512), stack_size_in_mb(2)
+  {}
+
+  CoreModule::~CoreModule(void)
+  {}
+
+  /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime,
+					       std::vector<std::string>& cmdline)
+  {
+    CoreModule *m = new CoreModule;
+
+    // parse command line arguments
+    CommandLineParser cp;
+    cp.add_option_int("-ll:cpu", m->num_cpu_procs)
+      .add_option_int("-ll:util", m->num_util_procs)
+      .add_option_int("-ll:io", m->num_io_procs)
+      .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
+      .add_option_int("-ll:csize", m->sysmem_size_in_mb)
+      .add_option_int("-ll:stacksize", m->stack_size_in_mb, true /*keep*/)
+      .parse_command_line(cmdline);
+
+    return m;
+  }
+
+  // create any memories provided by this module (default == do nothing)
+  //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
+  void CoreModule::create_memories(RuntimeImpl *runtime)
+  {
+    Module::create_memories(runtime);
+
+    if(sysmem_size_in_mb > 0) {
+      Memory m = runtime->next_local_memory_id();
+      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size_in_mb << 20);
+      runtime->add_memory(mi);
+    }
+  }
+
+  // create any processors provided by the module (default == do nothing)
+  //  (each new ProcessorImpl should use a Processor from
+  //   RuntimeImpl::next_local_processor_id)
+  void CoreModule::create_processors(RuntimeImpl *runtime)
+  {
+    Module::create_processors(runtime);
+
+    for(int i = 0; i < num_util_procs; i++) {
+      Processor p = runtime->next_local_processor_id();
+      ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
+						    stack_size_in_mb << 20);
+      runtime->add_processor(pi);
+    }
+
+    for(int i = 0; i < num_io_procs; i++) {
+      Processor p = runtime->next_local_processor_id();
+      ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
+					       stack_size_in_mb << 20,
+					       concurrent_io_threads);
+      runtime->add_processor(pi);
+    }
+
+    for(int i = 0; i < num_cpu_procs; i++) {
+      Processor p = runtime->next_local_processor_id();
+      ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
+						stack_size_in_mb << 20);
+      runtime->add_processor(pi);
+    }
+  }
+
+  // create any DMA channels provided by the module (default == do nothing)
+  void CoreModule::create_dma_channels(RuntimeImpl *runtime)
+  {
+    Module::create_dma_channels(runtime);
+
+    // no dma channels
+  }
+
+  // create any code translators provided by the module (default == do nothing)
+  void CoreModule::create_code_translators(RuntimeImpl *runtime)
+  {
+    Module::create_code_translators(runtime);
+
+    // no code translators
+  }
+
+  // clean up any common resources created by the module - this will be called
+  //  after all memories/processors/etc. have been shut down and destroyed
+  void CoreModule::cleanup(void)
+  {
+    // nothing to clean up
+
+    Module::cleanup();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RuntimeImpl
   //
 
     RuntimeImpl *runtime_singleton = 0;
 
   // these should probably be member variables of RuntimeImpl?
-    static std::vector<LocalTaskProcessor *> local_cpus;
-    static std::vector<LocalTaskProcessor *> local_util_procs;
-    static std::vector<LocalTaskProcessor *> local_io_procs;
     static size_t stack_size_in_mb;
-#ifdef USE_CUDA
-    static std::vector<GPUProcessor *> local_gpus;
-    static std::map<GPUProcessor *, GPUFBMemory *> gpu_fbmems;
-    static std::map<GPUProcessor *, GPUZCMemory *> gpu_zcmems;
-#endif
   
     RuntimeImpl::RuntimeImpl(void)
       : machine(0), nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0), background_pthread(0),
-	shutdown_requested(false), shutdown_condvar(shutdown_mutex)
+	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	num_local_memories(0), num_local_processors(0),
+	module_registrar(this)
     {
       machine = new MachineImpl;
     }
@@ -191,6 +279,107 @@ namespace Realm {
     RuntimeImpl::~RuntimeImpl(void)
     {
       delete machine;
+    }
+
+    Memory RuntimeImpl::next_local_memory_id(void)
+    {
+      Memory m = ID(ID::ID_MEMORY, 
+		    gasnet_mynode(), 
+		    num_local_memories++, 0).convert<Memory>();
+      return m;
+    }
+
+    Processor RuntimeImpl::next_local_processor_id(void)
+    {
+      Processor p = ID(ID::ID_PROCESSOR, 
+		       gasnet_mynode(), 
+		       num_local_processors++).convert<Processor>();
+      return p;
+    }
+
+    void RuntimeImpl::add_memory(MemoryImpl *m)
+    {
+      // right now expect this to always be for the current node and the next memory ID
+      assert((ID(m->me).node() == gasnet_mynode()) &&
+	     (ID(m->me).index_h() == nodes[gasnet_mynode()].memories.size()));
+
+      nodes[gasnet_mynode()].memories.push_back(m);
+    }
+
+    void RuntimeImpl::add_processor(ProcessorImpl *p)
+    {
+      // right now expect this to always be for the current node and the next processor ID
+      assert((ID(p->me).node() == gasnet_mynode()) &&
+	     (ID(p->me).index() == nodes[gasnet_mynode()].processors.size()));
+
+      nodes[gasnet_mynode()].processors.push_back(p);
+    }
+
+    void RuntimeImpl::add_dma_channel(DMAChannel *c)
+    {
+      dma_channels.push_back(c);
+    }
+
+    void RuntimeImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
+    {
+      machine->add_proc_mem_affinity(pma);
+    }
+
+    void RuntimeImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
+    {
+      machine->add_mem_mem_affinity(mma);
+    }
+
+    CoreReservationSet& RuntimeImpl::core_reservation_set(void)
+    {
+      return core_reservations;
+    }
+
+    const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
+    {
+      return dma_channels;
+    }
+
+    static void add_proc_mem_affinities(MachineImpl *machine,
+					const std::set<Processor>& procs,
+					const std::set<Memory>& mems,
+					int bandwidth,
+					int latency)
+    {
+      for(std::set<Processor>::const_iterator it1 = procs.begin();
+	  it1 != procs.end();
+	  it1++) 
+	for(std::set<Memory>::const_iterator it2 = mems.begin();
+	    it2 != mems.end();
+	    it2++) {
+	  Machine::ProcessorMemoryAffinity pma;
+	  pma.p = *it1;
+	  pma.m = *it2;
+	  pma.bandwidth = bandwidth;
+	  pma.latency = latency;
+	  machine->add_proc_mem_affinity(pma);
+	}
+    }
+
+    static void add_mem_mem_affinities(MachineImpl *machine,
+				       const std::set<Memory>& mems1,
+				       const std::set<Memory>& mems2,
+				       int bandwidth,
+				       int latency)
+    {
+      for(std::set<Memory>::const_iterator it1 = mems1.begin();
+	  it1 != mems1.end();
+	  it1++) 
+	for(std::set<Memory>::const_iterator it2 = mems2.begin();
+	    it2 != mems2.end();
+	    it2++) {
+	  Machine::MemoryMemoryAffinity mma;
+	  mma.m1 = *it1;
+	  mma.m2 = *it2;
+	  mma.bandwidth = bandwidth;
+	  mma.latency = latency;
+	  machine->add_mem_mem_affinity(mma);
+	}
     }
 
     bool RuntimeImpl::init(int *argc, char ***argv)
@@ -243,34 +432,37 @@ namespace Realm {
       }
 #endif
 
+      // new command-line parsers will work from a vector<string> representation of the
+      //  command line
+      std::vector<std::string> cmdline;
+      if(*argc > 1) {
+	cmdline.resize(*argc - 1);
+	for(int i = 1; i < *argc; i++)
+	  cmdline[i - 1] = (*argv)[i];
+      }
+
+      // very first thing - let the logger initialization happen
+      Logger::configure_from_cmdline(cmdline);
+
+      // now load modules
+      module_registrar.create_static_modules(cmdline, modules);
+      module_registrar.create_dynamic_modules(cmdline, modules);
+
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
 #else
       size_t gasnet_mem_size_in_mb = 0;
 #endif
-      size_t cpu_mem_size_in_mb = 512;
       size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
-      unsigned num_local_cpus = 1;
-      unsigned num_util_procs = 1;
-      unsigned num_io_procs = 0;
-      unsigned concurrent_io_threads = 1; // Legion does not support values > 1 right now
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       unsigned active_msg_handler_threads = 1;
-#ifdef USE_CUDA
-      size_t zc_mem_size_in_mb = 64;
-      size_t fb_mem_size_in_mb = 256;
-      unsigned num_local_gpus = 0;
-      unsigned num_gpu_streams = 12;
-      bool     gpu_worker_thread = true;
-      bool pin_sysmem_for_gpu = true;
-#endif
 #ifdef EVENT_TRACING
       size_t   event_trace_block_size = 1 << 20;
       double   event_trace_exp_arrv_rate = 1e3;
@@ -283,86 +475,69 @@ namespace Realm {
       bool dummy_reservation_ok = true;
       bool show_reservations = false;
 
-      for(int i = 1; i < *argc; i++) {
-#define INT_ARG(argname, varname)                       \
-	  if(!strcmp((*argv)[i], argname)) {		\
-	    varname = atoi((*argv)[++i]);		\
-	    continue;					\
-	  }
+      CommandLineParser cp;
+      cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
+	.add_option_int("-ll:rsize", reg_mem_size_in_mb)
+	.add_option_int("-ll:dsize", disk_mem_size_in_mb)
+	.add_option_int("-ll:stacksize", stack_size_in_mb)
+	.add_option_int("-ll:dma", dma_worker_threads)
+	.add_option_int("-ll:amsg", active_msg_worker_threads)
+	.add_option_int("-ll:ahandlers", active_msg_handler_threads)
+	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
+	.add_option_bool("-ll:show_rsrv", show_reservations);
 
-#define BOOL_ARG(argname, varname)                      \
-	  if(!strcmp((*argv)[i], argname)) {		\
-	    varname = true;				\
-	    continue;					\
-	  }
+      std::string event_trace_file, lock_trace_file;
 
-	INT_ARG("-ll:gsize", gasnet_mem_size_in_mb);
-	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
-	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
-        INT_ARG("-ll:dsize", disk_mem_size_in_mb);
-        INT_ARG("-ll:stacksize", stack_size_in_mb);
-	INT_ARG("-ll:cpu", num_local_cpus);
-	INT_ARG("-ll:util", num_util_procs);
-        INT_ARG("-ll:io", num_io_procs);
-	INT_ARG("-ll:concurrent_io", concurrent_io_threads);
-	//INT_ARG("-ll:workers", cpu_worker_threads);
-	INT_ARG("-ll:dma", dma_worker_threads);
-	INT_ARG("-ll:amsg", active_msg_worker_threads);
-	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
-	INT_ARG("-ll:dummy_rsrv_ok", dummy_reservation_ok);
-	INT_ARG("-ll:show_rsrv", show_reservations);
-#ifdef USE_CUDA
-	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
-	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
-	INT_ARG("-ll:gpu", num_local_gpus);
-        INT_ARG("-ll:streams", num_gpu_streams);
-        BOOL_ARG("-ll:gpuworker", gpu_worker_thread);
-        INT_ARG("-ll:pin", pin_sysmem_for_gpu);
-#endif
+      cp.add_option_string("-ll:eventtrace", event_trace_file)
+	.add_option_string("-ll:locktrace", lock_trace_file);
 
-	if(!strcmp((*argv)[i], "-ll:eventtrace")) {
-#ifdef EVENT_TRACING
-	  event_trace_file = strdup((*argv)[++i]);
-#else
-	  fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
-#endif
-	  continue;
-	}
-
-        if (!strcmp((*argv)[i], "-ll:locktrace"))
-        {
-#ifdef LOCK_TRACING
-          lock_trace_file = strdup((*argv)[++i]);
-#else
-          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
-#endif
-          continue;
-        }
-
-        if (!strcmp((*argv)[i], "-ll:prefix"))
-        {
 #ifdef NODE_LOGGING
-          RuntimeImpl::prefix = strdup((*argv)[++i]);
+      cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
 #else
-          fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+      std::string dummy_prefix;
+      cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
-          continue;
-        }
 
-        // Skip arguments that parsed in activemsg.cc
-        if (!strcmp((*argv)[i], "-ll:numlmbs") || !strcmp((*argv)[i],"-ll:lmbsize") ||
-            !strcmp((*argv)[i], "-ll:forcelong") || !strcmp((*argv)[i],"-ll:sdpsize"))
-        {
-          i++;
-          continue;
-        }
+      // these are actually parsed in activemsg.cc, but consume them here for now
+      size_t dummy = 0;
+      cp.add_option_int("-ll:numlmbs", dummy)
+	.add_option_int("-ll:lmbsize", dummy)
+	.add_option_int("-ll:forcelong", dummy)
+	.add_option_int("-ll:sdpsize", dummy);
 
-        if (strncmp((*argv)[i], "-ll:", 4) == 0)
-        {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", (*argv)[i]);
+      bool cmdline_ok = cp.parse_command_line(cmdline);
+
+      if(!cmdline_ok) {
+	fprintf(stderr, "ERROR: failure parsing command line options\n");
+	gasnet_exit(1);
+      }
+
+#ifndef EVENT_TRACING
+      if(!event_trace_file.empty()) {
+	fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
+      }
+#endif
+
+#ifndef LOCK_TRACING
+      if(!lock_trace_file.empty()) {
+          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
+      }
+#endif
+
+#ifndef NODE_LOGGING
+      if(!dummy_prefix.empty()) {
+	fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+      }
+#endif
+
+      // scan through what's left and see if anything starts with -ll: - probably a misspelled argument
+      for(std::vector<std::string>::const_iterator it = cmdline.begin();
+	  it != cmdline.end();
+	  it++)
+	if(it->compare(0, 4, "-ll:") == 0) {
+	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
           assert(0);
 	}
-      }
 
       // Check that we have enough resources for the number of nodes we are using
       if (gasnet_nodes() > MAX_NUM_NODES)
@@ -390,8 +565,6 @@ namespace Realm {
 
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
-
-      Logger::configure_from_cmdline(*argc, (const char **)*argv);
 
       gasnet_handlerentry_t handlers[128];
       int hcount = 0;
@@ -488,6 +661,8 @@ namespace Realm {
 			    core_reservations,
 			    stack_size_in_mb << 20);
 
+      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
+
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
 							core_reservations);
 
@@ -504,6 +679,11 @@ namespace Realm {
                                         lock_trace_exp_arrv_rate);
 #endif
 	
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->initialize(this);
+
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
@@ -514,101 +694,16 @@ namespace Realm {
 
       Node *n = &nodes[gasnet_mynode()];
 
-      // create utility processors (if any)
-      if (num_util_procs > 0)
-      {
-        for(unsigned i = 0; i < num_util_procs; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-          LocalUtilityProcessor *up = new LocalUtilityProcessor(p, core_reservations,
-								stack_size_in_mb << 20);
-          n->processors.push_back(up);
-          local_util_procs.push_back(up);
-        }
-      }
-      // create i/o processors (if any)
-      if (num_io_procs > 0)
-      {
-        for (unsigned i = 0; i < num_io_procs; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-	  LocalIOProcessor *io = new LocalIOProcessor(p, core_reservations,
-						      stack_size_in_mb << 20,
-						      concurrent_io_threads);
-          n->processors.push_back(io);
-          local_io_procs.push_back(io);
-        }
-      }
+      // create memories and processors for all loaded modules
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_memories(this);
 
-#ifdef USE_CUDA
-      // Keep track of the local system memories so we can pin them
-      // after we've initialized the GPU
-      std::vector<LocalCPUMemory*> local_mems;
-      // Figure out which GPUs support peer access (if any)
-      // and prioritize them so they are used first
-      std::vector<int> peer_gpus;
-      std::vector<int> dumb_gpus;
-      // only do this if gpus have been requested
-      if(num_local_gpus > 0) {
-	// Initialize the driver API
-	CHECK_CU( cuInit(0) );
-	{
-	  int num_devices;
-	  CHECK_CU( cuDeviceGetCount(&num_devices) );
-	  for (int i = 0; i < num_devices; i++)
-	  {
-	    CUdevice device;
-	    CHECK_CU( cuDeviceGet(&device, i) );
-	    bool has_peer = false;
-	    // Go through all the other devices and see
-	    // if we have peer access to them
-	    for (int j = 0; j < num_devices; j++)
-            {
-	      if (i == j) continue;
-	      CUdevice peer;
-	      CHECK_CU( cuDeviceGet(&peer, j) );
-	      int can_access;
-	      CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-	      if (can_access)
-	      {
-		has_peer = true;
-		break;
-	      }
-	    }
-	    if (has_peer)
-	      peer_gpus.push_back(i);
-	    else
-	      dumb_gpus.push_back(i);
-	  }
-	}
-      }
-#endif
-      // create local processors
-      for(unsigned i = 0; i < num_local_cpus; i++) {
-	Processor p = ID(ID::ID_PROCESSOR, 
-			 gasnet_mynode(), 
-			 n->processors.size()).convert<Processor>();
-        LocalTaskProcessor *lp;
-	lp = new LocalCPUProcessor(p, core_reservations, stack_size_in_mb << 20);
-	n->processors.push_back(lp);
-	local_cpus.push_back(lp);
-      }
-
-      // create local memory
-      LocalCPUMemory *cpumem;
-      if(cpu_mem_size_in_mb > 0) {
-	cpumem = new LocalCPUMemory(ID(ID::ID_MEMORY, 
-				       gasnet_mynode(),
-				       n->memories.size(), 0).convert<Memory>(),
-				    cpu_mem_size_in_mb << 20);
-	n->memories.push_back(cpumem);
-#ifdef USE_CUDA
-        local_mems.push_back(cpumem);
-#endif
-      } else
-	cpumem = 0;
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_processors(this);
 
       LocalCPUMemory *regmem;
       if(reg_mem_size_in_mb > 0) {
@@ -623,9 +718,6 @@ namespace Realm {
 				    regmem_base,
 				    true);
 	n->memories.push_back(regmem);
-#ifdef USE_CUDA
-        local_mems.push_back(regmem);
-#endif
       } else
 	regmem = 0;
 
@@ -650,81 +742,10 @@ namespace Realm {
       n->memories.push_back(hdfmem);
 #endif
 
-
-
-#ifdef USE_CUDA
-      if(num_local_gpus > 0) {
-        if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
-        {
-          printf("Requested %d GPUs, but only %ld GPUs exist on node %d\n",
-            num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
-          assert(false);
-        }
-
-	// TODO: let the CUDA module actually parse config variables
-	assert(gpu_worker_thread == true);
-
-	for(unsigned i = 0; i < num_local_gpus; i++) {
-	  Processor p = ID(ID::ID_PROCESSOR, 
-			   gasnet_mynode(), 
-			   n->processors.size()).convert<Processor>();
-	  //printf("GPU's ID is " IDFMT "\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p, core_reservations,
-                                              (i < peer_gpus.size() ?
-                                                peer_gpus[i] : 
-                                                dumb_gpus[i-peer_gpus.size()]), 
-                                              zc_mem_size_in_mb << 20,
-                                              fb_mem_size_in_mb << 20,
-                                              stack_size_in_mb << 20,
-                                              num_gpu_streams);
-	  n->processors.push_back(gp);
-	  local_gpus.push_back(gp);
-
-	  Memory m = ID(ID::ID_MEMORY,
-			gasnet_mynode(),
-			n->memories.size(), 0).convert<Memory>();
-	  GPUFBMemory *fbm = new GPUFBMemory(m, gp);
-	  n->memories.push_back(fbm);
-
-	  gpu_fbmems[gp] = fbm;
-
-	  Memory m2 = ID(ID::ID_MEMORY,
-			 gasnet_mynode(),
-			 n->memories.size(), 0).convert<Memory>();
-	  GPUZCMemory *zcm = new GPUZCMemory(m2, gp);
-	  n->memories.push_back(zcm);
-
-	  gpu_zcmems[gp] = zcm;
-	}
-        // Now pin any CPU memories
-        if(pin_sysmem_for_gpu)
-          for (unsigned idx = 0; idx < local_mems.size(); idx++)
-            local_mems[idx]->pin_memory(local_gpus[0]);
-
-        // Register peer access for any GPUs which support it
-        if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
-        {
-          unsigned peer_count = (num_local_gpus < peer_gpus.size()) ? 
-                                  num_local_gpus : peer_gpus.size();
-          // Needs to go both ways so register in all directions
-          for (unsigned i = 0; i < peer_count; i++)
-          {
-            CUdevice device;
-            CHECK_CU( cuDeviceGet(&device, peer_gpus[i]) );
-            for (unsigned j = 0; j < peer_count; j++)
-            {
-              if (i == j) continue;
-              CUdevice peer;
-              CHECK_CU( cuDeviceGet(&peer, peer_gpus[j]) );
-              int can_access;
-              CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
-              if (can_access)
-                local_gpus[i]->enable_peer_access(local_gpus[j]);
-            }
-          }
-        }
-      }
-#endif
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_dma_channels(this);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -741,6 +762,109 @@ namespace Realm {
       }
 
       {
+        // iterate over all local processors and add affinities for them
+	// all of this should eventually be moved into appropriate modules
+	std::map<Processor::Kind, std::set<Processor> > procs_by_kind;
+
+	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
+	    it != n->processors.end();
+	    it++)
+	  if(*it) {
+	    Processor p = (*it)->me;
+	    Processor::Kind k = (*it)->me.kind();
+
+	    procs_by_kind[k].insert(p);
+	  }
+
+	// now iterate over memories too
+	std::map<Memory::Kind, std::set<Memory> > mems_by_kind;
+	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+	    it != n->memories.end();
+	    it++)
+	  if(*it) {
+	    Memory m = (*it)->me;
+	    Memory::Kind k = (*it)->me.kind();
+
+	    mems_by_kind[k].insert(m);
+	  }
+
+	if(global_memory)
+	  mems_by_kind[Memory::GLOBAL_MEM].insert(global_memory->me);
+
+	std::set<Processor::Kind> local_cpu_kinds;
+	local_cpu_kinds.insert(Processor::LOC_PROC);
+	local_cpu_kinds.insert(Processor::UTIL_PROC);
+	local_cpu_kinds.insert(Processor::IO_PROC);
+
+	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+	    it != local_cpu_kinds.end();
+	    it++) {
+	  Processor::Kind k = *it;
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::SYSTEM_MEM],
+				  100, // "large" bandwidth
+				  1   // "small" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::REGDMA_MEM],
+				  80,  // "large" bandwidth
+				  5   // "small" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::DISK_MEM],
+				  5,   // "low" bandwidth
+				  100 // "high" latency
+				  );
+	  
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::HDF_MEM],
+				  5,   // "low" bandwidth
+				  100 // "high" latency
+				  );
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::GLOBAL_MEM],
+				  10,  // "lower" bandwidth
+				  50  // "higher" latency
+				  );
+	}
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::GLOBAL_MEM],
+			       30,  // "lower" bandwidth
+			       25  // "higher" latency
+			       );
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::DISK_MEM],
+			       15,  // "low" bandwidth
+			       50  // "high" latency
+			       );
+
+	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+	    it != local_cpu_kinds.end();
+	    it++) {
+	  Processor::Kind k = *it;
+
+	  add_proc_mem_affinities(machine,
+				  procs_by_kind[k],
+				  mems_by_kind[Memory::Z_COPY_MEM],
+				  40,  // "large" bandwidth
+				  3   // "small" latency
+				  );
+	}
+      }
+      {
 	const unsigned ADATA_SIZE = 4096;
 	size_t adata[ADATA_SIZE];
 	unsigned apos = 0;
@@ -748,210 +872,64 @@ namespace Realm {
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 
-	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_util_procs.begin();
-	    it != local_util_procs.end();
-	    it++) {
-	  num_procs++;
-          adata[apos++] = NODE_ANNOUNCE_PROC;
-          adata[apos++] = (*it)->me.id;
-          adata[apos++] = Processor::UTIL_PROC;
-	}
-
-	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_io_procs.begin();
-	    it != local_io_procs.end();
-	    it++) {
-	  num_procs++;
-          adata[apos++] = NODE_ANNOUNCE_PROC;
-          adata[apos++] = (*it)->me.id;
-          adata[apos++] = Processor::IO_PROC;
-	}
-
-	for(std::vector<LocalTaskProcessor *>::const_iterator it = local_cpus.begin();
-	    it != local_cpus.end();
-	    it++) {
-	  num_procs++;
-          adata[apos++] = NODE_ANNOUNCE_PROC;
-          adata[apos++] = (*it)->me.id;
-          adata[apos++] = Processor::LOC_PROC;
-	}
-
-	// memories
-	if(cpumem) {
-	  num_memories++;
-	  adata[apos++] = NODE_ANNOUNCE_MEM;
-	  adata[apos++] = cpumem->me.id;
-	  adata[apos++] = Memory::SYSTEM_MEM;
-	  adata[apos++] = cpumem->size;
-	  adata[apos++] = 0; // not registered
-	}
-
-	if(regmem) {
-	  num_memories++;
-	  adata[apos++] = NODE_ANNOUNCE_MEM;
-	  adata[apos++] = regmem->me.id;
-	  adata[apos++] = Memory::REGDMA_MEM;
-	  adata[apos++] = regmem->size;
-	  adata[apos++] = (size_t)(regmem->base);
-	}
-
-	if(diskmem) {
-	  num_memories++;
-	  adata[apos++] = NODE_ANNOUNCE_MEM;
-	  adata[apos++] = diskmem->me.id;
-	  adata[apos++] = Memory::DISK_MEM;
-	  adata[apos++] = diskmem->size;
-	  adata[apos++] = 0;
-	}
-
-#ifdef USE_HDF
-	if(hdfmem) {
-	  num_memories++;
-	  adata[apos++] = NODE_ANNOUNCE_MEM;
-	  adata[apos++] = hdfmem->me.id;
-	  adata[apos++] = Memory::HDF_MEM;
-	  adata[apos++] = hdfmem->size;
-	  adata[apos++] = 0;
-	}
-#endif
-
-	// list affinities between local CPUs / memories
-	std::vector<ProcessorImpl *> all_local_procs;
-	all_local_procs.insert(all_local_procs.end(),
-			       local_util_procs.begin(), local_util_procs.end());
-	all_local_procs.insert(all_local_procs.end(),
-			       local_io_procs.begin(), local_io_procs.end());
-	all_local_procs.insert(all_local_procs.end(),
-			       local_cpus.begin(), local_cpus.end());
-	for(std::vector<ProcessorImpl*>::iterator it = all_local_procs.begin();
-	    it != all_local_procs.end();
-	    it++) {
-	  if(cpumem) {
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = cpumem->me.id;
-	    adata[apos++] = 100;  // "large" bandwidth
-	    adata[apos++] = 1;    // "small" latency
-	  }
-
-	  if(regmem) {
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = regmem->me.id;
-	    adata[apos++] = 80;  // "large" bandwidth
-	    adata[apos++] = 5;    // "small" latency
-	  }
-
-	  if(diskmem) {
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = diskmem->me.id;
-	    adata[apos++] = 5;  // "low" bandwidth
-	    adata[apos++] = 100;  // "high" latency
-	  }
-
-#ifdef USE_HDF
-	  if(hdfmem) {
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = hdfmem->me.id;
-	    adata[apos++] = 5; // "low" bandwidth
-	    adata[apos++] = 100; // "high" latency
-	  } 
-#endif
-
-	  if(global_memory) {
-  	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = global_memory->me.id;
-	    adata[apos++] = 10;  // "lower" bandwidth
-	    adata[apos++] = 50;    // "higher" latency
-	  }
-	}
-
-	if(cpumem && global_memory) {
-	  adata[apos++] = NODE_ANNOUNCE_MMA;
-	  adata[apos++] = cpumem->me.id;
-	  adata[apos++] = global_memory->me.id;
-	  adata[apos++] = 30;  // "lower" bandwidth
-	  adata[apos++] = 25;    // "higher" latency
-	}
-
-	if(cpumem && diskmem) {
-	  adata[apos++] = NODE_ANNOUNCE_MMA;
-	  adata[apos++] = cpumem->me.id;
-	  adata[apos++] = diskmem->me.id;
-	  adata[apos++] = 15;    // "low" bandwidth
-	  adata[apos++] = 50;    // "high" latency
-	}
-
-#ifdef USE_CUDA
-	for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
-	    it != local_gpus.end();
+	// announce each processor and its affinities
+	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
+	    it != n->processors.end();
 	    it++)
-	{
-	  num_procs++;
-	  adata[apos++] = NODE_ANNOUNCE_PROC;
-	  adata[apos++] = (*it)->me.id;
-	  adata[apos++] = Processor::TOC_PROC;
+	  if(*it) {
+	    Processor p = (*it)->me;
+	    Processor::Kind k = (*it)->me.kind();
 
-	  GPUFBMemory *fbm = gpu_fbmems[*it];
-	  if(fbm) {
-	    num_memories++;
+	    num_procs++;
+	    adata[apos++] = NODE_ANNOUNCE_PROC;
+	    adata[apos++] = p.id;
+	    adata[apos++] = k;
 
-	    adata[apos++] = NODE_ANNOUNCE_MEM;
-	    adata[apos++] = fbm->me.id;
-	    adata[apos++] = Memory::GPU_FB_MEM;
-	    adata[apos++] = fbm->size;
-	    adata[apos++] = 0; // not registered
+	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
+	    machine->get_proc_mem_affinity(pmas, p);
 
-	    // FB has very good bandwidth and ok latency to GPU
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = fbm->me.id;
-	    adata[apos++] = 200; // "big" bandwidth
-	    adata[apos++] = 5;   // "ok" latency
-	  }
-
-	  GPUZCMemory *zcm = gpu_zcmems[*it];
-	  if(zcm) {
-	    num_memories++;
-
-	    adata[apos++] = NODE_ANNOUNCE_MEM;
-	    adata[apos++] = zcm->me.id;
-	    adata[apos++] = Memory::Z_COPY_MEM;
-	    adata[apos++] = zcm->size;
-	    adata[apos++] = 0; // not registered
-
-	    // ZC has medium bandwidth and bad latency to GPU
-	    adata[apos++] = NODE_ANNOUNCE_PMA;
-	    adata[apos++] = (*it)->me.id;
-	    adata[apos++] = zcm->me.id;
-	    adata[apos++] = 20;
-	    adata[apos++] = 200;
-
-	    // ZC also accessible to all the local CPUs
-	    for(std::vector<LocalTaskProcessor *>::iterator it2 = local_cpus.begin();
-		it2 != local_cpus.end();
+	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
+		it2 != pmas.end();
 		it2++) {
 	      adata[apos++] = NODE_ANNOUNCE_PMA;
-	      adata[apos++] = (*it2)->me.id;
-	      adata[apos++] = zcm->me.id;
-	      adata[apos++] = 40;
-	      adata[apos++] = 3;
+	      adata[apos++] = it2->p.id;
+	      adata[apos++] = it2->m.id;
+	      adata[apos++] = it2->bandwidth;
+	      adata[apos++] = it2->latency;
 	    }
 	  }
-	}
-#endif
+
+	// now each memory and its affinities with other memories
+	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+	    it != n->memories.end();
+	    it++)
+	  if(*it) {
+	    Memory m = (*it)->me;
+	    Memory::Kind k = (*it)->me.kind();
+
+	    num_memories++;
+	    adata[apos++] = NODE_ANNOUNCE_MEM;
+	    adata[apos++] = m.id;
+	    adata[apos++] = k;
+	    adata[apos++] = (*it)->size;
+	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+
+	    std::vector<Machine::MemoryMemoryAffinity> mmas;
+	    machine->get_mem_mem_affinity(mmas, m);
+
+	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
+		it2 != mmas.end();
+		it2++) {
+	      adata[apos++] = NODE_ANNOUNCE_MMA;
+	      adata[apos++] = it2->m1.id;
+	      adata[apos++] = it2->m2.id;
+	      adata[apos++] = it2->bandwidth;
+	      adata[apos++] = it2->latency;
+	    }
+	  }
 
 	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
-
-	// parse our own data (but don't create remote proc/mem objects)
-	machine->parse_node_announce_data(gasnet_mynode(),
-					  num_procs,
-					  num_memories,
-					  adata, apos*sizeof(adata[0]), 
-					  false);
 
 #ifdef DEBUG_REALM_STARTUP
 	if(gasnet_mynode() == 0) {
@@ -1015,6 +993,18 @@ namespace Realm {
       return 0;
     }
 
+    template <typename T>
+    void delete_vector_contents(std::vector<T *>& v, bool clear_vector = true)
+    {
+      for(typename std::vector<T *>::iterator it = v.begin();
+	  it != v.end();
+	  it++)
+	delete (*it);
+
+      if(clear_vector)
+	v.clear();
+    }
+
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -1050,23 +1040,9 @@ namespace Realm {
       if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
 	log_task.info("spawning processor init task on local cpus");
 
-	spawn_on_all(local_util_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
-
-	spawn_on_all(local_cpus,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-
-	spawn_on_all(local_io_procs,Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-
-#ifdef USE_CUDA
-	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
-#endif
       } else {
 	log_task.info("no processor init task");
       }
@@ -1136,43 +1112,18 @@ namespace Realm {
 #endif
 
       // Shutdown all the threads
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_util_procs.begin();
-	  it != local_util_procs.end();
+      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	  it != local_procs.end();
 	  it++)
 	(*it)->shutdown();
-
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_io_procs.begin();
-          it != local_io_procs.end();
-          it++)
-	(*it)->shutdown();
-
-      for(std::vector<LocalTaskProcessor *>::iterator it = local_cpus.begin();
-	  it != local_cpus.end();
-	  it++)
-	(*it)->shutdown();
-
-#ifdef USE_CUDA
-      for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
-	  it != local_gpus.end();
-	  it++)
-	(*it)->shutdown();
-#endif
-
 
       // delete processors, memories, nodes, etc.
       {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
 	  Node& n = nodes[i];
 
-	  for(std::vector<MemoryImpl *>::iterator it = n.memories.begin();
-	      it != n.memories.end();
-	      it++)
-	    delete (*it);
-
-	  for(std::vector<ProcessorImpl *>::iterator it = n.processors.begin();
-	      it != n.processors.end();
-	      it++)
-	    delete (*it);
+	  delete_vector_contents(n.memories);
+	  delete_vector_contents(n.processors);
 	}
 	
 	delete[] nodes;
@@ -1182,6 +1133,18 @@ namespace Realm {
 	delete local_reservation_free_list;
 	delete local_index_space_free_list;
 	delete local_proc_group_free_list;
+
+	// delete all the DMA channels that we were given
+	delete_vector_contents(dma_channels);
+
+	for(std::vector<Module *>::iterator it = modules.begin();
+	    it != modules.end();
+	    it++) {
+	  (*it)->cleanup();
+	  delete (*it);
+	}
+
+	module_registrar.unload_module_sofiles();
       }
 
       // need to kill other threads too so we can actually terminate process
@@ -1215,20 +1178,12 @@ namespace Realm {
 
       if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
 	log_task.info("spawning processor shutdown task on local cpus");
-	spawn_on_all(local_cpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
+
+	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+
+	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
-	spawn_on_all(local_util_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-	spawn_on_all(local_io_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-#ifdef USE_CUDA
-	spawn_on_all(local_gpus, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-#endif
       } else {
 	log_task.info("no processor shutdown task");
       }
@@ -1329,30 +1284,6 @@ namespace Realm {
 	  ReservationImpl *impl = n->reservations.lookup_entry(id.index(), id.node());
 	  assert(impl->me == id.convert<Reservation>());
 	  return impl;
-#if 0
-	  std::vector<ReservationImpl>& locks = nodes[id.node()].locks;
-
-	  unsigned index = id.index();
-	  if(index >= n->num_locks) {
-	    AutoHSLLock a(n->mutex); // take lock before we actually resize
-
-	    // grow our array to mirror additions by other nodes
-	    //  this should never happen for our own node
-	    assert(id.node() != gasnet_mynode());
-
-	    unsigned oldsize = n->locks.size();
-	    assert(oldsize < MAX_LOCAL_LOCKS);
-	    if(index >= oldsize) { // only it's still too small
-              assert((index+1) < MAX_LOCAL_LOCKS);
-	      n->locks.resize(index + 1);
-	      for(unsigned i = oldsize; i <= index; i++)
-		n->locks[i].init(ID(ID::ID_LOCK, id.node(), i).convert<Reservation>(),
-				 id.node());
-	      n->num_locks = index + 1;
-	    }
-	  }
-	  return &(locks[index]);
-#endif
 	}
 
       case ID::ID_INDEXSPACE:
@@ -1418,25 +1349,6 @@ namespace Realm {
       IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.index(), id.node());
       assert(impl->me == id.convert<IndexSpace>());
       return impl;
-#if 0
-      unsigned index = id.index();
-      if(index >= n->index_spaces.size()) {
-	AutoHSLLock a(n->mutex); // take lock before we actually resize
-
-	if(index >= n->index_spaces.size())
-	  n->index_spaces.resize(index + 1);
-      }
-
-      if(!n->index_spaces[index]) { // haven't seen this metadata before?
-	//printf("UNKNOWN METADATA " IDFMT "\n", id.id());
-	AutoHSLLock a(n->mutex); // take lock before we actually allocate
-	if(!n->index_spaces[index]) {
-	  n->index_spaces[index] = new IndexSpaceImpl(id.convert<IndexSpace>());
-	} 
-      }
-
-      return n->index_spaces[index];
-#endif
     }
 
     RegionInstanceImpl *RuntimeImpl::get_instance_impl(ID id)

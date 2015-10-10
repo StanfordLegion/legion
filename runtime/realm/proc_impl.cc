@@ -21,10 +21,6 @@
 #include "serialize.h"
 #include "profiling.h"
 
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-#endif
-
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -54,24 +50,6 @@ namespace Realm {
   namespace ThreadLocal {
     __thread Processor current_processor;
   };
-
-#if 0
-    /*static*/ Processor Processor::get_executing_processor(void) 
-    { 
-      void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
-      if (tls_val != NULL)
-      {
-        PreemptableThread *me = (PreemptableThread *)tls_val;
-        return me->get_processor();
-      }
-      // Otherwise this better be a GPU processor 
-#ifdef USE_CUDA
-      return LegionRuntime::LowLevel::GPUProcessor::get_processor();
-#else
-      assert(0);
-#endif
-    }
-#endif
 
     Processor::Kind Processor::kind(void) const
     {
@@ -202,6 +180,10 @@ namespace Realm {
     }
 
     ProcessorImpl::~ProcessorImpl(void)
+    {
+    }
+
+    void ProcessorImpl::shutdown(void)
     {
     }
 

@@ -591,7 +591,7 @@ namespace Realm {
     {
       AutoHSLLock al(lock);
 
-      while(!all_workers.empty())
+      while(!all_workers.empty() || !terminating_workers.empty())
 	shutdown_condvar.wait();
     }
 
@@ -643,9 +643,17 @@ namespace Realm {
       }
     }
 
-    // detach and delete the worker thread
+    // detach and delete the worker thread - better be expected now
+    assert(terminating_workers.count(thread) > 0);
+    terminating_workers.erase(thread);
     thread->detach();
     delete thread;
+
+    // if this was the last thread, we'd better be in shutdown...
+    if(all_workers.empty() && terminating_workers.empty()) {
+      assert(shutdown_flag);
+      shutdown_condvar.signal();
+    }
   }
 
   bool KernelThreadTaskScheduler::execute_task(Task *task)
@@ -724,16 +732,11 @@ namespace Realm {
 
     // also off the all workers list
     all_workers.erase(me);
+    terminating_workers.insert(me);
 
     // and wake up whoever we're switching to (if any)
     if(switch_to)
       worker_wake(switch_to);
-
-    // if this was the last thread, we'd better be in shutdown...
-    if(all_workers.empty()) {
-      assert(shutdown_flag);
-      shutdown_condvar.signal();
-    }
   }
   
   void KernelThreadTaskScheduler::wait_for_work(long long old_work_counter)
