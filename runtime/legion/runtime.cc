@@ -14739,9 +14739,9 @@ namespace LegionRuntime {
 
       // register tasks and reduction ops with LLR
       {
-	const Processor::TaskIDTable& task_table =
+	const TaskIDTable& task_table =
 	  get_task_table(true/*add runtime tasks*/);
-	for(Processor::TaskIDTable::const_iterator it = task_table.begin();
+	for(TaskIDTable::const_iterator it = task_table.begin();
 	    it != task_table.end();
 	    it++)
 	  ll.register_task(it->first, it->second);
@@ -15374,11 +15374,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskIDTable& Runtime::get_task_table(
+    /*static*/ TaskIDTable& Runtime::get_task_table(
                                             bool add_runtime_tasks /*= true*/)
     //--------------------------------------------------------------------------
     {
-      static Processor::TaskIDTable table;
+      static TaskIDTable table;
       if (add_runtime_tasks)
         Runtime::register_runtime_tasks(table); 
       return table;
@@ -15432,7 +15432,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::
-                          register_runtime_tasks(Processor::TaskIDTable &table)
+                          register_runtime_tasks(TaskIDTable &table)
     //--------------------------------------------------------------------------
     {
       // Check to make sure that nobody has registered any tasks here
@@ -15580,7 +15580,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::initialize_runtime(
-                                  const void *args, size_t arglen, Processor p)
+                                  const void *args, size_t arglen, 
+				  const void *userdata, size_t userlen,
+				  Processor p)
     //--------------------------------------------------------------------------
     {
       // Always enable the idle task for any processor 
@@ -15763,7 +15765,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::shutdown_runtime(
-                                  const void *args, size_t arglen, Processor p)
+                                  const void *args, size_t arglen, 
+				  const void *userdata, size_t userlen,
+				  Processor p)
     //--------------------------------------------------------------------------
     {
       if (separate_runtime_instances)
@@ -15779,7 +15783,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::high_level_runtime_task(
-                                  const void *args, size_t arglen, Processor p)
+                                  const void *args, size_t arglen, 
+				  const void *userdata, size_t userlen,
+				  Processor p)
     //--------------------------------------------------------------------------
     {
       const char *data = (const char*)args;
@@ -16173,7 +16179,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::profiling_runtime_task(
-                                   const void *args, size_t arglen, Processor p)
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
     //--------------------------------------------------------------------------
     {
       Runtime *rt = Runtime::get_runtime(p);
@@ -16182,7 +16190,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::profiling_mapper_task(
-                                   const void *args, size_t arglen, Processor p)
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
     //--------------------------------------------------------------------------
     {
       SingleTask::process_mapper_profiling(args, arglen);

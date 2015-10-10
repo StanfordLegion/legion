@@ -6800,47 +6800,55 @@ namespace LegionRuntime {
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, HighLevelRuntime*)>
-      static void legion_task_wrapper(const void*, size_t, Processor);
+      static void legion_task_wrapper(const void*, size_t, 
+				      const void*, size_t, Processor);
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, HighLevelRuntime*, const UDT&)>
-      static void legion_udt_task_wrapper(const void*, size_t, Processor);
+      static void legion_udt_task_wrapper(const void*, size_t, 
+					  const void*, size_t, Processor);
     public:
       // Void return type for new legion task types
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, HighLevelRuntime*)>
-      static void legion_task_wrapper(const void*, size_t, Processor);
+      static void legion_task_wrapper(const void*, size_t, 
+				      const void*, size_t, Processor);
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, HighLevelRuntime*, const UDT&)>
-      static void legion_udt_task_wrapper(const void*, size_t, Processor);
+      static void legion_udt_task_wrapper(const void*, size_t, 
+					  const void*, size_t, Processor);
     public:
       // Non-void single task wrapper
       template<typename T,
       T (*TASK_PTR)(const void*,size_t,const std::vector<RegionRequirement>&,
                   const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
-      static void high_level_task_wrapper(const void*, size_t, Processor);
+      static void high_level_task_wrapper(const void*, size_t, 
+					  const void*, size_t, Processor);
     public:
       // Void single task wrapper
       template<
       void (*TASK_PTR)(const void*,size_t,const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
-      static void high_level_task_wrapper(const void*, size_t, Processor);
+      static void high_level_task_wrapper(const void*, size_t, 
+					  const void*, size_t, Processor);
     public:
       // Non-void index task wrapper
       template<typename RT,
       RT (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&,
                  const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
-      static void high_level_index_task_wrapper(const void*,size_t,Processor);
+      static void high_level_index_task_wrapper(const void*, size_t, 
+						const void*, size_t, Processor);
     public:
       // Void index task wrapper
       template< 
       void (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&, 
                  const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
-      static void high_level_index_task_wrapper(const void*,size_t,Processor);
+      static void high_level_index_task_wrapper(const void*, size_t, 
+						const void*, size_t, Processor);
     public: // INLINE VERSIONS OF THE ABOVE METHODS
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
@@ -6904,7 +6912,10 @@ namespace LegionRuntime {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, HighLevelRuntime*)>
     void LegionTaskWrapper::legion_task_wrapper(const void *args, 
-                                                size_t arglen, Processor p)
+                                                size_t arglen, 
+						const void *userdata,
+						size_t userlen,
+						Processor p)
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
@@ -6935,7 +6946,10 @@ namespace LegionRuntime {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, HighLevelRuntime*)>
     void LegionTaskWrapper::legion_task_wrapper(const void *args, 
-                                                size_t arglen, Processor p)
+                                                size_t arglen, 
+						const void *userdata,
+						size_t userlen,
+						Processor p)
     //--------------------------------------------------------------------------
     {
       // Get the high level runtime
@@ -6959,7 +6973,10 @@ namespace LegionRuntime {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, HighLevelRuntime*, const UDT&)>
     void LegionTaskWrapper::legion_udt_task_wrapper(const void *args,
-                                                    size_t arglen, Processor p)
+                                                    size_t arglen, 
+						    const void *userdata,
+						    size_t userlen,
+						    Processor p)
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
@@ -6993,7 +7010,10 @@ namespace LegionRuntime {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, HighLevelRuntime*, const UDT&)>
     void LegionTaskWrapper::legion_udt_task_wrapper(const void *args,
-                                                    size_t arglen, Processor p)
+                                                    size_t arglen, 
+						    const void *userdata,
+						    size_t userlen,
+						    Processor p)
     //--------------------------------------------------------------------------
     {
       // Get the high level runtime
@@ -7021,7 +7041,10 @@ namespace LegionRuntime {
       T (*TASK_PTR)(const void*,size_t,const std::vector<RegionRequirement>&,
                   const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
     void LegionTaskWrapper::high_level_task_wrapper(const void *args, 
-                                                    size_t arglen, Processor p)
+                                                    size_t arglen, 
+						    const void *userdata,
+						    size_t userlen,
+						    Processor p)
     //--------------------------------------------------------------------------
     {
       // Assert that we aren't returning Futures or FutureMaps
@@ -7054,7 +7077,10 @@ namespace LegionRuntime {
       void (*TASK_PTR)(const void*,size_t,const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
     void LegionTaskWrapper::high_level_task_wrapper(const void *args, 
-                                                    size_t arglen, Processor p)
+                                                    size_t arglen, 
+						    const void *userdata,
+						    size_t userlen,
+						    Processor p)
     //--------------------------------------------------------------------------
     {
       // Get the high level runtime
@@ -7083,7 +7109,10 @@ namespace LegionRuntime {
                  const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
     void LegionTaskWrapper::high_level_index_task_wrapper(const void *args, 
-                                                     size_t arglen, Processor p)
+							  size_t arglen, 
+							  const void *userdata,
+							  size_t userlen,
+							  Processor p)
     //--------------------------------------------------------------------------
     {
       // Assert that we aren't returning Futures or FutureMaps
@@ -7118,7 +7147,10 @@ namespace LegionRuntime {
                  const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,HighLevelRuntime*)>
     void LegionTaskWrapper::high_level_index_task_wrapper(const void *args, 
-                                                     size_t arglen, Processor p)
+							  size_t arglen, 
+							  const void *userdata,
+							  size_t userlen,
+							  Processor p)
     //--------------------------------------------------------------------------
     {
       // Get the high level runtime
