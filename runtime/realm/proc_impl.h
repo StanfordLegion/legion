@@ -54,6 +54,17 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
+      virtual Event register_task(Processor::TaskFuncID func_id,
+				  const CodeDescriptor& codedesc,
+				  const ProfilingRequestSet& prs,
+				  const ByteArray& user_data) = 0;
+
+    protected:
+      friend class Task;
+
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				const ByteArray& task_args);
+
     public:
       Processor me;
       Processor::Kind kind;
@@ -74,6 +85,11 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority);
 
+      virtual Event register_task(Processor::TaskFuncID func_id,
+				  const CodeDescriptor& codedesc,
+				  const ProfilingRequestSet& prs,
+				  const ByteArray& user_data);
+
       // blocks until things are cleaned up
       virtual void shutdown(void);
 
@@ -84,6 +100,16 @@ namespace Realm {
 
       ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
+
+      struct TaskTableEntry {
+	Processor::TaskFuncPtr fnptr;
+	ByteArray user_data;
+      };
+
+      std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
+
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				const ByteArray& task_args);
     };
 
     // three simple subclasses for:
@@ -136,6 +162,11 @@ namespace Realm {
                               const ProfilingRequestSet &reqs,
 			      Event start_event, Event finish_event,
                               int priority);
+
+      virtual Event register_task(Processor::TaskFuncID func_id,
+				  const CodeDescriptor& codedesc,
+				  const ProfilingRequestSet& prs,
+				  const ByteArray& user_data);
     };
 
     class ProcessorGroup : public ProcessorImpl {
@@ -162,6 +193,10 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority);
 
+      virtual Event register_task(Processor::TaskFuncID func_id,
+				  const CodeDescriptor& codedesc,
+				  const ProfilingRequestSet& prs,
+				  const ByteArray& user_data);
 
     public: //protected:
       bool members_valid;

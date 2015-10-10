@@ -48,7 +48,7 @@ namespace Realm {
     if(!p.exists())
       p = this->proc;
 
-    Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
+    //Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
 #if 0
     char argstr[100];
     argstr[0] = 0;
@@ -77,7 +77,9 @@ namespace Realm {
     // make sure the current processor is set during execution of the task
     ThreadLocal::current_processor = p;
 
-    (*fptr)(args.base(), args.size(), p);
+    //(*fptr)(args.base(), args.size(), p);
+
+    get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
 
     // and clear the TLS when we're done
     // TODO: get this right when using user threads

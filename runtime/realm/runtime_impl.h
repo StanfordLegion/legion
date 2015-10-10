@@ -196,7 +196,6 @@ namespace Realm {
     public:
       MachineImpl *machine;
 
-      Processor::TaskIDTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
 
 #ifdef NODE_LOGGING

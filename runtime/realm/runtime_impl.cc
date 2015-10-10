@@ -25,6 +25,8 @@
 
 #include "cmdline.h"
 
+#include "codedesc.h"
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -106,15 +108,33 @@ namespace Realm {
       return ((RuntimeImpl *)impl)->init(argc, argv);
     }
     
+    // this is now just a wrapper around Processor::register_task - consider switching to
+    //  that
     bool Runtime::register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr)
     {
       assert(impl != 0);
 
+      CodeDescriptor codedesc(taskptr);
+      ProfilingRequestSet prs;
+      ByteArray userdata;
+      std::set<Event> events;
+      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[gasnet_mynode()].processors;
+      for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
+	  it != procs.end();
+	  it++) {
+	Event e = (*it)->register_task(taskid, codedesc, prs, userdata);
+	events.insert(e);
+      }
+
+      Event::merge_events(events).wait();
+      return true;
+#if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
 	return false;
 
       ((RuntimeImpl *)impl)->task_table[taskid] = taskptr;
       return true;
+#endif
     }
 
     bool Runtime::register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
@@ -1037,7 +1057,7 @@ namespace Realm {
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
 	log_task.info("spawning processor init task on local cpus");
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
@@ -1176,7 +1196,7 @@ namespace Realm {
 
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
 	log_task.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;

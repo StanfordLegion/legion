@@ -20,6 +20,7 @@
 #include "logging.h"
 #include "serialize.h"
 #include "profiling.h"
+#include "codedesc.h"
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -38,7 +39,7 @@ namespace Realm {
 
   extern Logger log_task;  // defined in tasks.cc
   extern Logger log_util;  // defined in tasks.cc
-
+  Logger log_taskreg("taskreg");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -187,6 +188,13 @@ namespace Realm {
     {
     }
 
+    void ProcessorImpl::execute_task(Processor::TaskFuncID func_id,
+				     const ByteArray& task_args)
+    {
+      // should never be called
+      assert(0);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -273,6 +281,15 @@ namespace Realm {
         enqueue_task(task);
       else
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+    }
+
+    Event ProcessorGroup::register_task(Processor::TaskFuncID func_id,
+					const CodeDescriptor& codedesc,
+					const ProfilingRequestSet& prs,
+					const ByteArray& user_data)
+    {
+      assert(0);
+      return Event::NO_EVENT;
     }
 
 
@@ -405,6 +422,15 @@ namespace Realm {
 				     start_event, finish_event, priority);
     }
 
+    Event RemoteProcessor::register_task(Processor::TaskFuncID func_id,
+					 const CodeDescriptor& codedesc,
+					 const ProfilingRequestSet& prs,
+					 const ByteArray& user_data)
+    {
+      assert(0);
+      return Event::NO_EVENT;
+    }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -483,6 +509,55 @@ namespace Realm {
                finish_event.id, finish_event.gen);
       EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
+  }
+
+  Event LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
+					  const CodeDescriptor& codedesc,
+					  const ProfilingRequestSet& prs,
+					  const ByteArray& user_data)
+  {
+    // first, make sure we haven't seen this task id before
+    assert(task_table.count(func_id) == 0);
+
+    // next, get see if we have a function pointer to register
+    Processor::TaskFuncPtr fnptr;
+    const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+    if(fpi) {
+      fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+    } else {
+      assert(0);
+    }
+
+    log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << fnptr;
+
+    TaskTableEntry &tte = task_table[func_id];
+    tte.fnptr = fnptr;
+    tte.user_data = user_data;
+
+    return Event::NO_EVENT;
+  }
+
+  void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
+					const ByteArray& task_args)
+  {
+    std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
+    if(it == task_table.end()) {
+      // TODO: remove this hack once the tools are available to the HLR to call these directly
+      if(func_id < Processor::TASK_ID_FIRST_AVAILABLE) {
+	log_taskreg.warning() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
+	return;
+      }
+      log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+      assert(0);
+    }
+
+    const TaskTableEntry& tte = it->second;
+
+    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << tte.fnptr;
+
+    (tte.fnptr)(task_args.base(), task_args.size(),
+		tte.user_data.base(), tte.user_data.size(),
+		me);
   }
 
   // blocks until things are cleaned up
