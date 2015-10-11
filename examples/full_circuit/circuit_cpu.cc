@@ -16,6 +16,7 @@
 
 #include "circuit.h"
 #include <x86intrin.h>
+#include <cmath>
 
 using namespace LegionRuntime::Accessor;
 
@@ -753,7 +754,7 @@ bool CheckTask::cpu_impl(const Task *task,
   {
     ptr_t ptr = itr.next();
     float value = fa_check.read(ptr);
-    if (isnan(value))
+    if (std::isnan(value))
       success = false;
   }
   return success;

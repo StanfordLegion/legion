@@ -49,6 +49,9 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority) = 0;
 
+      // blocks until things are cleaned up
+      virtual void shutdown(void);
+
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
     public:

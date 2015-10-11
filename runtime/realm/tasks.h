@@ -198,6 +198,7 @@ namespace Realm {
 
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
+      std::set<Thread *> terminating_workers;
       std::map<Thread *, GASNetCondVar *> sleeping_threads;
       GASNetCondVar shutdown_condvar;
     };

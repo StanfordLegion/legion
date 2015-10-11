@@ -122,6 +122,7 @@ namespace Realm {
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
+	    log_annc.debug() << "adding proc " << p << " (kind = " << kind << ")";
 	    if(remote) {
 	      RemoteProcessor *proc = new RemoteProcessor(p, kind);
 	      get_runtime()->nodes[ID(p).node()].processors[ID(p).index()] = proc;
@@ -137,6 +138,8 @@ namespace Realm {
             Memory::Kind kind = (Memory::Kind)(*cur++);
 	    unsigned size = *cur++;
 	    void *regbase = (void *)(*cur++);
+	    log_annc.debug() << "adding memory " << m << " (kind = " << kind
+			     << ", size = " << size << ", regbase = " << regbase << ")";
 	    if(remote) {
 	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
 	      get_runtime()->nodes[ID(m).node()].memories[ID(m).index_h()] = mem;
@@ -151,6 +154,8 @@ namespace Realm {
 	    pma.m = ID((ID::IDType)*cur++).convert<Memory>();
 	    pma.bandwidth = *cur++;
 	    pma.latency = *cur++;
+	    log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+			     << " (bw = " << pma.bandwidth << ", latency = " << pma.latency << ")";
 
 	    proc_mem_affinities.push_back(pma);
 	  }
@@ -163,6 +168,8 @@ namespace Realm {
 	    mma.m2 = ID((ID::IDType)*cur++).convert<Memory>();
 	    mma.bandwidth = *cur++;
 	    mma.latency = *cur++;
+	    log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
+			     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
 
 	    mem_mem_affinities.push_back(mma);
 	  }
@@ -278,6 +285,17 @@ namespace Realm {
       return count;
     }
 
+    void MachineImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
+    {
+      AutoHSLLock al(mutex);
+      proc_mem_affinities.push_back(pma);
+    }
+
+    void MachineImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
+    {
+      AutoHSLLock al(mutex);
+      mem_mem_affinities.push_back(mma);
+    }
 
   ////////////////////////////////////////////////////////////////////////
   //
