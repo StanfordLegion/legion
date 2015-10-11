@@ -115,7 +115,7 @@ namespace Realm {
     ~LoggerMessage(void);
 
     template <typename T>
-      LoggerMessage& operator<<(T val);
+      LoggerMessage& operator<<(const T& val);
 
     // vprintf-style
     LoggerMessage& vprintf(const char *fmt, va_list ap);
