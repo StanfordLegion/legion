@@ -59,6 +59,25 @@ namespace Realm {
     return *this;
   }
 
+  inline bool Type::operator==(const Type& rhs) const
+  {
+    if(f_common.kind != rhs.f_common.kind)
+      return false;
+    switch(f_common.kind) {
+    case InvalidKind: return true;
+#define COMPARE_CASE(k, f, n) case k: return n.is_equal(rhs.n);
+      REALM_TYPE_KINDS(COMPARE_CASE);
+#undef COMPARE_CASE
+    }
+    // unreachable
+    return false;
+  }
+
+  inline bool Type::operator!=(const Type& rhs) const
+  {
+    return !(*this == rhs);
+  }
+
   inline bool Type::is_valid(void) const
   {
     return (f_common.kind != InvalidKind);
@@ -158,6 +177,12 @@ namespace Realm {
 
   inline void Type::CommonFields::copy_from(const CommonFields& rhs) { *this = rhs; }
 
+  inline bool Type::CommonFields::is_equal(const CommonFields& rhs) const
+  {
+    return ((size_bits == rhs.size_bits) &&
+	    (alignment_bits == rhs.alignment_bits));
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -166,6 +191,11 @@ namespace Realm {
   inline void Type::OpaqueFields::destroy(void) {}
 
   inline void Type::OpaqueFields::copy_from(const OpaqueFields& rhs) { *this = rhs; }
+
+  inline bool Type::OpaqueFields::is_equal(const OpaqueFields& rhs) const
+  {
+    return CommonFields::is_equal(rhs);
+  }
 
   inline OpaqueType::OpaqueType(size_t _size_bits, size_t _alignment_bits /*= 0*/)
     : Type(KIND, _size_bits, _alignment_bits)
@@ -180,6 +210,12 @@ namespace Realm {
   inline void Type::IntegerFields::destroy(void) {}
 
   inline void Type::IntegerFields::copy_from(const IntegerFields& rhs) { *this = rhs; }
+
+  inline bool Type::IntegerFields::is_equal(const IntegerFields& rhs) const
+  {
+    return (CommonFields::is_equal(rhs) &&
+	    (is_signed == rhs.is_signed));
+  }
 
   inline IntegerType::IntegerType(size_t _size_bits, bool _signed, size_t _alignment_bits /*= 0*/)
     : Type(KIND, _size_bits, _alignment_bits)
@@ -206,6 +242,11 @@ namespace Realm {
 
   inline void Type::FloatingPointFields::copy_from(const FloatingPointFields& rhs) { *this = rhs; }
 
+  inline bool Type::FloatingPointFields::is_equal(const FloatingPointFields& rhs) const
+  {
+    return CommonFields::is_equal(rhs);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -217,6 +258,13 @@ namespace Realm {
   { 
     *this = rhs;
     base_type = new Type(*rhs.base_type);
+  }
+
+  inline bool Type::PointerFields::is_equal(const PointerFields& rhs) const
+  {
+    return (CommonFields::is_equal(rhs) &&
+	    is_const == rhs.is_const &&
+	    *base_type == *rhs.base_type);
   }
 
   inline PointerType::PointerType(const Type& _base_type, bool _const /*= false*/,
@@ -253,6 +301,21 @@ namespace Realm {
     *this = rhs;
     return_type = new Type(*rhs.return_type);
     param_types = new std::vector<Type>(*rhs.param_types);
+  }
+
+  inline bool Type::FunctionPointerFields::is_equal(const FunctionPointerFields& rhs) const
+  {
+    if(!CommonFields::is_equal(rhs))
+      return false;
+    if(*return_type != *rhs.return_type)
+      return false;
+    size_t s = (*param_types).size();
+    if(s != (*rhs.param_types).size())
+      return false;
+    for(size_t i = 0; i < s; i++)
+      if((*param_types)[i] != (*rhs.param_types)[i])
+	return false;
+    return true;
   }
 
   inline FunctionPointerType::FunctionPointerType(const Type &_return_type,

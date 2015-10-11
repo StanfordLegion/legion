@@ -47,6 +47,10 @@ namespace Realm {
     template <typename T>
     static Type from_cpp_value(const T& value);
 
+    // exact equality
+    bool operator==(const Type& rhs) const;
+    bool operator!=(const Type& rhs) const;
+
     // testing for the kind
     bool is_valid(void) const;
 
@@ -68,13 +72,15 @@ namespace Realm {
 
     // pretty-printing
     friend std::ostream& operator<<(std::ostream& os, const Type& t);
-    
+
+#if 0    
     // serializer/deserializer functions
     template <typename S>
     friend bool operator<<(S& os, const Type& t);
 
     template <typename S>
     friend bool operator>>(S& os, const Type& t);
+#endif
 
 #define REALM_TYPE_KINDS(__func__) \
     __func__(OpaqueKind, OpaqueFields, f_opaque) \
@@ -98,24 +104,28 @@ namespace Realm {
 
       void destroy(void);
       void copy_from(const CommonFields &rhs);
+      bool is_equal(const CommonFields& rhs) const;
     };
     struct OpaqueFields : public CommonFields {
       // nothing
 
       void destroy(void);
       void copy_from(const OpaqueFields &rhs);
+      bool is_equal(const OpaqueFields& rhs) const;
     };
     struct IntegerFields : public CommonFields {
       bool is_signed;
 
       void destroy(void);
       void copy_from(const IntegerFields &rhs);
+      bool is_equal(const IntegerFields& rhs) const;
     };
     struct FloatingPointFields : public CommonFields {
       // nothing
 
       void destroy(void);
       void copy_from(const FloatingPointFields &rhs);
+      bool is_equal(const FloatingPointFields& rhs) const;
     };
     struct PointerFields : public CommonFields {
       Type *base_type;
@@ -123,6 +133,7 @@ namespace Realm {
 
       void destroy(void);
       void copy_from(const PointerFields &rhs);
+      bool is_equal(const PointerFields& rhs) const;
     };
     struct FunctionPointerFields : public CommonFields {
       Type *return_type;
@@ -130,6 +141,7 @@ namespace Realm {
 
       void destroy(void);
       void copy_from(const FunctionPointerFields &rhs);
+      bool is_equal(const FunctionPointerFields& rhs) const;
     };
 
     union {
