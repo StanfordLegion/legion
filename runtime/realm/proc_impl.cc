@@ -169,6 +169,65 @@ namespace Realm {
       return ID(id).index();
     }
 
+    Event Processor::register_task(TaskFuncID func_id,
+				   const CodeDescriptor& codedesc,
+				   const ProfilingRequestSet& prs,
+				   const void *user_data /*= 0*/,
+				   size_t user_data_len /*= 0*/) const
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      // for now, processor must be local
+      if(ID(id).node() != gasnet_mynode()) {
+	log_taskreg.fatal() << "TODO: support task registration for remote processors";
+	assert(0);
+      }
+
+      ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
+      return p->register_task(func_id, codedesc, prs,
+			      // TODO: use a reference here instead of a copy
+			      ByteArray(user_data, user_data_len));
+    }
+
+    /*static*/ Event Processor::register_task_by_kind(Kind target_kind, bool global,
+						      TaskFuncID func_id,
+						      const CodeDescriptor& codedesc,
+						      const ProfilingRequestSet& prs,
+						      const void *user_data /*= 0*/,
+						      size_t user_data_len /*= 0*/)
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      // for now, processor must be local
+      if(global) {
+	log_taskreg.fatal() << "TODO: support task registration for remote processors";
+	assert(0);
+      }
+
+      // TODO: use a reference here instead of a copy
+      ByteArray udata(user_data, user_data_len);
+
+      std::set<Event> events;
+      const std::vector<ProcessorImpl *>& local_procs = get_runtime()->nodes[gasnet_mynode()].processors;
+      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	  it != local_procs.end();
+	  it++)
+	if((*it)->kind == target_kind) {
+	  Event e = (*it)->register_task(func_id, codedesc, prs, udata);
+	  events.insert(e);
+	}
+
+      return Event::merge_events(events);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
