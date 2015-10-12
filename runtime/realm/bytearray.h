@@ -32,7 +32,7 @@ namespace Realm {
     ByteArrayRef(const ByteArrayRef& ref);
 
     // change what this ByteArrayRef refers to
-    ByteArrayRef& set(const void *ref_base, size_t ref_size);
+    ByteArrayRef& changeref(const void *ref_base, size_t ref_size);
 
     // access to base pointer and size
     const void *base(void) const;
@@ -52,12 +52,16 @@ namespace Realm {
   public:
     ByteArray(void);
     ByteArray(const void *copy_from, size_t copy_size);
+    ByteArray(const ByteArray& copy_from);
+
+    // not actually a copy constructor!  blech...
     ByteArray(const ByteArrayRef& copy_from);
 
     ~ByteArray(void);
 
-    // copies the contents of the rhs ByteArray
+    // copies the contents of the rhs ByteArray (again two versions)
     ByteArray& operator=(const ByteArrayRef& copy_from);
+    ByteArray& operator=(const ByteArray& copy_from);
 
     // swaps the contents of two ByteArrays - returns a reference to the first one
     // this allows you to transfer ownership of a byte array to a called function via:
@@ -87,6 +91,9 @@ namespace Realm {
 
     // extract the pointer from the ByteArray (caller assumes ownership)
     void *detach(void);
+
+  protected:
+    void make_copy(const void *copy_base, size_t copy_size);
   };
 
   // support for realm-style serialization

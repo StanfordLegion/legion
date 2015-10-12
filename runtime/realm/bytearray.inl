@@ -45,7 +45,7 @@ namespace Realm {
   {}
 
   // change what this ByteArrayRef refers to
-  inline ByteArrayRef& ByteArrayRef::set(const void *ref_base, size_t ref_size)
+  inline ByteArrayRef& ByteArrayRef::changeref(const void *ref_base, size_t ref_size)
   {
     array_base = const_cast<void *>(ref_base);
     array_size = ref_size;
@@ -84,39 +84,39 @@ namespace Realm {
 
   inline ByteArray::ByteArray(const void *copy_from, size_t copy_size)
   {
-    if(copy_size) {
-      array_base = malloc(copy_size);
-      assert(array_base != 0);
-      memcpy(array_base, copy_from, copy_size);
-      array_size = copy_size;
-    }
+    make_copy(copy_from, copy_size);
+  }
+
+  inline ByteArray::ByteArray(const ByteArray& copy_from)
+  {
+    make_copy(copy_from.array_base, copy_from.array_size);
   }
 
   inline ByteArray::ByteArray(const ByteArrayRef& copy_from)
   {
-    if(copy_from.size()) {
-      array_base = malloc(copy_from.size());
-      assert(array_base != 0);
-      memcpy(array_base, copy_from.base(), copy_from.size());
-      array_size = copy_from.size();
-    }
+    make_copy(copy_from.base(), copy_from.size());
   }
 
   inline ByteArray::~ByteArray(void)
   {
-    if(array_size)
-      free(array_base);
+    clear();
   }
 
   // copies the contents of the rhs ByteArray
   inline ByteArray& ByteArray::operator=(const ByteArrayRef& copy_from)
   {
-    clear();  // throw away any data we had before
-    if(copy_from.size()) {
-      array_base = malloc(copy_from.size());
-      assert(array_base != 0);
-      memcpy(array_base, copy_from.base(), copy_from.size());
-      array_size = copy_from.size();
+    if(this != &copy_from) {
+      clear();  // throw away any data we had before
+      make_copy(copy_from.base(), copy_from.size());
+    }
+    return *this;
+  }
+
+  inline ByteArray& ByteArray::operator=(const ByteArray& copy_from)
+  {
+    if(this != &copy_from) {
+      clear();  // throw away any data we had before
+      make_copy(copy_from.base(), copy_from.size());
     }
     return *this;
   }
@@ -135,12 +135,7 @@ namespace Realm {
   inline ByteArray& ByteArray::set(const void *copy_from, size_t copy_size)
   {
     clear();  // throw away any data we had before
-    if(copy_size) {
-      array_base = malloc(copy_size);
-      assert(array_base != 0);
-      memcpy(array_base, copy_from, copy_size);
-      array_size = copy_size;
-    }
+    make_copy(copy_from, copy_size);
     return *this;
   }
 
@@ -186,6 +181,19 @@ namespace Realm {
 	free(new_base);
     }
     return *this;
+  }
+
+  inline void ByteArray::make_copy(const void *copy_base, size_t copy_size)
+  {
+    if(copy_size) {
+      array_base = malloc(copy_size);
+      assert(array_base != 0);
+      memcpy(array_base, copy_base, copy_size);
+      array_size = copy_size;
+    } else {
+      array_base = 0;
+      array_size = 0;
+    }
   }
 
   // explicitly deallocate any held storage
