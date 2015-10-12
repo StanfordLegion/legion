@@ -173,6 +173,35 @@ namespace Realm {
     return os;
   }
 
+  template <typename S>
+  bool serialize(S& s, const Type& t)
+  {
+    if(!(s << t.f_common.kind)) return false;  
+    switch(t.f_common.kind) {
+    case Type::InvalidKind: return true;
+#define SERIALIZE_CASE(k, f, n) case Type::k: return t.n.serialize(s);
+      REALM_TYPE_KINDS(SERIALIZE_CASE);
+#undef SERIALIZE_CASE
+    }
+    return false;
+  }
+
+  template <typename S>
+  bool deserialize(S& s, Type& t)
+  {
+    t.destroy();
+    Type::Kind kind;
+    if(!(s >> kind)) return false;  
+    t.f_common.kind = kind;
+    switch(kind) {
+    case Type::InvalidKind: return true;
+#define DESERIALIZE_CASE(k, f, n) case Type::k: return t.n.deserialize(s);
+      REALM_TYPE_KINDS(DESERIALIZE_CASE);
+#undef DESERIALIZE_CASE
+    }
+    return false;
+  }
+
   inline void Type::CommonFields::destroy(void) {}
 
   inline void Type::CommonFields::copy_from(const CommonFields& rhs) { *this = rhs; }
@@ -181,6 +210,18 @@ namespace Realm {
   {
     return ((size_bits == rhs.size_bits) &&
 	    (alignment_bits == rhs.alignment_bits));
+  }
+
+  template <typename S>
+  bool Type::CommonFields::serialize(S& s) const
+  {
+    return (s << size_bits) && (s << alignment_bits);
+  }
+
+  template <typename S>
+  bool Type::CommonFields::deserialize(S& s)
+  {
+    return (s >> size_bits) && (s >> alignment_bits);
   }
 
 
@@ -200,6 +241,18 @@ namespace Realm {
   inline OpaqueType::OpaqueType(size_t _size_bits, size_t _alignment_bits /*= 0*/)
     : Type(KIND, _size_bits, _alignment_bits)
   {
+  }
+
+  template <typename S>
+  bool Type::OpaqueFields::serialize(S& s) const
+  {
+    return CommonFields::serialize(s);
+  }
+
+  template <typename S>
+  bool Type::OpaqueFields::deserialize(S& s)
+  {
+    return CommonFields::deserialize(s);
   }
 
 
@@ -233,6 +286,20 @@ namespace Realm {
     return f_integer.is_signed;
   }
 
+  template <typename S>
+  bool Type::IntegerFields::serialize(S& s) const
+  {
+    return (CommonFields::serialize(s) &&
+	    (s << is_signed));
+  }
+
+  template <typename S>
+  bool Type::IntegerFields::deserialize(S& s)
+  {
+    return (CommonFields::deserialize(s) &&
+	    (s >> is_signed));
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -245,6 +312,18 @@ namespace Realm {
   inline bool Type::FloatingPointFields::is_equal(const FloatingPointFields& rhs) const
   {
     return CommonFields::is_equal(rhs);
+  }
+
+  template <typename S>
+  bool Type::FloatingPointFields::serialize(S& s) const
+  {
+    return CommonFields::serialize(s);
+  }
+
+  template <typename S>
+  bool Type::FloatingPointFields::deserialize(S& s)
+  {
+    return CommonFields::deserialize(s);
   }
 
 
@@ -283,6 +362,23 @@ namespace Realm {
   inline bool& PointerType::is_const(void)
   {
     return f_pointer.is_const;
+  }
+
+  template <typename S>
+  bool Type::PointerFields::serialize(S& s) const
+  {
+    return (CommonFields::serialize(s) &&
+	    (s << *base_type) &&
+	    (s << is_const));
+  }
+
+  template <typename S>
+  bool Type::PointerFields::deserialize(S& s)
+  {
+    base_type = new Type;
+    return (CommonFields::deserialize(s) &&
+	    (s >> *base_type) &&
+	    (s >> is_const));
   }
 
 
@@ -405,6 +501,24 @@ namespace Realm {
     (*v)[3] = _param4_type;
     (*v)[4] = _param5_type;
     f_funcptr.param_types = v;
+  }
+
+  template <typename S>
+  bool Type::FunctionPointerFields::serialize(S& s) const
+  {
+    return (CommonFields::serialize(s) &&
+	    (s << *return_type) &&
+	    (s << *param_types));
+  }
+
+  template <typename S>
+  bool Type::FunctionPointerFields::deserialize(S& s)
+  {
+    return_type = new Type;
+    param_types = new std::vector<Type>;
+    return (CommonFields::deserialize(s) &&
+	    (s >> *return_type) &&
+	    (s >> *param_types));
   }
 
 
@@ -574,6 +688,30 @@ namespace Realm {
 	return i;
     }
     return 0;
+  }
+
+  template <typename S>
+  bool CodeDescriptor::serialize(S& s, bool portable) const
+  {
+    return (s << m_type);
+  }
+
+  template <typename S>
+  bool CodeDescriptor::deserialize(S& s)
+  {
+    return (s >> m_type);
+  }
+
+  template <typename S>
+  bool serialize(S& s, const CodeDescriptor& cd)
+  {
+    return cd.serialize(s, true /*portable*/);
+  }
+
+  template <typename S>
+  bool deserialize(S& s, CodeDescriptor& cd)
+  {
+    return cd.deserialize(s);
   }
 
 

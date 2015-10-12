@@ -73,14 +73,12 @@ namespace Realm {
     // pretty-printing
     friend std::ostream& operator<<(std::ostream& os, const Type& t);
 
-#if 0    
     // serializer/deserializer functions
     template <typename S>
-    friend bool operator<<(S& os, const Type& t);
+    friend bool serialize(S& os, const Type& t);
 
     template <typename S>
-    friend bool operator>>(S& os, const Type& t);
-#endif
+    friend bool deserialize(S& os, Type& t);
 
 #define REALM_TYPE_KINDS(__func__) \
     __func__(OpaqueKind, OpaqueFields, f_opaque) \
@@ -97,52 +95,47 @@ namespace Realm {
     };
 
   protected:
+#define FIELDOBJ_METHODS(classname) \
+      void destroy(void); \
+      void copy_from(const classname &rhs); \
+      bool is_equal(const classname& rhs) const; \
+      template <typename S> bool serialize(S& s) const; \
+      template <typename S> bool deserialize(S& s)
     struct CommonFields {
       Kind kind;
       size_t size_bits;
       size_t alignment_bits;
 
-      void destroy(void);
-      void copy_from(const CommonFields &rhs);
-      bool is_equal(const CommonFields& rhs) const;
+      FIELDOBJ_METHODS(CommonFields);
     };
     struct OpaqueFields : public CommonFields {
       // nothing
 
-      void destroy(void);
-      void copy_from(const OpaqueFields &rhs);
-      bool is_equal(const OpaqueFields& rhs) const;
+      FIELDOBJ_METHODS(OpaqueFields);
     };
     struct IntegerFields : public CommonFields {
       bool is_signed;
 
-      void destroy(void);
-      void copy_from(const IntegerFields &rhs);
-      bool is_equal(const IntegerFields& rhs) const;
+      FIELDOBJ_METHODS(IntegerFields);
     };
     struct FloatingPointFields : public CommonFields {
       // nothing
 
-      void destroy(void);
-      void copy_from(const FloatingPointFields &rhs);
-      bool is_equal(const FloatingPointFields& rhs) const;
+      FIELDOBJ_METHODS(FloatingPointFields);
     };
     struct PointerFields : public CommonFields {
       Type *base_type;
       bool is_const;
 
-      void destroy(void);
-      void copy_from(const PointerFields &rhs);
-      bool is_equal(const PointerFields& rhs) const;
+      FIELDOBJ_METHODS(PointerFields);
     };
     struct FunctionPointerFields : public CommonFields {
       Type *return_type;
       std::vector<Type> *param_types;
 
-      void destroy(void);
-      void copy_from(const FunctionPointerFields &rhs);
-      bool is_equal(const FunctionPointerFields& rhs) const;
+      FIELDOBJ_METHODS(FunctionPointerFields);
     };
+#undef FIELDOBJ_METHODS
 
     union {
       CommonFields f_common;
@@ -293,10 +286,10 @@ namespace Realm {
   };
 
   template <typename S>
-  bool operator<<(S& serializer, const CodeDescriptor& cd);
+  bool serialize(S& serializer, const CodeDescriptor& cd);
 
   template <typename S>
-  bool operator>>(S& deserializer, CodeDescriptor& cd);
+  bool deserialize(S& deserializer, CodeDescriptor& cd);
 
 
   // this is the interface that actual CodeImplementations must follow
