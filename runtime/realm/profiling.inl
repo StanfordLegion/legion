@@ -36,7 +36,7 @@ namespace Realm {
     TYPE_IS_SERIALIZABLE(OperationStatus::Result);
 
     template <typename S>
-    bool operator&(S& serdez, const OperationStatus& s)
+    bool serdez(S& serdez, const OperationStatus& s)
     {
       return ((serdez & s.result) &&
 	      (serdez & s.error_code) &&
