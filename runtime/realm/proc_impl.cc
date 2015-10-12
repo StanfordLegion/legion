@@ -283,35 +283,67 @@ namespace Realm {
 	assert(0);
       }
 
-      Serialization::DynamicBufferSerializer dbs(1024);
-      dbs << codedesc;
-      printf("slen = %zd\n", dbs.bytes_used());
-      CodeDescriptor cd2;
-      Serialization::FixedBufferDeserializer fbd(dbs.get_buffer(), dbs.bytes_used());
-      fbd >> cd2;
-      printf("compare = %d\n", codedesc.type() == cd2.type());
-      std::cout << cd2.type() << std::endl;
-      // for now, processor must be local
+      // TODO: special case - registration on local processord with a raw function pointer and no
+      //  profiling requests - can be done immediately and return NO_EVENT
+
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+
+      TaskRegistration *tro = new TaskRegistration(codedesc, 
+						   ByteArrayRef(user_data, user_data_len),
+						   finish_event, prs);
+      tro->mark_ready();
+      tro->mark_started();
+
+      // do local processors first
+      std::set<Processor> local_procs;
+      get_runtime()->machine->get_local_processors_by_kind(local_procs, target_kind);
+      if(!local_procs.empty()) {
+	// for now, always need a function pointer implementation
+	if(!tro->codedesc.find_impl<FunctionPointerImplementation>()) {
+	  // try to make one from a dso reference, if available
+	  const DSOReferenceImplementation *dso = tro->codedesc.find_impl<DSOReferenceImplementation>();
+	  if(!dso) {
+	    log_taskreg.fatal() << "local task registration needs fnptr or DSO reference!";
+	    assert(0);
+	  }
+	  FunctionPointerImplementation *fpi = cvt_dsoref_to_fnptr(dso);
+	  if(!fpi) {
+	    log_taskreg.fatal() << "failed to convert DSO reference to function pointer";
+	    assert(0);
+	  }
+	}
+
+	for(std::set<Processor>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++) {
+	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
+	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	}
+      }
+
       if(global) {
-	log_taskreg.fatal() << "TODO: support task registration for remote processors";
+	// remote processors need a portable implementation available
+	if(!tro->codedesc.has_portable_implementations()) {
+	  // try converting a function pointer into a DSO reference
+	  const FunctionPointerImplementation *fpi = tro->codedesc.find_impl<FunctionPointerImplementation>();
+	  if(!fpi) {
+	    log_taskreg.fatal() << "remote proc needs portable code: no function pointer available either";
+	    assert(0);
+	  }
+	  DSOReferenceImplementation *dso = cvt_fnptr_to_dsoref(fpi);
+	  if(!dso) {
+	    log_taskreg.fatal() << "couldn't generate DSO reference for remote task registration";
+	    assert(0);
+	  }
+	  tro->codedesc.add_implementation(dso);
+	}
+
+	// TODO: remote proc case
 	assert(0);
       }
 
-      ByteArrayRef udata(user_data, user_data_len);
-
-      std::set<Event> events;
-#if 0
-      const std::vector<ProcessorImpl *>& local_procs = get_runtime()->nodes[gasnet_mynode()].processors;
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	if((*it)->kind == target_kind) {
-	  Event e = (*it)->register_task(func_id, codedesc, prs, udata);
-	  events.insert(e);
-	}
-#endif
-
-      return Event::merge_events(events);
+      tro->mark_finished();
+      return finish_event;
     }
 
 
