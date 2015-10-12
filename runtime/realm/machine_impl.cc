@@ -50,6 +50,17 @@ namespace Realm {
       return ((MachineImpl *)impl)->get_all_processors(pset);
     }
 
+    void Machine::get_local_processors(std::set<Processor>& pset) const
+    {
+      return ((MachineImpl *)impl)->get_local_processors(pset);
+    }
+
+    void Machine::get_local_processors_by_kind(std::set<Processor>& pset,
+					       Processor::Kind kind) const
+    {
+      return ((MachineImpl *)impl)->get_local_processors_by_kind(pset, kind);
+    }
+
     // Return the set of memories visible from a processor
     void Machine::get_visible_memories(Processor p, std::set<Memory>& mset) const
     {
@@ -196,6 +207,29 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	pset.insert((*it).p);
+      }
+    }
+
+    void MachineImpl::get_local_processors(std::set<Processor>& pset) const
+    {
+      for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
+	  it != proc_mem_affinities.end();
+	  it++) {
+	Processor p = (*it).p;
+	if(ID(p).node() == gasnet_mynode())
+	  pset.insert(p);
+      }
+    }
+
+    void MachineImpl::get_local_processors_by_kind(std::set<Processor>& pset,
+						   Processor::Kind kind) const
+    {
+      for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
+	  it != proc_mem_affinities.end();
+	  it++) {
+	Processor p = (*it).p;
+	if((ID(p).node() == gasnet_mynode()) && (p.kind() == kind))
+	  pset.insert(p);
       }
     }
 
