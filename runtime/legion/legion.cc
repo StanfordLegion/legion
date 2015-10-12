@@ -363,7 +363,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FieldAllocator::FieldAllocator(FieldSpace f, Context p, 
-                                   HighLevelRuntime *rt)
+                                   Runtime *rt)
       : field_space(f), parent(p), runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -604,7 +604,7 @@ namespace LegionRuntime {
       if (!lock_event.has_triggered())
       {
         Processor proc = Processor::get_executing_processor();
-        Runtime *rt = Runtime::get_runtime(proc);
+        Internal *rt = Internal::get_runtime(proc);
         rt->pre_wait(proc);
         lock_event.wait();
         rt->post_wait(proc);
@@ -728,7 +728,7 @@ namespace LegionRuntime {
       if (!phase_barrier.has_triggered())
       {
         Processor proc = Processor::get_executing_processor();
-        Runtime *rt = Runtime::get_runtime(proc);
+        Internal *rt = Internal::get_runtime(proc);
         rt->pre_wait(proc);
         phase_barrier.wait();
         rt->post_wait(proc);
@@ -1864,7 +1864,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(HighLevelRuntime *rt, Context ctx,
+    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
                                  IndexSpace space)
     //--------------------------------------------------------------------------
     {
@@ -1874,7 +1874,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(HighLevelRuntime *rt, Context ctx,
+    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
                                  LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -2040,7 +2040,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ProjectionFunctor::ProjectionFunctor(HighLevelRuntime *rt)
+    ProjectionFunctor::ProjectionFunctor(Runtime *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -2211,14 +2211,14 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    HighLevelRuntime::HighLevelRuntime(Runtime *rt)
+    Runtime::Runtime(Internal *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space(Context ctx,
+    IndexSpace Runtime::create_index_space(Context ctx,
                                                     size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
@@ -2226,14 +2226,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space(Context ctx, Domain domain)
+    IndexSpace Runtime::create_index_space(Context ctx, Domain domain)
     //--------------------------------------------------------------------------
     {
       return runtime->create_index_space(ctx, domain);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space(Context ctx, 
+    IndexSpace Runtime::create_index_space(Context ctx, 
                                                 const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -2241,14 +2241,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       runtime->destroy_index_space(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+    IndexPartition Runtime::create_index_partition(Context ctx,
                                           IndexSpace parent,
                                           const Domain &color_space,
                                           const PointColoring &coloring,
@@ -2261,7 +2261,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(
+    IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Coloring &coloring,
                                           bool disjoint,
@@ -2273,7 +2273,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+    IndexPartition Runtime::create_index_partition(Context ctx,
                                           IndexSpace parent, 
                                           const Domain &color_space,
                                           const DomainPointColoring &coloring,
@@ -2285,7 +2285,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(
+    IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           Domain color_space,
                                           const DomainColoring &coloring,
@@ -2298,7 +2298,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+    IndexPartition Runtime::create_index_partition(Context ctx,
                                        IndexSpace parent,
                                        const Domain &color_space,
                                        const MultiDomainPointColoring &coloring,
@@ -2310,7 +2310,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(
+    IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           Domain color_space,
                                           const MultiDomainColoring &coloring,
@@ -2323,7 +2323,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_index_partition(
+    IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
     Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
                                           int part_color)
@@ -2334,7 +2334,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_index_partition(Context ctx, 
+    void Runtime::destroy_index_partition(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2342,7 +2342,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_equal_partition(Context ctx, 
+    IndexPartition Runtime::create_equal_partition(Context ctx, 
                                                       IndexSpace parent,
                                                       Domain color_space,
                                                       size_t granularity,
@@ -2354,7 +2354,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_weighted_partition(Context ctx,
+    IndexPartition Runtime::create_weighted_partition(Context ctx,
                                       IndexSpace parent, Domain color_space,
                                       const std::map<DomainPoint,int> &weights,
                                       size_t granularity, int color,
@@ -2367,7 +2367,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_union(Context ctx,
+    IndexPartition Runtime::create_partition_by_union(Context ctx,
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, PartitionKind kind,
                                     int color, bool allocable)
@@ -2378,7 +2378,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_intersection(
+    IndexPartition Runtime::create_partition_by_intersection(
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
@@ -2392,7 +2392,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_difference(
+    IndexPartition Runtime::create_partition_by_difference(
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
@@ -2406,7 +2406,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::create_cross_product_partitions(Context ctx,
+    void Runtime::create_cross_product_partitions(Context ctx,
                                 IndexPartition handle1, IndexPartition handle2,
                                 std::map<DomainPoint,IndexPartition> &handles,
                                 PartitionKind kind, int color, bool allocable)
@@ -2417,7 +2417,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_field(Context ctx,
+    IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                    const Domain &color_space, int color, bool allocable)
     //--------------------------------------------------------------------------
@@ -2427,7 +2427,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_image(Context ctx,
+    IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, const Domain &color_space,
                   PartitionKind part_kind, int color, bool allocable)
@@ -2439,7 +2439,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_partition_by_preimage(Context ctx,
+    IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, const Domain &color_space,
                   PartitionKind part_kind, int color, bool allocable)
@@ -2451,7 +2451,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::create_pending_partition(Context ctx,
+    IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, const Domain &color_space, 
                              PartitionKind part_kind, int color, bool allocable)
     //--------------------------------------------------------------------------
@@ -2461,7 +2461,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space_union(Context ctx,
+    IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
                       const std::vector<IndexSpace> &handles) 
     //--------------------------------------------------------------------------
@@ -2470,7 +2470,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space_union(Context ctx,
+    IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
                       IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -2479,7 +2479,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space_intersection(Context ctx,
+    IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
                       const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -2489,7 +2489,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space_intersection(Context ctx,
+    IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
                       IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -2499,7 +2499,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::create_index_space_difference(Context ctx,
+    IndexSpace Runtime::create_index_space_difference(Context ctx,
           IndexPartition parent, const DomainPoint &color, IndexSpace initial, 
           const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -2509,7 +2509,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::get_index_partition(Context ctx, 
+    IndexPartition Runtime::get_index_partition(Context ctx, 
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
@@ -2517,7 +2517,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::get_index_partition(Context ctx,
+    IndexPartition Runtime::get_index_partition(Context ctx,
                                     IndexSpace parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -2525,7 +2525,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_index_partition(Context ctx, IndexSpace parent,
+    bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -2533,7 +2533,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::get_index_subspace(Context ctx, 
+    IndexSpace Runtime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
@@ -2541,7 +2541,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::get_index_subspace(Context ctx,
+    IndexSpace Runtime::get_index_subspace(Context ctx,
                                      IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -2549,7 +2549,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_index_subspace(Context ctx, 
+    bool Runtime::has_index_subspace(Context ctx, 
                                      IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -2557,14 +2557,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_multiple_domains(Context ctx, IndexSpace handle)
+    bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->has_multiple_domains(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
-    Domain HighLevelRuntime::get_index_space_domain(Context ctx, 
+    Domain Runtime::get_index_space_domain(Context ctx, 
                                                     IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2572,7 +2572,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::get_index_space_domains(Context ctx, 
+    void Runtime::get_index_space_domains(Context ctx, 
                                 IndexSpace handle, std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -2580,7 +2580,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain HighLevelRuntime::get_index_partition_color_space(Context ctx, 
+    Domain Runtime::get_index_partition_color_space(Context ctx, 
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
@@ -2588,7 +2588,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::get_index_space_partition_colors(Context ctx, 
+    void Runtime::get_index_space_partition_colors(Context ctx, 
                                                             IndexSpace sp,
                                                         std::set<Color> &colors)
     //--------------------------------------------------------------------------
@@ -2597,7 +2597,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::get_index_space_partition_colors(Context ctx,
+    void Runtime::get_index_space_partition_colors(Context ctx,
                                                             IndexSpace sp,
                                                   std::set<DomainPoint> &colors)
     //--------------------------------------------------------------------------
@@ -2606,7 +2606,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::is_index_partition_disjoint(Context ctx, 
+    bool Runtime::is_index_partition_disjoint(Context ctx, 
                                                        IndexPartition p)
     //--------------------------------------------------------------------------
     {
@@ -2614,7 +2614,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color HighLevelRuntime::get_index_space_color(Context ctx, 
+    Color Runtime::get_index_space_color(Context ctx, 
                                                   IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2622,7 +2622,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint HighLevelRuntime::get_index_space_color_point(Context ctx,
+    DomainPoint Runtime::get_index_space_color_point(Context ctx,
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2630,7 +2630,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color HighLevelRuntime::get_index_partition_color(Context ctx,
+    Color Runtime::get_index_partition_color(Context ctx,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2638,7 +2638,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint HighLevelRuntime::get_index_partition_color_point(Context ctx,
+    DomainPoint Runtime::get_index_partition_color_point(Context ctx,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2646,7 +2646,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace HighLevelRuntime::get_parent_index_space(Context ctx,
+    IndexSpace Runtime::get_parent_index_space(Context ctx,
                                                         IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2654,7 +2654,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_parent_index_partition(Context ctx,
+    bool Runtime::has_parent_index_partition(Context ctx,
                                                       IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2662,7 +2662,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition HighLevelRuntime::get_parent_index_partition(Context ctx,
+    IndexPartition Runtime::get_parent_index_partition(Context ctx,
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2670,7 +2670,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    ptr_t HighLevelRuntime::safe_cast(Context ctx, ptr_t pointer, 
+    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
@@ -2678,7 +2678,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint HighLevelRuntime::safe_cast(Context ctx, DomainPoint point, 
+    DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
     {
@@ -2686,21 +2686,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace HighLevelRuntime::create_field_space(Context ctx)
+    FieldSpace Runtime::create_field_space(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->create_field_space(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       runtime->destroy_field_space(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
-    size_t HighLevelRuntime::get_field_size(Context ctx, FieldSpace handle,
+    size_t Runtime::get_field_size(Context ctx, FieldSpace handle,
                                             FieldID fid)
     //--------------------------------------------------------------------------
     {
@@ -2708,7 +2708,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::create_logical_region(Context ctx, 
+    LogicalRegion Runtime::create_logical_region(Context ctx, 
                                             IndexSpace index, FieldSpace fields)
     //--------------------------------------------------------------------------
     {
@@ -2716,7 +2716,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_logical_region(Context ctx, 
+    void Runtime::destroy_logical_region(Context ctx, 
                                                   LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -2724,7 +2724,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_logical_partition(Context ctx, 
+    void Runtime::destroy_logical_partition(Context ctx, 
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2732,7 +2732,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition HighLevelRuntime::get_logical_partition(Context ctx, 
+    LogicalPartition Runtime::get_logical_partition(Context ctx, 
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2740,7 +2740,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition HighLevelRuntime::get_logical_partition_by_color(
+    LogicalPartition Runtime::get_logical_partition_by_color(
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
@@ -2748,7 +2748,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition HighLevelRuntime::get_logical_partition_by_color(
+    LogicalPartition Runtime::get_logical_partition_by_color(
                         Context ctx, LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -2756,7 +2756,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_logical_partition_by_color(Context ctx,
+    bool Runtime::has_logical_partition_by_color(Context ctx,
                                      LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -2764,7 +2764,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition HighLevelRuntime::get_logical_partition_by_tree(
+    LogicalPartition Runtime::get_logical_partition_by_tree(
                                             Context ctx, IndexPartition handle, 
                                             FieldSpace fspace, RegionTreeID tid) 
     //--------------------------------------------------------------------------
@@ -2773,7 +2773,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::get_logical_subregion(Context ctx, 
+    LogicalRegion Runtime::get_logical_subregion(Context ctx, 
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2781,7 +2781,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::get_logical_subregion_by_color(Context ctx, 
+    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx, 
                                              LogicalPartition parent, Color c)
     //--------------------------------------------------------------------------
     {
@@ -2789,7 +2789,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::get_logical_subregion_by_color(Context ctx,
+    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx,
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -2797,7 +2797,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_logical_subregion_by_color(Context ctx,
+    bool Runtime::has_logical_subregion_by_color(Context ctx,
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -2805,7 +2805,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::get_logical_subregion_by_tree(Context ctx, 
+    LogicalRegion Runtime::get_logical_subregion_by_tree(Context ctx, 
                         IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
@@ -2813,7 +2813,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color HighLevelRuntime::get_logical_region_color(Context ctx,
+    Color Runtime::get_logical_region_color(Context ctx,
                                                      LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -2821,7 +2821,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color HighLevelRuntime::get_logical_partition_color(Context ctx,
+    Color Runtime::get_logical_partition_color(Context ctx,
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2829,7 +2829,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion HighLevelRuntime::get_parent_logical_region(Context ctx,
+    LogicalRegion Runtime::get_parent_logical_region(Context ctx,
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -2837,7 +2837,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool HighLevelRuntime::has_parent_logical_partition(Context ctx,
+    bool Runtime::has_parent_logical_partition(Context ctx,
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -2845,7 +2845,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition HighLevelRuntime::get_parent_logical_partition(Context ctx,
+    LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -2853,7 +2853,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexAllocator HighLevelRuntime::create_index_allocator(Context ctx, 
+    IndexAllocator Runtime::create_index_allocator(Context ctx, 
                                                             IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2861,7 +2861,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator HighLevelRuntime::create_field_allocator(Context ctx, 
+    FieldAllocator Runtime::create_field_allocator(Context ctx, 
                                                             FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2869,14 +2869,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap HighLevelRuntime::create_argument_map(Context ctx)
+    ArgumentMap Runtime::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->create_argument_map(ctx);
     }
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::execute_task(Context ctx, 
+    Future Runtime::execute_task(Context ctx, 
                                           const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2884,7 +2884,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap HighLevelRuntime::execute_index_space(Context ctx, 
+    FutureMap Runtime::execute_index_space(Context ctx, 
                                                   const IndexLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2892,7 +2892,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::execute_index_space(Context ctx, 
+    Future Runtime::execute_index_space(Context ctx, 
                             const IndexLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -2900,7 +2900,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::execute_task(Context ctx, 
+    Future Runtime::execute_task(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -2916,7 +2916,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap HighLevelRuntime::execute_index_space(Context ctx, 
+    FutureMap Runtime::execute_index_space(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
@@ -2938,7 +2938,7 @@ namespace LegionRuntime {
 
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::execute_index_space(Context ctx, 
+    Future Runtime::execute_index_space(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
@@ -2961,7 +2961,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion HighLevelRuntime::map_region(Context ctx, 
+    PhysicalRegion Runtime::map_region(Context ctx, 
                                                 const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2969,7 +2969,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion HighLevelRuntime::map_region(Context ctx, 
+    PhysicalRegion Runtime::map_region(Context ctx, 
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -2977,7 +2977,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion HighLevelRuntime::map_region(Context ctx, unsigned idx, 
+    PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -2985,28 +2985,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       runtime->remap_region(ctx, region);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::unmap_region(Context ctx, PhysicalRegion region)
+    void Runtime::unmap_region(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       runtime->unmap_region(ctx, region);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::unmap_all_regions(Context ctx)
+    void Runtime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
       runtime->unmap_all_regions(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::fill_field(Context ctx, LogicalRegion handle,
+    void Runtime::fill_field(Context ctx, LogicalRegion handle,
                                       LogicalRegion parent, FieldID fid,
                                       const void *value, size_t value_size,
                                       Predicate pred)
@@ -3016,7 +3016,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::fill_field(Context ctx, LogicalRegion handle,
+    void Runtime::fill_field(Context ctx, LogicalRegion handle,
                                       LogicalRegion parent, FieldID fid,
                                       Future f, Predicate pred)
     //--------------------------------------------------------------------------
@@ -3025,7 +3025,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::fill_fields(Context ctx, LogicalRegion handle,
+    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
                                        LogicalRegion parent,
                                        const std::set<FieldID> &fields,
                                        const void *value, size_t size,
@@ -3036,7 +3036,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::fill_fields(Context ctx, LogicalRegion handle,
+    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
                                        LogicalRegion parent, 
                                        const std::set<FieldID> &fields,
                                        Future f, Predicate pred)
@@ -3046,7 +3046,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion HighLevelRuntime::attach_hdf5(Context ctx, 
+    PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
                                                  LogicalRegion handle,
                                                  LogicalRegion parent,
@@ -3059,14 +3059,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::detach_hdf5(Context ctx, PhysicalRegion region)
+    void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       runtime->detach_hdf5(ctx, region);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_copy_operation(Context ctx, 
+    void Runtime::issue_copy_operation(Context ctx, 
                                                 const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -3074,21 +3074,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate HighLevelRuntime::create_predicate(Context ctx, const Future &f)
+    Predicate Runtime::create_predicate(Context ctx, const Future &f)
     //--------------------------------------------------------------------------
     {
       return runtime->create_predicate(ctx, f);
     }
 
     //--------------------------------------------------------------------------
-    Predicate HighLevelRuntime::predicate_not(Context ctx, const Predicate &p) 
+    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
     //--------------------------------------------------------------------------
     {
       return runtime->predicate_not(ctx, p);
     }
 
     //--------------------------------------------------------------------------
-    Predicate HighLevelRuntime::predicate_and(Context ctx, 
+    Predicate Runtime::predicate_and(Context ctx, 
                                        const Predicate &p1, const Predicate &p2) 
     //--------------------------------------------------------------------------
     {
@@ -3096,7 +3096,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate HighLevelRuntime::predicate_or(Context ctx,
+    Predicate Runtime::predicate_or(Context ctx,
                                        const Predicate &p1, const Predicate &p2)  
     //--------------------------------------------------------------------------
     {
@@ -3104,21 +3104,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Lock HighLevelRuntime::create_lock(Context ctx)
+    Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->create_lock(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_lock(Context ctx, Lock l)
+    void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
       runtime->destroy_lock(ctx, l);
     }
 
     //--------------------------------------------------------------------------
-    Grant HighLevelRuntime::acquire_grant(Context ctx,
+    Grant Runtime::acquire_grant(Context ctx,
                                       const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
@@ -3126,14 +3126,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::release_grant(Context ctx, Grant grant)
+    void Runtime::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
       runtime->release_grant(ctx, grant);
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier HighLevelRuntime::create_phase_barrier(Context ctx, 
+    PhaseBarrier Runtime::create_phase_barrier(Context ctx, 
                                                         unsigned arrivals)
     //--------------------------------------------------------------------------
     {
@@ -3141,14 +3141,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
+    void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
       runtime->destroy_phase_barrier(ctx, pb);
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier HighLevelRuntime::advance_phase_barrier(Context ctx, 
+    PhaseBarrier Runtime::advance_phase_barrier(Context ctx, 
                                                          PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
@@ -3156,7 +3156,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective HighLevelRuntime::create_dynamic_collective(Context ctx,
+    DynamicCollective Runtime::create_dynamic_collective(Context ctx,
                                                         unsigned arrivals,
                                                         ReductionOpID redop,
                                                         const void *init_value,
@@ -3168,7 +3168,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_dynamic_collective(Context ctx, 
+    void Runtime::destroy_dynamic_collective(Context ctx, 
                                                       DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -3176,7 +3176,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::arrive_dynamic_collective(Context ctx,
+    void Runtime::arrive_dynamic_collective(Context ctx,
                                                      DynamicCollective dc,
                                                      const void *buffer,
                                                      size_t size, 
@@ -3187,7 +3187,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::defer_dynamic_collective_arrival(Context ctx,
+    void Runtime::defer_dynamic_collective_arrival(Context ctx,
                                                       DynamicCollective dc,
                                                       Future f, unsigned count)
     //--------------------------------------------------------------------------
@@ -3196,7 +3196,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::get_dynamic_collective_result(Context ctx,
+    Future Runtime::get_dynamic_collective_result(Context ctx,
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -3204,7 +3204,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective HighLevelRuntime::advance_dynamic_collective(Context ctx,
+    DynamicCollective Runtime::advance_dynamic_collective(Context ctx,
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -3212,7 +3212,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_acquire(Context ctx,
+    void Runtime::issue_acquire(Context ctx,
                                          const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -3220,7 +3220,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_release(Context ctx,
+    void Runtime::issue_release(Context ctx,
                                          const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -3228,42 +3228,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_mapping_fence(Context ctx)
+    void Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_mapping_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_execution_fence(Context ctx)
+    void Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_execution_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::begin_trace(Context ctx, TraceID tid)
+    void Runtime::begin_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
       runtime->begin_trace(ctx, tid);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::end_trace(Context ctx, TraceID tid)
+    void Runtime::end_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
       runtime->end_trace(ctx, tid);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::complete_frame(Context ctx)
+    void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
       runtime->complete_frame(ctx);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap HighLevelRuntime::execute_must_epoch(Context ctx,
+    FutureMap Runtime::execute_must_epoch(Context ctx,
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -3271,7 +3271,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    int HighLevelRuntime::get_tunable_value(Context ctx, TunableID tid,
+    int Runtime::get_tunable_value(Context ctx, TunableID tid,
                                             MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -3279,7 +3279,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Mapper* HighLevelRuntime::get_mapper(Context ctx, MapperID id,
+    Mapper* Runtime::get_mapper(Context ctx, MapperID id,
                                          Processor target)
     //--------------------------------------------------------------------------
     {
@@ -3287,14 +3287,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor HighLevelRuntime::get_executing_processor(Context ctx)
+    Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->get_executing_processor(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::raise_region_exception(Context ctx, 
+    void Runtime::raise_region_exception(Context ctx, 
                                                   PhysicalRegion region,
                                                   bool nuclear)
     //--------------------------------------------------------------------------
@@ -3304,7 +3304,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     const std::map<int,AddressSpace>& 
-                                HighLevelRuntime::find_forward_MPI_mapping(void)
+                                Runtime::find_forward_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
       return runtime->find_forward_MPI_mapping();
@@ -3312,14 +3312,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     const std::map<AddressSpace,int>&
-                                HighLevelRuntime::find_reverse_MPI_mapping(void)
+                                Runtime::find_reverse_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
       return runtime->find_reverse_MPI_mapping();
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::add_mapper(MapperID map_id, Mapper *mapper, 
+    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
                                       Processor proc)
     //--------------------------------------------------------------------------
     {
@@ -3327,7 +3327,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::replace_default_mapper(Mapper *mapper, 
+    void Runtime::replace_default_mapper(Mapper *mapper, 
                                                   Processor proc)
     //--------------------------------------------------------------------------
     {
@@ -3335,7 +3335,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::register_projection_functor(ProjectionID pid,
+    void Runtime::register_projection_functor(ProjectionID pid,
                                                        ProjectionFunctor *func)
     //--------------------------------------------------------------------------
     {
@@ -3343,7 +3343,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(IndexSpace handle,
+    void Runtime::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
                                                        size_t size)
@@ -3353,7 +3353,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(IndexPartition handle,
+    void Runtime::attach_semantic_information(IndexPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
                                                        size_t size)
@@ -3363,7 +3363,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(FieldSpace handle,
+    void Runtime::attach_semantic_information(FieldSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
                                                        size_t size)
@@ -3373,7 +3373,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(FieldSpace handle,
+    void Runtime::attach_semantic_information(FieldSpace handle,
                                                        FieldID fid,
                                                        SemanticTag tag,
                                                        const void *buffer,
@@ -3384,7 +3384,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(LogicalRegion handle,
+    void Runtime::attach_semantic_information(LogicalRegion handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
                                                        size_t size)
@@ -3394,7 +3394,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_semantic_information(LogicalPartition handle,
+    void Runtime::attach_semantic_information(LogicalPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
                                                        size_t size)
@@ -3404,58 +3404,58 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(IndexSpace handle, const char *name)
+    void Runtime::attach_name(IndexSpace handle, const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle,
+      Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(IndexPartition handle, const char *name)
+    void Runtime::attach_name(IndexPartition handle, const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle,
+      Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(FieldSpace handle, const char *name)
+    void Runtime::attach_name(FieldSpace handle, const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle,
+      Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(FieldSpace handle,
+    void Runtime::attach_name(FieldSpace handle,
                                        FieldID fid,
                                        const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle, fid,
+      Runtime::attach_semantic_information(handle, fid,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(LogicalRegion handle, const char *name)
+    void Runtime::attach_name(LogicalRegion handle, const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle,
+      Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::attach_name(LogicalPartition handle,
+    void Runtime::attach_name(LogicalPartition handle,
                                        const char *name)
     //--------------------------------------------------------------------------
     {
-      HighLevelRuntime::attach_semantic_information(handle,
+      Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(IndexSpace handle,
+    void Runtime::retrieve_semantic_information(IndexSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
                                                          size_t &size)
@@ -3465,7 +3465,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(IndexPartition handle,
+    void Runtime::retrieve_semantic_information(IndexPartition handle,
                                                          SemanticTag tag,
                                                          const void *&result,
                                                          size_t &size)
@@ -3475,7 +3475,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(FieldSpace handle,
+    void Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
                                                          size_t &size)
@@ -3485,7 +3485,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(FieldSpace handle,
+    void Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          FieldID fid,
                                                          SemanticTag tag,
                                                          const void *&result,
@@ -3496,7 +3496,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(LogicalRegion handle,
+    void Runtime::retrieve_semantic_information(LogicalRegion handle,
                                                          SemanticTag tag,
                                                          const void *&result,
                                                          size_t &size)
@@ -3506,7 +3506,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_semantic_information(LogicalPartition part,
+    void Runtime::retrieve_semantic_information(LogicalPartition part,
                                                          SemanticTag tag,
                                                          const void *&result,
                                                          size_t &size)
@@ -3516,72 +3516,72 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(IndexSpace handle, const char *&result)
+    void Runtime::retrieve_name(IndexSpace handle, const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(IndexPartition handle,
+    void Runtime::retrieve_name(IndexPartition handle,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(FieldSpace handle, const char *&result)
+    void Runtime::retrieve_name(FieldSpace handle, const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(FieldSpace handle,
+    void Runtime::retrieve_name(FieldSpace handle,
                                          FieldID fid,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(LogicalRegion handle,
+    void Runtime::retrieve_name(LogicalRegion handle,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::retrieve_name(LogicalPartition part,
+    void Runtime::retrieve_name(LogicalPartition part,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      HighLevelRuntime::retrieve_semantic_information(part,
+      Runtime::retrieve_semantic_information(part,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
-    FieldID HighLevelRuntime::allocate_field(Context ctx, FieldSpace space,
+    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
                                              size_t field_size, FieldID fid,
                                              bool local)
     //--------------------------------------------------------------------------
@@ -3590,14 +3590,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::free_field(Context ctx, FieldSpace sp, FieldID fid)
+    void Runtime::free_field(Context ctx, FieldSpace sp, FieldID fid)
     //--------------------------------------------------------------------------
     {
       runtime->free_field(ctx, sp, fid);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::allocate_fields(Context ctx, FieldSpace space,
+    void Runtime::allocate_fields(Context ctx, FieldSpace space,
                                            const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          bool local)
@@ -3607,7 +3607,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::free_fields(Context ctx, FieldSpace space,
+    void Runtime::free_fields(Context ctx, FieldSpace space,
                                        const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
@@ -3615,14 +3615,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& HighLevelRuntime::begin_task(Context ctx)
+    const std::vector<PhysicalRegion>& Runtime::begin_task(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->begin_task(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::end_task(Context ctx, const void *result, 
+    void Runtime::end_task(Context ctx, const void *result, 
                                     size_t result_size, bool owned /*= false*/)
     //--------------------------------------------------------------------------
     {
@@ -3630,7 +3630,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future HighLevelRuntime::from_value(const void *value, 
+    Future Runtime::from_value(const void *value, 
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
@@ -3643,7 +3643,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const void* HighLevelRuntime::get_local_args(Context ctx, 
+    const void* Runtime::get_local_args(Context ctx, 
                                          DomainPoint &point, size_t &local_size)
     //--------------------------------------------------------------------------
     {
@@ -3651,37 +3651,37 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    /*static*/ int HighLevelRuntime::start(int argc, char **argv, 
+    /*static*/ int Runtime::start(int argc, char **argv, 
                                            bool background)
     //--------------------------------------------------------------------------
     {
-      return Runtime::start(argc, argv, background);
+      return Internal::start(argc, argv, background);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::wait_for_shutdown(void)
+    /*static*/ void Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::wait_for_shutdown();
+      Internal::wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::set_top_level_task_id(
+    /*static*/ void Runtime::set_top_level_task_id(
                                                   Processor::TaskFuncID top_id)
     //--------------------------------------------------------------------------
     {
-      Runtime::set_top_level_task_id(top_id);
+      Internal::set_top_level_task_id(top_id);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::configure_MPI_interoperability(int rank)
+    /*static*/ void Runtime::configure_MPI_interoperability(int rank)
     //--------------------------------------------------------------------------
     {
-      Runtime::configure_MPI_interoperability(rank);
+      Internal::configure_MPI_interoperability(rank);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MPILegionHandshake HighLevelRuntime::create_handshake(
+    /*static*/ MPILegionHandshake Runtime::create_handshake(
                                                         bool init_in_MPI,
                                                         int mpi_participants,
                                                         int legion_participants)
@@ -3697,77 +3697,77 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const ReductionOp* HighLevelRuntime::get_reduction_op(
+    /*static*/ const ReductionOp* Runtime::get_reduction_op(
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_reduction_op(redop_id);
+      return Internal::get_reduction_op(redop_id);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::set_registration_callback(
+    /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Runtime::set_registration_callback(callback);
+      Internal::set_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const InputArgs& HighLevelRuntime::get_input_args(void)
+    /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_input_args();
+      return Internal::get_input_args();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ HighLevelRuntime* HighLevelRuntime::get_runtime(Processor p)
+    /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(p)->high_level;
+      return Internal::get_runtime(p)->high_level;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& HighLevelRuntime::get_reduction_table(void)
+    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_reduction_table();
+      return Internal::get_reduction_table();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID HighLevelRuntime::
+    /*static*/ ProjectionID Runtime::
       register_region_projection_function(ProjectionID handle, void *func_ptr)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_region_projection_function(handle, 
+      return Internal::register_region_projection_function(handle, 
                                                                 func_ptr);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID HighLevelRuntime::
+    /*static*/ ProjectionID Runtime::
       register_partition_projection_function(ProjectionID handle, 
                                              void *func_ptr)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_partition_projection_function(handle,
+      return Internal::register_partition_projection_function(handle,
                                                                    func_ptr);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID HighLevelRuntime::update_collection_table(
+    /*static*/ TaskID Runtime::update_collection_table(
         LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
         Processor::Kind proc_kind, bool single_task, bool index_space_task,
         VariantID vid, size_t return_size, 
         const TaskConfigOptions &options, const char *name)
     //--------------------------------------------------------------------------
     {
-      return Runtime::update_collection_table(low_level_ptr,inline_ptr,
+      return Internal::update_collection_table(low_level_ptr,inline_ptr,
                                                     uid,proc_kind,single_task, 
                                                     index_space_task,vid,
                                                     return_size,options,name);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID HighLevelRuntime::update_collection_table(
+    /*static*/ TaskID Runtime::update_collection_table(
         LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
         Processor::Kind proc_kind, bool single_task, bool index_space_task,
         VariantID vid, size_t return_size, 
@@ -3775,7 +3775,7 @@ namespace LegionRuntime {
         const void *user_data, size_t user_data_size)
     //--------------------------------------------------------------------------
     {
-      return Runtime::update_collection_table(low_level_ptr,inline_ptr,
+      return Internal::update_collection_table(low_level_ptr,inline_ptr,
                                                     uid,proc_kind,single_task, 
                                                     index_space_task,vid,
                                                     return_size,options,name,
@@ -3783,27 +3783,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const void* HighLevelRuntime::find_user_data(TaskID tid,
+    /*static*/ const void* Runtime::find_user_data(TaskID tid,
                                                             VariantID vid)
     //--------------------------------------------------------------------------
     {
-      return Runtime::find_user_data(tid, vid);
+      return Internal::find_user_data(tid, vid);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::enable_profiling(void)
+    /*static*/ void Runtime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::disable_profiling(void)
+    /*static*/ void Runtime::disable_profiling(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void HighLevelRuntime::dump_profiling(void)
+    /*static*/ void Runtime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
     }

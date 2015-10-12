@@ -234,7 +234,7 @@ namespace LegionRuntime {
      * must be made to perform allocations on different index
      * spaces.
      *
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     class IndexAllocator {
     public:
@@ -243,7 +243,7 @@ namespace LegionRuntime {
       ~IndexAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
-      // Only the HighLevelRuntime should be able to make these
+      // Only the Runtime should be able to make these
       IndexAllocator(IndexSpace space, IndexSpaceAllocator *allocator);
     public:
       IndexAllocator& operator=(const IndexAllocator &allocator);
@@ -283,7 +283,7 @@ namespace LegionRuntime {
      * to perform allocations on different field spaces.
      *
      * @see FieldSpace
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     class FieldAllocator {
     public:
@@ -292,8 +292,8 @@ namespace LegionRuntime {
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
-      // Only the HighLevelRuntime should be able to make these
-      FieldAllocator(FieldSpace f, Context p, HighLevelRuntime *rt);
+      // Only the Runtime should be able to make these
+      FieldAllocator(FieldSpace f, Context p, Runtime *rt);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
       inline bool operator<(const FieldAllocator &rhs) const;
@@ -366,7 +366,7 @@ namespace LegionRuntime {
     private:
       FieldSpace field_space;
       Context parent;
-      HighLevelRuntime *runtime;
+      Runtime *runtime;
     };
 
     //==========================================================================
@@ -550,7 +550,7 @@ namespace LegionRuntime {
      * @see IndexLauncher
      * @see CopyLauncher
      * @see InlineLauncher
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     class Lock {
     public:
@@ -595,7 +595,7 @@ namespace LegionRuntime {
      * Once a grant has been used for all necessary tasks, the
      * application can defer a grant release using the runtime
      * call 'release_grant'.
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     class Grant {
     public:
@@ -644,7 +644,7 @@ namespace LegionRuntime {
      * @see IndexLauncher
      * @see CopyLauncher
      * @see InlineLauncher
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     class PhaseBarrier {
     public:
@@ -1002,7 +1002,7 @@ namespace LegionRuntime {
        * and to always have concrete values.
        */
       template<typename T>
-      static inline Future from_value(HighLevelRuntime *rt, const T &value);
+      static inline Future from_value(Runtime *rt, const T &value);
     private:
       void* get_untyped_result(void); 
     };
@@ -1106,7 +1106,7 @@ namespace LegionRuntime {
      * Task launchers are objects that describe a launch
      * configuration to the runtime.  They can be re-used
      * and safely modified between calls to task launches.
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     struct TaskLauncher {
     public:
@@ -1159,7 +1159,7 @@ namespace LegionRuntime {
      * of an index space of tasks to the runtime.  They can
      * be re-used and safely modified between calls to 
      * index space launches.
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     struct IndexLauncher {
     public:
@@ -1217,7 +1217,7 @@ namespace LegionRuntime {
      * of an inline mapping operation to the runtime.  They
      * can be re-used and safely modified between calls to
      * inline mapping operations.
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     struct InlineLauncher {
     public:
@@ -1255,7 +1255,7 @@ namespace LegionRuntime {
      *    region's index space.
      * If either of these two conditions does not hold then
      * the runtime will issue an error.
-     * @see HighLevelRuntime
+     * @see Runtime
      */
     struct CopyLauncher {
     public:
@@ -1354,8 +1354,8 @@ namespace LegionRuntime {
     class IndexIterator {
     public:
       IndexIterator(const Domain &dom);
-      IndexIterator(HighLevelRuntime *rt, Context ctx, IndexSpace space);
-      IndexIterator(HighLevelRuntime *rt, Context ctx, LogicalRegion lr);
+      IndexIterator(Runtime *rt, Context ctx, IndexSpace space);
+      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr);
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:
@@ -1953,11 +1953,11 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      Mapper(HighLevelRuntime *rt) 
+      Mapper(Runtime *rt) 
         : runtime(rt) { }
       virtual ~Mapper(void) { }
     protected:
-      HighLevelRuntime *const runtime;
+      Runtime *const runtime;
     public:
       /**
        * ----------------------------------------------------------------------
@@ -2659,7 +2659,7 @@ namespace LegionRuntime {
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
-      // For documentation see methods of the same name in HighLevelRuntime
+      // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
       IndexPartition get_index_partition(IndexSpace parent, Color color) const;
 
@@ -2697,7 +2697,7 @@ namespace LegionRuntime {
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting field spaces 
-      // For documentation see methods of the same name in HighLevelRuntime
+      // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
       size_t get_field_size(FieldSpace handle, FieldID fid) const;
     protected:
@@ -2850,7 +2850,7 @@ namespace LegionRuntime {
      */
     class ProjectionFunctor {
     public:
-      ProjectionFunctor(HighLevelRuntime *rt);
+      ProjectionFunctor(Runtime *rt);
       virtual ~ProjectionFunctor(void);
     public:
       /**
@@ -2882,16 +2882,16 @@ namespace LegionRuntime {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point) = 0;
     protected:
-      HighLevelRuntime *const runtime;
+      Runtime *const runtime;
     };
 
     /**
-     * \class HighLevelRuntime
-     * The HighLevelRuntime class is the primary interface for
+     * \class Runtime
+     * The Runtime class is the primary interface for
      * Legion.  Every task is given a reference to the runtime as
      * part of its arguments.  All Legion operations are then
      * performed by directing the runtime to perform them through
-     * the methods of this class.  The methods in HighLevelRuntime
+     * the methods of this class.  The methods in Runtime
      * are broken into three categories.  The first group of
      * calls are the methods that can be used by application
      * tasks during runtime.  The second group contains calls
@@ -2899,13 +2899,13 @@ namespace LegionRuntime {
      * The final section of calls are static methods that are
      * used to configure the runtime prior to starting it up.
      */
-    class HighLevelRuntime {
+    class Runtime {
     protected:
-      // The HighLevelRuntime bootstraps itself and should
+      // The Runtime bootstraps itself and should
       // never need to be explicitly created.
-      friend class Runtime;
+      friend class Internal;
       friend class Future;
-      HighLevelRuntime(Runtime *rt);
+      Runtime(Internal *rt);
     public:
       //------------------------------------------------------------------------
       // Index Space Operations
@@ -5158,7 +5158,7 @@ namespace LegionRuntime {
        * @return ID where the function was registered
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
-                                         HighLevelRuntime*)>
+                                         Runtime*)>
       static ProjectionID register_region_function(ProjectionID handle);
 
       /**
@@ -5172,7 +5172,7 @@ namespace LegionRuntime {
        * @return ID where the function was registered
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
-                                         HighLevelRuntime*)>
+                                         Runtime*)>
       static ProjectionID register_partition_function(ProjectionID handle);
     public:
       /**
@@ -5224,7 +5224,7 @@ namespace LegionRuntime {
        */
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                      Context, HighLevelRuntime*)>
+                      Context, Runtime*)>
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index, 
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5244,7 +5244,7 @@ namespace LegionRuntime {
        */
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                         Context, HighLevelRuntime*)>
+                         Context, Runtime*)>
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5266,7 +5266,7 @@ namespace LegionRuntime {
        */
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                      Context, HighLevelRuntime*, const UDT&)>
+                      Context, Runtime*, const UDT&)>
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
@@ -5289,7 +5289,7 @@ namespace LegionRuntime {
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*,const std::vector<PhysicalRegion>&,
-                         Context, HighLevelRuntime*, const UDT&)>
+                         Context, Runtime*, const UDT&)>
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
@@ -5314,7 +5314,7 @@ namespace LegionRuntime {
         T (*TASK_PTR)(const void*,size_t,
                       const std::vector<RegionRequirement>&,
                       const std::vector<PhysicalRegion>&,
-                      Context,HighLevelRuntime*)>
+                      Context, Runtime*)>
       static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
                                          bool leaf = false,
                                          const char *name = NULL,
@@ -5339,7 +5339,7 @@ namespace LegionRuntime {
         void (*TASK_PTR)(const void*,size_t,
                          const std::vector<RegionRequirement>&,
                          const std::vector<PhysicalRegion>&,
-                         Context,HighLevelRuntime*)>
+                         Context, Runtime*)>
       static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
                                          bool leaf = false,
                                          const char *name = NULL,
@@ -5365,7 +5365,7 @@ namespace LegionRuntime {
         T (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&,
                       const std::vector<RegionRequirement>&,
                       const std::vector<PhysicalRegion>&,
-                      Context,HighLevelRuntime*)>
+                      Context, Runtime*)>
       static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
                                         bool leaf = false,
                                         const char *name = NULL,
@@ -5392,7 +5392,7 @@ namespace LegionRuntime {
                          const DomainPoint&,
                          const std::vector<RegionRequirement>&,
                          const std::vector<PhysicalRegion>&,
-                         Context,HighLevelRuntime*)>
+                         Context, Runtime*)>
       static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
                                         bool leaf = false,
                                         const char *name = NULL,
@@ -5407,7 +5407,7 @@ namespace LegionRuntime {
        * @param processor the task will run on
        * @return the high-level runtime pointer for the specified processor
        */
-      static HighLevelRuntime* get_runtime(Processor p);
+      static Runtime* get_runtime(Processor p);
     private:
       friend class FieldAllocator;
       FieldID allocate_field(Context ctx, FieldSpace space, 
@@ -5452,7 +5452,7 @@ namespace LegionRuntime {
       static ReductionOpTable& get_reduction_table(void);
     private:
       friend class Mapper;
-      Runtime *runtime;
+      Internal *runtime;
     };
 
     //==========================================================================

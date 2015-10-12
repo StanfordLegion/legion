@@ -42,19 +42,19 @@ namespace LegionRuntime {
       const char* find_privilege_task_name(void *impl)
       {
         // Have to bounce this off the Runtime because C++ is stupid
-        return HighLevel::Runtime::find_privilege_task_name(impl); 
+        return HighLevel::Internal::find_privilege_task_name(impl); 
       }
 #endif
 #ifdef BOUNDS_CHECKS
       void check_bounds(void *impl, ptr_t ptr)
       {
         // Have to bounce this off the Runtime because C++ is stupid 
-        HighLevel::Runtime::check_bounds(impl, ptr);
+        HighLevel::Internal::check_bounds(impl, ptr);
       }
       void check_bounds(void *impl, const LowLevel::DomainPoint &dp)
       {
         // Have to bounce this off the Runtime because C++ is stupid
-        HighLevel::Runtime::check_bounds(impl, dp);
+        HighLevel::Internal::check_bounds(impl, dp);
       }
 #endif
     };
@@ -161,7 +161,7 @@ namespace LegionRuntime {
       if (next == NULL)
       {
         // Check to see if we're frozen or not, note we don't really need the 
-        // lock here since there is only one thread that is traversing the list.  
+        // lock here since there is only one thread that is traversing the list.
         // The only multi-threaded part is with the references and we clearly 
         // have reference if we're traversing this list.
         if (frozen)
@@ -375,7 +375,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Future::Impl::Impl(Runtime *rt, bool register_future, DistributedID did, 
+    Future::Impl::Impl(Internal *rt, bool register_future, DistributedID did, 
                        AddressSpaceID own_space, AddressSpaceID loc_space,
                        Operation *o /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
@@ -822,7 +822,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Future::Impl::handle_future_send(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
+                                       Internal *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
@@ -844,7 +844,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Future::Impl::handle_future_result(Deserializer &derez,
-                                                       Runtime *runtime)
+                                                       Internal *runtime)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
@@ -856,7 +856,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Future::Impl::handle_future_subscription(
-                                          Deserializer &derez, Runtime *runtime)
+                                         Deserializer &derez, Internal *runtime)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
@@ -909,7 +909,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMap::Impl::Impl(SingleTask *ctx, TaskOp *t, Runtime *rt)
+    FutureMap::Impl::Impl(SingleTask *ctx, TaskOp *t, Internal *rt)
       : Collectable(), context(ctx), task(t), task_gen(t->get_generation()),
         valid(true), runtime(rt), ready_event(t->get_completion_event()),
         lock(Reservation::create_reservation()) 
@@ -918,7 +918,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::Impl::Impl(SingleTask *ctx, Event comp_event, Runtime *rt)
+    FutureMap::Impl::Impl(SingleTask *ctx, Event comp_event, Internal *rt)
       : Collectable(), context(ctx), task(NULL), task_gen(0),
         valid(true), runtime(rt), ready_event(comp_event),
         lock(Reservation::create_reservation())
@@ -927,7 +927,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::Impl::Impl(SingleTask *ctx, Runtime *rt)
+    FutureMap::Impl::Impl(SingleTask *ctx, Internal *rt)
       : Collectable(), context(ctx), task(NULL), task_gen(0),
         valid(false), runtime(rt), ready_event(Event::NO_EVENT), 
         lock(Reservation::NO_RESERVATION)
@@ -1104,7 +1104,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalRegion::Impl::Impl(const RegionRequirement &r, Event ready, bool m, 
                                SingleTask *ctx, MapperID mid, MappingTagID t,
-                               bool leaf, Runtime *rt)
+                               bool leaf, Internal *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), ready_event(ready), req(r), mapped(m), 
         valid(false), trigger_on_unmap(false)
@@ -1662,7 +1662,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(Processor proc, Processor::Kind kind,
-                                       Runtime *rt, unsigned width, 
+                                       Internal *rt, unsigned width, 
                                        unsigned def_mappers, bool no_steal, 
                                        unsigned max_steals)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
@@ -2860,7 +2860,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MemoryManager::MemoryManager(Memory m, Runtime *rt)
+    MemoryManager::MemoryManager(Memory m, Internal *rt)
       : memory(m), capacity(m.capacity()),
         remaining_capacity(capacity), runtime(rt), 
         manager_lock(Reservation::create_reservation())
@@ -3027,7 +3027,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                                 bool flush, Runtime *runtime, Processor target)
+                                bool flush, Internal *runtime, Processor target)
     //--------------------------------------------------------------------------
     {
       // First check to see if the message fits in the current buffer    
@@ -3085,7 +3085,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::send_message(bool complete, Runtime *runtime,
+    void VirtualChannel::send_message(bool complete, Internal *runtime,
                                       Processor target)
     //--------------------------------------------------------------------------
     {
@@ -3124,7 +3124,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::process_message(const void *args, size_t arglen,
-                          Runtime *runtime, AddressSpaceID remote_address_space)
+                         Internal *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
       // Strip off our header and the number of messages, the 
@@ -3170,7 +3170,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::handle_messages(unsigned num_messages,Runtime *runtime,
+    void VirtualChannel::handle_messages(unsigned num_messages,
+                                         Internal *runtime,
                                          AddressSpaceID remote_address_space,
                                          const char *args, size_t arglen)
     //--------------------------------------------------------------------------
@@ -3672,7 +3673,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(AddressSpaceID remote,
-                                   Runtime *rt, size_t max_message_size,
+                                   Internal *rt, size_t max_message_size,
                                    const std::set<Processor> &remote_util_procs)
       : remote_address_space(remote), runtime(rt), channels((VirtualChannel*)
                       malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
@@ -3776,7 +3777,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(Runtime *rt)
+    GarbageCollectionEpoch::GarbageCollectionEpoch(Internal *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -3875,13 +3876,13 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Machine m, AddressSpaceID unique,
+    Internal::Internal(Machine m, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      Processor cleanup, Processor gc, Processor message)
-      : high_level(new HighLevelRuntime(this)),machine(m),address_space(unique),
+      : high_level(new Runtime(this)),machine(m),address_space(unique),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
@@ -4041,7 +4042,7 @@ namespace LegionRuntime {
       // Set up the profiler if it was requested
       // If it is less than zero, all nodes enabled by default, otherwise
       // we have to be less than the maximum number to enable profiling
-      if (address_space < Runtime::num_profiling_nodes)
+      if (address_space < Internal::num_profiling_nodes)
       {
         HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
         profiler = new LegionProfiler((local_utils.empty() ? 
@@ -4053,7 +4054,7 @@ namespace LegionRuntime {
         // We also have to register any statically registered task
         // variants here since the profiler didn't exist before
         const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
-          &collections = Runtime::get_collection_table();
+          &collections = Internal::get_collection_table();
         for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
               const_iterator cit = collections.begin(); cit != 
               collections.end(); cit++) 
@@ -4082,13 +4083,13 @@ namespace LegionRuntime {
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
-      if (Runtime::registration_callback != NULL)
-        (*Runtime::registration_callback)(machine, high_level, 
+      if (Internal::registration_callback != NULL)
+        (*Internal::registration_callback)(machine, high_level, 
                                                 local_procs);
     }
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(const Runtime &rhs)
+    Internal::Internal(const Internal &rhs)
       : high_level(NULL), machine(rhs.machine), address_space(0), 
         runtime_stride(0), profiler(NULL), forest(NULL),
         has_explicit_utility_procs(false),
@@ -4104,7 +4105,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Runtime::~Runtime(void)
+    Internal::~Internal(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
@@ -4431,7 +4432,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Runtime& Runtime::operator=(const Runtime &rhs)
+    Internal& Internal::operator=(const Internal &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4440,14 +4441,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::construct_mpi_rank_tables(Processor proc, int rank)
+    void Internal::construct_mpi_rank_tables(Processor proc, int rank)
     //--------------------------------------------------------------------------
     {
       // Only do this on the first processor
       if (proc == *(local_procs.begin()))
       {
         // Initialize our mpi rank event
-        Runtime::mpi_rank_event = UserEvent::create_user_event();
+        Internal::mpi_rank_event = UserEvent::create_user_event();
         // Now broadcast our address space and rank to all the other nodes
         MPIRankArgs args;
         args.hlr_id = HLR_MPI_RANK_ID;
@@ -4473,18 +4474,18 @@ namespace LegionRuntime {
           sent_targets.insert(target_space);
         }
         // Now set our own value, update the count, and see if we're done
-        Runtime::mpi_rank_table[rank] = address_space;
+        Internal::mpi_rank_table[rank] = address_space;
         unsigned count = 
-          __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
+          __sync_add_and_fetch(&Internal::remaining_mpi_notifications, 1);
         const size_t total_ranks = machine.get_address_space_count();
         if (count == total_ranks)
-          Runtime::mpi_rank_event.trigger();
+          Internal::mpi_rank_event.trigger();
         // Wait on the event
         mpi_rank_event.wait();
         // Once we've triggered, then we can build the maps
         for (unsigned local_rank = 0; local_rank < count; local_rank++)
         {
-          AddressSpace local_space = Runtime::mpi_rank_table[local_rank];
+          AddressSpace local_space = Internal::mpi_rank_table[local_rank];
 #ifdef DEBUG_HIGH_LEVEL
           assert(reverse_mpi_mapping.find(local_space) == 
                  reverse_mpi_mapping.end());
@@ -4496,7 +4497,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(Processor proc)
+    void Internal::launch_top_level_task(Processor proc)
     //--------------------------------------------------------------------------
     {
       // Check to see if we should launch the top-level task
@@ -4514,7 +4515,7 @@ namespace LegionRuntime {
         top_context->initialize_remote(0, NULL);
         // Set the executing processor
         top_context->set_executing_processor(proc);
-        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
+        TaskLauncher launcher(Internal::legion_main_id, TaskArgument());
         // Mark that this task is the top-level task
         top_task->set_top_level();
         top_task->initialize_task(top_context, launcher, 
@@ -4523,19 +4524,19 @@ namespace LegionRuntime {
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
         top_task->depth = 0;
-        memcpy(top_task->args,&Runtime::get_input_args(),top_task->arglen);
+        memcpy(top_task->args,&Internal::get_input_args(),top_task->arglen);
 #ifdef DEBUG_HIGH_LEVEL
         assert(proc_managers.find(proc) != proc_managers.end());
 #endif
         proc_managers[proc]->invoke_mapper_set_task_options(top_task);
         invoke_mapper_configure_context(proc, top_task);
 #ifdef LEGION_LOGGING
-        LegionLogging::log_top_level_task(Runtime::legion_main_id,
+        LegionLogging::log_top_level_task(Internal::legion_main_id,
                                           top_task->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
-        Runtime::log_machine(machine);
-        LegionSpy::log_top_level_task(Runtime::legion_main_id,
+        Internal::log_machine(machine);
+        LegionSpy::log_top_level_task(Internal::legion_main_id,
                                       top_task->get_unique_task_id(),
                                       top_task->variants->name);
 #endif
@@ -4545,7 +4546,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
+    Event Internal::launch_mapper_task(Mapper *mapper, Processor proc, 
                                       Processor::TaskFuncID tid,
                                       const TaskArgument &arg, MapperID map_id)
     //--------------------------------------------------------------------------
@@ -4592,7 +4593,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::perform_one_time_logging(void)
+    void Internal::perform_one_time_logging(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
@@ -4639,7 +4640,7 @@ namespace LegionRuntime {
       }
       // Log information about tasks and their variants
       const std::map<Processor::TaskFuncID,TaskVariantCollection*> &table = 
-        Runtime::get_collection_table();
+        Internal::get_collection_table();
       for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
             const_iterator it = table.begin(); it != table.end(); it++)
       {
@@ -4663,7 +4664,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
+    IndexSpace Internal::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
@@ -4703,7 +4704,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, Domain domain)
+    IndexSpace Internal::create_index_space(Context ctx, Domain domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4743,7 +4744,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, 
+    IndexSpace Internal::create_index_space(Context ctx, 
                                            const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -4851,7 +4852,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Internal::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
@@ -4895,14 +4896,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::finalize_index_space_destroy(IndexSpace handle)
+    bool Internal::finalize_index_space_destroy(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->destroy_index_space(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Domain &color_space,
                                           const PointColoring &coloring,
@@ -4970,7 +4971,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Coloring &coloring,
                                           bool disjoint,
@@ -5121,7 +5122,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Domain &color_space,
                                           const DomainPointColoring &coloring,
@@ -5161,7 +5162,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           Domain color_space,
                                           const DomainColoring &coloring,
@@ -5237,7 +5238,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Domain &color_space,
                                        const MultiDomainPointColoring &coloring,
@@ -5287,7 +5288,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           Domain color_space,
                                           const MultiDomainColoring &coloring,
@@ -5368,7 +5369,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
+    IndexPartition Internal::create_index_partition(
                                           Context ctx, IndexSpace parent,
        Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
                                           int part_color)
@@ -5495,7 +5496,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, 
+    void Internal::destroy_index_partition(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -5536,14 +5537,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_index_partition_destroy(IndexPartition handle)
+    void Internal::finalize_index_partition_destroy(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       forest->destroy_index_partition(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::validate_unstructured_disjointness(IndexPartition pid,
+    void Internal::validate_unstructured_disjointness(IndexPartition pid,
                                     const std::map<DomainPoint,Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -5587,7 +5588,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::validate_structured_disjointness(IndexPartition pid,
+    void Internal::validate_structured_disjointness(IndexPartition pid,
                                     const std::map<DomainPoint,Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -5661,7 +5662,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::validate_multi_structured_disjointness(IndexPartition pid,
+    void Internal::validate_multi_structured_disjointness(IndexPartition pid,
                          const std::map<DomainPoint,std::set<Domain> > &domains)
     //--------------------------------------------------------------------------
     {
@@ -5744,7 +5745,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::construct_convex_hull(const std::set<Domain> &domains)
+    Domain Internal::construct_convex_hull(const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
       Domain hull = *(domains.begin());
@@ -5802,7 +5803,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_equal_partition(Context ctx, 
+    IndexPartition Internal::create_equal_partition(Context ctx, 
                                                    IndexSpace parent,
                                                    const Domain &color_space,
                                                    size_t granularity,
@@ -5856,7 +5857,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_weighted_partition(Context ctx, 
+    IndexPartition Internal::create_weighted_partition(Context ctx, 
                                                       IndexSpace parent,
                                                       const Domain &color_space,
                                        const std::map<DomainPoint,int> &weights,
@@ -5911,7 +5912,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_union(Context ctx, 
+    IndexPartition Internal::create_partition_by_union(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
@@ -5987,7 +5988,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
+    IndexPartition Internal::create_partition_by_intersection(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
@@ -6064,7 +6065,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_difference(Context ctx, 
+    IndexPartition Internal::create_partition_by_difference(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
@@ -6141,7 +6142,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_cross_product_partition(Context ctx,
+    void Internal::create_cross_product_partition(Context ctx,
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
                                   std::map<DomainPoint,IndexPartition> &handles,
@@ -6204,7 +6205,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_field(Context ctx,
+    IndexPartition Internal::create_partition_by_field(Context ctx,
                                                       LogicalRegion handle,
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
@@ -6302,7 +6303,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_image(Context ctx,
+    IndexPartition Internal::create_partition_by_image(Context ctx,
                                                     IndexSpace handle,
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
@@ -6400,7 +6401,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_preimage(Context ctx,
+    IndexPartition Internal::create_partition_by_preimage(Context ctx,
                                                     IndexPartition projection,
                                                     LogicalRegion handle,
                                                     LogicalRegion parent,
@@ -6499,7 +6500,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_pending_partition(Context ctx, 
+    IndexPartition Internal::create_pending_partition(Context ctx, 
                                                      IndexSpace parent, 
                                                      const Domain &color_space,
                                                      PartitionKind part_kind,
@@ -6535,7 +6536,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_union(Context ctx, 
+    IndexSpace Internal::create_index_space_union(Context ctx, 
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
                                          const std::vector<IndexSpace> &handles)
@@ -6568,8 +6569,10 @@ namespace LegionRuntime {
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
+                                      handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
+                                      domain_ready);
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
@@ -6586,7 +6589,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_union(Context ctx,
+    IndexSpace Internal::create_index_space_union(Context ctx,
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
                                                  IndexPartition handle)
@@ -6619,8 +6622,10 @@ namespace LegionRuntime {
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
+                                      handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
+                                      domain_ready);
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
@@ -6637,7 +6642,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_intersection(Context ctx,
+    IndexSpace Internal::create_index_space_intersection(Context ctx,
                                                         IndexPartition parent,
                                                        const DomainPoint &color,
                                          const std::vector<IndexSpace> &handles)
@@ -6672,8 +6677,10 @@ namespace LegionRuntime {
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
+                                      handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
+                                      domain_ready);
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
@@ -6690,7 +6697,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_intersection(Context ctx,
+    IndexSpace Internal::create_index_space_intersection(Context ctx,
                                                         IndexPartition parent,
                                                        const DomainPoint &color,
                                                         IndexPartition handle)
@@ -6725,8 +6732,10 @@ namespace LegionRuntime {
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
+                                      handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
+                                      domain_ready);
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
@@ -6743,7 +6752,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_difference(Context ctx,
+    IndexSpace Internal::create_index_space_difference(Context ctx,
                                                       IndexPartition parent,
                                                       const DomainPoint &color,
                                                       IndexSpace initial,
@@ -6779,8 +6788,10 @@ namespace LegionRuntime {
       handle_ready.trigger(part_op->get_handle_ready());
       domain_ready.trigger(part_op->get_completion_event());
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), domain_ready);
+      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
+                                      handle_ready);
+      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
+                                      domain_ready);
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
@@ -6797,7 +6808,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(Context ctx, 
+    IndexPartition Internal::get_index_partition(Context ctx, 
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
@@ -6816,14 +6827,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
+    IndexPartition Internal::get_index_partition(IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition(parent, ColorPoint(color));
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(Context ctx,
+    IndexPartition Internal::get_index_partition(Context ctx,
                                     IndexSpace parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -6857,7 +6868,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
+    bool Internal::has_index_partition(Context ctx, IndexSpace parent,
                                       const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -6867,7 +6878,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(Context ctx, 
+    IndexSpace Internal::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
@@ -6885,14 +6896,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color c)
+    IndexSpace Internal::get_index_subspace(IndexPartition p, Color c)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_subspace(p, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(Context ctx, IndexPartition p, 
+    IndexSpace Internal::get_index_subspace(Context ctx, IndexPartition p, 
                                            const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -6900,7 +6911,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, 
+    IndexSpace Internal::get_index_subspace(IndexPartition p, 
                                            const DomainPoint &color) 
     //--------------------------------------------------------------------------
     {
@@ -6932,7 +6943,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_index_subspace(Context ctx, IndexPartition p,
+    bool Internal::has_index_subspace(Context ctx, IndexPartition p,
                                      const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -6941,21 +6952,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
+    bool Internal::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->has_multiple_domains(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_multiple_domains(IndexSpace handle)
+    bool Internal::has_multiple_domains(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->has_multiple_domains(handle);
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
+    Domain Internal::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       Domain result = forest->get_index_space_domain(handle);
@@ -6973,14 +6984,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(IndexSpace handle)
+    Domain Internal::get_index_space_domain(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_domains(Context ctx, IndexSpace handle,
+    void Internal::get_index_space_domains(Context ctx, IndexSpace handle,
                                           std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -6988,7 +6999,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_domains(IndexSpace handle,
+    void Internal::get_index_space_domains(IndexSpace handle,
                                           std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
@@ -6996,7 +7007,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_partition_color_space(Context ctx, 
+    Domain Internal::get_index_partition_color_space(Context ctx, 
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
@@ -7014,14 +7025,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_partition_color_space(IndexPartition p)
+    Domain Internal::get_index_partition_color_space(IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color_space(p);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+    void Internal::get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
@@ -7035,7 +7046,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(IndexSpace handle,
+    void Internal::get_index_space_partition_colors(IndexSpace handle,
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
@@ -7049,7 +7060,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+    void Internal::get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                                   std::set<DomainPoint> &colors)
     //--------------------------------------------------------------------------
     {
@@ -7063,35 +7074,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
+    bool Internal::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return forest->is_index_partition_disjoint(p);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_disjoint(IndexPartition p)
+    bool Internal::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return forest->is_index_partition_disjoint(p);
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
+    Color Internal::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_space_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_space_color(IndexSpace handle)
+    Color Internal::get_index_space_color(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_space_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_space_color_point(Context ctx, 
+    DomainPoint Internal::get_index_space_color_point(Context ctx, 
                                                      IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7099,7 +7110,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_partition_color(Context ctx, 
+    Color Internal::get_index_partition_color(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7107,14 +7118,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_partition_color(IndexPartition handle)
+    Color Internal::get_index_partition_color(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_partition_color_point(Context ctx,
+    DomainPoint Internal::get_index_partition_color_point(Context ctx,
                                                          IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7122,7 +7133,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_parent_index_space(Context ctx,   
+    IndexSpace Internal::get_parent_index_space(Context ctx,   
                                                IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7130,28 +7141,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_parent_index_space(IndexPartition handle)
+    IndexSpace Internal::get_parent_index_space(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_parent_index_space(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_index_partition(Context ctx, IndexSpace handle)
+    bool Internal::has_parent_index_partition(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->has_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_index_partition(IndexSpace handle)
+    bool Internal::has_parent_index_partition(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->has_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_parent_index_partition(Context ctx,
+    IndexPartition Internal::get_parent_index_partition(Context ctx,
                                                        IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7159,14 +7170,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_parent_index_partition(IndexSpace handle)
+    IndexPartition Internal::get_parent_index_partition(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
+    ptr_t Internal::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
@@ -7176,7 +7187,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 
+    DomainPoint Internal::safe_cast(Context ctx, DomainPoint point, 
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
     {
@@ -7186,7 +7197,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace Runtime::create_field_space(Context ctx)
+    FieldSpace Internal::create_field_space(Context ctx)
     //--------------------------------------------------------------------------
     {
       FieldSpace space(get_unique_field_space_id());
@@ -7220,7 +7231,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Internal::destroy_field_space(Context ctx, FieldSpace handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -7259,35 +7270,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
+    size_t Internal::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       return forest->get_field_size(handle, fid);
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::get_field_size(FieldSpace handle, FieldID fid)
+    size_t Internal::get_field_size(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       return forest->get_field_size(handle, fid);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_space_destroy(FieldSpace handle)
+    void Internal::finalize_field_space_destroy(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       forest->destroy_field_space(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, FieldID fid)
+    void Internal::finalize_field_destroy(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       forest->free_field(handle, fid, address_space);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, 
+    void Internal::finalize_field_destroy(FieldSpace handle, 
                                                const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
@@ -7295,7 +7306,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::create_logical_region(Context ctx, 
+    LogicalRegion Internal::create_logical_region(Context ctx, 
                                 IndexSpace index_space, FieldSpace field_space)
     //--------------------------------------------------------------------------
     {
@@ -7336,7 +7347,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, 
+    void Internal::destroy_logical_region(Context ctx, 
                                                   LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -7378,7 +7389,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx, 
+    void Internal::destroy_logical_partition(Context ctx, 
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7420,14 +7431,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::finalize_logical_region_destroy(LogicalRegion handle)
+    bool Internal::finalize_logical_region_destroy(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return forest->destroy_logical_region(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_partition_destroy(
+    void Internal::finalize_logical_partition_destroy(
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7435,7 +7446,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition(Context ctx, 
+    LogicalPartition Internal::get_logical_partition(Context ctx, 
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7443,7 +7454,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition(LogicalRegion parent,
+    LogicalPartition Internal::get_logical_partition(LogicalRegion parent,
                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7451,7 +7462,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(
+    LogicalPartition Internal::get_logical_partition_by_color(
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
@@ -7459,7 +7470,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(
+    LogicalPartition Internal::get_logical_partition_by_color(
                         Context ctx, LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -7467,7 +7478,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(LogicalRegion par,
+    LogicalPartition Internal::get_logical_partition_by_color(LogicalRegion par,
                                                              Color c)
     //--------------------------------------------------------------------------
     {
@@ -7475,7 +7486,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_logical_partition_by_color(Context ctx, 
+    bool Internal::has_logical_partition_by_color(Context ctx, 
                                  LogicalRegion parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
@@ -7483,16 +7494,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_tree(
+    LogicalPartition Internal::get_logical_partition_by_tree(
                                             Context ctx, IndexPartition handle, 
-                                            FieldSpace fspace, RegionTreeID tid) 
+                                            FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_partition_by_tree(handle, fspace, tid);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_tree(IndexPartition part,
+    LogicalPartition Internal::get_logical_partition_by_tree(
+                                                            IndexPartition part,
                                                             FieldSpace fspace,
                                                             RegionTreeID tid)
     //--------------------------------------------------------------------------
@@ -7501,7 +7513,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion(Context ctx, 
+    LogicalRegion Internal::get_logical_subregion(Context ctx, 
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7509,7 +7521,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion(LogicalPartition parent,
+    LogicalRegion Internal::get_logical_subregion(LogicalPartition parent,
                                                  IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7517,7 +7529,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx, 
+    LogicalRegion Internal::get_logical_subregion_by_color(Context ctx, 
                                              LogicalPartition parent, Color c)
     //--------------------------------------------------------------------------
     {
@@ -7525,7 +7537,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx,
+    LogicalRegion Internal::get_logical_subregion_by_color(Context ctx,
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -7533,7 +7545,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
+    LogicalRegion Internal::get_logical_subregion_by_color(LogicalPartition par,
                                                           Color c)
     //--------------------------------------------------------------------------
     {
@@ -7541,15 +7553,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_logical_subregion_by_color(Context ctx,
-                              LogicalPartition parent, const DomainPoint &color) 
+    bool Internal::has_logical_subregion_by_color(Context ctx,
+                              LogicalPartition parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_tree(Context ctx, 
+    LogicalRegion Internal::get_logical_subregion_by_tree(Context ctx, 
                         IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
@@ -7557,7 +7569,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_tree(IndexSpace handle,
+    LogicalRegion Internal::get_logical_subregion_by_tree(IndexSpace handle,
                                                          FieldSpace fspace,
                                                          RegionTreeID tid)
     //--------------------------------------------------------------------------
@@ -7566,7 +7578,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_region_color(Context ctx, 
+    Color Internal::get_logical_region_color(Context ctx, 
                                                   LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -7574,14 +7586,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_region_color(LogicalRegion handle)
+    Color Internal::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_region_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_partition_color(Context ctx,
+    Color Internal::get_logical_partition_color(Context ctx,
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7589,14 +7601,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_partition_color(LogicalPartition handle)
+    Color Internal::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_parent_logical_region(Context ctx, 
+    LogicalRegion Internal::get_parent_logical_region(Context ctx, 
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7604,14 +7616,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_parent_logical_region(LogicalPartition handle)
+    LogicalRegion Internal::get_parent_logical_region(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_parent_logical_region(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_logical_partition(Context ctx, 
+    bool Internal::has_parent_logical_partition(Context ctx, 
                                                LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -7619,14 +7631,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_logical_partition(LogicalRegion handle)
+    bool Internal::has_parent_logical_partition(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return forest->has_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
+    LogicalPartition Internal::get_parent_logical_partition(Context ctx,
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -7634,14 +7646,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_parent_logical_partition(LogicalRegion handle)
+    LogicalPartition Internal::get_parent_logical_partition(
+                                                           LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, 
+    IndexAllocator Internal::create_index_allocator(Context ctx, 
                                                             IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7665,7 +7678,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
+    FieldAllocator Internal::create_field_allocator(Context ctx, 
                                                             FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7689,7 +7702,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap Runtime::create_argument_map(Context ctx)
+    ArgumentMap Internal::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
       ArgumentMap::Impl *impl = legion_new<ArgumentMap::Impl>(
@@ -7701,7 +7714,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, 
+    Future Internal::execute_task(Context ctx, 
                                           const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     { 
@@ -7789,7 +7802,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
+    FutureMap Internal::execute_index_space(Context ctx, 
                                                   const IndexLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -7927,7 +7940,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
+    Future Internal::execute_index_space(Context ctx, 
                             const IndexLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -8012,7 +8025,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, 
+    Future Internal::execute_task(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -8065,7 +8078,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
+    FutureMap Internal::execute_index_space(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
@@ -8123,7 +8136,7 @@ namespace LegionRuntime {
 
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
+    Future Internal::execute_index_space(Context ctx, 
                         Processor::TaskFuncID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
@@ -8185,7 +8198,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::map_region(Context ctx, 
+    PhysicalRegion Internal::map_region(Context ctx, 
                                                 const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -8257,7 +8270,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::map_region(Context ctx, 
+    PhysicalRegion Internal::map_region(Context ctx, 
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -8268,7 +8281,7 @@ namespace LegionRuntime {
       log_run.debug("Registering a map operation for region " 
                            "(%x,%x,%x) "
                            "in task %s (ID %lld)",
-                           req.region.index_space.id, req.region.field_space.id, 
+                           req.region.index_space.id, req.region.field_space.id,
                            req.region.tree_id, ctx->variants->name, 
                            ctx->get_unique_task_id());
 #else
@@ -8329,7 +8342,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
+    PhysicalRegion Internal::map_region(Context ctx, unsigned idx, 
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -8341,7 +8354,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Internal::remap_region(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       // Check to see if the region is already mapped,
@@ -8377,7 +8390,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unmap_region(Context ctx, PhysicalRegion region)
+    void Internal::unmap_region(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8402,14 +8415,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unmap_all_regions(Context ctx)
+    void Internal::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
       ctx->unmap_all_mapped_regions();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::fill_field(Context ctx, LogicalRegion handle,
+    void Internal::fill_field(Context ctx, LogicalRegion handle,
                              LogicalRegion parent, FieldID fid,
                              const void *value, size_t value_size,
                              const Predicate &pred)
@@ -8504,7 +8517,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::fill_field(Context ctx, LogicalRegion handle,
+    void Internal::fill_field(Context ctx, LogicalRegion handle,
                              LogicalRegion parent, FieldID fid,
                              Future f, const Predicate &pred)
     //--------------------------------------------------------------------------
@@ -8598,7 +8611,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
+    void Internal::fill_fields(Context ctx, LogicalRegion handle,
                               LogicalRegion parent,
                               const std::set<FieldID> &fields,
                               const void *value, size_t value_size,
@@ -8694,7 +8707,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
+    void Internal::fill_fields(Context ctx, LogicalRegion handle,
                               LogicalRegion parent,
                               const std::set<FieldID> &fields,
                               Future f, const Predicate &pred)
@@ -8789,7 +8802,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::attach_hdf5(Context ctx, const char *file_name,
+    PhysicalRegion Internal::attach_hdf5(Context ctx, const char *file_name,
                                         LogicalRegion handle, 
                                         LogicalRegion parent,
                                   const std::map<FieldID,const char*> field_map,
@@ -8865,7 +8878,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
+    void Internal::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8910,7 +8923,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_copy_operation(Context ctx, 
+    void Internal::issue_copy_operation(Context ctx, 
                                        const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -9004,7 +9017,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f) 
+    Predicate Internal::create_predicate(Context ctx, const Future &f) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9058,7 +9071,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
+    Predicate Internal::predicate_not(Context ctx, const Predicate &p) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9102,7 +9115,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_and(Context ctx, const Predicate &p1, 
+    Predicate Internal::predicate_and(Context ctx, const Predicate &p1, 
                                                   const Predicate &p2) 
     //--------------------------------------------------------------------------
     {
@@ -9147,7 +9160,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_or(Context ctx, const Predicate &p1, 
+    Predicate Internal::predicate_or(Context ctx, const Predicate &p1, 
                                                  const Predicate &p2)  
     //--------------------------------------------------------------------------
     {
@@ -9192,21 +9205,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Lock Runtime::create_lock(Context ctx)
+    Lock Internal::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
       return Lock(Reservation::create_reservation());
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_lock(Context ctx, Lock l)
+    void Internal::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
       ctx->destroy_user_lock(l.reservation_lock);
     }
 
     //--------------------------------------------------------------------------
-    Grant Runtime::acquire_grant(Context ctx, 
+    Grant Internal::acquire_grant(Context ctx, 
                                  const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
@@ -9226,14 +9239,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::release_grant(Context ctx, Grant grant)
+    void Internal::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
       grant.impl->release_grant();
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier Runtime::create_phase_barrier(Context ctx, unsigned arrivals) 
+    PhaseBarrier Internal::create_phase_barrier(Context ctx, unsigned arrivals) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9254,7 +9267,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
+    void Internal::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9271,7 +9284,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier Runtime::advance_phase_barrier(Context ctx, PhaseBarrier pb)
+    PhaseBarrier Internal::advance_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9293,7 +9306,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective Runtime::create_dynamic_collective(Context ctx,
+    DynamicCollective Internal::create_dynamic_collective(Context ctx,
                                                          unsigned arrivals,
                                                          ReductionOpID redop,
                                                          const void *init_value,
@@ -9319,7 +9332,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_dynamic_collective(Context ctx, DynamicCollective dc)
+    void Internal::destroy_dynamic_collective(Context ctx, DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9337,7 +9350,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::arrive_dynamic_collective(Context ctx, DynamicCollective dc,
+    void Internal::arrive_dynamic_collective(Context ctx, DynamicCollective dc,
                                             const void *buffer, size_t size,
                                             unsigned count)
     //--------------------------------------------------------------------------
@@ -9356,7 +9369,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_dynamic_collective_arrival(Context ctx, 
+    void Internal::defer_dynamic_collective_arrival(Context ctx, 
                                                    DynamicCollective dc,
                                                    Future f, unsigned count)
     //--------------------------------------------------------------------------
@@ -9377,7 +9390,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::get_dynamic_collective_result(Context ctx, 
+    Future Internal::get_dynamic_collective_result(Context ctx, 
                                                   DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -9412,7 +9425,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective Runtime::advance_dynamic_collective(Context ctx,
+    DynamicCollective Internal::advance_dynamic_collective(Context ctx,
                                                           DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -9436,7 +9449,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
+    void Internal::issue_acquire(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AcquireOp *acquire_op = get_available_acquire_op(true);
@@ -9527,7 +9540,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_release(Context ctx, const ReleaseLauncher &launcher)
+    void Internal::issue_release(Context ctx, const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       ReleaseOp *release_op = get_available_release_op(true);
@@ -9618,7 +9631,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    void Internal::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp *fence_op = get_available_fence_op(true);
@@ -9657,7 +9670,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    void Internal::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp *fence_op = get_available_fence_op(true);
@@ -9696,7 +9709,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid)
+    void Internal::begin_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9725,7 +9738,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::end_trace(Context ctx, TraceID tid)
+    void Internal::end_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_HIGH_LEVEL
@@ -9754,7 +9767,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::complete_frame(Context ctx)
+    void Internal::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
       FrameOp *frame_op = get_available_frame_op(true);
@@ -9793,7 +9806,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_must_epoch(Context ctx, 
+    FutureMap Internal::execute_must_epoch(Context ctx, 
                                           const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -9890,7 +9903,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    int Runtime::get_tunable_value(Context ctx, TunableID tid,
+    int Internal::get_tunable_value(Context ctx, TunableID tid,
                                    MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
@@ -9908,7 +9921,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Mapper* Runtime::get_mapper(Context ctx, MapperID id, Processor target)
+    Mapper* Internal::get_mapper(Context ctx, MapperID id, Processor target)
     //--------------------------------------------------------------------------
     {
       if (!target.exists())
@@ -9937,14 +9950,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::get_executing_processor(Context ctx)
+    Processor Internal::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {
       return ctx->get_executing_processor();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::raise_region_exception(Context ctx, 
+    void Internal::raise_region_exception(Context ctx, 
                                                PhysicalRegion region, 
                                                bool nuclear)
     //--------------------------------------------------------------------------
@@ -9954,7 +9967,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::map<int,AddressSpace>& Runtime::find_forward_MPI_mapping(void)
+    const std::map<int,AddressSpace>& Internal::find_forward_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
       if (forward_mpi_mapping.empty())
@@ -9971,7 +9984,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::map<AddressSpace,int>& Runtime::find_reverse_MPI_mapping(void)
+    const std::map<AddressSpace,int>& Internal::find_reverse_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
       if (reverse_mpi_mapping.empty())
@@ -9988,7 +10001,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
+    void Internal::add_mapper(MapperID map_id, Mapper *mapper, 
                                       Processor proc)
     //--------------------------------------------------------------------------
     {
@@ -10001,7 +10014,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::replace_default_mapper(Mapper *mapper, 
+    void Internal::replace_default_mapper(Mapper *mapper, 
                                                   Processor proc)
     //--------------------------------------------------------------------------
     {
@@ -10014,7 +10027,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_projection_functor(ProjectionID pid,
+    void Internal::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor)
     //--------------------------------------------------------------------------
     {
@@ -10043,7 +10056,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid)
+    ProjectionFunctor* Internal::find_projection_functor(ProjectionID pid)
     //--------------------------------------------------------------------------
     {
       std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
@@ -10064,7 +10077,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(IndexSpace handle, 
+    void Internal::attach_semantic_information(IndexSpace handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10074,7 +10087,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(IndexPartition handle, 
+    void Internal::attach_semantic_information(IndexPartition handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10084,7 +10097,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(FieldSpace handle, 
+    void Internal::attach_semantic_information(FieldSpace handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10094,7 +10107,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(FieldSpace handle, FieldID fid,
+    void Internal::attach_semantic_information(FieldSpace handle, FieldID fid,
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10104,7 +10117,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(LogicalRegion handle, 
+    void Internal::attach_semantic_information(LogicalRegion handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10114,7 +10127,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_semantic_information(LogicalPartition handle, 
+    void Internal::attach_semantic_information(LogicalPartition handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
@@ -10124,7 +10137,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexSpace handle,
+    void Internal::retrieve_semantic_information(IndexSpace handle,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10134,7 +10147,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexPartition handle,
+    void Internal::retrieve_semantic_information(IndexPartition handle,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10144,7 +10157,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle,
+    void Internal::retrieve_semantic_information(FieldSpace handle,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10154,7 +10167,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle, FieldID fid,
+    void Internal::retrieve_semantic_information(FieldSpace handle, FieldID fid,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10164,7 +10177,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalRegion handle,
+    void Internal::retrieve_semantic_information(LogicalRegion handle,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10174,7 +10187,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalPartition handle,
+    void Internal::retrieve_semantic_information(LogicalPartition handle,
                                                 SemanticTag tag,
                                                 const void *&result, 
                                                 size_t &size)
@@ -10184,7 +10197,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
+    FieldID Internal::allocate_field(Context ctx, FieldSpace space,
                                           size_t field_size, FieldID fid,
                                           bool local)
     //--------------------------------------------------------------------------
@@ -10225,7 +10238,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace space, FieldID fid)
+    void Internal::free_field(Context ctx, FieldSpace space, FieldID fid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10262,7 +10275,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
+    void Internal::allocate_fields(Context ctx, FieldSpace space,
                                         const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         bool local)
@@ -10309,7 +10322,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
+    void Internal::free_fields(Context ctx, FieldSpace space,
                                     const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
@@ -10347,14 +10360,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_task(SingleTask *ctx)
+    const std::vector<PhysicalRegion>& Internal::begin_task(SingleTask *ctx)
     //--------------------------------------------------------------------------
     {
       return ctx->begin_task();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::end_task(SingleTask *ctx, const void *result, 
+    void Internal::end_task(SingleTask *ctx, const void *result, 
                                  size_t result_size, bool owned)
     //--------------------------------------------------------------------------
     {
@@ -10362,7 +10375,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const void* Runtime::get_local_args(SingleTask *ctx, 
+    const void* Internal::get_local_args(SingleTask *ctx, 
                                         DomainPoint &point, size_t &local_size)
     //--------------------------------------------------------------------------
     {
@@ -10372,7 +10385,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager* Runtime::find_memory(Memory mem)
+    MemoryManager* Internal::find_memory(Memory mem)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(memory_manager_lock);
@@ -10388,21 +10401,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_physical_instance(PhysicalManager *instance)
+    void Internal::allocate_physical_instance(PhysicalManager *instance)
     //--------------------------------------------------------------------------
     {
       find_memory(instance->memory)->allocate_physical_instance(instance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_physical_instance(PhysicalManager *instance)
+    void Internal::free_physical_instance(PhysicalManager *instance)
     //--------------------------------------------------------------------------
     {
       find_memory(instance->memory)->free_physical_instance(instance);
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID Runtime::find_address_space(Memory handle) const
+    AddressSpaceID Internal::find_address_space(Memory handle) const
     //--------------------------------------------------------------------------
     {
       // Just use the standard translation for now
@@ -10411,7 +10424,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::sample_allocated_space(Memory mem)
+    size_t Internal::sample_allocated_space(Memory mem)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory(mem);
@@ -10419,7 +10432,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::sample_free_space(Memory mem)
+    size_t Internal::sample_free_space(Memory mem)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory(mem);
@@ -10427,7 +10440,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    unsigned Runtime::sample_allocated_instances(Memory mem)
+    unsigned Internal::sample_allocated_instances(Memory mem)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory(mem);
@@ -10435,7 +10448,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    unsigned Runtime::sample_unmapped_tasks(Processor proc, Mapper *mapper)
+    unsigned Internal::sample_unmapped_tasks(Processor proc, Mapper *mapper)
     //--------------------------------------------------------------------------
     {
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
@@ -10460,7 +10473,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MessageManager* Runtime::find_messenger(AddressSpaceID sid)
+    MessageManager* Internal::find_messenger(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10506,14 +10519,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MessageManager* Runtime::find_messenger(Processor target)
+    MessageManager* Internal::find_messenger(Processor target)
     //--------------------------------------------------------------------------
     {
       return find_messenger(find_address_space(target));
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID Runtime::find_address_space(Processor target) const
+    AddressSpaceID Internal::find_address_space(Processor target) const
     //--------------------------------------------------------------------------
     {
       std::map<Processor,AddressSpaceID>::const_iterator finder = 
@@ -10525,7 +10538,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_task(Processor target, TaskOp *task)
+    void Internal::send_task(Processor target, TaskOp *task)
     //--------------------------------------------------------------------------
     {
       // Check to see if the target processor is still local 
@@ -10558,7 +10571,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_tasks(Processor target, 
+    void Internal::send_tasks(Processor target, 
                                    const std::set<TaskOp*> &tasks)
     //--------------------------------------------------------------------------
     {
@@ -10605,7 +10618,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_steal_request(
+    void Internal::send_steal_request(
               const std::multimap<Processor,MapperID> &targets, Processor thief)
     //--------------------------------------------------------------------------
     {
@@ -10644,7 +10657,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_advertisements(const std::set<Processor> &targets,
+    void Internal::send_advertisements(const std::set<Processor> &targets,
                                             MapperID map_id, Processor source)
     //--------------------------------------------------------------------------
     {
@@ -10679,7 +10692,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
+    void Internal::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
@@ -10687,7 +10700,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_request(AddressSpaceID target, 
+    void Internal::send_index_space_request(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10696,7 +10709,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_return(AddressSpaceID target,
+    void Internal::send_index_space_return(AddressSpaceID target,
                                           Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10705,7 +10718,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_child_request(AddressSpaceID target,
+    void Internal::send_index_space_child_request(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10714,7 +10727,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_node(AddressSpaceID target, 
+    void Internal::send_index_partition_node(AddressSpaceID target, 
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10723,7 +10736,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_request(AddressSpaceID target,
+    void Internal::send_index_partition_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10732,7 +10745,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_return(AddressSpaceID target,
+    void Internal::send_index_partition_return(AddressSpaceID target,
                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10741,7 +10754,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
+    void Internal::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_NODE,
@@ -10749,7 +10762,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_request(AddressSpaceID target,
+    void Internal::send_field_space_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10758,7 +10771,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_return(AddressSpaceID target,
+    void Internal::send_field_space_return(AddressSpaceID target,
                                           Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10767,7 +10780,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_top_level_region_request(AddressSpaceID target,
+    void Internal::send_top_level_region_request(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10776,7 +10789,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_top_level_region_return(AddressSpaceID target,
+    void Internal::send_top_level_region_return(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10785,7 +10798,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_distributed_alloc_request(AddressSpaceID target,
+    void Internal::send_distributed_alloc_request(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10794,7 +10807,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_distributed_alloc_upgrade(AddressSpaceID target,
+    void Internal::send_distributed_alloc_upgrade(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10803,7 +10816,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_node(AddressSpaceID target, 
+    void Internal::send_logical_region_node(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10812,7 +10825,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_destruction(IndexSpace handle, 
+    void Internal::send_index_space_destruction(IndexSpace handle, 
                                                AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10826,7 +10839,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_destruction(IndexPartition handle, 
+    void Internal::send_index_partition_destruction(IndexPartition handle, 
                                                    AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10841,7 +10854,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_destruction(FieldSpace handle, 
+    void Internal::send_field_space_destruction(FieldSpace handle, 
                                                AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10856,7 +10869,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_destruction(LogicalRegion handle, 
+    void Internal::send_logical_region_destruction(LogicalRegion handle, 
                                                   AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10871,7 +10884,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_partition_destruction(
+    void Internal::send_logical_partition_destruction(
                               LogicalPartition handle, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10886,7 +10899,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_allocation(FieldSpace space, FieldID fid,
+    void Internal::send_field_allocation(FieldSpace space, FieldID fid,
                                               size_t size, unsigned idx,
                                               AddressSpaceID target)
     //--------------------------------------------------------------------------
@@ -10904,7 +10917,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_destruction(FieldSpace space, FieldID fid,
+    void Internal::send_field_destruction(FieldSpace space, FieldID fid,
                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -10919,7 +10932,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_mapped(Processor target,
+    void Internal::send_individual_remote_mapped(Processor target,
                                         Serializer &rez, bool flush /*= true*/)
     //--------------------------------------------------------------------------
     {
@@ -10930,7 +10943,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_complete(Processor target,
+    void Internal::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10941,7 +10954,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_commit(Processor target,
+    void Internal::send_individual_remote_commit(Processor target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10952,7 +10965,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_remote_mapped(Processor target, Serializer &rez)
+    void Internal::send_slice_remote_mapped(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       // Very important that this goes on the physical state channel
@@ -10962,7 +10975,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_remote_complete(Processor target, Serializer &rez)
+    void Internal::send_slice_remote_complete(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       // Very important that this goes on the physical state channel
@@ -10972,7 +10985,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_remote_commit(Processor target, Serializer &rez)
+    void Internal::send_slice_remote_commit(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       // Very important that this goes on the physical state channel
@@ -10982,7 +10995,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_registration(AddressSpaceID target, 
+    void Internal::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10991,7 +11004,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_valid_update(AddressSpaceID target,
+    void Internal::send_did_remote_valid_update(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11000,7 +11013,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_gc_update(AddressSpaceID target,
+    void Internal::send_did_remote_gc_update(AddressSpaceID target,
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11009,7 +11022,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
+    void Internal::send_did_remote_resource_update(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11018,7 +11031,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_registration(AddressSpaceID target, 
+    void Internal::send_view_remote_registration(AddressSpaceID target, 
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11027,7 +11040,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_valid_update(AddressSpaceID target,
+    void Internal::send_view_remote_valid_update(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11036,7 +11049,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_gc_update(AddressSpaceID target,
+    void Internal::send_view_remote_gc_update(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11045,7 +11058,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_resource_update(AddressSpaceID target,
+    void Internal::send_view_remote_resource_update(AddressSpaceID target,
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11054,15 +11067,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_atomic(AddressSpaceID target, Serializer &rez)
+    void Internal::send_back_atomic(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_BACK_ATOMIC,
-                                        DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_materialized_view(AddressSpaceID target, Serializer &rez)
+    void Internal::send_materialized_view(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
@@ -11070,7 +11083,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_materialized_update(AddressSpaceID target, 
+    void Internal::send_materialized_update(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11079,7 +11092,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
+    void Internal::send_composite_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
@@ -11087,7 +11100,7 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
+    void Internal::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
@@ -11095,7 +11108,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_deferred_update(AddressSpaceID target, Serializer &rez)
+    void Internal::send_deferred_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_DEFERRED_UPDATE,
@@ -11103,7 +11116,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
+    void Internal::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
@@ -11111,7 +11124,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_reduction_update(AddressSpaceID target, Serializer &rez)
+    void Internal::send_reduction_update(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_UPDATE,
@@ -11119,7 +11132,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_instance_manager(AddressSpaceID target, Serializer &rez)
+    void Internal::send_instance_manager(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_MANAGER,
@@ -11127,7 +11140,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_reduction_manager(AddressSpaceID target, Serializer &rez)
+    void Internal::send_reduction_manager(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
@@ -11135,7 +11148,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_future(AddressSpaceID target, Serializer &rez)
+    void Internal::send_future(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FUTURE,
@@ -11143,7 +11156,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
+    void Internal::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FUTURE_RESULT,
@@ -11151,7 +11164,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_future_subscription(AddressSpaceID target,
+    void Internal::send_future_subscription(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11160,7 +11173,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_make_persistent(AddressSpaceID target, Serializer &rez)
+    void Internal::send_make_persistent(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MAKE_PERSISTENT,
@@ -11168,7 +11181,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_unmake_persistent(AddressSpaceID target, Serializer &rez)
+    void Internal::send_unmake_persistent(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_UNMAKE_PERSISTENT,
@@ -11176,7 +11189,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
+    void Internal::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MAPPER_MESSAGE,
@@ -11184,7 +11197,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_mapper_broadcast(AddressSpaceID target, Serializer &rez)
+    void Internal::send_mapper_broadcast(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MAPPER_BROADCAST,
@@ -11192,7 +11205,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_semantic_request(AddressSpaceID target,
+    void Internal::send_index_space_semantic_request(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11201,7 +11214,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_semantic_request(AddressSpaceID target,
+    void Internal::send_index_partition_semantic_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11211,7 +11224,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_semantic_request(AddressSpaceID target,
+    void Internal::send_field_space_semantic_request(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11220,7 +11233,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_semantic_request(AddressSpaceID target,
+    void Internal::send_field_semantic_request(AddressSpaceID target,
                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11229,7 +11242,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_semantic_request(AddressSpaceID target,
+    void Internal::send_logical_region_semantic_request(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11239,8 +11252,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_partition_semantic_request(AddressSpaceID target,
-                                                          Serializer &rez)
+    void Internal::send_logical_partition_semantic_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,
@@ -11249,7 +11262,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_semantic_info(AddressSpaceID target,
+    void Internal::send_index_space_semantic_info(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11258,7 +11271,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_semantic_info(AddressSpaceID target,
+    void Internal::send_index_partition_semantic_info(AddressSpaceID target,
                                                      Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11268,7 +11281,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_semantic_info(AddressSpaceID target,
+    void Internal::send_field_space_semantic_info(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11277,7 +11290,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_semantic_info(AddressSpaceID target,
+    void Internal::send_field_semantic_info(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11286,7 +11299,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_semantic_info(AddressSpaceID target,
+    void Internal::send_logical_region_semantic_info(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11296,7 +11309,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_logical_partition_semantic_info(AddressSpaceID target,
+    void Internal::send_logical_partition_semantic_info(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11306,7 +11319,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subscribe_remote_context(AddressSpaceID target,
+    void Internal::send_subscribe_remote_context(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11315,7 +11328,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_free_remote_context(AddressSpaceID target, 
+    void Internal::send_free_remote_context(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11324,7 +11337,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_path_only(AddressSpaceID target,
+    void Internal::send_version_state_path_only(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11333,7 +11346,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_initialization(AddressSpaceID target,
+    void Internal::send_version_state_initialization(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11342,7 +11355,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_request(AddressSpaceID target,
+    void Internal::send_version_state_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11351,7 +11364,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_response(AddressSpaceID target,
+    void Internal::send_version_state_response(AddressSpaceID target,
                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11360,7 +11373,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_instance_creation_request(AddressSpaceID target,
+    void Internal::send_remote_instance_creation_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11369,7 +11382,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_reduction_creation_request(AddressSpaceID target,
+    void Internal::send_remote_reduction_creation_request(AddressSpaceID target,
                                                          Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11378,7 +11391,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_creation_response(AddressSpaceID target,
+    void Internal::send_remote_creation_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -11387,7 +11400,8 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::send_back_logical_state(AddressSpaceID target,Serializer &rez)
+    void Internal::send_back_logical_state(AddressSpaceID target,
+                                           Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
@@ -11395,14 +11409,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_task(Deserializer &derez)
+    void Internal::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       TaskOp::process_unpack_task(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_steal(Deserializer &derez)
+    void Internal::handle_steal(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11422,7 +11436,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_advertisement(Deserializer &derez)
+    void Internal::handle_advertisement(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11439,7 +11453,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_node(Deserializer &derez, 
+    void Internal::handle_index_space_node(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11447,7 +11461,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_request(Deserializer &derez,
+    void Internal::handle_index_space_request(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11455,21 +11469,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_return(Deserializer &derez)
+    void Internal::handle_index_space_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_node_return(derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_child_request(Deserializer &derez)
+    void Internal::handle_index_space_child_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_node_child_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_node(Deserializer &derez,
+    void Internal::handle_index_partition_node(Deserializer &derez,
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11477,7 +11491,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_request(Deserializer &derez,
+    void Internal::handle_index_partition_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11485,14 +11499,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_return(Deserializer &derez)
+    void Internal::handle_index_partition_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_return(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_node(Deserializer &derez, 
+    void Internal::handle_field_space_node(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11500,7 +11514,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_request(Deserializer &derez,
+    void Internal::handle_field_space_request(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11508,14 +11522,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_return(Deserializer &derez)
+    void Internal::handle_field_space_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_node_return(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_request(Deserializer &derez,
+    void Internal::handle_top_level_region_request(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11523,28 +11537,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_return(Deserializer &derez)
+    void Internal::handle_top_level_region_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RegionNode::handle_top_level_return(derez);   
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_distributed_alloc_request(Deserializer &derez)
+    void Internal::handle_distributed_alloc_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_distributed_alloc_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_distributed_alloc_upgrade(Deserializer &derez)
+    void Internal::handle_distributed_alloc_upgrade(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_distributed_alloc_upgrade(forest, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_node(Deserializer &derez, 
+    void Internal::handle_logical_region_node(Deserializer &derez, 
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11552,7 +11566,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_destruction(Deserializer &derez,
+    void Internal::handle_index_space_destruction(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11563,7 +11577,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_destruction(Deserializer &derez,
+    void Internal::handle_index_partition_destruction(Deserializer &derez,
                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11574,7 +11588,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_destruction(Deserializer &derez,
+    void Internal::handle_field_space_destruction(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11585,7 +11599,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_destruction(Deserializer &derez,
+    void Internal::handle_logical_region_destruction(Deserializer &derez,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11596,7 +11610,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_destruction(Deserializer &derez,
+    void Internal::handle_logical_partition_destruction(Deserializer &derez,
                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11607,7 +11621,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_allocation(Deserializer &derez, 
+    void Internal::handle_field_allocation(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11624,7 +11638,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_destruction(Deserializer &derez, 
+    void Internal::handle_field_destruction(Deserializer &derez, 
                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11637,28 +11651,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
+    void Internal::handle_individual_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_complete(Deserializer &derez)
+    void Internal::handle_individual_remote_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndividualTask::process_unpack_remote_complete(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_commit(Deserializer &derez)
+    void Internal::handle_individual_remote_commit(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndividualTask::process_unpack_remote_commit(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_slice_remote_mapped(Deserializer &derez,
+    void Internal::handle_slice_remote_mapped(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11666,21 +11680,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_slice_remote_complete(Deserializer &derez)
+    void Internal::handle_slice_remote_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexTask::process_slice_complete(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_slice_remote_commit(Deserializer &derez)
+    void Internal::handle_slice_remote_commit(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexTask::process_slice_commit(derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_registration(Deserializer &derez,
+    void Internal::handle_did_remote_registration(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11688,28 +11702,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_valid_update(Deserializer &derez)
+    void Internal::handle_did_remote_valid_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remote_valid_update(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_gc_update(Deserializer &derez)
+    void Internal::handle_did_remote_gc_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remote_gc_update(this, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
+    void Internal::handle_did_remote_resource_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remote_resource_update(this, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_registration(Deserializer &derez,
+    void Internal::handle_view_remote_registration(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11717,28 +11731,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_valid_update(Deserializer &derez)
+    void Internal::handle_view_remote_valid_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_remote_valid_update(forest, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_gc_update(Deserializer &derez)
+    void Internal::handle_view_remote_gc_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_remote_gc_update(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_resource_update(Deserializer &derez)
+    void Internal::handle_view_remote_resource_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_remote_resource_update(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_atomic(Deserializer &derez,
+    void Internal::handle_send_back_atomic(Deserializer &derez,
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11746,7 +11760,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_materialized_view(Deserializer &derez, 
+    void Internal::handle_send_materialized_view(Deserializer &derez, 
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11754,7 +11768,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_materialized_update(Deserializer &derez,
+    void Internal::handle_send_materialized_update(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11762,7 +11776,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_composite_view(Deserializer &derez,
+    void Internal::handle_send_composite_view(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11770,7 +11784,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_fill_view(Deserializer &derez, 
+    void Internal::handle_send_fill_view(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11778,7 +11792,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_deferred_update(Deserializer &derez, 
+    void Internal::handle_send_deferred_update(Deserializer &derez, 
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11786,7 +11800,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_view(Deserializer &derez,
+    void Internal::handle_send_reduction_view(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11794,7 +11808,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_update(Deserializer &derez,
+    void Internal::handle_send_reduction_update(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11802,7 +11816,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_instance_manager(Deserializer &derez,
+    void Internal::handle_send_instance_manager(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11810,7 +11824,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_manager(Deserializer &derez,
+    void Internal::handle_send_reduction_manager(Deserializer &derez,
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11818,28 +11832,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_send(Deserializer &derez, AddressSpaceID source)
+    void Internal::handle_future_send(Deserializer &derez,AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       Future::Impl::handle_future_send(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_result(Deserializer &derez)
+    void Internal::handle_future_result(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       Future::Impl::handle_future_result(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_subscription(Deserializer &derez)
+    void Internal::handle_future_subscription(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       Future::Impl::handle_future_subscription(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_make_persistent(Deserializer &derez,
+    void Internal::handle_make_persistent(Deserializer &derez,
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11847,7 +11861,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_unmake_persistent(Deserializer &derez,
+    void Internal::handle_unmake_persistent(Deserializer &derez,
                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11855,7 +11869,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_message(Deserializer &derez)
+    void Internal::handle_mapper_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11873,7 +11887,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_broadcast(Deserializer &derez)
+    void Internal::handle_mapper_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11892,7 +11906,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_semantic_request(Deserializer &derez,
+    void Internal::handle_index_space_semantic_request(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11900,7 +11914,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_semantic_request(Deserializer &derez, 
+    void Internal::handle_index_partition_semantic_request(Deserializer &derez, 
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11908,7 +11922,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_semantic_request(Deserializer &derez,
+    void Internal::handle_field_space_semantic_request(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11916,7 +11930,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_semantic_request(Deserializer &derez,
+    void Internal::handle_field_semantic_request(Deserializer &derez,
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11924,7 +11938,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_semantic_request(Deserializer &derez,
+    void Internal::handle_logical_region_semantic_request(Deserializer &derez,
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11932,15 +11946,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_semantic_request(Deserializer &derez,
-                                                          AddressSpaceID source)
+    void Internal::handle_logical_partition_semantic_request(
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       PartitionNode::handle_semantic_request(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_semantic_info(Deserializer &derez,
+    void Internal::handle_index_space_semantic_info(Deserializer &derez,
                                                    AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11948,7 +11962,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_semantic_info(Deserializer &derez, 
+    void Internal::handle_index_partition_semantic_info(Deserializer &derez, 
                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11956,7 +11970,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_semantic_info(Deserializer &derez,
+    void Internal::handle_field_space_semantic_info(Deserializer &derez,
                                                    AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11964,7 +11978,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_semantic_info(Deserializer &derez,
+    void Internal::handle_field_semantic_info(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11972,7 +11986,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_semantic_info(Deserializer &derez,
+    void Internal::handle_logical_region_semantic_info(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11980,7 +11994,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_semantic_info(Deserializer &derez,
+    void Internal::handle_logical_partition_semantic_info(Deserializer &derez,
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -11988,7 +12002,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_subscribe_remote_context(Deserializer &derez,
+    void Internal::handle_subscribe_remote_context(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12001,7 +12015,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_free_remote_context(Deserializer &derez)
+    void Internal::handle_free_remote_context(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -12024,7 +12038,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_path_only(Deserializer &derez,
+    void Internal::handle_version_state_path_only(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12032,7 +12046,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_initialization(Deserializer &derez,
+    void Internal::handle_version_state_initialization(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12040,14 +12054,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_request(Deserializer &derez)
+    void Internal::handle_version_state_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_response(Deserializer &derez,
+    void Internal::handle_version_state_response(Deserializer &derez,
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12055,7 +12069,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_instance_creation(Deserializer &derez,
+    void Internal::handle_remote_instance_creation(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12063,7 +12077,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_reduction_creation(Deserializer &derez,
+    void Internal::handle_remote_reduction_creation(Deserializer &derez,
                                                    AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12071,7 +12085,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_creation_response(Deserializer &derez)
+    void Internal::handle_remote_creation_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       UserEvent done_event;
@@ -12080,7 +12094,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_state_return(Deserializer &derez)
+    void Internal::handle_logical_state_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode::handle_logical_state_return(forest, derez);
@@ -12088,7 +12102,7 @@ namespace LegionRuntime {
 
 #ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
-    Processor Runtime::get_cleanup_proc(Processor p) const
+    Processor Internal::get_cleanup_proc(Processor p) const
     //--------------------------------------------------------------------------
     {
       if (cleanup_proc.exists())
@@ -12097,7 +12111,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::get_gc_proc(Processor p) const
+    Processor Internal::get_gc_proc(Processor p) const
     //--------------------------------------------------------------------------
     {
       if (gc_proc.exists())
@@ -12106,7 +12120,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::get_message_proc(Processor p) const
+    Processor Internal::get_message_proc(Processor p) const
     //--------------------------------------------------------------------------
     {
       if (message_proc.exists())
@@ -12117,7 +12131,7 @@ namespace LegionRuntime {
 
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
-    void Runtime::dump_processor_states(FILE *target)
+    void Internal::dump_processor_states(FILE *target)
     //--------------------------------------------------------------------------
     {
       // Don't need to hold the lock since we are hung when this is called  
@@ -12130,7 +12144,7 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    void Runtime::process_schedule_request(Processor proc)
+    void Internal::process_schedule_request(Processor proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12158,7 +12172,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::process_profiling_task(Processor p, 
+    void Internal::process_profiling_task(Processor p, 
                                          const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
@@ -12169,7 +12183,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::process_message_task(const void *args, size_t arglen)
+    void Internal::process_message_task(const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
       const char *buffer = (const char*)args;
@@ -12180,7 +12194,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::activate_context(SingleTask *context)
+    void Internal::activate_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
       for (std::map<Processor,ProcessorManager*>::const_iterator it =
@@ -12191,7 +12205,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::deactivate_context(SingleTask *context)
+    void Internal::deactivate_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
@@ -12202,7 +12216,7 @@ namespace LegionRuntime {
     }
  
     //--------------------------------------------------------------------------
-    void Runtime::execute_task_launch(Context ctx, TaskOp *task)
+    void Internal::execute_task_launch(Context ctx, TaskOp *task)
     //--------------------------------------------------------------------------
     {
       Processor proc = ctx->get_executing_processor();
@@ -12279,7 +12293,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_dependence_queue(Processor p, Operation *op)
+    void Internal::add_to_dependence_queue(Processor p, Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12290,7 +12304,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, 
+    void Internal::add_to_ready_queue(Processor p, 
                                            TaskOp *op, bool prev_fail)
     //--------------------------------------------------------------------------
     {
@@ -12302,7 +12316,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_local_queue(Processor p, 
+    void Internal::add_to_local_queue(Processor p, 
                                            Operation *op, bool prev_fail)
     //--------------------------------------------------------------------------
     {
@@ -12314,7 +12328,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::pre_wait(Processor proc)
+    void Internal::pre_wait(Processor proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12324,7 +12338,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::post_wait(Processor proc)
+    void Internal::post_wait(Processor proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12334,7 +12348,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_pre_map_task(Processor proc, TaskOp *task)
+    bool Internal::invoke_mapper_pre_map_task(Processor proc, TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12344,7 +12358,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_select_variant(Processor proc, TaskOp *task)
+    void Internal::invoke_mapper_select_variant(Processor proc, TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12354,7 +12368,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_task(Processor proc, SingleTask *task)
+    bool Internal::invoke_mapper_map_task(Processor proc, SingleTask *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12364,7 +12378,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_failed_mapping(Processor proc,
+    void Internal::invoke_mapper_failed_mapping(Processor proc,
                                                Mappable *mappable)
     //--------------------------------------------------------------------------
     {
@@ -12375,7 +12389,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_notify_result(Processor proc,
+    void Internal::invoke_mapper_notify_result(Processor proc,
                                               Mappable *mappable)
     //--------------------------------------------------------------------------
     {
@@ -12386,7 +12400,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_slice_domain(Processor proc, 
+    void Internal::invoke_mapper_slice_domain(Processor proc, 
                       MultiTask *task, std::vector<Mapper::DomainSplit> &splits)
     //--------------------------------------------------------------------------
     {
@@ -12397,7 +12411,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_inline(Processor proc, Inline *op)
+    bool Internal::invoke_mapper_map_inline(Processor proc, Inline *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12407,7 +12421,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_copy(Processor proc, Copy *op)
+    bool Internal::invoke_mapper_map_copy(Processor proc, Copy *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12417,7 +12431,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_speculate(Processor proc, 
+    bool Internal::invoke_mapper_speculate(Processor proc, 
                                           Mappable *mappable, bool &value)
     //--------------------------------------------------------------------------
     {
@@ -12428,7 +12442,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_configure_context(Processor proc, TaskOp *task)
+    void Internal::invoke_mapper_configure_context(Processor proc, TaskOp *task)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_HIGH_LEVEL
@@ -12444,7 +12458,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_rank_copy_targets(Processor proc,
+    bool Internal::invoke_mapper_rank_copy_targets(Processor proc,
                                                   Mappable *mappable,
                                                   LogicalRegion handle,
                                               const std::set<Memory> &memories,
@@ -12465,7 +12479,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_rank_copy_sources(Processor proc, 
+    void Internal::invoke_mapper_rank_copy_sources(Processor proc, 
                                            Mappable *mappable,
                                            const std::set<Memory> &memories,
                                            Memory destination,
@@ -12480,7 +12494,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_notify_profiling(Processor proc, TaskOp *task)
+    void Internal::invoke_mapper_notify_profiling(Processor proc, TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12490,7 +12504,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_must_epoch(Processor proc,
+    bool Internal::invoke_mapper_map_must_epoch(Processor proc,
         const std::vector<Task*> &tasks,
         const std::vector<Mapper::MappingConstraint> &constraints,
         MapperID map_id, MappingTagID tag)
@@ -12504,8 +12518,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_handle_message(Processor target,MapperID map_id,
-                           Processor source, const void *message, size_t length)
+    void Internal::invoke_mapper_handle_message(Processor target,
+          MapperID map_id, Processor source, const void *message, size_t length)
     //--------------------------------------------------------------------------
     {
       if (is_local(target))
@@ -12533,7 +12547,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_broadcast(MapperID map_id, Processor source,
+    void Internal::invoke_mapper_broadcast(MapperID map_id, Processor source,
                                           const void *message, size_t length, 
                                           int radix, int index)
     //--------------------------------------------------------------------------
@@ -12572,7 +12586,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_task_result(MapperID map_id, Processor proc,
+    void Internal::invoke_mapper_task_result(MapperID map_id, Processor proc,
                                             Event event, const void *result,
                                             size_t result_size)
     //--------------------------------------------------------------------------
@@ -12585,7 +12599,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::locate_mapper_info(Mapper *mapper, MapperID &map_id)
+    Processor Internal::locate_mapper_info(Mapper *mapper, MapperID &map_id)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(mapper_info_lock,1,false/*exclusive*/);
@@ -12599,7 +12613,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_send_message(Mapper *mapper, Processor target,
+    void Internal::handle_mapper_send_message(Mapper *mapper, Processor target,
                                              const void *message, size_t length)
     //--------------------------------------------------------------------------
     {
@@ -12618,7 +12632,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_broadcast(Mapper *mapper, const void *message,
+    void Internal::handle_mapper_broadcast(Mapper *mapper, const void *message,
                                           size_t length, int radix)
     //--------------------------------------------------------------------------
     {
@@ -12636,8 +12650,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event Runtime::launch_mapper_task(Mapper *mapper, Processor::TaskFuncID tid,
-                                      const TaskArgument &arg)
+    Event Internal::launch_mapper_task(Mapper *mapper, 
+                             Processor::TaskFuncID tid, const TaskArgument &arg)
     //--------------------------------------------------------------------------
     {
       MapperID map_id;
@@ -12646,7 +12660,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_mapper_call(Mapper *mapper, Event wait_on)
+    void Internal::defer_mapper_call(Mapper *mapper, Event wait_on)
     //--------------------------------------------------------------------------
     {
       MapperID map_id;
@@ -12658,7 +12672,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::find_processor_group(const std::set<Processor> &procs)
+    Processor Internal::find_processor_group(const std::set<Processor> &procs)
     //--------------------------------------------------------------------------
     {
       // Compute a hash of all the processor ids to avoid testing all sets 
@@ -12698,7 +12712,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event Runtime::issue_runtime_meta_task(const void *args, size_t arglen,
+    Event Internal::issue_runtime_meta_task(const void *args, size_t arglen,
                                            HLRTaskID tid, Operation *op,
                                            Event precondition, int priority,
                                            Processor target)
@@ -12732,7 +12746,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_context(SingleTask *task)
+    void Internal::allocate_context(SingleTask *task)
     //--------------------------------------------------------------------------
     {
       // Try getting something off the list of available contexts
@@ -12785,7 +12799,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_context(SingleTask *task)
+    void Internal::free_context(SingleTask *task)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext context = task->release_context();
@@ -12798,7 +12812,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID Runtime::get_available_distributed_id(bool need_cont,
+    DistributedID Internal::get_available_distributed_id(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -12808,7 +12822,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<DistributedID,
-                     &Runtime::get_available_distributed_id> 
+                     &Internal::get_available_distributed_id> 
                        continuation(this, distributed_id_lock);
         return continuation.get_result();
       }
@@ -12829,7 +12843,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_distributed_id(DistributedID did)
+    void Internal::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
@@ -12846,7 +12860,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::recycle_distributed_id(DistributedID did, Event recycle_event)
+    void Internal::recycle_distributed_id(DistributedID did,Event recycle_event)
     //--------------------------------------------------------------------------
     {
       if (recycle_event.exists())
@@ -12863,7 +12877,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_distributed_collectable(DistributedID did,
+    void Internal::register_distributed_collectable(DistributedID did,
                                                    DistributedCollectable *dc,
                                                    bool needs_lock)
     //--------------------------------------------------------------------------
@@ -12888,7 +12902,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::unregister_distributed_collectable(DistributedID did)
+    void Internal::unregister_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(distributed_collectable_lock);
@@ -12899,7 +12913,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_distributed_collectable(DistributedID did)
+    bool Internal::has_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
@@ -12907,7 +12921,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedCollectable* Runtime::find_distributed_collectable(
+    DistributedCollectable* Internal::find_distributed_collectable(
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
@@ -12921,7 +12935,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedCollectable* Runtime::weak_find_distributed_collectable(
+    DistributedCollectable* Internal::weak_find_distributed_collectable(
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
@@ -12934,7 +12948,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::register_future(DistributedID did, Future::Impl *impl)
+    void Internal::register_future(DistributedID did, Future::Impl *impl)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -12945,7 +12959,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unregister_future(DistributedID did)
+    void Internal::unregister_future(DistributedID did)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -12956,7 +12970,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_future(DistributedID did)
+    bool Internal::has_future(DistributedID did)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock,1,false/*exclusive*/);
@@ -12964,7 +12978,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future::Impl* Runtime::find_future(DistributedID did)
+    Future::Impl* Internal::find_future(DistributedID did)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock,1,false/*exclusive*/); 
@@ -12977,7 +12991,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future::Impl* Runtime::find_or_create_future(DistributedID did,
+    Future::Impl* Internal::find_or_create_future(DistributedID did,
                                                  AddressSpaceID owner_space)
     //--------------------------------------------------------------------------
     {
@@ -12997,7 +13011,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, Event term_event)
+    void Internal::defer_collect_user(LogicalView *view, Event term_event)
     //--------------------------------------------------------------------------
     {
       GarbageCollectionEpoch *to_trigger = NULL;
@@ -13005,7 +13019,7 @@ namespace LegionRuntime {
         AutoLock gc(gc_epoch_lock);
         current_gc_epoch->add_collection(view, term_event);
         gc_epoch_counter++;
-        if (gc_epoch_counter == Runtime::gc_epoch_size)
+        if (gc_epoch_counter == Internal::gc_epoch_size)
         {
           to_trigger = current_gc_epoch;
           current_gc_epoch = new GarbageCollectionEpoch(this);
@@ -13018,7 +13032,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::complete_gc_epoch(GarbageCollectionEpoch *epoch)
+    void Internal::complete_gc_epoch(GarbageCollectionEpoch *epoch)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_epoch_lock);
@@ -13033,7 +13047,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::increment_outstanding_top_level_tasks(void)
+    void Internal::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13046,7 +13060,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::decrement_outstanding_top_level_tasks(void)
+    void Internal::decrement_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
       unsigned previous = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
@@ -13059,7 +13073,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::initiate_runtime_shutdown(void)
+    void Internal::initiate_runtime_shutdown(void)
     //--------------------------------------------------------------------------
     {
       log_run.spew("Computation has terminated. "
@@ -13087,11 +13101,11 @@ namespace LegionRuntime {
       Event shutdown_precondition = Event::merge_events(shutdown_preconditions);
       shutdown_precondition.wait();
       // Finally shutdown the low-level runtime
-      LLRuntime::get_runtime().shutdown();
+      RealmRuntime::get_runtime().shutdown();
     }
 
     //--------------------------------------------------------------------------
-    IndividualTask* Runtime::get_available_individual_task(bool need_cont,
+    IndividualTask* Internal::get_available_individual_task(bool need_cont,
                                                            bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13101,7 +13115,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<IndividualTask*,
-                     &Runtime::get_available_individual_task> 
+                     &Internal::get_available_individual_task> 
                        continuation(this, individual_task_lock);
         return continuation.get_result();
       }
@@ -13120,7 +13134,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PointTask* Runtime::get_available_point_task(bool need_cont, bool has_lock)
+    PointTask* Internal::get_available_point_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13129,7 +13143,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<PointTask*,
-                     &Runtime::get_available_point_task> 
+                     &Internal::get_available_point_task> 
                        continuation(this, point_task_lock);
         return continuation.get_result();
       }
@@ -13148,7 +13162,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexTask* Runtime::get_available_index_task(bool need_cont, bool has_lock)
+    IndexTask* Internal::get_available_index_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13157,7 +13171,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<IndexTask*,
-                     &Runtime::get_available_index_task> 
+                     &Internal::get_available_index_task> 
                        continuation(this, index_task_lock);
         return continuation.get_result();
       }
@@ -13176,7 +13190,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    SliceTask* Runtime::get_available_slice_task(bool need_cont, bool has_lock)
+    SliceTask* Internal::get_available_slice_task(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13185,7 +13199,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<SliceTask*,
-                     &Runtime::get_available_slice_task> 
+                     &Internal::get_available_slice_task> 
                        continuation(this, slice_task_lock);
         return continuation.get_result();
       }
@@ -13204,7 +13218,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTask* Runtime::get_available_remote_task(bool need_cont, 
+    RemoteTask* Internal::get_available_remote_task(bool need_cont, 
                                                    bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13214,7 +13228,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<RemoteTask*,
-                     &Runtime::get_available_remote_task> 
+                     &Internal::get_available_remote_task> 
                        continuation(this, remote_task_lock);
         return continuation.get_result();
       }
@@ -13222,7 +13236,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InlineTask* Runtime::get_available_inline_task(bool need_cont,
+    InlineTask* Internal::get_available_inline_task(bool need_cont,
                                                    bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13232,7 +13246,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<InlineTask*,
-                     &Runtime::get_available_inline_task> 
+                     &Internal::get_available_inline_task> 
                        continuation(this, inline_task_lock);
         return continuation.get_result();
       }
@@ -13240,7 +13254,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MapOp* Runtime::get_available_map_op(bool need_cont, bool has_lock)
+    MapOp* Internal::get_available_map_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13249,7 +13263,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<MapOp*,
-                     &Runtime::get_available_map_op> 
+                     &Internal::get_available_map_op> 
                        continuation(this, map_op_lock);
         return continuation.get_result();
       }
@@ -13257,7 +13271,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    CopyOp* Runtime::get_available_copy_op(bool need_cont, bool has_lock)
+    CopyOp* Internal::get_available_copy_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13266,7 +13280,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<CopyOp*,
-                     &Runtime::get_available_copy_op> 
+                     &Internal::get_available_copy_op> 
                        continuation(this, copy_op_lock);
         return continuation.get_result();
       }
@@ -13274,7 +13288,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FenceOp* Runtime::get_available_fence_op(bool need_cont, bool has_lock)
+    FenceOp* Internal::get_available_fence_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13283,7 +13297,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<FenceOp*,
-                     &Runtime::get_available_fence_op> 
+                     &Internal::get_available_fence_op> 
                        continuation(this, fence_op_lock);
         return continuation.get_result();
       }
@@ -13291,7 +13305,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FrameOp* Runtime::get_available_frame_op(bool need_cont, bool has_lock)
+    FrameOp* Internal::get_available_frame_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13300,7 +13314,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<FrameOp*,
-                     &Runtime::get_available_frame_op> 
+                     &Internal::get_available_frame_op> 
                        continuation(this, frame_op_lock);
         return continuation.get_result();
       }
@@ -13308,7 +13322,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DeletionOp* Runtime::get_available_deletion_op(bool need_cont, 
+    DeletionOp* Internal::get_available_deletion_op(bool need_cont, 
                                                    bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13318,7 +13332,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<DeletionOp*,
-                     &Runtime::get_available_deletion_op> 
+                     &Internal::get_available_deletion_op> 
                        continuation(this, deletion_op_lock);
         return continuation.get_result();
       }
@@ -13326,7 +13340,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(bool need_cont,
+    InterCloseOp* Internal::get_available_inter_close_op(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13336,7 +13350,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<InterCloseOp*,
-                     &Runtime::get_available_inter_close_op> 
+                     &Internal::get_available_inter_close_op> 
                        continuation(this, inter_close_op_lock);
         return continuation.get_result();
       }
@@ -13345,7 +13359,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PostCloseOp* Runtime::get_available_post_close_op(bool need_cont,
+    PostCloseOp* Internal::get_available_post_close_op(bool need_cont,
                                                       bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13355,7 +13369,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<PostCloseOp*,
-                     &Runtime::get_available_post_close_op> 
+                     &Internal::get_available_post_close_op> 
                        continuation(this, post_close_op_lock);
         return continuation.get_result();
       }
@@ -13364,7 +13378,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* Runtime::get_available_virtual_close_op(bool need_cont,
+    VirtualCloseOp* Internal::get_available_virtual_close_op(bool need_cont,
                                                             bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13374,7 +13388,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<VirtualCloseOp*,
-                     &Runtime::get_available_virtual_close_op> 
+                     &Internal::get_available_virtual_close_op> 
                        continuation(this, virtual_close_op_lock);
         return continuation.get_result();
       }
@@ -13383,7 +13397,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(
+    DynamicCollectiveOp* Internal::get_available_dynamic_collective_op(
                                                   bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13393,7 +13407,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<DynamicCollectiveOp*,
-                     &Runtime::get_available_dynamic_collective_op> 
+                     &Internal::get_available_dynamic_collective_op> 
                        continuation(this, dynamic_collective_op_lock);
         return continuation.get_result();
       }
@@ -13402,7 +13416,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FuturePredOp* Runtime::get_available_future_pred_op(bool need_cont,
+    FuturePredOp* Internal::get_available_future_pred_op(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13412,7 +13426,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<FuturePredOp*,
-                     &Runtime::get_available_future_pred_op> 
+                     &Internal::get_available_future_pred_op> 
                        continuation(this, future_pred_op_lock);
         return continuation.get_result();
       }
@@ -13421,7 +13435,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    NotPredOp* Runtime::get_available_not_pred_op(bool need_cont, bool has_lock)
+    NotPredOp* Internal::get_available_not_pred_op(bool need_cont,bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13430,7 +13444,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<NotPredOp*,
-                     &Runtime::get_available_not_pred_op> 
+                     &Internal::get_available_not_pred_op> 
                        continuation(this, not_pred_op_lock);
         return continuation.get_result();
       }
@@ -13438,7 +13452,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    AndPredOp* Runtime::get_available_and_pred_op(bool need_cont, bool has_lock)
+    AndPredOp* Internal::get_available_and_pred_op(bool need_cont,bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13447,7 +13461,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<AndPredOp*,
-                     &Runtime::get_available_and_pred_op> 
+                     &Internal::get_available_and_pred_op> 
                        continuation(this, and_pred_op_lock);
         return continuation.get_result();
       }
@@ -13455,7 +13469,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    OrPredOp* Runtime::get_available_or_pred_op(bool need_cont, bool has_lock)
+    OrPredOp* Internal::get_available_or_pred_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13464,7 +13478,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<OrPredOp*,
-                     &Runtime::get_available_or_pred_op> 
+                     &Internal::get_available_or_pred_op> 
                        continuation(this, or_pred_op_lock);
         return continuation.get_result();
       }
@@ -13472,7 +13486,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    AcquireOp* Runtime::get_available_acquire_op(bool need_cont, bool has_lock)
+    AcquireOp* Internal::get_available_acquire_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13481,7 +13495,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<AcquireOp*,
-                     &Runtime::get_available_acquire_op> 
+                     &Internal::get_available_acquire_op> 
                        continuation(this, acquire_op_lock);
         return continuation.get_result();
       }
@@ -13489,7 +13503,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    ReleaseOp* Runtime::get_available_release_op(bool need_cont, bool has_lock)
+    ReleaseOp* Internal::get_available_release_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13498,7 +13512,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<ReleaseOp*,
-                     &Runtime::get_available_release_op> 
+                     &Internal::get_available_release_op> 
                        continuation(this, release_op_lock);
         return continuation.get_result();
       }
@@ -13506,7 +13520,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp* Runtime::get_available_capture_op(bool need_cont, 
+    TraceCaptureOp* Internal::get_available_capture_op(bool need_cont, 
                                                       bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13516,7 +13530,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<TraceCaptureOp*,
-                     &Runtime::get_available_capture_op> 
+                     &Internal::get_available_capture_op> 
                        continuation(this, capture_op_lock);
         return continuation.get_result();
       }
@@ -13524,7 +13538,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp* Runtime::get_available_trace_op(bool need_cont, 
+    TraceCompleteOp* Internal::get_available_trace_op(bool need_cont, 
                                                      bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13534,7 +13548,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<TraceCompleteOp*,
-                     &Runtime::get_available_trace_op> 
+                     &Internal::get_available_trace_op> 
                        continuation(this, trace_op_lock);
         return continuation.get_result();
       }
@@ -13542,7 +13556,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MustEpochOp* Runtime::get_available_epoch_op(bool need_cont, bool has_lock)
+    MustEpochOp* Internal::get_available_epoch_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13551,7 +13565,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<MustEpochOp*,
-                     &Runtime::get_available_epoch_op> 
+                     &Internal::get_available_epoch_op> 
                        continuation(this, epoch_op_lock);
         return continuation.get_result();
       }
@@ -13559,7 +13573,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PendingPartitionOp* Runtime::get_available_pending_partition_op(
+    PendingPartitionOp* Internal::get_available_pending_partition_op(
                                                   bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13569,7 +13583,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<PendingPartitionOp*,
-                     &Runtime::get_available_pending_partition_op> 
+                     &Internal::get_available_pending_partition_op> 
                        continuation(this, pending_partition_op_lock);
         return continuation.get_result();
       }
@@ -13578,7 +13592,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DependentPartitionOp* Runtime::get_available_dependent_partition_op(
+    DependentPartitionOp* Internal::get_available_dependent_partition_op(
                                                   bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -13588,7 +13602,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<DependentPartitionOp*,
-                     &Runtime::get_available_dependent_partition_op> 
+                     &Internal::get_available_dependent_partition_op> 
                        continuation(this, dependent_partition_op_lock);
         return continuation.get_result();
       }
@@ -13597,7 +13611,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FillOp* Runtime::get_available_fill_op(bool need_cont, bool has_lock)
+    FillOp* Internal::get_available_fill_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13606,7 +13620,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<FillOp*,
-                     &Runtime::get_available_fill_op> 
+                     &Internal::get_available_fill_op> 
                        continuation(this, fill_op_lock);
         return continuation.get_result();
       }
@@ -13614,7 +13628,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    AttachOp* Runtime::get_available_attach_op(bool need_cont, bool has_lock)
+    AttachOp* Internal::get_available_attach_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13623,7 +13637,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<AttachOp*,
-                     &Runtime::get_available_attach_op> 
+                     &Internal::get_available_attach_op> 
                        continuation(this, attach_op_lock);
         return continuation.get_result();
       }
@@ -13631,7 +13645,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DetachOp* Runtime::get_available_detach_op(bool need_cont, bool has_lock)
+    DetachOp* Internal::get_available_detach_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
       if (need_cont)
@@ -13640,7 +13654,7 @@ namespace LegionRuntime {
         assert(!has_lock);
 #endif
         GetAvailableContinuation<DetachOp*,
-                     &Runtime::get_available_detach_op> 
+                     &Internal::get_available_detach_op> 
                        continuation(this, detach_op_lock);
         return continuation.get_result();
       }
@@ -13648,7 +13662,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_individual_task(IndividualTask *task)
+    void Internal::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(individual_task_lock);
@@ -13659,7 +13673,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_point_task(PointTask *task)
+    void Internal::free_point_task(PointTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(point_task_lock);
@@ -13677,7 +13691,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_index_task(IndexTask *task)
+    void Internal::free_index_task(IndexTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(index_task_lock);
@@ -13688,7 +13702,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_slice_task(SliceTask *task)
+    void Internal::free_slice_task(SliceTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(slice_task_lock);
@@ -13706,7 +13720,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_remote_task(RemoteTask *task)
+    void Internal::free_remote_task(RemoteTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(remote_task_lock);
@@ -13721,7 +13735,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_inline_task(InlineTask *task)
+    void Internal::free_inline_task(InlineTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inline_task_lock);
@@ -13736,7 +13750,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_map_op(MapOp *op)
+    void Internal::free_map_op(MapOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(map_op_lock);
@@ -13744,7 +13758,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_copy_op(CopyOp *op)
+    void Internal::free_copy_op(CopyOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
@@ -13752,7 +13766,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_fence_op(FenceOp *op)
+    void Internal::free_fence_op(FenceOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fence_op_lock);
@@ -13760,7 +13774,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_frame_op(FrameOp *op)
+    void Internal::free_frame_op(FrameOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(frame_op_lock);
@@ -13768,7 +13782,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_deletion_op(DeletionOp *op)
+    void Internal::free_deletion_op(DeletionOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(deletion_op_lock);
@@ -13776,7 +13790,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_inter_close_op(InterCloseOp *op)
+    void Internal::free_inter_close_op(InterCloseOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_close_op_lock);
@@ -13784,7 +13798,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_post_close_op(PostCloseOp *op)
+    void Internal::free_post_close_op(PostCloseOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(post_close_op_lock);
@@ -13792,7 +13806,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_virtual_close_op(VirtualCloseOp *op)
+    void Internal::free_virtual_close_op(VirtualCloseOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(virtual_close_op_lock);
@@ -13800,7 +13814,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_dynamic_collective_op(DynamicCollectiveOp *op)
+    void Internal::free_dynamic_collective_op(DynamicCollectiveOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock dc_lock(dynamic_collective_op_lock);
@@ -13808,7 +13822,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_future_predicate_op(FuturePredOp *op)
+    void Internal::free_future_predicate_op(FuturePredOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_pred_op_lock);
@@ -13816,7 +13830,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_not_predicate_op(NotPredOp *op)
+    void Internal::free_not_predicate_op(NotPredOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(not_pred_op_lock);
@@ -13824,7 +13838,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_and_predicate_op(AndPredOp *op)
+    void Internal::free_and_predicate_op(AndPredOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(and_pred_op_lock);
@@ -13832,7 +13846,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_or_predicate_op(OrPredOp *op)
+    void Internal::free_or_predicate_op(OrPredOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(or_pred_op_lock);
@@ -13840,7 +13854,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_acquire_op(AcquireOp *op)
+    void Internal::free_acquire_op(AcquireOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(acquire_op_lock);
@@ -13848,7 +13862,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_release_op(ReleaseOp *op)
+    void Internal::free_release_op(ReleaseOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(release_op_lock);
@@ -13856,7 +13870,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_capture_op(TraceCaptureOp *op)
+    void Internal::free_capture_op(TraceCaptureOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(capture_op_lock);
@@ -13864,7 +13878,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_trace_op(TraceCompleteOp *op)
+    void Internal::free_trace_op(TraceCompleteOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_op_lock);
@@ -13872,7 +13886,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_epoch_op(MustEpochOp *op)
+    void Internal::free_epoch_op(MustEpochOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(epoch_op_lock);
@@ -13880,7 +13894,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_pending_partition_op(PendingPartitionOp *op)
+    void Internal::free_pending_partition_op(PendingPartitionOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_partition_op_lock);
@@ -13888,7 +13902,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_dependent_partition_op(DependentPartitionOp *op)
+    void Internal::free_dependent_partition_op(DependentPartitionOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(dependent_partition_op_lock);
@@ -13896,7 +13910,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_fill_op(FillOp *op)
+    void Internal::free_fill_op(FillOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
@@ -13904,7 +13918,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_attach_op(AttachOp *op)
+    void Internal::free_attach_op(AttachOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(attach_op_lock);
@@ -13912,7 +13926,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_detach_op(DetachOp *op)
+    void Internal::free_detach_op(DetachOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
@@ -13920,7 +13934,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid,
+    RemoteTask* Internal::find_or_init_remote_context(UniqueID uid,
                                                      Processor orig_proc,
                                                      SingleTask *remote_parent)
     //--------------------------------------------------------------------------
@@ -13967,7 +13981,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* Runtime::find_remote_context(UniqueID uid, 
+    SingleTask* Internal::find_remote_context(UniqueID uid, 
                                              SingleTask *remote_parent_ctx)
     //--------------------------------------------------------------------------
     {
@@ -13982,14 +13996,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_local(Processor proc) const
+    bool Internal::is_local(Processor proc) const
     //--------------------------------------------------------------------------
     {
       return (local_procs.find(proc) != local_procs.end());
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceID Runtime::get_unique_index_space_id(void)
+    IndexSpaceID Internal::get_unique_index_space_id(void)
     //--------------------------------------------------------------------------
     {
       IndexSpaceID result = __sync_fetch_and_add(&unique_index_space_id,
@@ -14004,7 +14018,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartitionID Runtime::get_unique_index_partition_id(void)
+    IndexPartitionID Internal::get_unique_index_partition_id(void)
     //--------------------------------------------------------------------------
     {
       IndexPartitionID result = __sync_fetch_and_add(&unique_index_partition_id,
@@ -14019,7 +14033,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpaceID Runtime::get_unique_field_space_id(void)
+    FieldSpaceID Internal::get_unique_field_space_id(void)
     //--------------------------------------------------------------------------
     {
       FieldSpaceID result = __sync_fetch_and_add(&unique_field_space_id,
@@ -14034,7 +14048,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexTreeID Runtime::get_unique_index_tree_id(void)
+    IndexTreeID Internal::get_unique_index_tree_id(void)
     //--------------------------------------------------------------------------
     {
       IndexTreeID result = __sync_fetch_and_add(&unique_index_tree_id,
@@ -14049,7 +14063,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeID Runtime::get_unique_region_tree_id(void)
+    RegionTreeID Internal::get_unique_region_tree_id(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeID result = __sync_fetch_and_add(&unique_region_tree_id,
@@ -14064,7 +14078,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    UniqueID Runtime::get_unique_operation_id(void)
+    UniqueID Internal::get_unique_operation_id(void)
     //--------------------------------------------------------------------------
     {
       UniqueID result = __sync_fetch_and_add(&unique_operation_id,
@@ -14077,7 +14091,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    FieldID Runtime::get_unique_field_id(void)
+    FieldID Internal::get_unique_field_id(void)
     //--------------------------------------------------------------------------
     {
       FieldID result = __sync_fetch_and_add(&unique_field_id,
@@ -14090,8 +14104,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LegionErrorType Runtime::verify_requirement(
-                              const RegionRequirement &req, FieldID &bad_field)       
+    LegionErrorType Internal::verify_requirement(
+                               const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
     {
       FieldSpace sp = (req.handle_type == SINGULAR) 
@@ -14154,7 +14168,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(Operation *op /*= NULL*/)
+    Future Internal::help_create_future(Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       return Future(legion_new<Future::Impl>(this, true/*register*/,
@@ -14163,21 +14177,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::help_complete_future(const Future &f)
+    void Internal::help_complete_future(const Future &f)
     //--------------------------------------------------------------------------
     {
       f.impl->complete_future();
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::help_reset_future(const Future &f)
+    bool Internal::help_reset_future(const Future &f)
     //--------------------------------------------------------------------------
     {
       return f.impl->reset_future();
     }
 
     //--------------------------------------------------------------------------
-    unsigned Runtime::generate_random_integer(void)
+    unsigned Internal::generate_random_integer(void)
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(random_lock);
@@ -14187,7 +14201,7 @@ namespace LegionRuntime {
 
 #ifdef TRACE_ALLOCATION 
     //--------------------------------------------------------------------------
-    void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
+    void Internal::trace_allocation(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(allocation_lock);
@@ -14201,7 +14215,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::trace_free(AllocationType type, size_t size, int elems)
+    void Internal::trace_free(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(allocation_lock);
@@ -14215,7 +14229,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::dump_allocation_info(void)
+    void Internal::dump_allocation_info(void)
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(allocation_lock);
@@ -14240,7 +14254,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const char* Runtime::get_allocation_name(AllocationType type)
+    /*static*/ const char* Internal::get_allocation_name(AllocationType type)
     //--------------------------------------------------------------------------
     {
       switch (type)
@@ -14444,7 +14458,7 @@ namespace LegionRuntime {
 
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
     //--------------------------------------------------------------------------
-    void Runtime::print_out_individual_tasks(FILE *f, int cnt /*= -1*/)
+    void Internal::print_out_individual_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -14474,7 +14488,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_index_tasks(FILE *f, int cnt /*= -1*/)
+    void Internal::print_out_index_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -14504,7 +14518,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_slice_tasks(FILE *f, int cnt /*= -1*/)
+    void Internal::print_out_slice_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -14534,7 +14548,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_point_tasks(FILE *f, int cnt /*= -1*/)
+    void Internal::print_out_point_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -14564,7 +14578,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_outstanding_tasks(FILE *f, int cnt /*= -1*/)
+    void Internal::print_outstanding_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       std::map<UniqueID,TaskOp*> out_tasks;
@@ -14642,52 +14656,52 @@ namespace LegionRuntime {
     }
 #endif
 
-    /*static*/ Runtime *Runtime::runtime_map[(MAX_NUM_PROCS+1)];
-    /*static*/ volatile RegistrationCallbackFnptr Runtime::
+    /*static*/ Internal *Internal::runtime_map[(MAX_NUM_PROCS+1)];
+    /*static*/ volatile RegistrationCallbackFnptr Internal::
                                               registration_callback = NULL;
-    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ int Runtime::initial_task_window_size = 
+    /*static*/ Processor::TaskFuncID Internal::legion_main_id = 0;
+    /*static*/ int Internal::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
-    /*static*/ unsigned Runtime::initial_task_window_hysteresis =
+    /*static*/ unsigned Internal::initial_task_window_hysteresis =
                                       DEFAULT_TASK_WINDOW_HYSTERESIS;
-    /*static*/ unsigned Runtime::initial_tasks_to_schedule = 
+    /*static*/ unsigned Internal::initial_tasks_to_schedule = 
                                       DEFAULT_MIN_TASKS_TO_SCHEDULE;
-    /*static*/ unsigned Runtime::superscalar_width = 
+    /*static*/ unsigned Internal::superscalar_width = 
                                       DEFAULT_SUPERSCALAR_WIDTH;
-    /*static*/ unsigned Runtime::max_message_size = 
+    /*static*/ unsigned Internal::max_message_size = 
                                       DEFAULT_MAX_MESSAGE_SIZE;
-    /*static*/ unsigned Runtime::max_filter_size = 
+    /*static*/ unsigned Internal::max_filter_size = 
                                       DEFAULT_MAX_FILTER_SIZE;
-    /*static*/ unsigned Runtime::gc_epoch_size = 
+    /*static*/ unsigned Internal::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
-    /*static*/ bool Runtime::enable_imprecise_filter = false;
-    /*static*/ bool Runtime::separate_runtime_instances = false;
-    /*static*/ bool Runtime::record_registration = false;
-    /*sattic*/ bool Runtime::stealing_disabled = false;
-    /*static*/ bool Runtime::resilient_mode = false;
-    /*static*/ bool Runtime::unsafe_launch = false;
-    /*static*/ bool Runtime::dynamic_independence_tests = true;
-    /*static*/ unsigned Runtime::shutdown_counter = 0;
-    /*static*/ int Runtime::mpi_rank = -1;
-    /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
-    /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
-    /*static*/ UserEvent Runtime::mpi_rank_event = UserEvent::NO_USER_EVENT;
+    /*static*/ bool Internal::enable_imprecise_filter = false;
+    /*static*/ bool Internal::separate_runtime_instances = false;
+    /*static*/ bool Internal::record_registration = false;
+    /*sattic*/ bool Internal::stealing_disabled = false;
+    /*static*/ bool Internal::resilient_mode = false;
+    /*static*/ bool Internal::unsafe_launch = false;
+    /*static*/ bool Internal::dynamic_independence_tests = true;
+    /*static*/ unsigned Internal::shutdown_counter = 0;
+    /*static*/ int Internal::mpi_rank = -1;
+    /*static*/ unsigned Internal::mpi_rank_table[MAX_NUM_NODES];
+    /*static*/ unsigned Internal::remaining_mpi_notifications = 0;
+    /*static*/ UserEvent Internal::mpi_rank_event = UserEvent::NO_USER_EVENT;
 #ifdef INORDER_EXECUTION
-    /*static*/ bool Runtime::program_order_execution = true;
+    /*static*/ bool Internal::program_order_execution = true;
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-    /*static*/ bool Runtime::logging_region_tree_state = false;
-    /*static*/ bool Runtime::verbose_logging = false;
-    /*static*/ bool Runtime::logical_logging_only = false;
-    /*static*/ bool Runtime::physical_logging_only = false;
-    /*static*/ bool Runtime::check_privileges = true;
-    /*static*/ bool Runtime::verify_disjointness = false;
-    /*static*/ bool Runtime::bit_mask_logging = false;
+    /*static*/ bool Internal::logging_region_tree_state = false;
+    /*static*/ bool Internal::verbose_logging = false;
+    /*static*/ bool Internal::logical_logging_only = false;
+    /*static*/ bool Internal::physical_logging_only = false;
+    /*static*/ bool Internal::check_privileges = true;
+    /*static*/ bool Internal::verify_disjointness = false;
+    /*static*/ bool Internal::bit_mask_logging = false;
 #endif
 #ifdef DEBUG_PERF
-    /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
+    /*static*/ unsigned long long Internal::perf_trace_tolerance = 10000; 
 #endif
-    /*static*/ unsigned Runtime::num_profiling_nodes = 0;
+    /*static*/ unsigned Internal::num_profiling_nodes = 0;
 
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
@@ -14699,7 +14713,7 @@ namespace LegionRuntime {
       int count = __sync_fetch_and_add(&call_count, 0);
       if (count == 0)
       {
-        Runtime *rt = Runtime::runtime_map[1];
+        Internal *rt = Internal::runtime_map[1];
         const char *prefix = "";
         char file_name[1024];
         sprintf(file_name,"%strace_%d.txt", prefix, rt->address_space);
@@ -14713,7 +14727,7 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ int Runtime::start(int argc, char **argv, bool background)
+    /*static*/ int Internal::start(int argc, char **argv, bool background)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
@@ -14729,28 +14743,28 @@ namespace LegionRuntime {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      LLRuntime ll;
+      RealmRuntime realm;
 
 #ifndef NDEBUG
       bool ok = 
 #endif
-        ll.init(&argc, &argv);
+        realm.init(&argc, &argv);
       assert(ok);
 
-      // register tasks and reduction ops with LLR
+      // register tasks and reduction ops with Realm 
       {
 	const Processor::TaskIDTable& task_table =
 	  get_task_table(true/*add runtime tasks*/);
 	for(Processor::TaskIDTable::const_iterator it = task_table.begin();
 	    it != task_table.end();
 	    it++)
-	  ll.register_task(it->first, it->second);
+	  realm.register_task(it->first, it->second);
       
 	const ReductionOpTable& red_table = get_reduction_table();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
 	    it++)
-	  ll.register_reduction(it->first, it->second);
+	  realm.register_reduction(it->first, it->second);
       }
       
       // Parse any inputs for the high level runtime
@@ -14856,21 +14870,21 @@ namespace LegionRuntime {
 #endif
       }
       // Now we can set out input args
-      Runtime::get_input_args().argv = argv;
-      Runtime::get_input_args().argc = argc;
+      Internal::get_input_args().argv = argv;
+      Internal::get_input_args().argc = argc;
 #ifdef HANG_TRACE
       signal(SIGTERM, catch_hang); 
 #endif
-      if (Runtime::record_registration)
+      if (Internal::record_registration)
       {
         log_run.print("High-level runtime initialization task "
                             "has low-level ID %d", INIT_FUNC_ID);
         log_run.print("High-level runtime shutdown task has "
                             "low-level ID %d", SHUTDOWN_FUNC_ID);
-        log_run.print("Runtime meta-task has low-level ID %d", 
+        log_run.print("Internal meta-task has low-level ID %d", 
                             HLR_TASK_ID);
         std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-          variant_table = Runtime::get_collection_table(); 
+          variant_table = Internal::get_collection_table(); 
         for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
               const_iterator vit = variant_table.begin(); vit !=
               variant_table.end(); vit++)
@@ -14887,7 +14901,7 @@ namespace LegionRuntime {
         }
       } 
       // Kick off the low-level machine
-      ll.run(0, LLRuntime::ONE_TASK_ONLY, 0, 0, background);
+      realm.run(0, RealmRuntime::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded
       assert(background);
       if (background)
@@ -14897,14 +14911,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ void Internal::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      LLRuntime::get_runtime().wait_for_shutdown();
+      RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(
+    /*static*/ void Internal::set_top_level_task_id(
                                                   Processor::TaskFuncID top_id)
     //--------------------------------------------------------------------------
     {
@@ -14912,7 +14926,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::configure_MPI_interoperability(int rank)
+    /*static*/ void Internal::configure_MPI_interoperability(int rank)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -14922,7 +14936,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const ReductionOp* Runtime::get_reduction_op(
+    /*static*/ const ReductionOp* Internal::get_reduction_op(
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
     {
@@ -14934,7 +14948,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_RESERVED_REDOP_ID);
       }
-      ReductionOpTable &red_table = Runtime::get_reduction_table();
+      ReductionOpTable &red_table = Internal::get_reduction_table();
 #ifdef DEBUG_HIGH_LEVEL
       if (red_table.find(redop_id) == red_table.end())
       {
@@ -14947,7 +14961,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_registration_callback(
+    /*static*/ void Internal::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
@@ -14955,7 +14969,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ InputArgs& Runtime::get_input_args(void)
+    /*static*/ InputArgs& Internal::get_input_args(void)
     //--------------------------------------------------------------------------
     {
       static InputArgs inputs = { NULL, 0 };
@@ -14963,7 +14977,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Runtime* Runtime::get_runtime(Processor p)
+    /*static*/ Internal* Internal::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -14973,7 +14987,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
+    /*static*/ ReductionOpTable& Internal::get_reduction_table(void)
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
@@ -14981,7 +14995,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::register_region_projection_function(
+    /*static*/ ProjectionID Internal::register_region_projection_function(
                                           ProjectionID handle, void *func_ptr)
     //--------------------------------------------------------------------------
     {
@@ -14994,7 +15008,7 @@ namespace LegionRuntime {
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
       RegionProjectionTable &proj_table = 
-                          Runtime::get_region_projection_table();
+                          Internal::get_region_projection_table();
       if (proj_table.find(handle) != proj_table.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
@@ -15024,7 +15038,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::
+    /*static*/ ProjectionID Internal::
       register_partition_projection_function(ProjectionID handle, 
                                              void *func_ptr)
     //--------------------------------------------------------------------------
@@ -15038,7 +15052,7 @@ namespace LegionRuntime {
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
       PartitionProjectionTable &proj_table = 
-                              Runtime::get_partition_projection_table();
+                              Internal::get_partition_projection_table();
       if (proj_table.find(handle) != proj_table.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
@@ -15068,7 +15082,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
+    /*static*/ TaskID Internal::update_collection_table(
                           LowLevelFnptr low_level_ptr,
                           InlineFnptr inline_ptr,
                           TaskID uid, Processor::Kind proc_kind, 
@@ -15079,7 +15093,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = 
-                                        Runtime::get_collection_table();
+                                        Internal::get_collection_table();
       // See if the user wants us to find a new ID
       if (uid == AUTO_GENERATE_ID)
       {
@@ -15102,10 +15116,10 @@ namespace LegionRuntime {
 #endif
       }
       // First update the low-level task table
-      Processor::TaskFuncID low_id = Runtime::get_next_available_id();
+      Processor::TaskFuncID low_id = Internal::get_next_available_id();
       // Add it to the low level table
-      Runtime::get_task_table(false)[low_id] = low_level_ptr;
-      Runtime::get_inline_table()[low_id] = inline_ptr;
+      Internal::get_task_table(false)[low_id] = low_level_ptr;
+      Internal::get_inline_table()[low_id] = inline_ptr;
       // Now see if an entry already exists in the attribute 
       // table for this uid
       if (table.find(uid) == table.end())
@@ -15191,7 +15205,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
+    /*static*/ TaskID Internal::update_collection_table(
                           LowLevelFnptr low_level_ptr,
                           InlineFnptr inline_ptr,
                           TaskID tid, Processor::Kind proc_kind, 
@@ -15214,7 +15228,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const void* Runtime::find_user_data(TaskID tid, VariantID vid)
+    /*static*/ const void* Internal::find_user_data(TaskID tid, VariantID vid)
     //--------------------------------------------------------------------------
     {
       std::pair<TaskID,VariantID> key(tid,vid);
@@ -15229,12 +15243,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskVariantCollection* Runtime::get_variant_collection(
+    /*static*/ TaskVariantCollection* Internal::get_variant_collection(
                                                       Processor::TaskFuncID tid)
     //--------------------------------------------------------------------------
     {
       std::map<Processor::TaskFuncID,TaskVariantCollection*> &task_table = 
-        Runtime::get_collection_table();
+        Internal::get_collection_table();
       std::map<Processor::TaskFuncID,TaskVariantCollection*>::const_iterator
         finder = task_table.find(tid);
       if (finder == task_table.end())
@@ -15251,7 +15265,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionFnptr Runtime::
+    /*static*/ PartitionProjectionFnptr Internal::
                             find_partition_projection_function(ProjectionID pid)
     //--------------------------------------------------------------------------
     {
@@ -15270,7 +15284,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionFnptr Runtime::find_region_projection_function(
+    /*static*/ RegionProjectionFnptr Internal::find_region_projection_function(
                                                               ProjectionID pid)
     //--------------------------------------------------------------------------
     {
@@ -15289,7 +15303,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ InlineFnptr Runtime::find_inline_function(
+    /*static*/ InlineFnptr Internal::find_inline_function(
                                                     Processor::TaskFuncID fid)
     //--------------------------------------------------------------------------
     {
@@ -15311,7 +15325,7 @@ namespace LegionRuntime {
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
-    /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
+    /*static*/ const char* Internal::find_privilege_task_name(void *impl)
     //--------------------------------------------------------------------------
     {
       PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
@@ -15321,7 +15335,7 @@ namespace LegionRuntime {
 
 #ifdef BOUNDS_CHECKS
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::check_bounds(void *impl, ptr_t ptr)
+    /*static*/ void Internal::check_bounds(void *impl, ptr_t ptr)
     //--------------------------------------------------------------------------
     {
       PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
@@ -15334,7 +15348,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::check_bounds(void *impl, const DomainPoint &dp)
+    /*static*/ void Internal::check_bounds(void *impl, const DomainPoint &dp)
     //--------------------------------------------------------------------------
     {
       PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
@@ -15366,7 +15380,7 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ int* Runtime::get_startup_arrivals(void)
+    /*static*/ int* Internal::get_startup_arrivals(void)
     //--------------------------------------------------------------------------
     {
       static int startup_arrivals = 0;
@@ -15374,19 +15388,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskIDTable& Runtime::get_task_table(
+    /*static*/ Processor::TaskIDTable& Internal::get_task_table(
                                             bool add_runtime_tasks /*= true*/)
     //--------------------------------------------------------------------------
     {
       static Processor::TaskIDTable table;
       if (add_runtime_tasks)
-        Runtime::register_runtime_tasks(table); 
+        Internal::register_runtime_tasks(table); 
       return table;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ std::map<Processor::TaskFuncID,InlineFnptr>& 
-                                          Runtime::get_inline_table(void)
+                                          Internal::get_inline_table(void)
     //--------------------------------------------------------------------------
     {
       static std::map<Processor::TaskFuncID,InlineFnptr> table;
@@ -15395,7 +15409,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-                                      Runtime::get_collection_table(void)
+                                      Internal::get_collection_table(void)
     //--------------------------------------------------------------------------
     {
       static std::map<Processor::TaskFuncID,TaskVariantCollection*> 
@@ -15405,7 +15419,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ std::map<std::pair<TaskID,VariantID>,const void*>&
-                                      Runtime::get_user_data_table(void)
+                                      Internal::get_user_data_table(void)
     //--------------------------------------------------------------------------
     {
       static std::map<std::pair<TaskID,VariantID>,const void*> user_data_table;
@@ -15413,7 +15427,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionTable& Runtime::
+    /*static*/ RegionProjectionTable& Internal::
                                               get_region_projection_table(void)
     //--------------------------------------------------------------------------
     {
@@ -15422,7 +15436,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionTable& Runtime::
+    /*static*/ PartitionProjectionTable& Internal::
                                           get_partition_projection_table(void)
     //--------------------------------------------------------------------------
     {
@@ -15431,7 +15445,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::
+    /*static*/ void Internal::
                           register_runtime_tasks(Processor::TaskIDTable &table)
     //--------------------------------------------------------------------------
     {
@@ -15448,15 +15462,15 @@ namespace LegionRuntime {
           exit(ERROR_RESERVED_TASK_ID);
         }
       }
-      table[INIT_FUNC_ID]            = Runtime::initialize_runtime;
-      table[SHUTDOWN_FUNC_ID]        = Runtime::shutdown_runtime;
-      table[HLR_TASK_ID]             = Runtime::high_level_runtime_task;
-      table[HLR_LEGION_PROFILING_ID] = Runtime::profiling_runtime_task;
-      table[HLR_MAPPER_PROFILING_ID] = Runtime::profiling_mapper_task;
+      table[INIT_FUNC_ID]            = Internal::initialize_runtime;
+      table[SHUTDOWN_FUNC_ID]        = Internal::shutdown_runtime;
+      table[HLR_TASK_ID]             = Internal::high_level_runtime_task;
+      table[HLR_LEGION_PROFILING_ID] = Internal::profiling_runtime_task;
+      table[HLR_MAPPER_PROFILING_ID] = Internal::profiling_mapper_task;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskFuncID Runtime::get_next_available_id(void)
+    /*static*/ Processor::TaskFuncID Internal::get_next_available_id(void)
     //--------------------------------------------------------------------------
     {
       static Processor::TaskFuncID available = TASK_ID_AVAILABLE;
@@ -15464,7 +15478,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::log_machine(Machine machine)
+    /*static*/ void Internal::log_machine(Machine machine)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -15517,7 +15531,7 @@ namespace LegionRuntime {
 
 #ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::get_utility_processor_mapping(
+    /*static*/ void Internal::get_utility_processor_mapping(
                 const std::set<Processor> &util_procs, Processor &cleanup_proc,
                 Processor &gc_proc, Processor &message_proc)
     //--------------------------------------------------------------------------
@@ -15579,7 +15593,7 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize_runtime(
+    /*static*/ void Internal::initialize_runtime(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
@@ -15700,12 +15714,12 @@ namespace LegionRuntime {
         Processor gc_proc = Processor::NO_PROC;
         Processor message_proc = Processor::NO_PROC;
 #ifdef SPECIALIZED_UTIL_PROCS
-        Runtime::get_utility_processor_mapping(local_util_procs,
+        Internal::get_utility_processor_mapping(local_util_procs,
                                                cleanup_proc, gc_proc,
                                                message_proc);
 #endif
         // Set up the runtime mask for this instance
-        Runtime *local_rt = new Runtime(machine, local_space_id, 
+        Internal *local_rt = new Internal(machine, local_space_id, 
                                         local_procs, local_util_procs,
                                         address_spaces, proc_spaces,
                                         cleanup_proc, gc_proc, message_proc);
@@ -15723,7 +15737,7 @@ namespace LegionRuntime {
         }
       }
       // Arrive at the barrier
-      __sync_fetch_and_add(Runtime::get_startup_arrivals(), 1);
+      __sync_fetch_and_add(Internal::get_startup_arrivals(), 1);
       // Compute the number of processors we need to wait for
       int needed_count = 0;
       {
@@ -15740,29 +15754,29 @@ namespace LegionRuntime {
       // Yes there is a race condition here on writes, but
       // everyone is going to be writing the same value
       // so it doesn't matter.
-      Runtime::shutdown_counter = needed_count;
+      Internal::shutdown_counter = needed_count;
       // Have a spinning barrier here to wait for all processors
       // to finish initializing before continuing
 #ifndef VALGRIND
-      while (__sync_fetch_and_add(Runtime::get_startup_arrivals(), 0) 
+      while (__sync_fetch_and_add(Internal::get_startup_arrivals(), 0) 
               != needed_count) { }
 #endif
       // Call in the runtime to see if we should launch the top-level task
       if (proc_kind != Processor::UTIL_PROC)
       {
-        Runtime *local_rt = Runtime::get_runtime(p);
+        Internal *local_rt = Internal::get_runtime(p);
 #ifdef DEBUG_HIGH_LEVEL
         assert(local_rt != NULL);
 #endif
         // If we have an MPI rank, build the maps first
-        if (Runtime::mpi_rank >= 0)
-          local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
+        if (Internal::mpi_rank >= 0)
+          local_rt->construct_mpi_rank_tables(p, Internal::mpi_rank);
         local_rt->launch_top_level_task(p);
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::shutdown_runtime(
+    /*static*/ void Internal::shutdown_runtime(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
@@ -15770,7 +15784,7 @@ namespace LegionRuntime {
         delete get_runtime(p);
       else
       {
-        unsigned result = __sync_sub_and_fetch(&Runtime::shutdown_counter, 1);
+        unsigned result = __sync_sub_and_fetch(&Internal::shutdown_counter, 1);
         // Only delete the runtime if we're the last one to use it
         if (result == 0)
           delete get_runtime(p);
@@ -15778,7 +15792,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::high_level_runtime_task(
+    /*static*/ void Internal::high_level_runtime_task(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
@@ -15792,12 +15806,13 @@ namespace LegionRuntime {
           {
             const ProcessorManager::SchedulerArgs *sched_args = 
               (const ProcessorManager::SchedulerArgs*)args;
-            Runtime::get_runtime(p)->process_schedule_request(sched_args->proc);
+            Internal::get_runtime(p)->process_schedule_request(
+                                                            sched_args->proc);
             break;
           }
         case HLR_MESSAGE_ID:
           {
-            Runtime::get_runtime(p)->process_message_task(data, arglen);
+            Internal::get_runtime(p)->process_message_task(data, arglen);
             break;
           }
         case HLR_POST_END_ID:
@@ -15867,7 +15882,7 @@ namespace LegionRuntime {
             derez.deserialize(handle);
             FieldID fid;
             derez.deserialize(fid);
-            Runtime::get_runtime(p)->finalize_field_destroy(handle, fid);
+            Internal::get_runtime(p)->finalize_field_destroy(handle, fid);
             break; 
           }
         case HLR_DEFERRED_COLLECT_ID:
@@ -15918,7 +15933,7 @@ namespace LegionRuntime {
           {
             const DeferredRecycleArgs *deferred_recycle_args = 
               (const DeferredRecycleArgs*)args;
-            Runtime::get_runtime(p)->free_distributed_id(
+            Internal::get_runtime(p)->free_distributed_id(
                                         deferred_recycle_args->did);
             break;
           }
@@ -16003,13 +16018,13 @@ namespace LegionRuntime {
         case HLR_MPI_RANK_ID:
           {
             MPIRankArgs *margs = (MPIRankArgs*)args;
-            Runtime::mpi_rank_table[margs->mpi_rank] = margs->source_space;
+            Internal::mpi_rank_table[margs->mpi_rank] = margs->source_space;
             unsigned count = 
-              __sync_fetch_and_add(&Runtime::remaining_mpi_notifications, 1);
+              __sync_fetch_and_add(&Internal::remaining_mpi_notifications, 1);
             const size_t total_ranks = 
               Machine::get_machine().get_address_space_count();
             if (count == total_ranks)
-              Runtime::mpi_rank_event.trigger();
+              Internal::mpi_rank_event.trigger();
             break;
           }
         case HLR_CONTRIBUTE_COLLECTIVE_ID:
@@ -16028,7 +16043,7 @@ namespace LegionRuntime {
           {
             MapperTaskArgs *margs = (MapperTaskArgs*)args;
             // Tell the mapper about the result
-            Runtime *rt = Runtime::get_runtime(p);       
+            Internal *rt = Internal::get_runtime(p);       
             size_t result_size = margs->future->get_untyped_size();
             const void *result = margs->future->get_untyped_result();
             rt->invoke_mapper_task_result(margs->map_id, margs->proc,
@@ -16046,7 +16061,7 @@ namespace LegionRuntime {
           {
             RegionTreeForest::DisjointnessArgs *dargs = 
               (RegionTreeForest::DisjointnessArgs*)args;
-            Runtime *runtime = Runtime::get_runtime(p);
+            Internal *runtime = Internal::get_runtime(p);
             runtime->forest->compute_partition_disjointness(dargs->handle,
                                                             dargs->ready);
             break;
@@ -16172,16 +16187,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::profiling_runtime_task(
+    /*static*/ void Internal::profiling_runtime_task(
                                    const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(p);
+      Internal *rt = Internal::get_runtime(p);
       rt->process_profiling_task(p, args, arglen);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::profiling_mapper_task(
+    /*static*/ void Internal::profiling_mapper_task(
                                    const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
@@ -16189,7 +16204,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event LegionContinuation::defer(Runtime *runtime, Event precondition)
+    Event LegionContinuation::defer(Internal *runtime, Event precondition)
     //--------------------------------------------------------------------------
     {
       ContinuationArgs args;
@@ -16214,7 +16229,8 @@ namespace LegionRuntime {
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(Processor::get_executing_processor());
+      Internal *rt = Internal::get_runtime(
+                                  Processor::get_executing_processor());
       if (rt != NULL)
         rt->trace_allocation(a, size, elems);
     }
@@ -16224,20 +16240,21 @@ namespace LegionRuntime {
                                                  size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(Processor::get_executing_processor());
+      Internal *rt = Internal::get_runtime(
+                                  Processor::get_executing_processor());
       if (rt != NULL)
         rt->trace_free(a, size, elems);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Runtime* LegionAllocation::find_runtime(void)
+    /*static*/ Internal* LegionAllocation::find_runtime(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(Processor::get_executing_processor());
+      return Internal::get_runtime(Processor::get_executing_processor());
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void LegionAllocation::trace_allocation(Runtime *&runtime,
+    /*static*/ void LegionAllocation::trace_allocation(Internal *&runtime,
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
@@ -16252,7 +16269,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void LegionAllocation::trace_free(Runtime *&runtime,
+    /*static*/ void LegionAllocation::trace_free(Internal *&runtime,
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {

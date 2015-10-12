@@ -2952,7 +2952,7 @@ namespace LegionRuntime {
       // Use the lock on the version manager to ensure that we don't
       // replicated version states on a node
       VersionState *result = NULL;
-      Runtime *runtime = owner->context->runtime;
+      Internal *runtime = owner->context->runtime;
       {
         AutoLock s_lock(state_lock);
         if (runtime->has_distributed_collectable(did))
@@ -4617,7 +4617,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
+    VersionState::VersionState(VersionID vid, Internal *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
                                CurrentState *man)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
@@ -6289,7 +6289,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_path_only(
-                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
+                       Internal *rt, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -6313,7 +6313,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_initialization(
-                        Runtime *rt, Deserializer &derez, AddressSpaceID source)
+                       Internal *rt, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -6336,7 +6336,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_request(Runtime *rt,
+    /*static*/ void VersionState::process_version_state_request(Internal *rt,
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -6363,7 +6363,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_response(Runtime *rt,
+    /*static*/ void VersionState::process_version_state_response(Internal *rt,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6703,7 +6703,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::unpack_reference(Runtime *runtime, Deserializer &derez)
+    void InstanceRef::unpack_reference(Internal *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
@@ -6789,7 +6789,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeRef::unpack_reference(Runtime *runtime, Deserializer &derez)
+    void CompositeRef::unpack_reference(Internal *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL

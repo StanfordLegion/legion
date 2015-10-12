@@ -30,7 +30,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DistributedCollectable::DistributedCollectable(Runtime *rt,
+    DistributedCollectable::DistributedCollectable(Internal *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space,
@@ -387,7 +387,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_registration(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -402,7 +402,7 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_valid_update(
-                                          Runtime *runtime, Deserializer &derez)
+                                         Internal *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -422,7 +422,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_gc_update(
-                                          Runtime *runtime, Deserializer &derez)
+                                         Internal *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -442,7 +442,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
-                                          Runtime *runtime, Deserializer &derez)
+                                         Internal *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);

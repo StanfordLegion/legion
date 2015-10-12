@@ -118,7 +118,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
     public:
-      TraceCaptureOp(Runtime *rt);
+      TraceCaptureOp(Internal *rt);
       TraceCaptureOp(const TraceCaptureOp &rhs);
       virtual ~TraceCaptureOp(void);
     public:
@@ -145,7 +145,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
-      TraceCompleteOp(Runtime *rt);
+      TraceCompleteOp(Internal *rt);
       TraceCompleteOp(const TraceCompleteOp &rhs);
       virtual ~TraceCompleteOp(void);
     public:
