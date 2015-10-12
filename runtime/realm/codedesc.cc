@@ -99,7 +99,7 @@ namespace Realm {
 
   CodeDescriptor::~CodeDescriptor(void)
   {
-    // TODO: delete impls, props
+    clear();
   }
 
   void CodeDescriptor::clear(void)
