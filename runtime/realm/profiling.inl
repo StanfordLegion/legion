@@ -115,7 +115,7 @@ namespace Realm {
   }
 
   template <typename S>
-  bool operator<<(S &s, const ProfilingRequest &pr)
+  bool serialize(S &s, const ProfilingRequest &pr)
   {
     return((s << pr.response_proc) &&
 	   (s << pr.response_task_id) &&
@@ -179,7 +179,7 @@ namespace Realm {
   //
 
   template <typename S>
-  bool operator<<(S &s, const ProfilingRequestSet &prs)
+  bool serialize(S &s, const ProfilingRequestSet &prs)
   {
     size_t len = prs.requests.size();
     if(!(s << len)) return false;
@@ -189,7 +189,7 @@ namespace Realm {
   }
   
   template <typename S>
-  bool operator>>(S &s, ProfilingRequestSet &prs)
+  bool deserialize(S &s, ProfilingRequestSet &prs)
   {
     size_t len;
     if(!(s >> len)) return false;

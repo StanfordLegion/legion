@@ -173,7 +173,7 @@ namespace Realm {
 
   // support for realm-style serialization
   template <typename S>
-  bool operator<<(S& serdez, const ByteArray& a)
+  bool serialize(S& serdez, const ByteArray& a)
   {
     return((serdez << a.size()) &&
 	   ((a.size() == 0) ||
@@ -181,7 +181,7 @@ namespace Realm {
   }
 
   template <typename S>
-  bool operator>>(S& serdez, ByteArray& a)
+  bool deserialize(S& serdez, ByteArray& a)
   {
     size_t new_size;
     if(!(serdez >> new_size)) return false;

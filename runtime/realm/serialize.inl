@@ -64,30 +64,30 @@ namespace Realm {
     // class FixedBufferSerializer
     //
 
-    FixedBufferSerializer::FixedBufferSerializer(void *buffer, size_t size)
+    inline FixedBufferSerializer::FixedBufferSerializer(void *buffer, size_t size)
       : pos((char *)buffer), limit(((char *)buffer) + size)
     {}
 
-    FixedBufferSerializer::FixedBufferSerializer(ByteArray& array)
+    inline FixedBufferSerializer::FixedBufferSerializer(ByteArray& array)
       : pos((char *)(array.base())), limit(((char *)(array.base())) + array.size())
     {}
 
-    FixedBufferSerializer::~FixedBufferSerializer(void)
+    inline FixedBufferSerializer::~FixedBufferSerializer(void)
     {}
 
-    ptrdiff_t FixedBufferSerializer::bytes_left(void) const
+    inline ptrdiff_t FixedBufferSerializer::bytes_left(void) const
     {
       return limit - pos;
     }
 
-    bool FixedBufferSerializer::enforce_alignment(size_t granularity)
+    inline bool FixedBufferSerializer::enforce_alignment(size_t granularity)
     {
       // always move the pointer, but return false if we've overshot
       pos = align_pointer(pos, granularity);
       return (pos <= limit);
     }
 
-    bool FixedBufferSerializer::append_bytes(const void *data, size_t datalen)
+    inline bool FixedBufferSerializer::append_bytes(const void *data, size_t datalen)
     {
       char *pos2 = pos + datalen;
       // only copy if it fits in the buffer
@@ -110,12 +110,25 @@ namespace Realm {
       return ok_to_write;
     }
 
+    template <typename T>
+    bool FixedBufferSerializer::operator<<(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+    template <typename T>
+    bool FixedBufferSerializer::operator&(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+
     ////////////////////////////////////////////////////////////////////////
     //
     // class DynamicBufferSerializer
     //
 
-    DynamicBufferSerializer::DynamicBufferSerializer(size_t initial_size)
+    inline DynamicBufferSerializer::DynamicBufferSerializer(size_t initial_size)
     {
       // always allocate at least a little space
       if(initial_size < 16)
@@ -126,7 +139,7 @@ namespace Realm {
       limit = base + initial_size;
     }
 
-    DynamicBufferSerializer::~DynamicBufferSerializer(void)
+    inline DynamicBufferSerializer::~DynamicBufferSerializer(void)
     {
       // if we still own our pointer, release it
       if(base != 0) {
@@ -135,17 +148,17 @@ namespace Realm {
       }
     }
 
-    size_t DynamicBufferSerializer::bytes_used(void) const
+    inline size_t DynamicBufferSerializer::bytes_used(void) const
     {
       return pos - base;
     }
 
-    const void *DynamicBufferSerializer::get_buffer(void) const
+    inline const void *DynamicBufferSerializer::get_buffer(void) const
     {
       return base;
     }
 
-    void *DynamicBufferSerializer::detach_buffer(ptrdiff_t max_wasted_bytes /*= 0*/)
+    inline void *DynamicBufferSerializer::detach_buffer(ptrdiff_t max_wasted_bytes /*= 0*/)
     {
       assert(base != 0);
       assert(pos <= limit);
@@ -165,14 +178,14 @@ namespace Realm {
       return retval;
     }
 
-    ByteArray DynamicBufferSerializer::detach_bytearray(ptrdiff_t max_wasted_bytes /*= 0*/)
+    inline ByteArray DynamicBufferSerializer::detach_bytearray(ptrdiff_t max_wasted_bytes /*= 0*/)
     {
       size_t size = pos - base;
       void *buffer = detach_buffer(max_wasted_bytes);
       return ByteArray().attach(buffer, size);
     }
 
-    bool DynamicBufferSerializer::enforce_alignment(size_t granularity)
+    inline bool DynamicBufferSerializer::enforce_alignment(size_t granularity)
     {
       char *pos2 = align_pointer(pos, granularity);
       if(pos2 > limit) {
@@ -191,7 +204,7 @@ namespace Realm {
       return true;
     }
 
-    bool DynamicBufferSerializer::append_bytes(const void *data, size_t datalen)
+    inline bool DynamicBufferSerializer::append_bytes(const void *data, size_t datalen)
     {
       char *pos2 = pos + datalen;
       // resize as needed
@@ -234,30 +247,43 @@ namespace Realm {
       return true;
     }
 
+    template <typename T>
+    bool DynamicBufferSerializer::operator<<(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+    template <typename T>
+    bool DynamicBufferSerializer::operator&(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+
     ////////////////////////////////////////////////////////////////////////
     //
     // class ByteCountSerializer
     //
 
-    ByteCountSerializer::ByteCountSerializer(void)
+    inline ByteCountSerializer::ByteCountSerializer(void)
       : count(0)
     {}
 
-    ByteCountSerializer::~ByteCountSerializer(void)
+    inline ByteCountSerializer::~ByteCountSerializer(void)
     {}
 
-    size_t ByteCountSerializer::bytes_used(void) const
+    inline size_t ByteCountSerializer::bytes_used(void) const
     {
       return count;
     }
 
-    bool ByteCountSerializer::enforce_alignment(size_t granularity)
+    inline bool ByteCountSerializer::enforce_alignment(size_t granularity)
     {
       count = align_offset(count, granularity);
       return true;
     }
 
-    bool ByteCountSerializer::append_bytes(const void *data, size_t datalen)
+    inline bool ByteCountSerializer::append_bytes(const void *data, size_t datalen)
     {
       count += datalen;
       return true;
@@ -270,35 +296,48 @@ namespace Realm {
       return true;
     }
 
+    template <typename T>
+    bool ByteCountSerializer::operator<<(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+    template <typename T>
+    bool ByteCountSerializer::operator&(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_scalar(*this, data);
+    }
+
+
     ////////////////////////////////////////////////////////////////////////
     //
     // class FixedBufferDeserializer
     //
 
-    FixedBufferDeserializer::FixedBufferDeserializer(const void *buffer, size_t size)
+    inline FixedBufferDeserializer::FixedBufferDeserializer(const void *buffer, size_t size)
       : pos((const char *)buffer), limit(((const char *)buffer) + size)
     {}
 
-    FixedBufferDeserializer::FixedBufferDeserializer(const ByteArray& array)
+    inline FixedBufferDeserializer::FixedBufferDeserializer(const ByteArray& array)
       : pos((const char *)(array.base())), limit(((const char *)(array.base())) + array.size())
     {}
 
-    FixedBufferDeserializer::~FixedBufferDeserializer(void)
+    inline FixedBufferDeserializer::~FixedBufferDeserializer(void)
     {}
 
-    ptrdiff_t FixedBufferDeserializer::bytes_left(void) const
+    inline ptrdiff_t FixedBufferDeserializer::bytes_left(void) const
     {
       return limit - pos;
     }
 
-    bool FixedBufferDeserializer::enforce_alignment(size_t granularity)
+    inline bool FixedBufferDeserializer::enforce_alignment(size_t granularity)
     {
       // always move the pointer, but return false if we've overshot
       pos = align_pointer(pos, granularity);
       return (pos <= limit);
     }
 
-    bool FixedBufferDeserializer::extract_bytes(void *data, size_t datalen)
+    inline bool FixedBufferDeserializer::extract_bytes(void *data, size_t datalen)
     {
       const char *pos2 = pos + datalen;
       // only copy if we have enough data
@@ -309,7 +348,7 @@ namespace Realm {
       return ok_to_read;
     }
 
-    const void *FixedBufferDeserializer::peek_bytes(size_t datalen)
+    inline const void *FixedBufferDeserializer::peek_bytes(size_t datalen)
     {
       const char *pos2 = pos + datalen;
       // only copy if we have enough data
@@ -332,13 +371,132 @@ namespace Realm {
       return ok_to_read;
     }
 
+    template <typename T>
+    bool FixedBufferDeserializer::operator>>(T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_scalar(*this, data);
+    }
+
+    template <typename T>
+    bool FixedBufferDeserializer::operator&(const T& data)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_scalar(*this, *(T*)&data);
+    }
+
+
     ////////////////////////////////////////////////////////////////////////
     //
-    // STL container helpers (except std::vector)
+    // SerializationHelper<T,true>
     //
 
+    // this is the special case where we can copy bits directly, even for vectors
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,true>::serialize_scalar(S& s, const T& data)
+    {
+      return (s.enforce_alignment(__alignof__(T)) &&
+	      s.append_serializable(data));
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,true>::deserialize_scalar(S& s, T& data)
+    {
+      return (s.enforce_alignment(__alignof__(T)) &&
+	      s.extract_serializable(data));
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,true>::serialize_vector(S& s, const std::vector<T>& v)
+    {
+      size_t c = v.size();
+      return ((s << c) &&
+	      s.enforce_alignment(__alignof__(T)) &&
+	      s.append_bytes(&v[0], sizeof(T) * c));
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,true>::deserialize_vector(S& s, std::vector<T>& v)
+    {
+      size_t c;
+      if(!(s >> c)) return false;
+      // TODO: sanity-check size?
+      v.resize(c);
+      return (
+	      s.enforce_alignment(__alignof__(T)) &&
+	      s.extract_bytes(&v[0], sizeof(T) * c));
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // SerializationHelper<T,false>
+    //
+
+    // in this case, we have to fall through to custom-defined serializers
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,false>::serialize_scalar(S& s, const T& data)
+    {
+      return serialize(s, data);
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,false>::deserialize_scalar(S& s, T& data)
+    {
+      return deserialize(s, data);
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,false>::serialize_vector(S& s, const std::vector<T>& v)
+    {
+      size_t c = v.size();
+      if(!(s << c)) return false;
+      for(size_t i = 0; i < c; i++)
+	if(!serialize(s, v[i])) return false;
+      return true;
+    }
+
+    template <typename T>
+    template <typename S>
+    /*static*/ bool SerializationHelper<T,false>::deserialize_vector(S& s, std::vector<T>& v)
+    {
+      size_t c;
+      if(!(s >> c)) return false;
+      // TODO: sanity-check size?
+      v.resize(c);
+      for(size_t i = 0; i < c; i++)
+	if(!deserialize(s, v[i])) return false;
+      return true;
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // STL container helpers
+    //
+
+    // vector is special because it can still be trivially_copyable
     template <typename S, typename T>
-    inline bool operator<<(S& s, const std::list<T>& l)
+    bool serialize(S& s, const std::vector<T>& v)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_vector(s, v);
+    }
+
+    template <typename S, typename T>
+    bool deserialize(S& s, std::vector<T>& v)
+    { 
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_vector(s, v);
+    }
+
+    template <typename S, typename T>
+    inline bool serialize(S& s, const std::list<T>& l)
     {
       size_t len = l.size();
       if(!(s << len)) return false;
@@ -350,7 +508,7 @@ namespace Realm {
     }
 
     template <typename S, typename T>
-    inline bool operator>>(S& s, std::list<T>& l)
+    inline bool deserialize(S& s, std::list<T>& l)
     {
       size_t len;
       if(!(s >> len)) return false;
@@ -363,7 +521,7 @@ namespace Realm {
     }
 
     template <typename S, typename T>
-    inline bool operator<<(S& s, const std::set<T>& ss)
+    inline bool serialize(S& s, const std::set<T>& ss)
     {
       size_t len = ss.size();
       if(!(s << len)) return false;
@@ -375,7 +533,7 @@ namespace Realm {
     }
 
     template <typename S, typename T>
-    inline bool operator>>(S& s, std::set<T>& ss)
+    inline bool deserialize(S& s, std::set<T>& ss)
     {
       size_t len;
       if(!(s >> len)) return false;
@@ -389,7 +547,7 @@ namespace Realm {
     }
 
     template <typename S, typename T1, typename T2>
-    inline bool operator<<(S& s, const std::map<T1,T2>& m)
+    inline bool serialize(S& s, const std::map<T1,T2>& m)
     {
       size_t len = m.size();
       if(!(s << len)) return false;
@@ -403,7 +561,7 @@ namespace Realm {
     }
 
     template <typename S, typename T1, typename T2>
-    inline bool operator>>(S& s, std::map<T1,T2>& m)
+    inline bool deserialize(S& s, std::map<T1,T2>& m)
     {
       size_t len;
       if(!(s >> len)) return false;
@@ -419,7 +577,7 @@ namespace Realm {
     }
 
     template <typename S>
-    inline bool operator<<(S& s, const std::string& str)
+    inline bool serialize(S& s, const std::string& str)
     {
       // strings are common, so use a shorter length - 32 bits is plenty
       unsigned len = str.length();
@@ -429,7 +587,7 @@ namespace Realm {
     }
 
     template <typename S>
-    inline bool operator>>(S& s, std::string& str)
+    inline bool deserialize(S& s, std::string& str)
     {
       // strings are common, so use a shorter length - 32 bits is plenty
       unsigned len;

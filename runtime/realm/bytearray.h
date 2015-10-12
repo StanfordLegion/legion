@@ -71,10 +71,10 @@ namespace Realm {
 
   // support for realm-style serialization
   template <typename S>
-    bool operator<<(S& serdez, const ByteArray& a);
+    bool serialize(S& serdez, const ByteArray& a);
 
   template <typename S>
-    bool operator>>(S& serdez, ByteArray& a);
+    bool deserialize(S& serdez, ByteArray& a);
 
 }; // namespace Realm
 
