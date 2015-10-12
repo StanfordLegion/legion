@@ -154,7 +154,7 @@ namespace Realm {
     class FixedBufferDeserializer {
     public:
       FixedBufferDeserializer(const void *buffer, size_t size);
-      FixedBufferDeserializer(const ByteArray& array);
+      FixedBufferDeserializer(const ByteArrayRef& array);
       ~FixedBufferDeserializer(void);
 
       ptrdiff_t bytes_left(void) const;

@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 // base integer/float types are all serializable
+TYPE_IS_SERIALIZABLE(bool);
 TYPE_IS_SERIALIZABLE(char);
 TYPE_IS_SERIALIZABLE(unsigned char);
 TYPE_IS_SERIALIZABLE(short);
@@ -318,7 +319,7 @@ namespace Realm {
       : pos((const char *)buffer), limit(((const char *)buffer) + size)
     {}
 
-    inline FixedBufferDeserializer::FixedBufferDeserializer(const ByteArray& array)
+    inline FixedBufferDeserializer::FixedBufferDeserializer(const ByteArrayRef& array)
       : pos((const char *)(array.base())), limit(((const char *)(array.base())) + array.size())
     {}
 
