@@ -24,6 +24,7 @@
 #include "realm/cuda/cudart_hijack.h"
 
 #include "activemsg.h"
+#include "realm/utils.h"
 
 #include <stdio.h>
 
@@ -45,15 +46,6 @@ namespace Realm {
     extern Logger log_event_graph;
 #endif
     Logger log_stream("gpustream");
-
-    class stringbuilder {
-    public:
-      operator std::string(void) const { return ss.str(); }
-      template <typename T>
-      stringbuilder& operator<<(T data) { ss << data; return *this; }
-    protected:
-      std::stringstream ss;
-    };
 
 
   ////////////////////////////////////////////////////////////////////////
