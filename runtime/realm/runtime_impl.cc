@@ -27,6 +27,8 @@
 
 #include "codedesc.h"
 
+#include "utils.h"
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -116,13 +118,12 @@ namespace Realm {
 
       CodeDescriptor codedesc(taskptr);
       ProfilingRequestSet prs;
-      ByteArray userdata;
       std::set<Event> events;
       std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[gasnet_mynode()].processors;
       for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
-	Event e = (*it)->register_task(taskid, codedesc, prs, userdata);
+	Event e = (*it)->me.register_task(taskid, codedesc, prs);
 	events.insert(e);
       }
 
@@ -1013,18 +1014,6 @@ namespace Realm {
       return 0;
     }
 
-    template <typename T>
-    void delete_vector_contents(std::vector<T *>& v, bool clear_vector = true)
-    {
-      for(typename std::vector<T *>::iterator it = v.begin();
-	  it != v.end();
-	  it++)
-	delete (*it);
-
-      if(clear_vector)
-	v.clear();
-    }
-
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -1142,8 +1131,8 @@ namespace Realm {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
 	  Node& n = nodes[i];
 
-	  delete_vector_contents(n.memories);
-	  delete_vector_contents(n.processors);
+	  delete_container_contents(n.memories);
+	  delete_container_contents(n.processors);
 	}
 	
 	delete[] nodes;
@@ -1155,7 +1144,7 @@ namespace Realm {
 	delete local_proc_group_free_list;
 
 	// delete all the DMA channels that we were given
-	delete_vector_contents(dma_channels);
+	delete_container_contents(dma_channels);
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();

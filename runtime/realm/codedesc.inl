@@ -130,49 +130,6 @@ namespace Realm {
     }
   }
 
-  inline std::ostream& operator<<(std::ostream& os, const Type& t)
-  {
-    switch(t.f_common.kind) {
-    case Type::InvalidKind: os << "INVALIDTYPE"; break;
-    case Type::OpaqueKind:
-      {
-	if(t.size_bits() == 0)
-	  os << "void";
-	else
-	  os << "opaque(" << t.size_bits() << ")";
-	break;
-      }
-    case Type::IntegerKind:
-      {
-	os << (t.f_integer.is_signed ? 's' : 'u') << "int(" << t.size_bits() << ")";
-	break;
-      }
-    case Type::FloatingPointKind: os << "float(" << t.size_bits() << ")"; break;
-    case Type::PointerKind:
-      {
-	os << *t.f_pointer.base_type;
-	if(t.f_pointer.is_const) os << " const";
-	os << " *";
-	break;
-      }
-    case Type::FunctionPointerKind:
-      {
-	os << *t.f_funcptr.return_type << "(*)(";
-	const std::vector<Type>& p = *t.f_funcptr.param_types;
-	if(p.size()) {
-	  for(size_t i = 0; i < p.size(); i++) {
-	    if(i) os << ", ";
-	    os << p[i];
-	  }
-	} else
-	  os << "void";
-	os << ")";
-	break;
-      }
-    }
-    return os;
-  }
-
   template <typename S>
   bool serialize(S& s, const Type& t)
   {
@@ -639,13 +596,6 @@ namespace Realm {
   //
   // class CodeDescriptor
 
-  inline CodeDescriptor::CodeDescriptor(void)
-  {}
-
-  inline CodeDescriptor::CodeDescriptor(const Type& _t)
-    : m_type(_t)
-  {}
-
   // a common pattern is to make a code descriptor from a function pointer - we
   //  can use template magic to do this all at once
   // TODO: use some SFINAE trick to make this only work if T is a function pointer?
@@ -657,9 +607,24 @@ namespace Realm {
     m_impls.push_back(new FunctionPointerImplementation((void(*)())(fnptr)));
   }
 
-  inline CodeDescriptor::~CodeDescriptor(void)
+  inline CodeDescriptor& CodeDescriptor::set_type(const Type& _t)
   {
-    // TODO: delete impls, props
+    m_type = _t;
+    return *this;
+  }
+
+  // add an implementation - becomes owned by the descriptor
+  inline CodeDescriptor& CodeDescriptor::add_implementation(CodeImplementation *impl)
+  {
+    m_impls.push_back(impl);
+    return *this;
+  }
+
+  // add a property - becomes owned by the descriptor
+  inline CodeDescriptor& CodeDescriptor::add_property(CodeProperty *prop)
+  {
+    m_props.push_back(prop);
+    return *this;
   }
 
   inline const Type& CodeDescriptor::type(void) const
@@ -725,21 +690,5 @@ namespace Realm {
   inline CodeImplementation::~CodeImplementation(void)
   {}
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class FunctionPointerImplementation
-
-  inline FunctionPointerImplementation::FunctionPointerImplementation(void (*_fnptr)())
-    : fnptr(_fnptr)
-  {}
-
-  inline FunctionPointerImplementation::~FunctionPointerImplementation(void)
-  {}
-
-  inline bool FunctionPointerImplementation::is_portable(void) const
-  {
-    return false;
-  }
 
 }; // namespace Realm

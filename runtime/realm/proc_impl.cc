@@ -20,7 +20,7 @@
 #include "logging.h"
 #include "serialize.h"
 #include "profiling.h"
-#include "codedesc.h"
+#include "utils.h"
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -181,16 +181,93 @@ namespace Realm {
 	assert(0);
       }
 
-      // for now, processor must be local
-      if(ID(id).node() != gasnet_mynode()) {
-	log_taskreg.fatal() << "TODO: support task registration for remote processors";
+      // TODO: special case - registration on a local processor with a raw function pointer and no
+      //  profiling requests - can be done immediately and return NO_EVENT
+
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+
+      TaskRegistration *tro = new TaskRegistration(codedesc, 
+						   ByteArrayRef(user_data, user_data_len),
+						   finish_event, prs);
+      tro->mark_ready();
+      tro->mark_started();
+
+      std::vector<Processor> local_procs;
+      std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
+      // is the target a single processor or a group?
+      if(ID(*this).type() == ID::ID_PROCESSOR) {
+	gasnet_node_t n = ID(*this).node();
+	if(n == gasnet_mynode())
+	  local_procs.push_back(*this);
+	else
+	  remote_procs[n].push_back(*this);
+      } else {
+	// assume we're a group
+	ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
+	std::vector<Processor> members;
+	grp->get_group_members(members);
+	for(std::vector<Processor>::const_iterator it = members.begin();
+	    it != members.end();
+	    it++) {
+	  Processor p = *it;
+	  gasnet_node_t n = ID(p).node();
+	  if(n == gasnet_mynode())
+	    local_procs.push_back(p);
+	  else
+	    remote_procs[n].push_back(p);
+	}
+      }
+
+      // remote processors need a portable implementation available
+      if(!remote_procs.empty()) {
+	if(!tro->codedesc.has_portable_implementations()) {
+	  // try converting a function pointer into a DSO reference
+	  const FunctionPointerImplementation *fpi = tro->codedesc.find_impl<FunctionPointerImplementation>();
+	  if(!fpi) {
+	    log_taskreg.fatal() << "remote proc needs portable code: no function pointer available either";
+	    assert(0);
+	  }
+	  DSOReferenceImplementation *dso = cvt_fnptr_to_dsoref(fpi);
+	  if(!dso) {
+	    log_taskreg.fatal() << "couldn't generate DSO reference for remote task registration";
+	    assert(0);
+	  }
+	  tro->codedesc.add_implementation(dso);
+	}
+      }
+	 
+      // local processor(s) can be called directly
+      if(!local_procs.empty()) {
+	// for now, always need a function pointer implementation
+	if(!tro->codedesc.find_impl<FunctionPointerImplementation>()) {
+	  // try to make one from a dso reference, if available
+	  const DSOReferenceImplementation *dso = tro->codedesc.find_impl<DSOReferenceImplementation>();
+	  if(!dso) {
+	    log_taskreg.fatal() << "local task registration needs fnptr or DSO reference!";
+	    assert(0);
+	  }
+	  FunctionPointerImplementation *fpi = cvt_dsoref_to_fnptr(dso);
+	  if(!fpi) {
+	    log_taskreg.fatal() << "failed to convert DSO reference to function pointer";
+	    assert(0);
+	  }
+	}
+
+	for(std::vector<Processor>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++) {
+	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
+	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	}
+      }
+
+      if(!remote_procs.empty()) {
+	// TODO: remote proc case
 	assert(0);
       }
 
-      ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
-      return p->register_task(func_id, codedesc, prs,
-			      // TODO: use a reference here instead of a copy
-			      ByteArray(user_data, user_data_len));
+      tro->mark_finished();
+      return finish_event;
     }
 
     /*static*/ Event Processor::register_task_by_kind(Kind target_kind, bool global,
@@ -206,16 +283,24 @@ namespace Realm {
 	assert(0);
       }
 
+      Serialization::DynamicBufferSerializer dbs(1024);
+      dbs << codedesc;
+      printf("slen = %zd\n", dbs.bytes_used());
+      CodeDescriptor cd2;
+      Serialization::FixedBufferDeserializer fbd(dbs.get_buffer(), dbs.bytes_used());
+      fbd >> cd2;
+      printf("compare = %d\n", codedesc.type() == cd2.type());
+      std::cout << cd2.type() << std::endl;
       // for now, processor must be local
       if(global) {
 	log_taskreg.fatal() << "TODO: support task registration for remote processors";
 	assert(0);
       }
 
-      // TODO: use a reference here instead of a copy
-      ByteArray udata(user_data, user_data_len);
+      ByteArrayRef udata(user_data, user_data_len);
 
       std::set<Event> events;
+#if 0
       const std::vector<ProcessorImpl *>& local_procs = get_runtime()->nodes[gasnet_mynode()].processors;
       for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	  it != local_procs.end();
@@ -224,6 +309,7 @@ namespace Realm {
 	  Event e = (*it)->register_task(func_id, codedesc, prs, udata);
 	  events.insert(e);
 	}
+#endif
 
       return Event::merge_events(events);
     }
@@ -248,7 +334,15 @@ namespace Realm {
     }
 
     void ProcessorImpl::execute_task(Processor::TaskFuncID func_id,
-				     const ByteArray& task_args)
+				     const ByteArrayRef& task_args)
+    {
+      // should never be called
+      assert(0);
+    }
+
+    void ProcessorImpl::register_task(Processor::TaskFuncID func_id,
+				      const CodeDescriptor& codedesc,
+				      const ByteArrayRef& user_data)
     {
       // should never be called
       assert(0);
@@ -340,15 +434,6 @@ namespace Realm {
         enqueue_task(task);
       else
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
-    }
-
-    Event ProcessorGroup::register_task(Processor::TaskFuncID func_id,
-					const CodeDescriptor& codedesc,
-					const ProfilingRequestSet& prs,
-					const ByteArray& user_data)
-    {
-      assert(0);
-      return Event::NO_EVENT;
     }
 
 
@@ -481,15 +566,6 @@ namespace Realm {
 				     start_event, finish_event, priority);
     }
 
-    Event RemoteProcessor::register_task(Processor::TaskFuncID func_id,
-					 const CodeDescriptor& codedesc,
-					 const ProfilingRequestSet& prs,
-					 const ByteArray& user_data)
-    {
-      assert(0);
-      return Event::NO_EVENT;
-    }
-
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -570,10 +646,9 @@ namespace Realm {
     }
   }
 
-  Event LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
-					  const CodeDescriptor& codedesc,
-					  const ProfilingRequestSet& prs,
-					  const ByteArray& user_data)
+  void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
+					 const CodeDescriptor& codedesc,
+					 const ByteArrayRef& user_data)
   {
     // first, make sure we haven't seen this task id before
     assert(task_table.count(func_id) == 0);
@@ -592,12 +667,10 @@ namespace Realm {
     TaskTableEntry &tte = task_table[func_id];
     tte.fnptr = fnptr;
     tte.user_data = user_data;
-
-    return Event::NO_EVENT;
   }
 
   void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
-					const ByteArray& task_args)
+					const ByteArrayRef& task_args)
   {
     std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
     if(it == task_table.end()) {
@@ -640,15 +713,6 @@ namespace Realm {
     sched->shutdown();
   }
   
-
-  class stringbuilder {
-  public:
-    operator std::string(void) const { return ss.str(); }
-    template <typename T>
-    stringbuilder& operator<<(T data) { ss << data; return *this; }
-  protected:
-    std::stringstream ss;
-  };
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -754,6 +818,19 @@ namespace Realm {
   {
     delete core_rsrv;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TaskRegistration
+  //
+
+  TaskRegistration::TaskRegistration(const CodeDescriptor& _codedesc,
+				     const ByteArrayRef& _userdata,
+				     Event _finish_event, const ProfilingRequestSet &_requests)
+    : Operation(_finish_event, _requests)
+    , codedesc(_codedesc), userdata(_userdata)
+  {}
 
 
 }; // namespace Realm

@@ -251,10 +251,14 @@ namespace Realm {
     template <typename T>
     explicit CodeDescriptor(T fnptr);
 
+    // copy and assignment
+    CodeDescriptor(const CodeDescriptor& rhs);
+    CodeDescriptor& operator=(const CodeDescriptor& rhs);
+
     ~CodeDescriptor(void);
 
-    // deep copy
-    CodeDescriptor *duplicate(void) const;
+    // erase contents
+    void clear(void);
 
     CodeDescriptor& set_type(const Type& _t);
 
@@ -268,6 +272,10 @@ namespace Realm {
     const std::vector<CodeImplementation *>& implementations(void) const;
     const std::vector<CodeProperty *>& properties(void) const;
 
+    // are any of the code implementations marked as "portable" (i.e.
+    //  usable in another process/address space)?
+    bool has_portable_implementations(void) const;
+
     template <typename T>
     const T *find_impl(void) const;
 
@@ -280,6 +288,8 @@ namespace Realm {
     bool deserialize(S& deserializer);
 
   protected:
+    void copy_from(const CodeDescriptor& rhs);
+
     Type m_type;
     std::vector<CodeImplementation *> m_impls;
     std::vector<CodeProperty *> m_props;
@@ -301,6 +311,25 @@ namespace Realm {
   public:
     virtual ~CodeImplementation(void);
 
+    virtual CodeImplementation *clone(void) const = 0;
+
+    // is this implementation meaningful in another address space?
+    virtual bool is_portable(void) const = 0;
+
+    // TODO: serialization/deserialization stuff
+  };
+
+  // this is the interface that actual CodePropertys must follow
+  class CodeProperty {
+  protected:
+    // not directly constructed
+    CodeProperty(void);
+
+  public:
+    virtual ~CodeProperty(void);
+
+    virtual CodeProperty *clone(void) const = 0;
+
     // is this implementation meaningful in another address space?
     virtual bool is_portable(void) const = 0;
 
@@ -319,6 +348,8 @@ namespace Realm {
 
     virtual ~FunctionPointerImplementation(void);
 
+    virtual CodeImplementation *clone(void) const;
+
     virtual bool is_portable(void) const;
 
   public:
@@ -332,11 +363,19 @@ namespace Realm {
 
     virtual ~DSOReferenceImplementation(void);
 
+    virtual CodeImplementation *clone(void) const;
+
     virtual bool is_portable(void) const;
 
   public:
     std::string dso_name, symbol_name;
   };
+
+  // TODO: encapsulate these as "code translations"
+
+  FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso);
+  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi);
+
 
 }; // namespace Realm
 
