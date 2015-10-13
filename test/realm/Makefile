@@ -79,7 +79,7 @@ clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
 
 $(TESTS) : % : %.cc librealm.a
-	$(CXX) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LD_FLAGS)
+	$(CXX) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LEGION_LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)

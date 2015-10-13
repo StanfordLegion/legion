@@ -234,6 +234,7 @@ class IndexSpaceNode(object):
             self.depth = 0
         self.name = None
         self.node_name = "index_space_node_" + str(uid)
+        self.independent_pairs = set()
 
     def instantiate(self, parent_inst, field_node, tid):
         assert tid not in self.instances
@@ -262,6 +263,29 @@ class IndexSpaceNode(object):
 
     def set_name(self, name):
         self.name = name
+
+    def find_child(self, uid):
+        for point,child in self.children.iteritems():
+            if child.uid == uid:
+                return child
+        return None
+
+    def mark_independent(self, uid1, uid2):
+        assert self.find_child(uid1) <> None
+        assert self.find_child(uid2) <> None
+        if uid1 < uid2:
+            self.independent_pairs.add((uid1, uid2))
+        else:
+            self.independent_pairs.add((uid2, uid1))
+
+    def is_independent(self, uid1, uid2):
+        assert self.find_child(uid1) <> None
+        assert self.find_child(uid2) <> None
+        if uid1 < uid2:
+            pair = (uid1, uid2)
+        else:
+            pair = (uid2, uid1)
+        return pair in self.independent_pairs
 
     def print_link_to_parent(self, printer, parent):
         printer.println(parent+' -> '+ self.node_name+\
@@ -309,6 +333,7 @@ class IndexPartNode(object):
             self.instantiate(pinst, pinst.field_node, tid)
         self.name = None
         self.node_name = "index_part_node_" + str(uid)
+        self.independent_pairs = set()
 
     def instantiate(self, parent_inst, field_node, tid):
         assert tid not in self.instances
@@ -333,6 +358,29 @@ class IndexPartNode(object):
 
     def set_name(self, name):
         self.name = name
+
+    def find_child(self, uid):
+        for point,child in self.children.iteritems():
+            if child.uid == uid:
+                return child
+        return None
+
+    def mark_independent(self, uid1, uid2):
+        assert self.find_child(uid1) <> None
+        assert self.find_child(uid2) <> None
+        if uid1 < uid2:
+            self.independent_pairs.add((uid1, uid2))
+        else:
+            self.independent_pairs.add((uid2, uid1))
+
+    def is_independent(self, uid1, uid2):
+        assert self.find_child(uid1) <> None
+        assert self.find_child(uid2) <> None
+        if uid1 < uid2:
+            pair = (uid1, uid2)
+        else:
+            pair = (uid2, uid1)
+        return pair in self.independent_pairs
 
     def print_link_to_parent(self, printer, parent):
         if self.disjoint:
@@ -3630,6 +3678,8 @@ class State(object):
         self.traverser_gen = 1
         self.copy_uid = 0
         self.next_logical_mark = long(1)
+        self.independent_ispaces = dict()
+        self.independent_ipart = dict()
 
     def get_next_traverser_gen(self):
         result = self.traverser_gen
@@ -3971,6 +4021,16 @@ class State(object):
         next_op.add_logical_outgoing(prev_op)
         return True
 
+    def add_independent_index_spaces(self, pid, uid1, uid2):
+        assert pid in self.index_part_nodes
+        self.index_part_nodes[pid].mark_independent(uid1, uid2)
+        return True
+
+    def add_independent_index_partitions(self, pid, uid1, uid2):
+        assert pid in self.index_space_nodes
+        self.index_space_nodes[pid].mark_independent(uid1, uid2)
+        return True
+
     def add_instance_requirement(self, uid, idx, index):
         if uid not in self.ops:
             return False
@@ -4178,14 +4238,17 @@ class State(object):
                 return False
             if inode2.parent == None:
                 return False
+            inode1_prev = inode1
             inode1 = inode1.parent
+            inode2_prev = inode2
             inode2 = inode2.parent
         assert inode1 is inode2
+        assert inode1_prev.parent == inode2_prev.parent
         # Least common ancestor is a region, so they came from different
         # partitions and are therefore not disjoint
         # TODO: handle when partitions are computed to be disjoint
         if inode1.is_region():
-            return True
+            return not inode1.is_independent(inode1_prev.uid, inode2_prev.uid)
         return not inode1.disjoint
 
     def get_next_logical_mark(self):

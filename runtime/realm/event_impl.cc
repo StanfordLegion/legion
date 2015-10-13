@@ -20,10 +20,6 @@
 #include "logging.h"
 #include "threads.h"
 
-#ifdef USE_CUDA
-GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
-#endif
-
 namespace Realm {
 
   Logger log_event("event");

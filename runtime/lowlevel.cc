@@ -34,10 +34,6 @@
 
 using namespace LegionRuntime::Accessor;
 
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-#endif
-
 #include "lowlevel_dma.h"
 
 #include <sys/types.h>
@@ -57,19 +53,12 @@ using namespace LegionRuntime::Accessor;
 #include <emmintrin.h>
 #endif
 
-#ifdef USE_CUDA
-GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
-#endif
-
 #include "realm/timers.h"
 
 // Implementation of Detailed Timer
 namespace LegionRuntime {
   namespace LowLevel {
 
-#ifdef USE_CUDA
-    Logger::Category log_gpu("gpu");
-#endif
     Logger::Category log_mutex("mutex");
     Logger::Category log_timer("timer");
     Logger::Category log_machine("machine");
@@ -80,19 +69,8 @@ namespace LegionRuntime {
 #ifdef EVENT_GRAPH_TRACE
     Event find_enclosing_termination_event(void)
     {
-      void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
-      if (tls_val != NULL) {
-        PreemptableThread *me = (PreemptableThread*)tls_val;
-        return me->find_enclosing();
-      }
-#ifdef USE_CUDA
-      tls_val = gasnett_threadkey_get(gpu_thread_ptr);
-      if (tls_val != NULL) {
-        GPUProcessor *me = (GPUProcessor*)tls_val;
-        return me->find_enclosing();
-      }
-#endif
-      return Event::NO_EVENT;
+      // TODO: fix this for new threading setup
+      HI I AM A SYNTAX ERROR
     }
 #endif
 

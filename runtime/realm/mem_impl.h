@@ -28,17 +28,6 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
-#ifdef USE_CUDA
-namespace LegionRuntime {
-  namespace LowLevel {
-    class GPUProcessor;
-  };
-};
-namespace Realm {
-  typedef LegionRuntime::LowLevel::GPUProcessor GPUProcessor;
-};
-#endif
-
 namespace Realm {
 
   class RegionInstanceImpl;
@@ -50,9 +39,11 @@ namespace Realm {
 	MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
 	MKIND_RDMA,    // remote, but accessible via RDMA
 	MKIND_REMOTE,  // not accessible
-#ifdef USE_CUDA
+
+	// defined even if USE_CUDA==0
+	// TODO: make kinds more extensible
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
-#endif
+
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
 	MKIND_DISK,    // disk memory accessible by owner node
 #ifdef USE_HDF
@@ -128,6 +119,8 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
       virtual int get_home_node(off_t offset, size_t size) = 0;
 
+      virtual void *local_reg_base(void) { return 0; };
+
       Memory::Kind get_kind(void) const;
 
     public:
@@ -153,12 +146,6 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
-#ifdef USE_CUDA
-      // For pinning CPU memories for use with asynchronous
-      // GPU copies
-      void pin_memory(GPUProcessor *proc);
-#endif
-
       virtual RegionInstance create_instance(IndexSpace r,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -177,6 +164,7 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
+      virtual void *local_reg_base(void);
 
     public: //protected:
       char *base, *base_orig;

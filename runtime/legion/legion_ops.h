@@ -1291,8 +1291,8 @@ namespace LegionRuntime {
       // The component slices for distribution
       std::set<SliceTask*>         slice_tasks;
       // The actual base operations
-      // Needs to be a set to ensure deduplication
-      std::set<SingleTask*>        single_tasks;
+      // Use a deque to keep everything in order
+      std::deque<SingleTask*>      single_tasks;
     protected:
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;
@@ -1372,7 +1372,7 @@ namespace LegionRuntime {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::set<SingleTask*> &single_tasks,
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
           const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_deps);
       void map_task(SingleTask *task);
     public:
