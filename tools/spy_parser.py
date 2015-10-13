@@ -72,6 +72,10 @@ requirement_pat         = re.compile(prefix+"Logical Requirement (?P<uid>[0-9]+)
 req_field_pat           = re.compile(prefix+"Logical Requirement Field (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
 mapping_dep_pat         = re.compile(prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) (?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 
+# Logger calls for dynamic independence analysis
+independent_ispace_pat  = re.compile(prefix+"Index Space Independence (?P<pid>[0-9a-f]+) (?P<uid1>[0-9a-f]+) (?P<uid2>[0-9a-f]+)")
+independent_ipart_pat   = re.compile(prefix+"Index Partition Independence (?P<pid>[0-9a-f]+) (?P<uid1>[0-9a-f]+) (?P<uid2>[0-9a-f]+)")
+
 # Logger calls for physical dependence analysis
 task_inst_req_pat       = re.compile(prefix+"Task Instance Requirement (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<index>[0-9]+)")
 
@@ -250,6 +254,15 @@ def parse_log_line(line, state):
     m = mapping_dep_pat.match(line)
     if m <> None:
         if state.add_mapping_dependence(int(m.group('ctx')), int(m.group('prev_id')), int(m.group('pidx')), int(m.group('next_id')), int(m.group('nidx')), int(m.group('dtype'))):
+            return True
+    # Dynamic independence analysis
+    m = independent_ispace_pat.match(line)
+    if m <> None:
+        if state.add_independent_index_spaces(int(m.group('pid'),16), int(m.group('uid1'),16), int(m.group('uid2'),16)):
+            return True
+    m = independent_ipart_pat.match(line)
+    if m <> None:
+        if state.add_independent_index_partitions(int(m.group('pid'),16), int(m.group('uid1'),16), int(m.group('uid2'),16)):
             return True
     # Physical dependence analysis
     m = task_inst_req_pat.match(line)
