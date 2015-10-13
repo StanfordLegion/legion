@@ -36,17 +36,24 @@ namespace LegionRuntime {
       DIM_Z
     };
 
+    static inline int min(int a, int b) { return (a < b) ? a : b; }
+
     template <unsigned DIM>
     class SplitDimLinearization {
+    public:
+      enum { IDIM = DIM, ODIM = 1};
     protected:
       unsigned dim_sum;
       DimKind dim_kind[DIM * 2];
       size_t dim_size[DIM * 2];
+      Point<IDIM> lo_in;
+      Point<ODIM> lo_out;
     public:
-      enum { IDIM = DIM, ODIM = 1};
       SplitDimLinearization() {}
-      SplitDimLinearization(std::vector<DimKind> dim_kind_vec, std::vector<size_t> dim_size_vec)
+      SplitDimLinearization(Point<IDIM> lo_input, Point<ODIM> lo_output, std::vector<DimKind> dim_kind_vec, std::vector<size_t> dim_size_vec)
       {
+        lo_in = lo_input;
+        lo_out = lo_output;
         dim_sum = dim_kind_vec.size();
         assert(dim_size_vec.size() == dim_sum);
         for (unsigned i = 0; i < dim_sum; i++) {
@@ -58,7 +65,7 @@ namespace LegionRuntime {
       Point<ODIM> image(const Point<IDIM> p) const
       {
         int index = 0, subtotal = 1;
-        Point<IDIM> local_p = p;
+        Point<IDIM> local_p = p - lo_in;
         unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
           switch (dim_kind[i]) {
@@ -68,7 +75,7 @@ namespace LegionRuntime {
               local_p.x[x_idx] /= dim_size[i];
               break;
             case DIM_Y:
-              index += (local_p.x[x_idx] % dim_size[i]) * subtotal;
+              index += (local_p.x[y_idx] % dim_size[i]) * subtotal;
               subtotal *= dim_size[i];
               local_p.x[y_idx] /= dim_size[i];
               break;
@@ -81,7 +88,7 @@ namespace LegionRuntime {
               assert(0);
           }
         }
-        return make_point(index);
+        return make_point(index) + lo_out;
       }
 
       Rect<1> image_convex(const Rect<IDIM> r) const
@@ -103,7 +110,8 @@ namespace LegionRuntime {
 
       Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const
       {
-        subrect = r;
+        Rect<IDIM> local_r(r.lo - lo_in, r.hi - lo_in);
+        Rect<IDIM> local_subrect(local_r.lo, local_r.lo);
         for (unsigned i = 0; i < IDIM; i++)
           strides[i] = Point<ODIM>::ZEROES();
         int subtotal = 1;
@@ -113,21 +121,21 @@ namespace LegionRuntime {
             case DIM_X:
               if (strides[x_idx][0] == 0) {
                 strides[x_idx].x[0] = subtotal;
-                subrect.hi.x[x_idx] = r.lo.x[x_idx] - r.lo.x[x_idx] % dim_size[i] + dim_size[i] - 1;
+                local_subrect.hi.x[x_idx] = min(local_r.lo.x[x_idx] - local_r.lo.x[x_idx] % dim_size[i] + dim_size[i] - 1, local_r.hi.x[x_idx]);
               }
               subtotal *= dim_size[i];
               break;
             case DIM_Y:
               if (strides[y_idx][0] == 0) {
                 strides[y_idx].x[0] = subtotal;
-                subrect.hi.x[y_idx] = r.lo.x[y_idx] - r.lo.x[y_idx] % dim_size[i] + dim_size[i] - 1;
+                local_subrect.hi.x[y_idx] = min(local_r.lo.x[y_idx] - local_r.lo.x[y_idx] % dim_size[i] + dim_size[i] - 1, local_r.hi.x[y_idx]);
               }
               subtotal *= dim_size[i];
               break;
             case DIM_Z:
               if (strides[z_idx][0] == 0) {
                 strides[z_idx].x[0] = subtotal;
-                subrect.hi.x[z_idx] = r.lo.x[z_idx] - r.lo.x[z_idx] % dim_size[i] + dim_size[i] - 1;
+                local_subrect.hi.x[z_idx] = min(local_r.lo.x[z_idx] - local_r.lo.x[z_idx] % dim_size[i] + dim_size[i] - 1, local_r.hi.x[z_idx]);
               }
               subtotal *= dim_size[i];
               break;
@@ -135,13 +143,14 @@ namespace LegionRuntime {
               assert(0);
           }
         }
+        subrect = Rect<IDIM>(local_subrect.lo + lo_in, local_subrect.hi + lo_in);
         return image(r.lo);
       }
 
       Rect<IDIM> preimage(const Point<ODIM> p) const
       {
         assert(ODIM == 1);
-        int index = p.x[0];
+        int index = p.x[0] - lo_out.x[0];
         Point<IDIM> ret = Point<IDIM>::ZEROES(), dim_base = Point<IDIM>::ONES();
         unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
@@ -165,7 +174,7 @@ namespace LegionRuntime {
               assert(0);
           }
         }
-        return Rect<IDIM> (ret, ret);
+        return Rect<IDIM>(ret + lo_in, ret + lo_in);
       }
 
       bool preimage_is_dense(const Point<ODIM> p) const
@@ -211,6 +220,17 @@ namespace LegionRuntime {
         src_mapping->add_reference();
         dst_mapping->add_reference();
         rect_size = orig_rect.volume();
+        switch(iter_order) {
+          case XferOrder::SRC_FIFO:
+            idx_offset = src_mapping->image(rect.lo);
+            break;
+          case XferOrder::DST_FIFO:
+          case XferOrder::ANY_ORDER:
+            idx_offset = dst_mapping->image(rect.lo);
+            break;
+          default:
+            assert(0);
+        }
       }
       ~GenericLayoutIterator()
       {
@@ -235,7 +255,7 @@ namespace LegionRuntime {
         int subtotal = 1;
         switch(iter_order) {
           case XferOrder::SRC_FIFO:
-            r = src_mapping->preimage(make_point(cur_idx));
+            r = src_mapping->preimage(make_point(cur_idx + idx_offset));
             assert(r.volume() == 1);
             r.hi = orig_rect.hi;
             src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
@@ -243,11 +263,11 @@ namespace LegionRuntime {
             break;
           case XferOrder::DST_FIFO:
           case XferOrder::ANY_ORDER:
-            r = dst_mapping->preimage(make_point(cur_idx));
+            r = dst_mapping->preimage(make_point(cur_idx + idx_offset));
             assert(r.volume() == 1);
             r.hi = orig_rect.hi;
-            src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
             dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
+            src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
             break;
           default:
             assert(0);
@@ -273,6 +293,7 @@ namespace LegionRuntime {
       Mapping<DIM, 1> *src_mapping, *dst_mapping;
       XferOrder::Type iter_order;
       size_t cur_idx, rect_size;
+      int idx_offset;
     };
 
 #ifdef USE_HDF
