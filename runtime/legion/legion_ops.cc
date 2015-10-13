@@ -7031,7 +7031,7 @@ namespace LegionRuntime {
 
       // Check that all the tasks have been assigned to different processors
       std::map<Processor,SingleTask*> target_procs;
-      for (std::set<SingleTask*>::const_iterator it = 
+      for (std::deque<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
         if (target_procs.find((*it)->target_proc) != target_procs.end())
@@ -7091,7 +7091,7 @@ namespace LegionRuntime {
       if (notify)
       {
         // Notify the mappers that the tasks successfully mapped
-        for (std::set<SingleTask*>::const_iterator it = 
+        for (std::deque<SingleTask*>::const_iterator it = 
               single_tasks.begin(); it != single_tasks.end(); it++)
         {
           runtime->invoke_mapper_notify_result(mapper_proc, *it);
@@ -7264,7 +7264,7 @@ namespace LegionRuntime {
 #endif
       task_sets[index].insert(single);
       AutoLock o_lock(op_lock);
-      single_tasks.insert(single);
+      single_tasks.push_back(single);
     }
 
     //--------------------------------------------------------------------------
@@ -7569,7 +7569,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::set<SingleTask*> &single_tasks,
+    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
       const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_dependences)
     //--------------------------------------------------------------------------
     {
@@ -7578,7 +7578,7 @@ namespace LegionRuntime {
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
       std::map<SingleTask*,Event> mapping_events;
-      for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
+      for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
             it != single_tasks.end(); it++)
       {
         args.task = *it;
@@ -7619,7 +7619,7 @@ namespace LegionRuntime {
       // If we failed to map then unmap all the tasks 
       if (!success)
       {
-        for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
+        for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
               it != single_tasks.end(); it++)
         {
           (*it)->unmap_all_regions();
