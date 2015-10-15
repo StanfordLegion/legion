@@ -18,6 +18,9 @@
 #include "realm/threads.h"
 #include <errno.h>
 #include <aio.h>
+// included for file memory data transfer
+#include <linux/aio_abi.h>
+#include <sys/syscall.h>
 
 #include <queue>
 
@@ -49,6 +52,7 @@ namespace LegionRuntime {
 
     typedef Realm::GASNetMemory GASNetMemory;
     typedef Realm::DiskMemory DiskMemory;
+    typedef Realm::FileMemory FileMemory;
     typedef Realm::Thread Thread;
     typedef Realm::ThreadLaunchParameters ThreadLaunchParameters;
     typedef Realm::CoreReservation CoreReservation;
@@ -1836,6 +1840,163 @@ namespace LegionRuntime {
       char *src_base;
       int fd; // file descriptor
     };
+
+    class FilefromCPUMemPairCopier : public MemPairCopier {
+    public:
+      class FileWriter {
+      public:
+        enum {max_nr = 1};
+        FileWriter(int _fd, char *_src_base)
+        {
+          ctx = 0;
+          int ret = io_setup(max_nr, &ctx);
+          assert(ret >= 0);
+          memset(&cbs[0], 0, sizeof(cbs[0]));
+          cbs[0].aio_lio_opcode = IOCB_CMD_PWRITE;
+          cbs[0].aio_fildes = _fd;
+          src_base = _src_base;
+        }
+        ~FileWriter(void)
+        {
+          io_destroy(ctx);
+        }
+        void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+        {
+          cbs[0].aio_buf = src_base + src_offset;
+          cbs[0].aio_offset = dst_offset;
+          cbs[0].aio_nbytes = bytes;
+          int ret = io_submit(ctx, 1, &cbs);
+          if (ret < 0) {
+            perror("io_submit error");
+          }
+
+          while (true) {
+            int nr = io_getevents(ctx, 0, 1, &events, NULL);
+            if (nr < 0)
+              perror("io_getevents error");
+            if (nr > 0) {
+              assert(nr == 1);
+              assert(events[0].res == bytes);
+              break;
+            }
+          }
+        }
+        void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                       off_t src_stride, off_t dst_stride, size_t lines)
+        {
+          while(lines-- > 0) {
+            copy_span(src_offset, dst_offset, bytes);
+            src_offset += src_stride;
+            dst_offset += dst_stride;
+          }
+        }
+      protected:
+        aio_context_t ctx;
+        struct iocb cbs[max_nr];
+        char *src_base;
+        struct io_event events[max_nr];
+      };
+      FilefromCPUMemPairCopier(Memory _src_mem, Memory _dst_mem)
+      {
+        MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
+        src_base = (char *)(src_impl->get_direct_ptr(0, src_impl->size));
+        dst_mem = (FileMemory*) get_runtime()->get_memory_impl(_dst_mem);
+      }
+
+      virtual ~FilefromCPUMemPairCopier(void) {}
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &osa_vec)
+      {
+        ID id(dst_inst);
+        unsigned index = id.index_l();
+        int fd = dst_mem->get_file_des(index);
+        FileWriter fw(fd, src_base);
+        return new SpanBasedInstPairCopier<FileWriter>(&fw, src_inst, dst_inst, osa_vec);
+      }
+
+    protected:
+      char *src_base;
+      FileMemory *dst_mem;
+    };
+
+    class FiletoCPUMemPairCopier : public MemPairCopier {
+    public:
+      class FileReader {
+      public:
+        enum {max_nr = 1};
+        FileReader(int _fd, char *_dst_base)
+        {
+          ctx = 0;
+          int ret = io_setup(max_nr, &ctx);
+          assert(ret >= 0);
+          memset(&cbs[0], 0, sizeof(cbs[0]));
+          cbs[0].aio_lio_opcode = IOCB_CMD_PREAD;
+          cbs[0].aio_fildes = _fd;
+          dst_base = _dst_base;
+        }
+        ~FileReader(void)
+        {
+          io_destroy(ctx);
+        }
+        void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+        {
+          cbs[0].aio_buf = dst_base + dst_offset;
+          cbs[0].aio_offset = src_offset;
+          cbs[0].aio_nbytes = bytes;
+          int ret = io_submit(ctx, 1, &cbs);
+          if (ret < 0) {
+            perror("io_submit error");
+          }
+
+          while (true) {
+            int nr = io_getevents(ctx, 0, 1, &events, NULL);
+            if (nr < 0)
+              perror("io_getevents error");
+            if (nr > 0) {
+              assert(nr == 1);
+              assert(events[0].res == bytes);
+              break;
+            }
+          }
+        }
+        void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                       off_t src_stride, off_t dst_stride, size_t lines)
+        {
+          while(lines-- > 0) {
+            copy_span(src_offset, dst_offset, bytes);
+            src_offset += src_stride;
+            dst_offset += dst_stride;
+          }
+        }
+      protected:
+        aio_context_t ctx;
+        struct iocb cbs[max_nr];
+        char *dst_base;
+        struct io_event events[max_nr];
+      };
+      FiletoCPUMemPairCopier(Memory _src_mem, Memory _dst_mem)
+      {
+        MemoryImpl *dst_impl = get_runtime()->get_memory_impl(_dst_mem);
+        dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+        src_mem = (FileMemory*) get_runtime()->get_memory_impl(_src_mem);
+      }
+
+      virtual ~FiletoCPUMemPairCopier(void) {}
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+        ID id(src_inst);
+        unsigned index = id.index_l();
+        int fd = src_mem->get_file_des(index);
+        FileReader fr(fd, dst_base);
+        return new SpanBasedInstPairCopier<FileReader>(&fr, src_inst, dst_inst, oas_vec);
+      }
+    protected:
+      char *dst_base;
+      FileMemory *src_mem;
+    };
      
     // most of the smarts from MemPairCopier::create_copier are now captured in the various factories
 
@@ -1939,6 +2100,19 @@ namespace LegionRuntime {
           printf("Create DisktoCPUMemPairCopier\n");
           int fd = ((DiskMemory *)src_impl)->fd;
           return new DisktoCPUMemPairCopier(fd, dst_mem);
+        }
+
+        // can we perform transfer between cpu and file memory
+        if (((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
+            (dst_kind == MemoryImpl::MKIND_FILE)) {
+          printf("Create FilefromCPUMemPairCopier\n");
+          return new FilefromCPUMemPairCopier(src_mem, dst_mem);
+        }
+
+        if ((src_kind == MemoryImpl::MKIND_FILE) &&
+            ((dst_kind == MemoryImpl::MKIND_SYSTEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
+          printf("Create FiletoCPUMemPairCopier\n");
+          return new FiletoCPUMemPairCopier(src_mem, dst_mem);
         }
 
 	// GPU FB-related copies should be handled by module-provided dma channels now

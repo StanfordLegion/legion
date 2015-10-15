@@ -130,9 +130,15 @@ namespace Realm {
     }
 
     FileMemory::FileMemory(Memory _me)
-      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM) {}
+      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM)
+    {
+      pthread_mutex_init(&vector_lock, NULL);
+    }
 
-    FileMemory::~FileMemory(void) {}
+    FileMemory::~FileMemory(void)
+    {
+      pthread_mutex_destroy(&vector_lock);
+    }
 
     RegionInstance FileMemory::create_instance(
                      IndexSpace is,
@@ -201,19 +207,22 @@ namespace Realm {
           assert(0);
       }
 
+      pthread_mutex_lock(&vector_lock);
       if (inst.id < file_vec.size())
         file_vec[inst.id] = fd;
       else
         file_vec.push_back(fd);
-
+      pthread_mutex_unlock(&vector_lock);
       return inst;
     }
 
     void FileMemory::destroy_instance(RegionInstance i,
                       bool local_destroy)
     {
+      pthread_mutex_lock(&vector_lock);
       assert(i.id < file_vec.size());
       int fd = file_vec[i.id];
+      pthread_mutex_unlock(&vector_lock);
       close(fd);
       destroy_instance_local(i, local_destroy);
     }
@@ -237,7 +246,9 @@ namespace Realm {
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
     {
+      pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
+      pthread_mutex_unlock(&vector_lock);
       size_t ret = pread(fd, dst, size, offset);
       assert(ret == size);
     }
@@ -249,7 +260,9 @@ namespace Realm {
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
     {
+      pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
+      pthread_mutex_unlock(&vector_lock);
       size_t ret = pwrite(fd, src, size, offset);
       assert(ret == size);
     }
@@ -265,6 +278,13 @@ namespace Realm {
     int FileMemory::get_home_node(off_t offset, size_t size)
     {
       return gasnet_mynode();
+    }
+
+    int FileMemory::get_file_des(ID::IDType inst_id)
+    {
+      pthread_mutex_lock(&vector_lock);
+      return file_vec[inst_id];
+      pthread_mutex_unlock(&vector_lock);
     }
 
 #ifdef USE_HDF

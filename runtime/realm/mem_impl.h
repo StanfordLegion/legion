@@ -316,8 +316,10 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
+      int get_file_des(ID::IDType inst_id);
     public:
       std::vector<int> file_vec;
+      pthread_mutex_t vector_lock;
     };
 
 #ifdef USE_HDF
