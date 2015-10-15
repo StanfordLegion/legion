@@ -19,8 +19,10 @@
 #include <errno.h>
 #include <aio.h>
 // included for file memory data transfer
+#include <unistd.h>
 #include <linux/aio_abi.h>
 #include <sys/syscall.h>
+
 
 #include <queue>
 
@@ -1841,6 +1843,27 @@ namespace LegionRuntime {
       int fd; // file descriptor
     };
 
+    inline int io_setup(unsigned nr, aio_context_t *ctxp)
+    {
+      return syscall(__NR_io_setup, nr, ctxp);
+    }
+
+    inline int io_destroy(aio_context_t ctx)
+    {
+      return syscall(__NR_io_destroy, ctx);
+    }
+
+    inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
+    {
+      return syscall(__NR_io_submit, ctx, nr, iocbpp);
+    }
+
+    inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
+                            struct io_event *events, struct timespec *timeout)
+    {
+      return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
+    }
+
     class FilefromCPUMemPairCopier : public MemPairCopier {
     public:
       class FileWriter {
@@ -1851,9 +1874,9 @@ namespace LegionRuntime {
           ctx = 0;
           int ret = io_setup(max_nr, &ctx);
           assert(ret >= 0);
-          memset(&cbs[0], 0, sizeof(cbs[0]));
-          cbs[0].aio_lio_opcode = IOCB_CMD_PWRITE;
-          cbs[0].aio_fildes = _fd;
+          memset(&cb[0], 0, sizeof(cb[0]));
+          cb[0].aio_lio_opcode = IOCB_CMD_PWRITE;
+          cb[0].aio_fildes = _fd;
           src_base = _src_base;
         }
         ~FileWriter(void)
@@ -1862,24 +1885,19 @@ namespace LegionRuntime {
         }
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
         {
-          cbs[0].aio_buf = src_base + src_offset;
-          cbs[0].aio_offset = dst_offset;
-          cbs[0].aio_nbytes = bytes;
-          int ret = io_submit(ctx, 1, &cbs);
+          cb[0].aio_buf = (uint64_t)(src_base + src_offset);
+          cb[0].aio_offset = dst_offset;
+          cb[0].aio_nbytes = bytes;
+          cbs[0] = &cb[0];
+          int ret = io_submit(ctx, max_nr, cbs);
           if (ret < 0) {
             perror("io_submit error");
           }
-
-          while (true) {
-            int nr = io_getevents(ctx, 0, 1, &events, NULL);
-            if (nr < 0)
-              perror("io_getevents error");
-            if (nr > 0) {
-              assert(nr == 1);
-              assert(events[0].res == bytes);
-              break;
-            }
-          }
+          int nr = io_getevents(ctx, max_nr, max_nr, events, NULL);
+          if (nr < 0)
+            perror("io_getevents error");
+          assert(nr == max_nr);
+          assert(events[0].res == (int64_t)bytes);
         }
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
                        off_t src_stride, off_t dst_stride, size_t lines)
@@ -1892,10 +1910,12 @@ namespace LegionRuntime {
         }
       protected:
         aio_context_t ctx;
-        struct iocb cbs[max_nr];
+        struct iocb cb[max_nr];
+        struct iocb *cbs[max_nr];
         char *src_base;
         struct io_event events[max_nr];
       };
+
       FilefromCPUMemPairCopier(Memory _src_mem, Memory _dst_mem)
       {
         MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
@@ -1930,9 +1950,9 @@ namespace LegionRuntime {
           ctx = 0;
           int ret = io_setup(max_nr, &ctx);
           assert(ret >= 0);
-          memset(&cbs[0], 0, sizeof(cbs[0]));
-          cbs[0].aio_lio_opcode = IOCB_CMD_PREAD;
-          cbs[0].aio_fildes = _fd;
+          memset(&cb[0], 0, sizeof(cb[0]));
+          cb[0].aio_lio_opcode = IOCB_CMD_PREAD;
+          cb[0].aio_fildes = _fd;
           dst_base = _dst_base;
         }
         ~FileReader(void)
@@ -1941,24 +1961,19 @@ namespace LegionRuntime {
         }
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
         {
-          cbs[0].aio_buf = dst_base + dst_offset;
-          cbs[0].aio_offset = src_offset;
-          cbs[0].aio_nbytes = bytes;
-          int ret = io_submit(ctx, 1, &cbs);
+          cb[0].aio_buf = (uint64_t)(dst_base + dst_offset);
+          cb[0].aio_offset = src_offset;
+          cb[0].aio_nbytes = bytes;
+          cbs[0] = &cb[0];
+          int ret = io_submit(ctx, max_nr, cbs);
           if (ret < 0) {
             perror("io_submit error");
           }
-
-          while (true) {
-            int nr = io_getevents(ctx, 0, 1, &events, NULL);
-            if (nr < 0)
-              perror("io_getevents error");
-            if (nr > 0) {
-              assert(nr == 1);
-              assert(events[0].res == bytes);
-              break;
-            }
-          }
+          int nr = io_getevents(ctx, max_nr, max_nr, events, NULL);
+          if (nr < 0)
+            perror("io_getevents error");
+          assert(nr == max_nr);
+          assert(events[0].res == (int64_t)bytes);
         }
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
                        off_t src_stride, off_t dst_stride, size_t lines)
@@ -1971,7 +1986,8 @@ namespace LegionRuntime {
         }
       protected:
         aio_context_t ctx;
-        struct iocb cbs[max_nr];
+        struct iocb cb[max_nr];
+        struct iocb *cbs[max_nr];
         char *dst_base;
         struct io_event events[max_nr];
       };
@@ -2110,7 +2126,7 @@ namespace LegionRuntime {
         }
 
         if ((src_kind == MemoryImpl::MKIND_FILE) &&
-            ((dst_kind == MemoryImpl::MKIND_SYSTEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
+            ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
           printf("Create FiletoCPUMemPairCopier\n");
           return new FiletoCPUMemPairCopier(src_mem, dst_mem);
         }
