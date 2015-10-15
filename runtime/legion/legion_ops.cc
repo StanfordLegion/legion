@@ -9029,7 +9029,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize_hdf5(SingleTask *ctx, 
+    PhysicalRegion AttachOp::initialize_hdf5(SingleTask *ctx,
                                              const char *name,
                                              LogicalRegion handle, 
                                              LogicalRegion parent,
@@ -9047,6 +9047,7 @@ namespace LegionRuntime {
                         parent_ctx->get_unique_task_id());
 
       }
+      file_type = HDF5_FILE;
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
@@ -9056,6 +9057,46 @@ namespace LegionRuntime {
       {
         requirement.add_field(it->first);
         field_map[it->first] = strdup(it->second);
+      }
+      file_mode = mode;
+      // This instance is not automatically mapped
+      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+                              completion_event, false/*mapped*/, ctx,
+                              0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
+      if (check_privileges)
+        check_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+      return region;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion AttachOp::initialize_file(SingleTask *ctx,
+                                             const char *name,
+                                             LogicalRegion handle,
+                                             LogicalRegion parent,
+                                      const std::vector<FieldID> &fvec,
+                                             LegionFileMode mode,
+                                             bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      if (fvec.empty())
+      {
+        log_run.warning("WARNING: FILE ATTACH OPERATION ISSUED WITH NO "
+                        "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                        "FORGET THEM?!?", parent_ctx->variants->name,
+                        parent_ctx->get_unique_task_id());
+
+      }
+      file_type = NORMAL_FILE;
+      file_name = strdup(name);
+      // Construct the region requirement for this task
+      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
+      requirement.initialize_mapping_fields();
+      for (std::vector<FieldID>::const_iterator it = fvec.begin();
+            it != fvec.end(); it++)
+      {
+        requirement.add_field(*it);
       }
       file_mode = mode;
       // This instance is not automatically mapped
@@ -9242,21 +9283,29 @@ namespace LegionRuntime {
                                                const std::vector<size_t> &sizes)
     //--------------------------------------------------------------------------
     {
-      // First build the set of field paths
-      std::vector<const char*> field_files(field_map.size());
-      unsigned idx = 0;
-      for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
-            it != field_map.end(); it++, idx++)
-      {
-        field_files[idx] = it->second;
-      }
-      // Now ask the low-level runtime to create the instance  
-      PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
-                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
+      if (file_type == HDF5_FILE) {
+        // First build the set of field paths
+        std::vector<const char*> field_files(field_map.size());
+        unsigned idx = 0;
+        for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
+              it != field_map.end(); it++, idx++)
+        {
+          field_files[idx] = it->second;
+        }
+        // Now ask the low-level runtime to create the instance
+        PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
+                               field_files, (file_mode == LEGION_FILE_READ_ONLY));
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.exists());
 #endif
-      return result;
+        return result;
+      } else if (file_type == NORMAL_FILE) {
+        PhysicalInstance result = dom.create_file_instance(file_name, sizes, file_mode);
+        return result;
+      } else {
+        assert(0);
+        return PhysicalInstance::NO_INST;
+      }
     }
 
     //--------------------------------------------------------------------------

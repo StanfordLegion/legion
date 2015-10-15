@@ -4310,6 +4310,22 @@ namespace LegionRuntime {
        * @param region the physical region for an HDF5 file to detach
        */
       void detach_hdf5(Context ctx, PhysicalRegion region);
+
+      /**
+       * Attach an normal file as a physical region. This attach is similar to
+       * attach_hdf5 operation, except that the file has exact same data format
+       * as in-memory physical region. Data lays out as SOA in file.
+       */
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> &field_vec,
+                                 LegionFileMode mode);
+
+      /**
+       * Detach an normal file. THis detach operation is similar to
+       * detach_hdf5
+       */
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations

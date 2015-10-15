@@ -1765,6 +1765,11 @@ namespace LegionRuntime {
     class AttachOp : public Operation {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+      enum ExternalType {
+        HDF5_FILE,
+        NORMAL_FILE,
+        IN_MEMORY_DATA
+      };
     public:
       AttachOp(Runtime *rt);
       AttachOp(const AttachOp &rhs);
@@ -1776,6 +1781,10 @@ namespace LegionRuntime {
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
+      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
+                                     LogicalRegion handle, LogicalRegion parent,
+                                     const std::vector<FieldID> &field_vec,
+                                     LegionFileMode mode, bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -1790,7 +1799,7 @@ namespace LegionRuntime {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     public:
-      PhysicalInstance create_instance(const Domain &dom, 
+      PhysicalInstance create_instance(const Domain &dom,
                                        const std::vector<size_t> &field_sizes);
     protected:
       void check_privilege(void);
@@ -1803,6 +1812,7 @@ namespace LegionRuntime {
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       LegionFileMode file_mode;
+      ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
     };

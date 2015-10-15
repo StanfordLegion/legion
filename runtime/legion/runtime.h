@@ -1231,6 +1231,11 @@ namespace LegionRuntime {
                                  const std::map<FieldID,const char*> field_map,
                                  LegionFileMode);
       void detach_hdf5(Context ctx, PhysicalRegion region);
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> field_vec,
+                                 LegionFileMode);
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:

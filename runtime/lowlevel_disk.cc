@@ -61,7 +61,7 @@ namespace Realm {
     }
 
     void DiskMemory::destroy_instance(RegionInstance i,
-				     bool local_destroy)
+                                      bool local_destroy)
     {
       destroy_instance_local(i, local_destroy);
     }
@@ -125,6 +125,144 @@ namespace Realm {
     }
 
     int DiskMemory::get_home_node(off_t offset, size_t size)
+    {
+      return gasnet_mynode();
+    }
+
+    FileMemory::FileMemory(Memory _me)
+      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM) {}
+
+    FileMemory::~FileMemory(void) {}
+
+    RegionInstance FileMemory::create_instance(
+                     IndexSpace is,
+                     const int *linearization_bits,
+                     size_t bytes_needed,
+                     size_t block_size,
+                     size_t element_size,
+                     const std::vector<size_t>& field_sizes,
+                     ReductionOpID redopid,
+                     off_t list_size,
+                     const ProfilingRequestSet &reqs,
+                     RegionInstance parent_inst)
+    {
+      // we use a new create_instance API
+      assert(0);
+      return RegionInstance::NO_INST;
+    }
+
+    RegionInstance FileMemory::create_instance(
+                     IndexSpace is,
+                     const int *linearization_bits,
+                     size_t bytes_needed,
+                     size_t block_size,
+                     size_t element_size,
+                     const std::vector<size_t>& field_sizes,
+                     ReductionOpID redopid,
+                     off_t list_size,
+                     const ProfilingRequestSet &reqs,
+                     RegionInstance parent_inst,
+                     const char *file_name,
+                     Domain domain,
+                     legion_lowlevel_file_mode_t file_mode)
+    {
+      RegionInstance inst =  create_instance_local(is,
+                   linearization_bits, bytes_needed,
+                   block_size, element_size, field_sizes, redopid,
+                   list_size, reqs, parent_inst);
+      int fd;
+      switch (file_mode) {
+        case LEGION_FILE_READ_ONLY:
+        {
+          fd = open(file_name, O_RDONLY);
+          assert(fd != -1);
+          break;
+        }
+        case LEGION_FILE_READ_WRITE:
+        {
+          fd = open(file_name, O_RDWR);
+          assert(fd != -1);
+          break;
+        }
+        case LEGION_FILE_CREATE:
+        {
+          fd = open(file_name, O_CREAT | O_EXCL | O_RDWR, 00777);
+          assert(fd != -1);
+          // resize the file to what we want
+          size_t field_size = 0;
+          for(std::vector<size_t>::const_iterator it = field_sizes.begin(); it != field_sizes.end(); it++) {
+            field_size += *it;
+          }
+          int ret = ftruncate(fd, field_size * domain.get_volume());
+          assert(ret == 0);
+          break;
+        }
+        default:
+          assert(0);
+      }
+
+      if (inst.id < file_vec.size())
+        file_vec[inst.id] = fd;
+      else
+        file_vec.push_back(fd);
+
+      return inst;
+    }
+
+    void FileMemory::destroy_instance(RegionInstance i,
+                      bool local_destroy)
+    {
+      assert(i.id < file_vec.size());
+      int fd = file_vec[i.id];
+      close(fd);
+      destroy_instance_local(i, local_destroy);
+    }
+
+    off_t FileMemory::alloc_bytes(size_t size)
+    {
+      // cannot alloc bytes in file memory
+      assert(0);
+      return 0;
+    }
+
+    void FileMemory::free_bytes(off_t offset, size_t size)
+    {
+      assert(0);
+    }
+
+    void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
+    {
+      assert(0);
+    }
+
+    void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
+    {
+      int fd = file_vec[inst_id];
+      size_t ret = pread(fd, dst, size, offset);
+      assert(ret == size);
+    }
+
+    void FileMemory::put_bytes(off_t offset, const void *src, size_t)
+    {
+      assert(0);
+    }
+
+    void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
+    {
+      int fd = file_vec[inst_id];
+      size_t ret = pwrite(fd, src, size, offset);
+      assert(ret == size);
+    }
+
+    void FileMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
+                                          size_t count, const void *entry_buffer) {}
+
+    void *FileMemory::get_direct_ptr(off_t offset, size_t size)
+    {
+      return 0; // cannot provide a pointer for it;
+    }
+
+    int FileMemory::get_home_node(off_t offset, size_t size)
     {
       return gasnet_mynode();
     }
@@ -206,7 +344,7 @@ namespace Realm {
     }
 
     void HDFMemory::destroy_instance(RegionInstance i,
-				     bool local_destroy)
+                                     bool local_destroy)
     {
       HDFMetadata* new_hdf = hdf_metadata[i.id];
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());

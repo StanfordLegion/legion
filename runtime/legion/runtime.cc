@@ -8796,7 +8796,7 @@ namespace LegionRuntime {
                                         LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachOp *attach_op = get_available_attach_op(true); 
+      AttachOp *attach_op = get_available_attach_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8813,7 +8813,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
-                       handle, parent, field_map, mode, check_privileges); 
+                       handle, parent, field_map, mode, check_privileges);
 #else
       PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
                handle, parent, field_map, mode, false/*check privileges*/);
@@ -8885,6 +8885,127 @@ namespace LegionRuntime {
       }
 #endif
       
+      // Then issue the detach operation
+      Processor proc = ctx->get_executing_processor();
+      DetachOp *detach_op = get_available_detach_op(true);
+      detach_op->initialize_detach(ctx, region);
+#ifdef INORDER_EXECUTION
+      Event term_event = detach_op->get_completion_event();
+#endif
+      add_to_dependence_queue(proc, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        ctx->unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_file(Context ctx, const char *file_name,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                  const std::vector<FieldID> field_vec,
+                                        LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *attach_op = get_available_attach_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context attach normal file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal attach normal file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      PhysicalRegion result = attach_op->initialize_file(ctx, file_name,
+                       handle, parent, field_vec, mode, check_privileges);
+#else
+      PhysicalRegion result = attach_op->initialize_file(ctx, file_name,
+               handle, parent, field_vec, mode, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(attach_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach file operation on region "
+                      "(%x,%x,%x) that conflicts with mapped region "
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_file on file %s",
+                      handle.index_space.id, handle.field_space.id,
+                      handle.tree_id, ctx->regions[index].region.index_space.id,
+                      ctx->regions[index].region.field_space.id,
+                      ctx->regions[index].region.tree_id, index,
+                      ctx->variants->name, ctx->get_unique_task_id(),
+                      file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach file operation on region "
+                      "(%x,%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_file on file %s",
+                      handle.index_space.id, handle.field_space.id,
+                      handle.tree_id, ctx->variants->name,
+                      ctx->get_unique_task_id(), file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_executiong)
+        result.wait_until_valid();
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_file(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context detach normal file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal detach normal file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+
       // Then issue the detach operation
       Processor proc = ctx->get_executing_processor();
       DetachOp *detach_op = get_available_detach_op(true);
