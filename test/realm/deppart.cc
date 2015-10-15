@@ -56,6 +56,20 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 
   // now create index spaces for nodes and edges
   ZIndexSpace<1> is_nodes(ZRect<1>(0, num_nodes - 1));
+  ZIndexSpace<1> is_edges(ZRect<1>(0, num_edges - 1));
+
+  // equal partition is used to do initial population of edges and nodes
+  std::vector<ZIndexSpace<1> > ss_nodes_eq;
+  std::vector<ZIndexSpace<1> > ss_edges_eq;
+
+  is_nodes.create_equal_subspaces(num_pieces, 1, ss_nodes_eq, Realm::ProfilingRequestSet()).wait();
+  is_edges.create_equal_subspaces(num_pieces, 1, ss_edges_eq, Realm::ProfilingRequestSet()).wait();
+
+  std::cout << "Initial partitions:" << std::endl;
+  for(size_t i = 0; i < ss_nodes_eq.size(); i++)
+    std::cout << " Nodes #" << i << ": " << ss_nodes_eq[i] << std::endl;
+  for(size_t i = 0; i < ss_edges_eq.size(); i++)
+    std::cout << " Edges #" << i << ": " << ss_edges_eq[i] << std::endl;
 
   if(errors > 0) {
     printf("Exiting with errors\n");

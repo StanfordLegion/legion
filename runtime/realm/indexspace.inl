@@ -18,6 +18,8 @@
 // nop, but helps IDEs
 #include "indexspace.h"
 
+#include "profiling.h"
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -76,6 +78,16 @@ namespace Realm {
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
   };
+
+  template <int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const ZPoint<N,T>& p)
+  {
+    os << '<' << p[0];
+    for(int i = 1; i < N; i++)
+      os << ',' << p[i];
+    os << '>';
+    return os;
+  }
 
   // component-wise operators defined on Point<N,T>
   template <int N, typename T> 
@@ -239,6 +251,13 @@ namespace Realm {
     return out;
   };
 
+  template <int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p)
+  {
+    os << p.lo << ".." << p.hi;
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -275,6 +294,50 @@ namespace Realm {
     return !sparsity.exists();
   }
 
+  template <int N, typename T>
+  inline Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
+							std::vector<ZIndexSpace<N,T> >& subspaces,
+							const ProfilingRequestSet &reqs,
+							Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+    assert(reqs.empty());
+
+    // dense case is easy(er)
+    if(dense()) {
+      // always split in x dimension for now
+      assert(count >= 1);
+      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, 0);
+      subspaces.reserve(count);
+      T px = bounds.lo.x;
+      for(size_t i = 0; i < count; i++) {
+	ZIndexSpace<N,T> ss(*this);
+	T nx = bounds.lo.x + (total_x * (i + 1) / count);
+	ss.bounds.lo.x = px;
+	ss.bounds.hi.x = nx - 1;
+	subspaces.push_back(ss);
+	px = nx;
+      }
+      return Event::NO_EVENT;
+    }
+
+    // TODO: sparse case
+    assert(0);
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const ZIndexSpace<N,T>& is)
+  {
+    os << "IS:" << is.bounds;
+    if(is.dense()) {
+      os << ",dense";
+    } else {
+      os << ",sparse(" << is.sparsity.id << ")";
+    }
+    return os;
+  }
 
 }; // namespace Realm
 

@@ -1126,6 +1126,9 @@ namespace Realm {
     const T& operator[](int index) const;
   };
 
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const ZPoint<N,T>& p);
+
   // component-wise operators defined on Point<N,T>
   template <int N, typename T> bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
   template <int N, typename T> bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
@@ -1162,6 +1165,9 @@ namespace Realm {
     ZRect<N,T> intersection(const ZRect<N,T>& other) const;
   };
 
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
+
   // an IndexSpace is a POD type that contains a bounding rectangle and an optional SparsityMap - the
   //  contents of the IndexSpace are the intersection of the bounding rectangle's volume and the
   //  optional SparsityMap's contents
@@ -1189,7 +1195,18 @@ namespace Realm {
     void foreach_subrect(LAMBDA lambda);
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda, const ZRect<N,T>& restriction);
+
+    // partitioning operations
+
+    // index-based:
+    Event create_equal_subspaces(size_t count, size_t granularity,
+				 std::vector<ZIndexSpace<N,T> >& subspaces,
+				 const ProfilingRequestSet &reqs,
+				 Event wait_on = Event::NO_EVENT) const;
   };
+
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const ZIndexSpace<N,T>& p);
 
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
   template <int N, typename T>
