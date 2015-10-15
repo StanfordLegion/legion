@@ -18,7 +18,7 @@
 // nop, but helps IDEs
 #include "indexspace.h"
 
-#include "profiling.h"
+#include "instance.h"
 
 namespace Realm {
 
@@ -302,7 +302,7 @@ namespace Realm {
   {
     // no support for deferring yet
     assert(wait_on.has_triggered());
-    assert(reqs.empty());
+    //assert(reqs.empty());
 
     // dense case is easy(er)
     if(dense()) {
@@ -337,6 +337,128 @@ namespace Realm {
       os << ",sparse(" << is.sparsity.id << ")";
     }
     return os;
+  }
+
+  extern RegionInstance create_instance_internal(Memory memory,
+						 size_t elements,
+						 const std::vector<size_t>& field_sizes,
+						 size_t block_size,
+						 const ProfilingRequestSet& reqs);
+
+  template <int N, typename T>
+  inline RegionInstance ZIndexSpace<N,T>::create_instance(Memory memory,
+							  const std::vector<size_t> &field_sizes,
+							  size_t block_size,
+							  const ProfilingRequestSet& reqs) const
+  {
+    // for now, create a instance that holds our entire bounding box and can therefore use a simple
+    //  linearizer
+
+    return RegionInstance::create_instance(memory,
+					   AffineLinearizedIndexSpace<N,T>(*this),
+					   field_sizes,
+					   reqs);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LinearizedIndexSpaceIntfc
+
+  inline LinearizedIndexSpaceIntfc::LinearizedIndexSpaceIntfc(int _dim, int _idxtype)
+    : dim(_dim), idxtype(_idxtype)
+  {}
+
+  inline LinearizedIndexSpaceIntfc::~LinearizedIndexSpaceIntfc(void)
+  {}
+
+  // check and conversion routines to get a dimension-aware intermediate
+  template <int N, typename T>
+  inline bool LinearizedIndexSpaceIntfc::check_dim(void) const
+  {
+    return (dim == N) && (idxtype == (int)sizeof(T));
+  }
+
+  template <int N, typename T>
+  inline LinearizedIndexSpace<N,T>& LinearizedIndexSpaceIntfc::as_dim(void)
+  {
+    assert((dim == N) && (idxtype == (int)sizeof(T)));
+    return *static_cast<LinearizedIndexSpace<N,T> *>(this);
+  }
+
+  template <int N, typename T>
+  inline const LinearizedIndexSpace<N,T>& LinearizedIndexSpaceIntfc::as_dim(void) const
+  {
+    assert((dim == N) && (idxtype == (int)sizeof(T)));
+    return *static_cast<const LinearizedIndexSpace<N,T> *>(this);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LinearizedIndexSpace<N,T>
+
+  template <int N, typename T>
+  inline LinearizedIndexSpace<N,T>::LinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace)
+    : LinearizedIndexSpaceIntfc(N, (int)sizeof(T))
+    , indexspace(_indexspace)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AffineLinearizedIndexSpace<N,T>
+
+  template <int N, typename T>
+  inline AffineLinearizedIndexSpace<N,T>::AffineLinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace,
+								     bool fortran_order /*= true*/)
+    : LinearizedIndexSpace<N,T>(_indexspace)
+  {
+    const ZRect<N,T>& bounds = this->indexspace.bounds;
+    volume = bounds.volume();
+    if(volume) {
+      offset = 0;
+      ptrdiff_t s = 1;  // initial stride == 1
+      if(fortran_order) {
+	for(int i = 0; i < N; i++) {
+	  offset += bounds.lo[i] * s;
+	  strides[i] = s;
+	  s *= bounds.hi[i] - bounds.lo[i] + 1;
+	}
+      } else {
+	for(int i = N-1; i >= 0; i--) {
+	  offset += bounds.lo[i] * s;
+	  strides[i] = s;
+	  s *= bounds.hi[i] - bounds.lo[i] + 1;
+	}
+      }
+      assert(s == volume);
+    } else {
+      offset = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
+    }
+  }
+
+  template <int N, typename T>
+  LinearizedIndexSpaceIntfc *AffineLinearizedIndexSpace<N,T>::clone(void) const
+  {
+    return new AffineLinearizedIndexSpace<N,T>(*this);
+  }
+    
+  template <int N, typename T>
+  inline size_t AffineLinearizedIndexSpace<N,T>::size(void) const
+  {
+    return volume;
+  }
+
+  template <int N, typename T>
+  inline size_t AffineLinearizedIndexSpace<N,T>::linearize(const ZPoint<N,T>& p) const
+  {
+    size_t x = 0;
+    for(int i = 0; i < N; i++)
+      x += p[i] * strides[i];
+    assert(x >= offset);
+    return x - offset;
   }
 
 }; // namespace Realm

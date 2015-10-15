@@ -102,6 +102,46 @@ namespace Realm {
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped((void *)i_impl));
     }
 
+    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
+							      const LinearizedIndexSpaceIntfc& lis,
+							      const std::vector<size_t>& field_sizes,
+							      const ProfilingRequestSet& prs)
+    {
+      size_t num_elements = lis.size();
+      size_t element_size = 0;
+      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
+	  it != field_sizes.end();
+	  it++)
+	element_size += *it;
+
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      int dummy_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+      for(size_t i = 0; i < RegionInstanceImpl::MAX_LINEARIZATION_LEN; i++)
+	dummy_bits[i] = 0;
+
+      RegionInstance r = m_impl->create_instance(IndexSpace::NO_SPACE,
+						 dummy_bits,
+						 num_elements * element_size,
+						 num_elements, // SOA
+						 element_size,
+						 field_sizes,
+						 0, -1, prs,
+						 RegionInstance::NO_INST);
+			
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(r);
+      r_impl->lis = lis.clone();
+			 
+      return r;
+    }
+
+    const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      assert(r_impl->lis);
+      return *(r_impl->lis);
+    }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -115,7 +155,7 @@ namespace Realm {
 					   const ProfilingRequestSet &reqs,
 					   off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/,
 					   RegionInstance _parent_inst /*= NO_INST*/)
-      : me(_me), memory(_memory)
+      : me(_me), memory(_memory), lis(0)
     {
       metadata.linearization = _linear;
 
@@ -156,7 +196,7 @@ namespace Realm {
 
     // when we auto-create a remote instance, we don't know region/offset
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
-      : me(_me), memory(_memory)
+      : me(_me), memory(_memory), lis(0)
     {
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;

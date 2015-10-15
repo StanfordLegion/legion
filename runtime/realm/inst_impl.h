@@ -76,6 +76,9 @@ namespace Realm {
       ProfilingMeasurementCollection measurements;
       ProfilingMeasurements::InstanceTimeline timeline;
 
+      // TODO: make this part of the metadata so it gets moved around properly
+      LinearizedIndexSpaceIntfc *lis;
+
       class Metadata : public MetadataBase {
       public:
 	void *serialize(size_t& out_size) const;

@@ -1196,6 +1196,15 @@ namespace Realm {
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda, const ZRect<N,T>& restriction);
 
+    // instance creation
+
+    RegionInstance create_instance(Memory memory,
+				   const std::vector<size_t>& field_sizes,
+				   size_t block_size,
+				   const ProfilingRequestSet& reqs) const;
+
+
+
     // partitioning operations
 
     // index-based:
@@ -1207,6 +1216,68 @@ namespace Realm {
 
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZIndexSpace<N,T>& p);
+
+  // instances are based around the concept of a "linearization" of some index space, which is
+  //  responsible for mapping (valid) points in the index space into a hopefully-fairly-dense
+  //  subset of [0,size) (for some size)
+  //
+  // because index spaces can have arbitrary dimensionality, this description is wrapped in an
+  //  abstract interface - all implementations must inherit from the approriate LinearizedIndexSpace<N,T>
+  //  intermediate
+
+  template <int N, typename T> class LinearizedIndexSpace;
+
+  class LinearizedIndexSpaceIntfc {
+  protected:
+    // cannot be created directly
+    LinearizedIndexSpaceIntfc(int _dim, int _idxtype);
+
+  public:
+    virtual ~LinearizedIndexSpaceIntfc(void);
+
+    virtual LinearizedIndexSpaceIntfc *clone(void) const = 0;
+
+    // returns the size of the linearized space
+    virtual size_t size(void) const = 0;
+
+    // check and conversion routines to get a dimension-aware intermediate
+    template <int N, typename T> bool check_dim(void) const;
+    template <int N, typename T> LinearizedIndexSpace<N,T>& as_dim(void);
+    template <int N, typename T> const LinearizedIndexSpace<N,T>& as_dim(void) const;
+
+    int dim, idxtype;
+  };
+
+  template <int N, typename T>
+  class LinearizedIndexSpace : public LinearizedIndexSpaceIntfc {
+  protected:
+    // still can't be created directly
+    LinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace);
+
+  public:
+    // generic way to linearize a point
+    virtual size_t linearize(const ZPoint<N,T>& p) const = 0;
+
+    ZIndexSpace<N,T> indexspace;
+  };
+
+  // the simplest way to linearize an index space is build an affine translation from its
+  //  bounding box to the range [0, volume)
+  template <int N, typename T>
+  class AffineLinearizedIndexSpace : public LinearizedIndexSpace<N,T> {
+  public:
+    // "fortran order" has the smallest stride in the first dimension
+    explicit AffineLinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace, bool fortran_order = true);
+
+    virtual LinearizedIndexSpaceIntfc *clone(void) const;
+    
+    virtual size_t size(void) const;
+
+    virtual size_t linearize(const ZPoint<N,T>& p) const;
+
+    size_t volume, offset;
+    ZPoint<N, ptrdiff_t> strides;
+  };
 
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
   template <int N, typename T>

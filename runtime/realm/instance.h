@@ -27,33 +27,51 @@
 
 namespace Realm {
 
-    class RegionInstance {
-    public:
-      typedef ::legion_lowlevel_id_t id_t;
-      id_t id;
-      bool operator<(const RegionInstance &rhs) const { return id < rhs.id; }
-      bool operator==(const RegionInstance &rhs) const { return id == rhs.id; }
-      bool operator!=(const RegionInstance &rhs) const { return id != rhs.id; }
+  template <int N, typename T> class ZIndexSpace;
+  class LinearizedIndexSpaceIntfc;
+  class ProfilingRequestSet;
 
-      static const RegionInstance NO_INST;
+  class RegionInstance {
+  public:
+    typedef ::legion_lowlevel_id_t id_t;
+    id_t id;
+    bool operator<(const RegionInstance &rhs) const;
+    bool operator==(const RegionInstance &rhs) const;
+    bool operator!=(const RegionInstance &rhs) const;
 
-      bool exists(void) const { return id != 0; }
+    static const RegionInstance NO_INST;
 
-      Memory get_location(void) const;
+    bool exists(void) const;
 
-      void destroy(Event wait_on = Event::NO_EVENT) const;
+    Memory get_location(void) const;
+    const LinearizedIndexSpaceIntfc& get_lis(void) const;
 
-      AddressSpace address_space(void) const;
-      id_t local_id(void) const;
+    static RegionInstance create_instance(Memory memory,
+					  const LinearizedIndexSpaceIntfc& lis,
+					  const std::vector<size_t>& field_sizes,
+					  const ProfilingRequestSet& prs);
 
-      LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
-    };
+    void destroy(Event wait_on = Event::NO_EVENT) const;
 
-    inline std::ostream& operator<<(std::ostream& os, RegionInstance r) { return os << std::hex << r.id << std::dec; }
+    AddressSpace address_space(void) const;
+    id_t local_id(void) const;
+
+    // apparently we can't use default template parameters on methods without C++11, but we
+    //  can provide templates of two different arities...
+    template <int N, typename T>
+    const ZIndexSpace<N,T>& get_indexspace(void) const;
+
+    template <int N>
+    const ZIndexSpace<N,int>& get_indexspace(void) const;
+
+    LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
+  };
+
+  std::ostream& operator<<(std::ostream& os, RegionInstance r);
 		
 }; // namespace Realm
 
-//include "instance.inl"
+#include "instance.inl"
 
 #endif // ifndef REALM_INSTANCE_H
 
