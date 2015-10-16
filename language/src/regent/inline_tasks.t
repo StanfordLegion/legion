@@ -189,6 +189,29 @@ local function check_valid_inline_task(task)
   end
 end
 
+local function check_rf(node)
+  if node:is(ast.typed.ExprID) then return true
+  elseif node:is(ast.typed.ExprConstant) then return true
+  elseif node:is(ast.typed.ExprFieldAccess) then
+    return check_rf(node.value)
+  elseif node:is(ast.typed.ExprIndexAccess) then
+    return check_rf(node.value) and check_rf(node.index)
+  else
+    return false
+  end
+end
+
+local function get_root_subregion(node)
+  if node:is(ast.typed.ExprID) then
+    local ty = std.as_read(node.expr_type)
+    if std.is_region(ty) then return node.value
+    elseif std.is_partition(ty) then return ty.parent_region_symbol
+    else return nil end
+  elseif node:is(ast.typed.ExprIndexAccess) then
+    return get_root_subregion(node.value)
+  end
+  return nil
+end
 
 function inline_tasks.expr(cx, node)
   if node:is(ast.typed.ExprCall) then
@@ -220,32 +243,48 @@ function inline_tasks.expr(cx, node)
     local new_block
     do
       local stats = terralib.newlist()
-      local mapping = {}
+      local expr_mapping = {}
+      local type_mapping = {}
       local new_local_params = terralib.newlist()
       local new_local_param_types = terralib.newlist()
+      local new_args = terralib.newlist()
       std.zip(params, param_types, args):map(function(tuple)
         local param, param_type, arg = unpack(tuple)
-        local new_var = terralib.newsymbol(std.as_read(arg.expr_type))
-        mapping[param] = new_var
-        new_local_params:insert(new_var)
-        new_local_param_types:insert(new_var.type)
-        if std.is_region(param_type) then
-          mapping[param_type] = new_var.type
+        if check_rf(arg) then
+          expr_mapping[param] = arg
+          if std.is_region(param_type) then
+            type_mapping[param_type] = std.as_read(arg.expr_type)
+            type_mapping[param] = get_root_subregion(arg)
+          end
+        else
+          local new_var = terralib.newsymbol(std.as_read(arg.expr_type))
+          expr_mapping[param] = new_var
+          new_local_params:insert(new_var)
+          new_local_param_types:insert(new_var.type)
+          new_args:insert(arg)
+          if std.is_region(param_type) then
+            type_mapping[param] = new_var
+            type_mapping[param_type] = new_var.type
+          end
         end
       end)
 
-      stats:insert(ast.typed.StatVar {
-        symbols = new_local_params,
-        types = new_local_param_types,
-        values = args,
-        span = node.span
-      })
+      if #new_local_params > 0 then
+        stats:insert(ast.typed.StatVar {
+          symbols = new_local_params,
+          types = new_local_param_types,
+          values = new_args,
+          span = node.span
+        })
+      end
       local function subst(node)
         if rawget(node, "expr_type") then
-          if node:is(ast.typed.ExprID) and mapping[node.value] then
-            node = node { value = mapping[node.value] }
+          if node:is(ast.typed.ExprID) and expr_mapping[node.value] then
+            local tgt = expr_mapping[node.value]
+            if rawget(tgt, "expr_type") then node = tgt
+            else node = node { value = tgt } end
           end
-          return node { expr_type = std.type_sub(node.expr_type, mapping) }
+          return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
         else
           return node
         end
