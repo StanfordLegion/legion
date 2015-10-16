@@ -230,6 +230,7 @@ void top_level_task(const Task *task,
 
   // Launcher a copy operation that performs checkpoint
   std::vector<FieldID> field_vec;
+  field_vec.push_back(FID_CP);
   PhysicalRegion cp_pr = runtime->attach_file(ctx, "checkpoint.dat", cp_lr, cp_lr, field_vec, LEGION_FILE_CREATE);
   runtime->remap_region(ctx, cp_pr);
   cp_pr.wait_until_valid();
