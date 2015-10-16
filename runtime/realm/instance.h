@@ -25,6 +25,13 @@
 
 #include "accessor.h"
 
+// we need intptr_t - make it if needed
+#if __cplusplus >= 201103L
+#include <cstdint>
+#else
+typedef ptrdiff_t intptr_t;
+#endif
+
 namespace Realm {
 
   template <int N, typename T> class ZIndexSpace;
@@ -65,6 +72,16 @@ namespace Realm {
     const ZIndexSpace<N,int>& get_indexspace(void) const;
 
     LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
+
+    // used for accessor construction
+    bool increment_accessor_count(void);
+    bool decrement_accessor_count(void);
+
+    bool can_get_strided_access_parameters(size_t start, size_t count,
+					   ptrdiff_t field_offset, size_t field_size);
+    void get_strided_access_parameters(size_t start, size_t count,
+				       ptrdiff_t field_offset, size_t field_size,
+				       intptr_t& base, ptrdiff_t& stride);
   };
 
   std::ostream& operator<<(std::ostream& os, RegionInstance r);

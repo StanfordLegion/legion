@@ -50,7 +50,8 @@ namespace Realm {
   {
     return os << std::hex << r.id << std::dec;
   }
-		
+
+#if 0		
   template <int N, typename T>
   const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
   {
@@ -62,6 +63,7 @@ namespace Realm {
   {
     return get_lis().as_dim<N,int>().indexspace;
   }
+#endif
 		
 }; // namespace Realm
 

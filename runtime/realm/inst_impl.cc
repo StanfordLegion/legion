@@ -142,6 +142,21 @@ namespace Realm {
       return *(r_impl->lis);
     }
 
+    void RegionInstance::get_strided_access_parameters(size_t start, size_t count,
+						       ptrdiff_t field_offset, size_t field_size,
+						       intptr_t& base, ptrdiff_t& stride)
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+
+      // TODO: make sure we're in range
+
+      void *orig_base = 0;
+      size_t orig_stride = 0;
+      bool ok = r_impl->get_strided_parameters(orig_base, orig_stride, field_offset);
+      assert(ok);
+      base = reinterpret_cast<intptr_t>(orig_base);
+      stride = orig_stride;
+    }
   
   ////////////////////////////////////////////////////////////////////////
   //

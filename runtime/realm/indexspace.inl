@@ -50,6 +50,9 @@ namespace Realm {
     ZPoint(T _x) : x(_x) {}
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
+
+    // special case: for N == 1, we're willing to coerce to T
+    operator T(void) const { return x; }
   };
 
   template <typename T>
@@ -328,6 +331,25 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  template <typename FT>
+  inline Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<FT> >& field_data,
+							       std::map<FT, ZIndexSpace<N,T> >& subspaces,
+							       const ProfilingRequestSet &reqs,
+							       Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    for(typename std::map<FT, ZIndexSpace<N,T> >::iterator it = subspaces.begin();
+	it != subspaces.end();
+	it++)
+      it->second = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const ZIndexSpace<N,T>& is)
   {
     os << "IS:" << is.bounds;
@@ -338,12 +360,6 @@ namespace Realm {
     }
     return os;
   }
-
-  extern RegionInstance create_instance_internal(Memory memory,
-						 size_t elements,
-						 const std::vector<size_t>& field_sizes,
-						 size_t block_size,
-						 const ProfilingRequestSet& reqs);
 
   template <int N, typename T>
   inline RegionInstance ZIndexSpace<N,T>::create_instance(Memory memory,
@@ -459,6 +475,80 @@ namespace Realm {
       x += p[i] * strides[i];
     assert(x >= offset);
     return x - offset;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AffineAccessor<FT,N,T>
+
+  // NOTE: these constructors will die horribly if the conversion is not
+  //  allowed - call is_compatible(...) first if you're not sure
+
+  // implicitly tries to cover the entire instance's domain
+  template <typename FT, int N, typename T>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset)
+  {
+    //const LinearizedIndexSpace<N,T>& lis = inst.get_lis().as_dim<N,T>();
+    //const AffineLinearizedIndexSpace<N,T>& alis = dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(lis);
+    const AffineLinearizedIndexSpace<N,T>& alis = dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(inst.get_lis());
+
+    ptrdiff_t element_stride;
+    inst.get_strided_access_parameters(0, alis.volume, field_offset, sizeof(FT), base, element_stride);
+
+    base += element_stride * alis.offset;
+    strides = element_stride * alis.strides;
+  }
+
+  template <typename FT, int N, typename T>
+  inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
+  {}
+#if 0
+    // limits domain to a subrectangle
+  template <typename FT, int N, typename T>
+    AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+  template <typename FT, int N, typename T>
+    AffineAccessor<FT,N,T>::~AffineAccessor(void);
+
+  template <typename FT, int N, typename T>
+    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset);
+  template <typename FT, int N, typename T>
+    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+#endif
+
+  template <typename FT, int N, typename T>
+  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p)
+  {
+    intptr_t rawptr = base;
+    for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
+    return reinterpret_cast<FT *>(rawptr);
+  }
+
+  template <typename FT, int N, typename T>
+  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p)
+  {
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval)
+  {
+    *(ptr(p)) = newval;
+  }
+
+
+
+  template <int N, typename T>
+  const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
+  {
+    return get_lis().as_dim<N,T>().indexspace;
+  }
+		
+  template <int N>
+  const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
+  {
+    return get_lis().as_dim<N,int>().indexspace;
   }
 
 }; // namespace Realm

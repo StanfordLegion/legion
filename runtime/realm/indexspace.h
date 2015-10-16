@@ -30,6 +30,13 @@
 #include "arrays.h"
 #include "sparsity.h"
 
+// we need intptr_t - make it if needed
+#if __cplusplus >= 201103L
+#include <cstdint>
+#else
+typedef ptrdiff_t intptr_t;
+#endif
+
 namespace Realm {
 
   class ProfilingRequestSet;
@@ -1212,6 +1219,41 @@ namespace Realm {
 				 std::vector<ZIndexSpace<N,T> >& subspaces,
 				 const ProfilingRequestSet &reqs,
 				 Event wait_on = Event::NO_EVENT) const;
+
+    // field-based:
+    template <typename FT>
+    struct FieldDataDescriptor {
+      ZIndexSpace<N,T> index_space;
+      RegionInstance inst;
+      size_t field_offset;
+    };
+
+    template <typename FT>
+    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<FT> >& field_data,
+				    std::map<FT, ZIndexSpace<N,T> >& subspaces,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
+    // computes subspaces of this index space by determining what subsets are reachable from
+    //  subsets of some other index space - the field data points from the other index space to
+    //  ours - i.e. upon return (and waiting for the finish event), the following invariant holds
+    //  for each pair in the map:
+    //    (it->first) ==> field_data = (it->second)
+    template <int N2, typename T2>
+    Event create_subspaces_by_image(const std::vector<ZIndexSpace<N2,T2>::FieldDataDescriptor<ZPoint<N,T> >& field_data,
+				    std::map<ZIndexSpace<N2,T2>, ZIndexSpace<N,T> >& subspaces,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
+    // preimage works in the reverse order - we define subspaces of this index space by in terms
+    //  of the points in this index space that can reach the specified subspaces of some other space,
+    //  so the invariant in this case is:
+    //    (it->second) ==> field_data = (it->first)
+    template <int N2, typename T2>
+    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZPoint<N2,T2> >& field_data,
+				       std::map<ZIndexSpace<N2,T2>, ZIndexSpace<N,T> >& subspaces,
+				       const ProfilingRequestSet &reqs,
+				       Event wait_on = Event::NO_EVENT) const;
   };
 
   template <int N, typename T>
@@ -1296,6 +1338,33 @@ namespace Realm {
 
     // steps to the next subrect, returning true if a next subrect exists
     bool step(void);
+  };
+
+  // an instance accessor based on an affine linearization of an index space
+  template <typename FT, int N, typename T = int>
+  class AffineAccessor {
+  public:
+    // NOTE: these constructors will die horribly if the conversion is not
+    //  allowed - call is_compatible(...) first if you're not sure
+
+    // implicitly tries to cover the entire instance's domain
+    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset);
+
+    // limits domain to a subrectangle
+    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    ~AffineAccessor(void);
+
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    FT *ptr(const ZPoint<N,T>& p);
+    FT read(const ZPoint<N,T>& p);
+    void write(const ZPoint<N,T>& p, FT newval);
+
+  protected:
+    intptr_t base;
+    ZPoint<N,T> strides;
   };
 
 }; // namespace Realm

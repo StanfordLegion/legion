@@ -28,8 +28,10 @@ void sigalrm_handler(int sig)
 static int num_nodes = 100;
 static int num_edges = 10;
 static int num_pieces = 2;
-//static int random_seed = 12345;
-//static bool random_colors = false;
+static int pct_wire_in_piece = 50;
+static int random_seed = 12345;
+static bool random_colors = false;
+static bool show_graph = true;
 
 struct InitDataArgs {
   int index;
@@ -37,6 +39,14 @@ struct InitDataArgs {
 };
 
 Logger log_app("app");
+
+static ZPoint<1> random_node(const ZIndexSpace<1>& is_nodes, unsigned short *rngstate, bool in_piece)
+{
+  if(in_piece)
+    return (is_nodes.bounds.lo + (nrand48(rngstate) % (is_nodes.bounds.hi.x - is_nodes.bounds.lo.x + 1)));
+  else
+    return (nrand48(rngstate) % num_nodes);
+}
 
 void init_data_task(const void *args, size_t arglen, Processor p)
 {
@@ -49,6 +59,56 @@ void init_data_task(const void *args, size_t arglen, Processor p)
 
   log_app.print() << "N: " << is_nodes;
   log_app.print() << "E: " << is_edges;
+
+  unsigned short rngstate[3];
+  rngstate[0] = random_seed;
+  rngstate[1] = is_nodes.bounds.lo;
+  rngstate[2] = 0;
+  for(int i = 0; i < 20; i++) nrand48(rngstate);
+
+  {
+    AffineAccessor<int,1> a_subckt_id(i_args.ri_nodes, 0 /* offset */);
+
+    for(int i = is_nodes.bounds.lo; i <= is_nodes.bounds.hi; i++) {
+      int color;
+      if(random_colors)
+	color = nrand48(rngstate) % num_pieces;
+      else
+	color = i_args.index;
+      a_subckt_id.write(i, color);
+    }
+  }
+
+  {
+    AffineAccessor<ZPoint<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(ZPoint<1>) /* offset */);
+    AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
+
+    for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++) {
+      int in_node = random_node(is_nodes, rngstate,
+				!random_colors);
+      int out_node = random_node(is_nodes, rngstate,
+				 !random_colors && ((nrand48(rngstate) % 100) < pct_wire_in_piece));
+      a_in_node.write(i, in_node);
+      a_out_node.write(i, out_node);
+    }
+  }
+
+  if(show_graph) {
+    AffineAccessor<int,1> a_subckt_id(i_args.ri_nodes, 0 /* offset */);
+
+    for(int i = is_nodes.bounds.lo; i <= is_nodes.bounds.hi; i++)
+      std::cout << "subckt_id[" << i << "] = " << a_subckt_id.read(i) << std::endl;
+
+    AffineAccessor<ZPoint<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(ZPoint<1>) /* offset */);
+
+    for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++)
+      std::cout << "in_node[" << i << "] = " << a_in_node.read(i) << std::endl;
+
+    AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
+
+    for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++)
+      std::cout << "out_node[" << i << "] = " << a_out_node.read(i) << std::endl;
+  }
 }
 
 void top_level_task(const void *args, size_t arglen, Processor p)
@@ -111,8 +171,9 @@ void top_level_task(const void *args, size_t arglen, Processor p)
   // create instances for each of these subspaces
   std::vector<size_t> node_fields, edge_fields;
   node_fields.push_back(sizeof(int));  // subckt_id
-  edge_fields.push_back(sizeof(int));  // in_node
-  edge_fields.push_back(sizeof(int));  // out_node
+  assert(sizeof(int) == sizeof(ZPoint<1>));
+  edge_fields.push_back(sizeof(ZPoint<1>));  // in_node
+  edge_fields.push_back(sizeof(ZPoint<1>));  // out_node
 
   std::vector<RegionInstance> ri_nodes, ri_edges;
 
@@ -144,6 +205,45 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     events.insert(e);
   }
   Event::merge_events(events).wait();
+
+  // now actual partitioning work
+
+  std::vector<ZIndexSpace<1>::FieldDataDescriptor<int> > subckt_field_data(num_pieces);
+  for(int i = 0; i < num_pieces; i++) {
+    subckt_field_data[i].index_space = ss_nodes_eq[i];
+    subckt_field_data[i].inst = ri_nodes[i];
+    subckt_field_data[i].field_offset = 0;
+  }
+
+  std::map<int, ZIndexSpace<1> > p_nodes;
+  for(int i = 0; i < num_pieces; i++)
+    p_nodes[i] = ZIndexSpace<1>();
+
+  Event e1 = is_nodes.create_subspaces_by_field(subckt_field_data,
+						p_nodes,
+						Realm::ProfilingRequestSet());
+  e1.wait();
+
+  std::vector<ZIndexSpace<1>::FieldDataDescriptor<ZPoint<1> > > in_node_field_data(num_pieces);
+  std::vector<ZIndexSpace<1>::FieldDataDescriptor<ZPoint<1> > > out_node_field_data(num_pieces);
+  for(int i = 0; i < num_pieces; i++) {
+    in_node_field_data[i].index_space = ss_edges_eq[i];
+    in_node_field_data[i].inst = ri_edges[i];
+    in_node_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      
+    out_node_field_data[i].index_space = ss_edges_eq[i];
+    out_node_field_data[i].inst = ri_edges[i];
+    out_node_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
+  }
+
+  std::map<ZIndexSpace<1>, ZIndexSpace<1> > foo;
+  for(int i = 0; i < num_pieces; i++)
+    foo[p_nodes[i]] = ZIndexSpace<1>();
+
+  Event e2 = is_edges.create_subspaces_by_preimage(in_node_field_data,
+						   foo,
+						   Realm::ProfilingRequestSet());
+  e2.wait();
 
   if(errors > 0) {
     printf("Exiting with errors\n");
