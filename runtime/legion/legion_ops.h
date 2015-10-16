@@ -1310,6 +1310,7 @@ namespace LegionRuntime {
       std::vector<std::set<SingleTask*> > task_sets;
     protected:
       std::deque<DependenceRecord> dependences;
+      std::vector<unsigned> dependence_count;
       std::map<SingleTask*,std::deque<SingleTask*> > mapping_dependences;
     };
 
@@ -1340,7 +1341,9 @@ namespace LegionRuntime {
       bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
                          std::vector<bool> &indiv_triggered,
                          const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
+                         std::vector<bool> &index_triggered,
+                   const std::deque<MustEpochOp::DependenceRecord> &deps,
+                         const std::vector<unsigned> &dep_count);
       void trigger_individual(IndividualTask *task);
       void trigger_index(IndexTask *task);
     public:

@@ -6938,10 +6938,23 @@ namespace LegionRuntime {
       // dependence.  When our sub-operations map, they will trigger these
       // mapping dependences which guarantees that we will not be able to
       // map until all of the sub-operations are ready to map.
+      unsigned prev_count = 0;
+      dependence_count.resize(indiv_tasks.size() + index_tasks.size());
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
         indiv_tasks[idx]->trigger_dependence_analysis();
+        unsigned next_count = dependences.size();
+        dependence_count[idx] = next_count - prev_count;
+        prev_count = next_count;
+      }
+      unsigned offset = indiv_tasks.size();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
         index_tasks[idx]->trigger_dependence_analysis();
+        unsigned next_count = dependences.size();
+        dependence_count[offset+idx] = next_count - prev_count;
+        prev_count = next_count;
+      }
       end_dependence_analysis();
     }
 
@@ -6980,7 +6993,8 @@ namespace LegionRuntime {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
         MustEpochTriggerer triggerer(this);
         if (!triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
-                                     index_tasks, index_triggered))
+                                     index_tasks, index_triggered,
+                                     dependences, dependence_count))
           return false;
 
 #ifdef DEBUG_HIGH_LEVEL
@@ -7417,47 +7431,84 @@ namespace LegionRuntime {
                                 const std::vector<IndividualTask*> &indiv_tasks,
                                 std::vector<bool> &indiv_triggered,
                                 const std::vector<IndexTask*> &index_tasks,
-                                std::vector<bool> &index_triggered)
+                                std::vector<bool> &index_triggered,
+                          const std::deque<MustEpochOp::DependenceRecord> &deps,
+                                const std::vector<unsigned> &dep_counts)
     //--------------------------------------------------------------------------
     {
-      std::deque<IndividualTask*> needed_indiv;
-      std::deque<IndexTask*> needed_index;
       std::set<Event> wait_events;
-      // Count how many triggerers we are attempting
+      unsigned dep_offset = 0; 
+      std::vector<Event> triggered_events(indiv_tasks.size() + 
+                            index_tasks.size(), Event::NO_EVENT);
       for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
+      {
         if (!indiv_triggered[idx])
-          needed_indiv.push_back(indiv_tasks[idx]);
-      for (unsigned idx = 0; idx < index_triggered.size(); idx++)
-        if (!index_triggered[idx])
-          needed_index.push_back(index_tasks[idx]);
-      // Now do the launches
-      if (!needed_indiv.empty())
-      {
-        MustEpochIndivArgs args;
-        args.hlr_id = HLR_MUST_INDIV_ID;
-        args.triggerer = this;
-        for (unsigned idx = 0; idx < needed_indiv.size(); idx++)
         {
-          args.task = needed_indiv[idx];
+          std::set<Event> preconditions;
+          // Figure out the event preconditiions
+          for (unsigned dep_idx = 0; dep_idx < dep_counts[idx]; dep_idx++)
+          {
+            const MustEpochOp::DependenceRecord &record = 
+              deps[dep_offset + dep_idx]; 
+#ifdef DEBUG_HIGH_LEVEL
+            assert(idx == record.op1_idx);
+            assert(record.op1_idx < triggered_events.size());
+#endif
+            Event pre = triggered_events[record.op2_idx]; 
+            if (pre.exists())
+              preconditions.insert(pre);
+          }
+          Event precondition;
+          if (!preconditions.empty())
+            precondition = Event::merge_events(preconditions);
+          else
+            precondition = Event::NO_EVENT;
+          MustEpochIndivArgs args;
+          args.hlr_id = HLR_MUST_INDIV_ID;
+          args.triggerer = this;
+          args.task = indiv_tasks[idx];
           Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                                sizeof(args), HLR_MUST_INDIV_ID, owner);
+                  sizeof(args), HLR_MUST_INDIV_ID, owner, precondition);
           if (wait.exists())
             wait_events.insert(wait);
         }
+        dep_offset += dep_counts[idx];
       }
-      if (!needed_index.empty())
+      const unsigned op_offset = indiv_tasks.size();
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
-        MustEpochIndexArgs args;
-        args.hlr_id = HLR_MUST_INDEX_ID;
-        args.triggerer = this;
-        for (unsigned idx = 0; idx < needed_index.size(); idx++)
+        if (!index_triggered[idx])
         {
-          args.task = needed_index[idx];
+          std::set<Event> preconditions;
+          // Figure out the event preconditiions
+          for (unsigned dep_idx = 0; 
+                dep_idx < dep_counts[op_offset + idx]; dep_idx++)
+          {
+            const MustEpochOp::DependenceRecord &record = 
+              deps[dep_offset + dep_idx]; 
+#ifdef DEBUG_HIGH_LEVEL
+            assert(idx == record.op1_idx);
+            assert(record.op1_idx < triggered_events.size());
+#endif
+            Event pre = triggered_events[record.op2_idx]; 
+            if (pre.exists())
+              preconditions.insert(pre);
+          }
+          Event precondition;
+          if (!preconditions.empty())
+            precondition = Event::merge_events(preconditions);
+          else
+            precondition = Event::NO_EVENT;
+          MustEpochIndexArgs args;
+          args.hlr_id = HLR_MUST_INDEX_ID;
+          args.triggerer = this;
+          args.task = index_tasks[idx];
           Event wait = owner->runtime->issue_runtime_meta_task(&args,
-                                sizeof(args), HLR_MUST_INDEX_ID, owner);
+                sizeof(args), HLR_MUST_INDEX_ID, owner, precondition);
           if (wait.exists())
             wait_events.insert(wait);
         }
+        dep_offset += dep_counts[op_offset + idx];
       }
 
       // Wait for all of the launches to be done
