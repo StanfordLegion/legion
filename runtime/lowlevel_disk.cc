@@ -229,8 +229,7 @@ namespace Realm {
 
     off_t FileMemory::alloc_bytes(size_t size)
     {
-      // cannot alloc bytes in file memory
-      assert(0);
+      // Offset for every instance should be 0!!!
       return 0;
     }
 
