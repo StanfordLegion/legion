@@ -7470,7 +7470,10 @@ namespace LegionRuntime {
           Event wait = owner->runtime->issue_runtime_meta_task(&args, 
                   sizeof(args), HLR_MUST_INDIV_ID, owner, precondition);
           if (wait.exists())
+          {
             wait_events.insert(wait);
+            triggered_events[idx] = wait;
+          }
         }
         dep_offset += dep_counts[idx];
       }
@@ -7506,7 +7509,10 @@ namespace LegionRuntime {
           Event wait = owner->runtime->issue_runtime_meta_task(&args,
                 sizeof(args), HLR_MUST_INDEX_ID, owner, precondition);
           if (wait.exists())
+          {
             wait_events.insert(wait);
+            triggered_events[op_offset + idx] = wait;
+          }
         }
         dep_offset += dep_counts[op_offset + idx];
       }
