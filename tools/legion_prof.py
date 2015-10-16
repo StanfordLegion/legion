@@ -175,6 +175,9 @@ class TimeRange(object):
     def emit_svg_range(self, printer):
         self.emit_svg(printer, 0)
 
+    def emit_tsv_range(self, tsv_file, base_level, max_levels):
+        self.emit_tsv(tsv_file, base_level, max_levels, 0)
+
     def __repr__(self):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
             self.start_time,
@@ -191,6 +194,10 @@ class BaseRange(TimeRange):
         printer.emit_time_line(level, self.start_time, self.stop_time, title)
         for subrange in self.subranges:
             subrange.emit_svg(printer, level + 1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
     def update_task_stats(self, stat):
         for r in self.subranges:
@@ -230,6 +237,18 @@ class TaskRange(TimeRange):
                                   self.start_time, self.stop_time, title)
         for subrange in self.subranges:
             subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.task)
+        if self.task.is_meta:
+            title += (' '+self.task.get_initiation())
+        title += (' '+self.task.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.task.variant.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
     def update_task_stats(self, stat):
         exec_time = self.total_time()
@@ -297,6 +316,12 @@ class Processor(object):
             # First figure out the max number of levels + 1 for padding
             printer.init_chunk(max_levels+1)
             self.full_range.emit_svg_range(printer)
+
+    def emit_tsv(self, tsv_file, base_level):
+        max_levels = self.full_range.max_levels()
+        if max_levels > 1:
+            self.full_range.emit_tsv_range(tsv_file, base_level, max_levels)
+        return base_level + max_levels
 
     def print_stats(self):
         total_time = self.full_range.total_time()
@@ -376,6 +401,21 @@ class Memory(object):
                 inst_name = repr(instance)
                 printer.emit_timing_range(instance.get_color(), instance.level,
                                           instance.create, instance.destroy, inst_name)
+
+    def emit_tsv(self, tsv_file, base_level):
+        max_levels = self.max_live_instances + 1
+        if max_levels > 1:
+            for instance in self.instances:
+                assert instance.level is not None
+                assert instance.create is not None
+                assert instance.destroy is not None
+                inst_name = repr(instance)
+                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                        (base_level + (max_levels - instance.level),
+                         instance.create, instance.destroy,
+                         instance.get_color(), inst_name))
+        return base_level + max_levels
+
 
     def print_stats(self):
         # Compute total and average utilization of memory
@@ -458,6 +498,20 @@ class Channel(object):
                 copy_name = repr(copy)
                 printer.emit_timing_range(copy.get_color(), copy.level,
                                           copy.start, copy.stop, copy_name)
+
+    def emit_tsv(self, tsv_file, base_level):
+        max_levels = self.max_live_copies + 1
+        if max_levels > 1:
+            for copy in self.copies:
+                assert copy.level is not None
+                assert copy.start is not None
+                assert copy.stop is not None
+                copy_name = repr(copy)
+                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                        (base_level + (max_levels - copy.level),
+                         copy.start, copy.stop,
+                         copy.get_color(), copy_name))
+        return base_level + max_levels
 
     def print_stats(self):
         assert self.last_time is not None 
@@ -995,7 +1049,7 @@ class State(object):
         meta.create = create
         assert create <= ready
         meta.ready = ready
-        assert ready <= start
+        #assert ready <= start
         meta.start = start
         assert start <= stop
         meta.stop = stop
@@ -1211,14 +1265,10 @@ class State(object):
             self.print_channel_stats()
         self.print_task_stats()
 
-    def emit_visualization(self, output_prefix, show_procs,
-                           show_channels, show_instances):
-        svg_file = output_prefix + '.svg'
-        html_file = output_prefix + '.html'
-        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
+    def assign_colors(self):
         # Subtract out some colors for which we have special colors
         num_colors = len(self.variants)+len(self.meta_variants)+len(self.op_kinds)
-       # Use a LFSR to randomize these colors
+        # Use a LFSR to randomize these colors
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
         op_colors = {}
@@ -1244,6 +1294,13 @@ class State(object):
         # Now we need to assign all the operations colors
         for op in self.operations.itervalues():
             op.assign_color(op_colors)
+
+    def emit_visualization(self, output_prefix, show_procs,
+                           show_channels, show_instances):
+        self.assign_colors()
+        svg_file = output_prefix + '.svg'
+        html_file = output_prefix + '.html'
+        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
         # Make a printer and emit the files
         printer = SVGPrinter(svg_file, html_file)
         if show_procs:
@@ -1295,6 +1352,64 @@ class State(object):
                                     repr(tsv_file_name)))
         html_file.close()
 
+    def emit_interactive_visualization(self, output_prefix, show_procs,
+                                       show_channels, show_instances):
+        self.assign_colors()
+        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof.html.template")
+        data_tsv_file_name = output_prefix + "_data.tsv"
+        processor_tsv_file_name = output_prefix + "_processor.tsv"
+        html_file_name = output_prefix + "_interactive.html"
+        print 'Generating interactive visualization files %s, %s, and %s' % \
+                (data_tsv_file_name,processor_tsv_file_name,html_file_name)
+
+        template_file = open(template_file_name, "r")
+        template = template_file.read()
+        template_file.close()
+
+        processor_levels = {}
+        channel_levels = {}
+        memory_levels = {}
+        base_level = 0
+        last_time = 0
+        data_tsv_file = open(data_tsv_file_name, "w")
+        data_tsv_file.write("level\tstart\tend\tcolor\ttitle\n")
+        if show_procs:
+            for p,proc in sorted(self.processors.iteritems()):
+                base_level = proc.emit_tsv(data_tsv_file, base_level)
+                processor_levels[proc] = base_level
+                last_time = max(last_time, proc.full_range.stop_time)
+        if show_channels:
+            for c,channel in sorted(self.channels.iteritems()):
+                base_level = channel.emit_tsv(data_tsv_file, base_level)
+                channel_levels[channel] = base_level
+                last_time = max(last_time, channel.last_time)
+        if show_instances:
+            for m,memory in sorted(self.memories.iteritems()):
+                base_level = memory.emit_tsv(data_tsv_file, base_level)
+                memory_levels[memory] = base_level
+                last_time = max(last_time, memory.last_time)
+        data_tsv_file.close()
+
+        processor_tsv_file = open(processor_tsv_file_name, "w")
+        processor_tsv_file.write("level\tprocessor\n")
+        if show_procs:
+            for proc,level in processor_levels.iteritems():
+                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(proc)))
+        if show_channels:
+            for channel,level in channel_levels.iteritems():
+                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(channel)))
+        if show_instances:
+            for memory,level in memory_levels.iteritems():
+                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
+        processor_tsv_file.close()
+
+        html_file = open(html_file_name, "w")
+        html_file.write(template % (last_time, base_level + 1,
+                                    repr(data_tsv_file_name),
+                                    repr(processor_tsv_file_name)))
+        html_file.close()
+
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
     print '  -p : include processors in visualization'
@@ -1307,7 +1422,7 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sC')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:sCT')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -1323,6 +1438,7 @@ def main():
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
+    interactive_timeline = False
     if '-p' in opts:
         show_procs = True
         show_all = False
@@ -1344,6 +1460,8 @@ def main():
         copy_output_prefix = output_prefix + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
+    if '-T' in opts:
+        interactive_timeline = True
     if show_all:
         show_procs = True
         show_channels = True
@@ -1367,11 +1485,15 @@ def main():
     if print_stats:
         state.print_stats(verbose) 
 
-    state.emit_visualization(output_prefix, show_procs, 
-                             show_channels, show_instances) 
+    if not interactive_timeline:
+        state.emit_visualization(output_prefix, show_procs, 
+                                 show_channels, show_instances) 
 
     if show_copy_matrix:
         state.show_copy_matrix(copy_output_prefix)
+    if interactive_timeline:
+        state.emit_interactive_visualization(output_prefix, show_procs,
+                             show_channels, show_instances)
 
 if __name__ == '__main__':
     main()
