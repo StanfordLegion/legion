@@ -45,11 +45,6 @@ namespace LegionRuntime{
     class XferDes;
     class Channel;
 
-    struct OffsetsAndSize {
-      off_t src_offset, dst_offset;
-      int size;
-    };
-
     class Buffer {
     public:
       enum MemoryKind {

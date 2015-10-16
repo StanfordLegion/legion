@@ -48,7 +48,6 @@ namespace LegionRuntime {
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
 
-      static inline int min(int a, int b) { return (a < b) ? a : b; }
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 

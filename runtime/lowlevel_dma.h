@@ -67,7 +67,7 @@ namespace LegionRuntime {
     int priority;
 
     // <NEWDMA>
-	pthread_mutex_t request_lock;
+    pthread_mutex_t request_lock;
     std::vector<XferDesID> path;
     std::set<XferDesID> complete_xd;
 
@@ -167,52 +167,6 @@ namespace LegionRuntime {
 
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 			  size_t size, off_t& field_start, int& field_size);
-
-    class DmaRequestQueue;
-
-    class DmaRequest : public Realm::Operation {
-    public:
-      DmaRequest(int _priority, Event _after_copy);
-
-      DmaRequest(int _priority, Event _after_copy,
-                 const Realm::ProfilingRequestSet &reqs);
-
-      virtual ~DmaRequest(void);
-
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
-
-      virtual bool handler_safe(void) = 0;
-
-      virtual void perform_dma(void) = 0;
-
-      enum State {
-	STATE_INIT,
-	STATE_METADATA_FETCH,
-	STATE_BEFORE_EVENT,
-	STATE_INST_LOCK,
-	STATE_READY,
-	STATE_QUEUED,
-	STATE_DONE
-      };
-
-      State state;
-      int priority;
-
-      class Waiter : public EventWaiter {
-      public:
-        Waiter(void);
-        virtual ~Waiter(void);
-      public:
-	Reservation current_lock;
-	DmaRequestQueue *queue;
-	DmaRequest *req;
-
-	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
-
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
-      };
-    };
 
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;
