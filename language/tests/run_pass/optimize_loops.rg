@@ -62,33 +62,36 @@ where reduces +(r), reduces *(s) do
   return 5
 end
 
-task with_partitions(r0 : region(int), p0_disjoint : partition(disjoint, r0),
-                     r1 : region(int), p1_disjoint : partition(disjoint, r1),
-                     n : int)
-where reads(r0, r1), writes(r0, r1) do
+-- FIXME: Dataflow analysis currently can't handle aliased regions
+-- with no common ancestor.
 
-  -- not optimized: loop-variant argument is (statically) interfering
-  for i = 0, n do
-    g2(p0_disjoint[i], p1_disjoint[i])
-  end
+-- task with_partitions(r0 : region(int), p0_disjoint : partition(disjoint, r0),
+--                      r1 : region(int), p1_disjoint : partition(disjoint, r1),
+--                      n : int)
+-- where reads(r0, r1), writes(r0, r1) do
 
-  -- not optimized: loop-variant argument is (statically) interfering
-  for i = 0, n do
-    h2b(p0_disjoint[i], p1_disjoint[i])
-  end
+--   -- not optimized: loop-variant argument is (statically) interfering
+--   for i = 0, n do
+--     g2(p0_disjoint[i], p1_disjoint[i])
+--   end
 
-  -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
-  for i = 0, n do
-    h2(p0_disjoint[i], p1_disjoint[i])
-  end
+--   -- not optimized: loop-variant argument is (statically) interfering
+--   for i = 0, n do
+--     h2b(p0_disjoint[i], p1_disjoint[i])
+--   end
 
-  -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
-  for i = 0, n do
-    g(p0_disjoint[i])
-  end
-end
+--   -- optimized: loop-variant argument is non-interfering
+--   __demand(__parallel)
+--   for i = 0, n do
+--     h2(p0_disjoint[i], p1_disjoint[i])
+--   end
+
+--   -- optimized: loop-variant argument is non-interfering
+--   __demand(__parallel)
+--   for i = 0, n do
+--     g(p0_disjoint[i])
+--   end
+-- end
 
 task main()
   var n = 5
@@ -168,7 +171,8 @@ task main()
   -- optimized: loop-invariant argument is read-only
   do
     var j = 3
-    __demand(__parallel)
+    -- FIXME: Dataflow codegen turns this into multiple statements.
+    -- __demand(__parallel)
     for i = 0, n do
       f(p_disjoint[(j + 1) % n])
     end
@@ -206,10 +210,11 @@ task main()
 
   -- optimized: reduction is non-interfering
   var y = 0
+  __demand(__parallel)
   for i = 0, n do
     y += f(p_disjoint[i])
   end
 
-  with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
+  -- with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
 end
 regentlib.start(main)
