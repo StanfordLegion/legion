@@ -1126,7 +1126,19 @@ function parser.stat_top(p)
         if not terralib.cudacompile then
           p:error("CUDA tasks are demanded, but CUDA is not enabled")
         end
-        task_opts.cuda = true
+        task_opts.cuda = { unrolling_factor = 1 }
+      elseif p:matches("__unroll") then
+        if not task_opts.cuda then
+          p:error("unexpected unrolling factor for CPU task")
+        end
+        p:expect("__unroll")
+        p:expect("(")
+        local token = p:next(p.number)
+        p:expect(")")
+        if token.value ~= math.floor(token.value) then
+          p:error("unrolling factor should be an integer")
+        end
+        task_opts.cuda.unrolling_factor = token.value
       end
     until not p:nextif(",")
     p:expect(")")
