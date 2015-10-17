@@ -138,7 +138,7 @@ namespace LegionRuntime {
 
     extern void start_dma_system(int count, int max_nr
 #ifdef USE_CUDA
-                                 ,std::vector<GPUProcessor*> &local_gpus
+                                 //,std::vector<Realm::Cuda::GPU*> &local_gpus
 #endif
                                  ,Realm::CoreReservationSet& crs);
 

@@ -1568,7 +1568,7 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
     
 #ifdef USE_CUDA
-      GPUChannel::GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind)
+      GPUChannel::GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
         src_gpu = _src_gpu;
         kind = _kind;
@@ -1926,7 +1926,7 @@ namespace LegionRuntime {
 
       void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
 #ifdef USE_CUDA
-                                ,std::vector<GPUProcessor*> &local_gpus
+                                ,std::vector<GPU*> &local_gpus
 #endif
                                )
       {
@@ -1941,7 +1941,7 @@ namespace LegionRuntime {
 
       void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager
 #ifdef USE_CUDA
-                                      ,std::vector<GPUProcessor*> &local_gpus
+                                      ,std::vector<GPU*> &local_gpus
 #endif
     ) {
         log_new_dma.info("XferDesQueue: start_workers");
@@ -1963,7 +1963,7 @@ namespace LegionRuntime {
         async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
-        std::vector<GPUProcessor*>::iterator it;
+        std::vector<GPU*>::iterator it;
         for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
           async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
           async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));

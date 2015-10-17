@@ -777,7 +777,7 @@ namespace Realm {
       // since we need list of local gpus to create channels
       LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
 #ifdef USE_CUDA
-                       ,local_gpus
+                       //,local_gpus
 #endif
                        ,core_reservations);
 

@@ -36,7 +36,7 @@
 #include "lowlevel_dma.h"
 
 #ifdef USE_CUDA
-#include "lowlevel_gpu.h"
+#include "realm/cuda/cuda_module.h"
 #endif
 
 
@@ -44,6 +44,8 @@ namespace LegionRuntime{
   namespace LowLevel{
     class XferDes;
     class Channel;
+
+    typedef Realm::Cuda::GPU GPU;
 
     class Buffer {
     public:
@@ -238,7 +240,7 @@ namespace LegionRuntime{
     public:
       off_t src_offset, dst_offset;
       size_t nbytes;
-      GPUProcessor* dst_gpu;
+      GPU* dst_gpu;
       Event complete_event;
     };
 
@@ -780,7 +782,7 @@ namespace LegionRuntime{
       int offset_idx;
       char *src_buf_base;
       char *dst_buf_base;
-      GPUProcessor *dst_gpu, *src_gpu;
+      GPU *dst_gpu, *src_gpu;
     };
 #endif
 
@@ -915,13 +917,13 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
-      GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind);
+      GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
       ~GPUChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
     private:
-      GPUProcessor* src_gpu;
+      GPU* src_gpu;
       long capacity;
       std::deque<Request*> pending_copies;
     };
@@ -971,7 +973,7 @@ namespace LegionRuntime{
           delete disk_write_channel;
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
-        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        std::map<GPU*, GPUChannel*>::iterator it;
         for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
           delete it->second;
         }
@@ -1019,19 +1021,19 @@ namespace LegionRuntime{
       }
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+      GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
         return gpu_to_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_from_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+      GPUChannel* create_gpu_from_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_FROM_FB);
         return gpu_from_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_in_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+      GPUChannel* create_gpu_in_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_IN_FB);
         return gpu_in_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_peer_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+      GPUChannel* create_gpu_peer_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
         return gpu_in_fb_channels[src_gpu];
       }
@@ -1069,26 +1071,26 @@ namespace LegionRuntime{
       }
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
-      GPUChannel* get_gpu_to_fb_channel(GPUProcessor* gpu) {
-        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
+        std::map<GPU*, GPUChannel*>::iterator it;
         it = gpu_to_fb_channels.find(gpu);
         assert(it != gpu_to_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_from_fb_channel(GPUProcessor* gpu) {
-        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_from_fb_channel(GPU* gpu) {
+        std::map<GPU*, GPUChannel*>::iterator it;
         it = gpu_from_fb_channels.find(gpu);
         assert(it != gpu_from_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_in_fb_channel(GPUProcessor* gpu) {
-        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_in_fb_channel(GPU* gpu) {
+        std::map<GPU*, GPUChannel*>::iterator it;
         it = gpu_in_fb_channels.find(gpu);
         assert(it != gpu_in_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_peer_fb_channel(GPUProcessor* gpu) {
-        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_peer_fb_channel(GPU* gpu) {
+        std::map<GPU*, GPUChannel*>::iterator it;
         it = gpu_peer_fb_channels.find(gpu);
         assert(it != gpu_peer_fb_channels.end());
         return (it->second);
@@ -1110,7 +1112,7 @@ namespace LegionRuntime{
       DiskChannel *disk_read_channel, *disk_write_channel;
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
-      std::map<GPUProcessor*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
+      std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
 #ifdef USE_HDF
       HDFChannel *hdf_read_channel, *hdf_write_channel;
@@ -1567,7 +1569,7 @@ namespace LegionRuntime{
 
       void start_worker(int count, int max_nr, ChannelManager* channel_manager
 #ifdef USE_CUDA
-                                ,std::vector<GPUProcessor*> &local_gpus
+                                ,std::vector<GPU*> &local_gpus
 #endif
                        );
 
@@ -1589,7 +1591,7 @@ namespace LegionRuntime{
     XferDesQueue* get_xdq_singleton();
     void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
 #ifdef USE_CUDA
-                              ,std::vector<GPUProcessor*> &local_gpus
+                              ,std::vector<GPU*> &local_gpus
 #endif
                              );
     void stop_channel_manager();
