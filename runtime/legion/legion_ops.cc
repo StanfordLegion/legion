@@ -9615,7 +9615,7 @@ namespace LegionRuntime {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!requirement.premapped);
+        assert(requirement.premapped);
 #endif
       }
       Event detach_event = 
