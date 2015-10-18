@@ -332,19 +332,131 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename FT>
-  inline Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<FT> >& field_data,
-							       std::map<FT, ZIndexSpace<N,T> >& subspaces,
-							       const ProfilingRequestSet &reqs,
-							       Event wait_on /*= Event::NO_EVENT*/) const
+  inline Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+							   const std::vector<FT>& colors,
+							   std::vector<ZIndexSpace<N,T> >& subspaces,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/) const
   {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
     // just give copies of ourselves for now
-    for(typename std::map<FT, ZIndexSpace<N,T> >::iterator it = subspaces.begin();
-	it != subspaces.end();
-	it++)
-      it->second = *this;
+    size_t n = colors.size();
+    subspaces.resize(n);
+    for(size_t i = 0; i < n; i++)
+      subspaces[i] = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+							   const std::vector<ZIndexSpace<N2,T2> >& sources,
+							   std::vector<ZIndexSpace<N,T> >& images,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    size_t n = sources.size();
+    images.resize(n);
+    for(size_t i = 0; i < n; i++)
+      images[i] = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  Event ZIndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
+						       const std::vector<ZIndexSpace<N2,T2> >& targets,
+						       std::vector<ZIndexSpace<N,T> >& preimages,
+						       const ProfilingRequestSet &reqs,
+						       Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    size_t n = targets.size();
+    preimages.resize(n);
+    for(size_t i = 0; i < n; i++)
+      preimages[i] = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_difference(const ZIndexSpace<N,T>& lhs,
+							const ZIndexSpace<N,T>& rhs,
+							ZIndexSpace<N,T>& result,
+							const ProfilingRequestSet &reqs,
+							Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copy of lhs for now
+    result = lhs;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
+							 const std::vector<ZIndexSpace<N,T> >& rhss,
+							 std::vector<ZIndexSpace<N,T> >& results,
+							 const ProfilingRequestSet &reqs,
+							 Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of lhss for now
+    assert(lhss.size() == rhss.size());
+    size_t n = lhss.size();
+    results.resize(n);
+    for(size_t i = 0; i < n; i++)
+      results[i] = lhss[i];
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
+							   const ZIndexSpace<N,T>& rhs,
+							   std::vector<ZIndexSpace<N,T> >& results,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of lhss for now
+    size_t n = lhss.size();
+    results.resize(n);
+    for(size_t i = 0; i < n; i++)
+      results[i] = lhss[i];
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
+						   ZIndexSpace<N,T>& result,
+						   const ProfilingRequestSet &reqs,
+						   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    assert(!subspaces.empty());
+    // WRONG
+    result = subspaces[0];
 
     return Event::NO_EVENT;
   }

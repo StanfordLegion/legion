@@ -1175,6 +1175,17 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
 
+  // a FieldDataDescriptor is used to describe field data provided for partitioning
+  //  operations - it is templated on the dimensionality (N) and base type (T) of the
+  //  index space that defines the domain over which the data is defined, and the
+  //  type of the data contained in the field (FT)
+  template <typename IS, typename FT>
+  struct FieldDataDescriptor {
+    IS index_space;
+    RegionInstance inst;
+    size_t field_offset;
+  };
+
   // an IndexSpace is a POD type that contains a bounding rectangle and an optional SparsityMap - the
   //  contents of the IndexSpace are the intersection of the bounding rectangle's volume and the
   //  optional SparsityMap's contents
@@ -1221,16 +1232,11 @@ namespace Realm {
 				 Event wait_on = Event::NO_EVENT) const;
 
     // field-based:
-    template <typename FT>
-    struct FieldDataDescriptor {
-      ZIndexSpace<N,T> index_space;
-      RegionInstance inst;
-      size_t field_offset;
-    };
 
     template <typename FT>
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<FT> >& field_data,
-				    std::map<FT, ZIndexSpace<N,T> >& subspaces,
+    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+				    const std::vector<FT>& colors,
+				    std::vector<ZIndexSpace<N,T> >& subspaces,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
@@ -1240,20 +1246,113 @@ namespace Realm {
     //  for each pair in the map:
     //    (it->first) ==> field_data = (it->second)
     template <int N2, typename T2>
-    Event create_subspaces_by_image(const std::vector<ZIndexSpace<N2,T2>::FieldDataDescriptor<ZPoint<N,T> >& field_data,
-				    std::map<ZIndexSpace<N2,T2>, ZIndexSpace<N,T> >& subspaces,
+    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+				    const std::vector<ZIndexSpace<N2,T2> >& sources,
+				    std::vector<ZIndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
-    // preimage works in the reverse order - we define subspaces of this index space by in terms
-    //  of the points in this index space that can reach the specified subspaces of some other space,
-    //  so the invariant in this case is:
-    //    (it->second) ==> field_data = (it->first)
     template <int N2, typename T2>
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZPoint<N2,T2> >& field_data,
-				       std::map<ZIndexSpace<N2,T2>, ZIndexSpace<N,T> >& subspaces,
+    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+				                         ZPoint<N2,T2> > >& field_data,
+				       const std::vector<ZIndexSpace<N2,T2> >& targets,
+				       std::vector<ZIndexSpace<N,T> >& preimages,
 				       const ProfilingRequestSet &reqs,
 				       Event wait_on = Event::NO_EVENT) const;
+
+    // set operations
+
+    // three basic operations (union, intersection, difference) are provided in 4 forms:
+    //  IS op IS     -> result
+    //  IS[] op IS[] -> result[] (zip over two inputs, which must be same length)
+    //  IS op IS[]   -> result[] (first input applied to each element of second array)
+    //  IS[] op IS   -> result[] (each element of first array applied to second input)
+
+    static Event compute_union(const ZIndexSpace<N,T>& lhs,
+				    const ZIndexSpace<N,T>& rhs,
+				    ZIndexSpace<N,T>& result,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT);
+
+    static Event compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_unions(const ZIndexSpace<N,T>& lhs,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const ZIndexSpace<N,T>& rhs,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_intersection(const ZIndexSpace<N,T>& lhs,
+				    const ZIndexSpace<N,T>& rhs,
+				    ZIndexSpace<N,T>& result,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT);
+
+    static Event compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_intersections(const ZIndexSpace<N,T>& lhs,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const ZIndexSpace<N,T>& rhs,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_difference(const ZIndexSpace<N,T>& lhs,
+				    const ZIndexSpace<N,T>& rhs,
+				    ZIndexSpace<N,T>& result,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT);
+
+    static Event compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_differences(const ZIndexSpace<N,T>& lhs,
+				     const std::vector<ZIndexSpace<N,T> >& rhss,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    static Event compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
+				     const ZIndexSpace<N,T>& rhs,
+				     std::vector<ZIndexSpace<N,T> >& results,
+				     const ProfilingRequestSet &reqs,
+				     Event wait_on = Event::NO_EVENT);
+
+    // set reduction operations
+
+    // just union and intersection
+
+    static Event compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
+			       ZIndexSpace<N,T>& result,
+			       const ProfilingRequestSet &reqs,
+			       Event wait_on = Event::NO_EVENT);
+				     
+    static Event compute_intersection(const std::vector<ZIndexSpace<N,T> >& subspaces,
+				      ZIndexSpace<N,T>& result,
+				      const ProfilingRequestSet &reqs,
+				      Event wait_on = Event::NO_EVENT);
   };
 
   template <int N, typename T>

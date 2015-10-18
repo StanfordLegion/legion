@@ -32,6 +32,7 @@ static int pct_wire_in_piece = 50;
 static int random_seed = 12345;
 static bool random_colors = false;
 static bool show_graph = true;
+static bool wait_on_events = false;
 
 struct InitDataArgs {
   int index;
@@ -175,22 +176,39 @@ void top_level_task(const void *args, size_t arglen, Processor p)
   edge_fields.push_back(sizeof(ZPoint<1>));  // in_node
   edge_fields.push_back(sizeof(ZPoint<1>));  // out_node
 
-  std::vector<RegionInstance> ri_nodes, ri_edges;
+  std::vector<RegionInstance> ri_nodes(num_pieces);
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > subckt_field_data(num_pieces);
 
   for(size_t i = 0; i < ss_nodes_eq.size(); i++) {
     RegionInstance ri = ss_nodes_eq[i].create_instance(sysmems[i % sysmems.size()],
 						       node_fields,
 						       1,
 						       Realm::ProfilingRequestSet());
-    ri_nodes.push_back(ri);
+    ri_nodes[i] = ri;
+
+    subckt_field_data[i].index_space = ss_nodes_eq[i];
+    subckt_field_data[i].inst = ri_nodes[i];
+    subckt_field_data[i].field_offset = 0;
   }
+
+  std::vector<RegionInstance> ri_edges(num_pieces);
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > in_node_field_data(num_pieces);
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > out_node_field_data(num_pieces);
 
   for(size_t i = 0; i < ss_edges_eq.size(); i++) {
     RegionInstance ri = ss_edges_eq[i].create_instance(sysmems[i % sysmems.size()],
 						       edge_fields,
 						       1,
 						       Realm::ProfilingRequestSet());
-    ri_edges.push_back(ri);
+    ri_edges[i] = ri;
+
+    in_node_field_data[i].index_space = ss_edges_eq[i];
+    in_node_field_data[i].inst = ri_edges[i];
+    in_node_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      
+    out_node_field_data[i].index_space = ss_edges_eq[i];
+    out_node_field_data[i].inst = ri_edges[i];
+    out_node_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
   }
 
   // fire off tasks to initialize data
@@ -204,46 +222,92 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     Event e = p.spawn(INIT_DATA_TASK, &args, sizeof(args));
     events.insert(e);
   }
+  // we're going to time the next stuff, so always wait here
   Event::merge_events(events).wait();
 
+  // the outputs of our partitioning will be:
+  //  is_private, is_shared - subsets of is_nodes based on private/shared
+  //  p_pvt, p_shr, p_ghost - subsets of the above split by subckt
+  //  p_edges               - subsets of is_edges for each subckt
+
+  ZIndexSpace<1> is_shared, is_private;
+  std::vector<ZIndexSpace<1> > p_pvt, p_shr, p_ghost;
+  std::vector<ZIndexSpace<1> > p_edges;
+
   // now actual partitioning work
+  {
+    Realm::TimeStamp ts("dependent partitioning work", true, &log_app);
 
-  std::vector<ZIndexSpace<1>::FieldDataDescriptor<int> > subckt_field_data(num_pieces);
-  for(int i = 0; i < num_pieces; i++) {
-    subckt_field_data[i].index_space = ss_nodes_eq[i];
-    subckt_field_data[i].inst = ri_nodes[i];
-    subckt_field_data[i].field_offset = 0;
+    // first partition nodes by subckt id (this is the independent partition,
+    //  but not actually used by the app)
+    std::vector<ZIndexSpace<1> > p_nodes;
+
+    std::vector<int> colors(num_pieces);
+    for(int i = 0; i < num_pieces; i++)
+      colors[i] = i;
+
+    Event e1 = is_nodes.create_subspaces_by_field(subckt_field_data,
+						  colors,
+						  p_nodes,
+						  Realm::ProfilingRequestSet());
+    if(wait_on_events) e1.wait();
+
+    // now compute p_edges based on the color of their in_node (i.e. a preimage)
+    Event e2 = is_edges.create_subspaces_by_preimage(in_node_field_data,
+						     p_nodes,
+						     p_edges,
+						     Realm::ProfilingRequestSet(),
+						     e1);
+    if(wait_on_events) e2.wait();
+
+    // an image of p_edges through out_node gives us all the shared nodes, along
+    //  with some private nodes
+    std::vector<ZIndexSpace<1> > p_extra_nodes;
+
+    Event e3 = is_nodes.create_subspaces_by_image(out_node_field_data,
+						  p_edges,
+						  p_extra_nodes,
+						  Realm::ProfilingRequestSet(),
+						  e2);
+    if(wait_on_events) e3.wait();
+  
+    // subtracting out those private nodes gives us p_ghost
+    Event e4 = ZIndexSpace<1>::compute_differences(p_extra_nodes,
+						   p_nodes,
+						   p_ghost,
+						   Realm::ProfilingRequestSet(),
+						   e3);
+    if(wait_on_events) e4.wait();
+
+    // the union of everybody's ghost nodes is is_shared
+    Event e5 = ZIndexSpace<1>::compute_union(p_ghost, is_shared,
+					     Realm::ProfilingRequestSet(),
+					     e4);
+    if(wait_on_events) e5.wait();
+
+    // and is_private is just the nodes of is_nodes that aren't in is_shared
+    Event e6 = ZIndexSpace<1>::compute_difference(is_nodes, is_shared, is_private,
+						  Realm::ProfilingRequestSet(),
+						  e5);
+    if(wait_on_events) e6.wait();
+
+    // the intersection of the original p_nodes with is_shared gives us p_shr
+    // (note that we can do this in parallel with the computation of is_private)
+    Event e7 = ZIndexSpace<1>::compute_intersections(p_nodes, is_shared, p_shr,
+						     Realm::ProfilingRequestSet(),
+						     e5);
+    if(wait_on_events) e7.wait();
+
+    // and finally, the intersection of p_nodes with is_private gives us p_pvt
+    Event e8 = ZIndexSpace<1>::compute_intersections(p_nodes, is_private, p_pvt,
+						     Realm::ProfilingRequestSet(),
+						     e6);
+    if(wait_on_events) e8.wait();
+
+    // all done - wait on e7 and e8, which dominate every other operation
+    e7.wait();
+    e8.wait();
   }
-
-  std::map<int, ZIndexSpace<1> > p_nodes;
-  for(int i = 0; i < num_pieces; i++)
-    p_nodes[i] = ZIndexSpace<1>();
-
-  Event e1 = is_nodes.create_subspaces_by_field(subckt_field_data,
-						p_nodes,
-						Realm::ProfilingRequestSet());
-  e1.wait();
-
-  std::vector<ZIndexSpace<1>::FieldDataDescriptor<ZPoint<1> > > in_node_field_data(num_pieces);
-  std::vector<ZIndexSpace<1>::FieldDataDescriptor<ZPoint<1> > > out_node_field_data(num_pieces);
-  for(int i = 0; i < num_pieces; i++) {
-    in_node_field_data[i].index_space = ss_edges_eq[i];
-    in_node_field_data[i].inst = ri_edges[i];
-    in_node_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
-      
-    out_node_field_data[i].index_space = ss_edges_eq[i];
-    out_node_field_data[i].inst = ri_edges[i];
-    out_node_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
-  }
-
-  std::map<ZIndexSpace<1>, ZIndexSpace<1> > foo;
-  for(int i = 0; i < num_pieces; i++)
-    foo[p_nodes[i]] = ZIndexSpace<1>();
-
-  Event e2 = is_edges.create_subspaces_by_preimage(in_node_field_data,
-						   foo,
-						   Realm::ProfilingRequestSet());
-  e2.wait();
 
   if(errors > 0) {
     printf("Exiting with errors\n");
