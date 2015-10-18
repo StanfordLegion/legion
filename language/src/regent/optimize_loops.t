@@ -444,7 +444,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     node.values[3]:is(ast.typed.ExprConstant) and
     node.values[3].value == 1)
   then
-    log_fail(node.values[3], "loop optimization failed: stride not equal to 1")
+    log_fail(node, "loop optimization failed: stride not equal to 1")
     return node
   end
 

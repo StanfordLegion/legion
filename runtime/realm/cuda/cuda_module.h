@@ -16,13 +16,19 @@
 #ifndef LOWLEVEL_GPU_H
 #define LOWLEVEL_GPU_H
 
-#include "lowlevel_impl.h"
-#include "cuda.h"
+#include <cuda.h>
+
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
-#include "cuda_runtime.h"
+#include <cuda_runtime.h>
+
+#include "realm/operation.h"
+#include "realm/module.h"
 #include "realm/threads.h"
 #include "realm/circ_queue.h"
+#include "realm/indexspace.h"
+#include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -57,8 +63,77 @@
 } while(0)
 #endif
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
+  namespace Cuda {
+
+    class GPU;
+    class GPUWorker;
+    struct GPUInfo;
+    class GPUZCMemory;
+
+    // our interface to the rest of the runtime
+    class CudaModule : public Module {
+    protected:
+      CudaModule(void);
+      
+    public:
+      virtual ~CudaModule(void);
+
+      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+
+      // do any general initialization - this is called after all configuration is
+      //  complete
+      virtual void initialize(RuntimeImpl *runtime);
+
+      // create any memories provided by this module (default == do nothing)
+      //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
+      virtual void create_memories(RuntimeImpl *runtime);
+
+      // create any processors provided by the module (default == do nothing)
+      //  (each new ProcessorImpl should use a Processor from
+      //   RuntimeImpl::next_local_processor_id)
+      virtual void create_processors(RuntimeImpl *runtime);
+
+      // create any DMA channels provided by the module (default == do nothing)
+      virtual void create_dma_channels(RuntimeImpl *runtime);
+
+      // create any code translators provided by the module (default == do nothing)
+      virtual void create_code_translators(RuntimeImpl *runtime);
+
+      // clean up any common resources created by the module - this will be called
+      //  after all memories/processors/etc. have been shut down and destroyed
+      virtual void cleanup(void);
+
+    public:
+      size_t cfg_zc_mem_size_in_mb, cfg_fb_mem_size_in_mb;
+      unsigned cfg_num_gpus, cfg_gpu_streams;
+      bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
+      bool cfg_fences_use_callbacks;
+      bool cfg_suppress_hijack_warning;
+
+      // "global" variables live here too
+      GPUWorker *shared_worker;
+      std::map<GPU *, GPUWorker *> dedicated_workers;
+      std::vector<GPUInfo *> gpu_info;
+      std::vector<GPU *> gpus;
+      void *zcmem_cpu_base;
+      GPUZCMemory *zcmem;
+    };
+
+    REGISTER_REALM_MODULE(CudaModule);
+
+    struct GPUInfo {
+      int index;  // index used by CUDA runtime
+      CUdevice device;
+
+      static const size_t MAX_NAME_LEN = 64;
+      char name[MAX_NAME_LEN];
+
+      int compute_major, compute_minor;
+      size_t total_mem;
+      CUdevprop props;
+      std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
+    };
 
     enum GPUMemcpyKind {
       GPU_MEMCPY_HOST_TO_DEVICE,
@@ -71,6 +146,8 @@ namespace LegionRuntime {
     class GPUProcessor;
     class GPUWorker;
     class GPUStream;
+    class GPUFBMemory;
+    class GPUZCMemory;
 
     // an interface for receiving completion notification for a GPU operation
     //  (right now, just copies)
@@ -84,12 +161,12 @@ namespace LegionRuntime {
     // An abstract base class for all GPU memcpy operations
     class GPUMemcpy { //: public GPUJob {
     public:
-      GPUMemcpy(GPUProcessor *_gpu, GPUMemcpyKind _kind);
+      GPUMemcpy(GPU *_gpu, GPUMemcpyKind _kind);
       virtual ~GPUMemcpy(void) { }
     public:
       virtual void execute(GPUStream *stream) = 0;
     public:
-      GPUProcessor *const gpu;
+      GPU *const gpu;
     protected:
       GPUMemcpyKind kind;
     };
@@ -108,7 +185,7 @@ namespace LegionRuntime {
 
     class GPUMemcpyFence : public GPUMemcpy {
     public:
-      GPUMemcpyFence(GPUProcessor *_gpu, GPUMemcpyKind _kind,
+      GPUMemcpyFence(GPU *_gpu, GPUMemcpyKind _kind,
 		     GPUWorkFence *_fence);
 
       virtual void execute(GPUStream *stream);
@@ -119,11 +196,11 @@ namespace LegionRuntime {
 
     class GPUMemcpy1D : public GPUMemcpy {
     public:
-      GPUMemcpy1D(GPUProcessor *_gpu,
+      GPUMemcpy1D(GPU *_gpu,
 		  void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
 		  GPUCompletionNotification *_notification);
 
-      GPUMemcpy1D(GPUProcessor *_gpu,
+      GPUMemcpy1D(GPU *_gpu,
 		  void *_dst, const void *_src, 
 		  const ElementMask *_mask, size_t _elmt_size,
 		  GPUMemcpyKind _kind,
@@ -146,7 +223,7 @@ namespace LegionRuntime {
 
     class GPUMemcpy2D : public GPUMemcpy {
     public:
-      GPUMemcpy2D(GPUProcessor *_gpu,
+      GPUMemcpy2D(GPU *_gpu,
                   void *_dst, const void *_src,
                   off_t _dst_stride, off_t _src_stride,
                   size_t _bytes, size_t _lines,
@@ -171,10 +248,10 @@ namespace LegionRuntime {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPUProcessor *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker);
       ~GPUStream(void);
 
-      GPUProcessor *get_gpu(void) const;
+      GPU *get_gpu(void) const;
       CUstream get_stream(void) const;
 
       // may be called by anybody to enqueue a copy or an event
@@ -191,7 +268,7 @@ namespace LegionRuntime {
       void add_event(CUevent event, GPUWorkFence *fence, 
 		     GPUCompletionNotification *notification);
 
-      GPUProcessor *gpu;
+      GPU *gpu;
       GPUWorker *worker;
 
       CUstream stream;
@@ -271,27 +348,34 @@ namespace LegionRuntime {
       std::vector<CUevent> available_events;
     };
 
-    class GPUProcessor : public Realm::LocalTaskProcessor {
-    public:
-      GPUProcessor(Processor _me, Realm::CoreReservationSet& crs,
-		   int _gpu_index, 
-		   size_t _zcmem_size, size_t _fbmem_size, 
-                   size_t _stack_size,
-                   int _streams);
-      virtual ~GPUProcessor(void);
+    struct FatBin;
+    struct RegisteredVariable;
+    struct RegisteredFunction;
 
-    protected:
-      void initialize_cuda_stuff(void);
-      void cleanup_cuda_stuff(void);
-
+    // a GPU object represents our use of a given CUDA-capable GPU - this will
+    //  have an associated CUDA context, a (possibly shared) worker thread, a 
+    //  processor, and an FB memory (the ZC memory is shared across all GPUs)
+    class GPU {
     public:
-      virtual void shutdown(void);
+      GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
+	  int num_streams);
+      ~GPU(void);
 
-      void *get_zcmem_cpu_base(void) const;
-      void *get_fbmem_gpu_base(void) const;
-      size_t get_zcmem_size(void) const;
-      size_t get_fbmem_size(void) const;
-    public:
+      void push_context(void);
+      void pop_context(void);
+
+      void register_fat_binary(const FatBin *data);
+      void register_variable(const RegisteredVariable *var);
+      void register_function(const RegisteredFunction *func);
+
+      CUfunction lookup_function(const void *func);
+      CUdeviceptr lookup_variable(const void *var);
+
+      void create_processor(RuntimeImpl *runtime, size_t stack_size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size);
+
+      void create_dma_channels(Realm::RuntimeImpl *r);
+
       // copy operations are asynchronous - use a fence (of the right type)
       //   after all of your copies, or a completion notification for particular copies
       void copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
@@ -319,11 +403,11 @@ namespace LegionRuntime {
                              size_t bytes, size_t lines,
 			     GPUCompletionNotification *notification = 0);
 
-      void copy_to_peer(GPUProcessor *dst, off_t dst_offset, 
+      void copy_to_peer(GPU *dst, off_t dst_offset, 
                         off_t src_offset, size_t bytes,
 			GPUCompletionNotification *notification = 0);
 
-      void copy_to_peer_2d(GPUProcessor *dst, off_t dst_offset, off_t src_offset,
+      void copy_to_peer_2d(GPU *dst, off_t dst_offset, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
                            size_t bytes, size_t lines,
 			   GPUCompletionNotification *notification = 0);
@@ -343,191 +427,116 @@ namespace LegionRuntime {
       void fence_to_fb(Realm::Operation *op);
       void fence_from_fb(Realm::Operation *op);
       void fence_within_fb(Realm::Operation *op);
-      void fence_to_peer(Realm::Operation *op, GPUProcessor *dst);
-    public:
-      void register_host_memory(void *base, size_t size);
-      void enable_peer_access(GPUProcessor *peer);
-      void handle_peer_access(CUcontext peer_ctx);
-      bool can_access_peer(GPUProcessor *peer) const;
-      void handle_complete_copy(GPUMemcpy *copy);
+      void fence_to_peer(Realm::Operation *op, GPU *dst);
+
+      bool can_access_peer(GPU *peer);
+
+      GPUStream *switch_to_next_task_stream(void);
       GPUStream *get_current_task_stream(void);
-    public:
-      void load_context(void);
-    public:
-    public:
-      void enqueue_copy(GPUMemcpy *copy);
-    public:
-      void issue_copies(const std::deque<GPUMemcpy*> &to_issue);
-      //void finish_copies(const std::deque<GPUMemcpy*> &to_complete);
-    private:
-      static GPUProcessor **node_gpus;
-      static size_t num_node_gpus;
-    protected:
-      const int gpu_index;
-      const size_t zcmem_size, fbmem_size;
-      const size_t zcmem_reserve, fbmem_reserve;
-      GPUWorker *gpu_worker;
-      void *zcmem_cpu_base;
-      void *zcmem_gpu_base;
-      void *fbmem_gpu_base;
-      Realm::CoreReservation *core_rsrv;
-    protected:
 
-      std::set<GPUProcessor*> peer_gpus;
+    protected:
+      CUmodule load_cuda_module(const void *data);
 
     public:
-      // Our CUDA context that we will create
-      CUdevice  proc_dev;
-      CUcontext proc_ctx;
-      // Streams for different copy types
+      CudaModule *module;
+      GPUInfo *info;
+      GPUWorker *worker;
+      GPUProcessor *proc;
+      GPUFBMemory *fbmem;
+
+      CUcontext context;
+      CUdeviceptr fbmem_base;
+
+      // which system memories have been registered and can be used for cuMemcpyAsync
+      std::set<Memory> pinned_sysmems;
+
+      // which other FBs we have peer access to
+      std::set<Memory> peer_fbs;
+
+      // streams for different copy types and a pile for actual tasks
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
       GPUStream *peer_to_peer_stream;
+      std::vector<GPUStream *> task_streams;
+      unsigned current_stream;
 
-      GPUStream *switch_to_next_task_stream(void);
-
-      // we're going to keep a pile of events that we use for notifications
       GPUEventPool event_pool;
 
-      void add_event_to_stream(GPUStream *stream,
-			       GPUWorkFence *fence, 
-			       GPUCompletionNotification *notification);
+      std::map<const FatBin *, CUmodule> device_modules;
+      std::map<const void *, CUfunction> device_functions;
+      std::map<const void *, CUdeviceptr> device_variables;
+    };
 
+    // helper to push/pop a GPU's context by scope
+    class AutoGPUContext {
+    public:
+      AutoGPUContext(GPU& _gpu);
+      AutoGPUContext(GPU *_gpu);
+      ~AutoGPUContext(void);
     protected:
-      size_t current_stream;
-      std::vector<GPUStream *> task_streams;
+      GPU *gpu;
+    };
+
+    class GPUProcessor : public Realm::LocalTaskProcessor {
     public:
-      // Our helper cuda calls
-      void** internal_register_fat_binary(void *fat_bin);
-      void** internal_register_cuda_binary(void *cubin);
-      void internal_unregister_fat_binary(void **fat_bin);
-      void internal_register_var(void **fat_bin, char *host_var, 
-                                 const char *device_name, bool ext, 
-                                 int size, bool constant, bool global);
-      void internal_register_function(void **fat_bin ,const char *host_fun,
-                                      const char *device_fun);
-      char internal_init_module(void **fat_bin);
-      void load_module(CUmodule *module, const void *image);
-      void find_function_handle(const void *func, CUfunction *handle);
+      GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
+                   size_t _stack_size);
+      virtual ~GPUProcessor(void);
+
     public:
-      // Our cuda calls
-      cudaError_t internal_stream_synchronize(void);  
-      cudaError_t internal_configure_call(dim3 gird_dim, dim3 block_dim, size_t shared_mem);
-      cudaError_t internal_setup_argument(const void *arg, size_t size, size_t offset);
-      cudaError_t internal_launch(const void *func);
-      cudaError_t internal_gpu_memcpy(void *dst, const void *src, size_t size, bool sync);
-      cudaError_t internal_gpu_memcpy_to_symbol(void *dst, const void *src, size_t size,
-                                       size_t offset, cudaMemcpyKind kind, bool sync);
-      cudaError_t internal_gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-                                         size_t offset, cudaMemcpyKind kind, bool sync);
-    private:
-      struct VarInfo {
-      public:
-        const char *name;
-        CUdeviceptr ptr;
-        size_t size;
-      };
-      struct ModuleInfo {
-        CUmodule module;
-        std::set<const void*> host_aliases;
-        std::set<const void*> var_aliases;
-      };
+      virtual void shutdown(void);
+
+      static GPUProcessor *get_current_gpu_proc(void);
+
+      // calls that come from the CUDA runtime API
+      void stream_synchronize(cudaStream_t stream);
+      void device_synchronize(void);
+
+      void event_create(cudaEvent_t *event, int flags);
+      void event_destroy(cudaEvent_t event);
+      void event_record(cudaEvent_t event, cudaStream_t stream);
+      void event_synchronize(cudaEvent_t event);
+      
+      void configure_call(dim3 grid_dim, dim3 block_dim,
+			  size_t shared_memory, cudaStream_t stream);
+      void setup_argument(const void *arg, size_t size, size_t offset);
+      void launch(const void *func);
+
+      void gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
+      void gpu_memcpy_async(void *dst, const void *src, size_t size,
+			    cudaMemcpyKind kind, cudaStream_t stream);
+      void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
+				size_t offset, cudaMemcpyKind kind);
+      void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,
+				      size_t offset, cudaMemcpyKind kind,
+				      cudaStream_t stream);
+      void gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
+				  size_t offset, cudaMemcpyKind kind);
+      void gpu_memcpy_from_symbol_async(void *dst, const void *src, size_t size,
+					size_t offset, cudaMemcpyKind kind,
+					cudaStream_t stream);
+
+    public:
+      GPU *gpu;
+
+      // data needed for kernel launches
       struct LaunchConfig {
-      public:
         dim3 grid;
         dim3 block;
         size_t shared;
+	LaunchConfig(dim3 _grid, dim3 _block, size_t _shared);
       };
-    private:
-      // Support for our internal cuda runtime
-      struct FatBin {
-        int magic; // Hehe cuda magic (who knows what this does)
-        int version;
-        const unsigned long long *data;
-        void *filename_or_fatbins;
-      };
-      std::map<void** /*fatbin*/,ModuleInfo> modules;
-      std::map<const void*,CUfunction> device_functions;
-      std::map<const void*,VarInfo> device_variables;
-      std::deque<LaunchConfig> launch_configs;
-      char *kernel_arg_buffer;
-      size_t kernel_arg_size;
-      size_t kernel_buffer_size;
-      // Modules allocated just during this task's lifetime
-      std::set<void**> task_modules;
-    public:
-      // Support for deferring loading of modules and functions
-      // until after we have initialized the runtime
-      struct DeferredFunction {
-        void **handle;
-        const char *host_fun;
-        const char *device_fun;
-      };
-      struct DeferredVariable {
-        void **handle;
-        char *host_var;
-        const char *device_name;
-        bool external;
-        int size;
-        bool constant;
-        bool global;
-      };
-      static std::map<void*,void**>& get_deferred_modules(void);
-      static std::map<void*,void**>& get_deferred_cubins(void);
-      static std::deque<DeferredFunction>& get_deferred_functions(void);
-      static std::deque<DeferredVariable>& get_deferred_variables(void);
-      static void** defer_module_load(void *fat_bin);
-      static void** defer_cubin_load(void *cubin);
-      static void defer_function_load(void **fat_bin, const char *host_fun,
-                                      const char *device_fun);
-      static void defer_variable_load(void **fat_bin, char *host_var,
-                                      const char *device_name,
-                                      bool ext, int size,
-                                      bool constant, bool global);
-    public:
-      // Helper methods for intercepting CUDA calls
-      static GPUProcessor* find_local_gpu(void);
-      static void** register_fat_binary(void *fat_bin);
-      static void** register_cuda_binary(void *cubin, size_t cubinSize);
-      static void unregister_fat_binary(void **fat_bin);
-      static void register_var(void **fat_bin, char *host_var,
-                               char *device_addr, const char *device_name,
-                               int ext, int size, int constant, int global);
-      static void register_function(void **fat_bin, const char *host_fun,
-                                    char *device_fun, const char *device_name,
-                                    int thread_limit, uint3 *tid, uint3 *bid,
-                                    dim3 *bDim, dim3 *gDim, int *wSize);
-      static char init_module(void **fat_bin);
-    public:
-      // Helper methods for replacing CUDA calls
-      static cudaError_t stream_create(cudaStream_t *stream);
-      static cudaError_t stream_destroy(cudaStream_t stream);
-      static cudaError_t stream_synchronize(cudaStream_t stream);
-      static cudaError_t configure_call(dim3 grid_dim, dim3 block_dim,
-                                        size_t shared_memory, cudaStream_t stream);
-      static cudaError_t setup_argument(const void *arg, size_t size, size_t offset);
-      static cudaError_t launch(const void *func);
-      static cudaError_t gpu_malloc(void **ptr, size_t size);
-      static cudaError_t gpu_free(void *ptr);
-      static cudaError_t gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
-      static cudaError_t gpu_memcpy_async(void *dst, const void *src, size_t size,
-                                      cudaMemcpyKind kind, cudaStream_t stream);
-      static cudaError_t gpu_memcpy_to_symbol(void *dst, const void *src, size_t size,
-                                              size_t offset, cudaMemcpyKind kind, bool sync);
-      static cudaError_t gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-                                                size_t offset, cudaMemcpyKind kind, bool sync);
-      static cudaError_t device_synchronize(void);
-      static cudaError_t set_shared_memory_config(cudaSharedMemConfig config);
-      static const char* get_error_string(cudaError_t error);
-      static cudaError_t get_device(int *device);
-      static cudaError_t get_device_properties(cudaDeviceProp *prop, int device);
-      static cudaError_t get_func_attributes(cudaFuncAttributes *attr, const void *func);
+      std::vector<LaunchConfig> launch_configs;
+      std::vector<char> kernel_args;
+
+    protected:
+      Realm::CoreReservation *core_rsrv;
     };
 
     class GPUFBMemory : public MemoryImpl {
     public:
-      GPUFBMemory(Memory _me, GPUProcessor *_gpu);
+      GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
 
       virtual ~GPUFBMemory(void);
 
@@ -540,51 +549,31 @@ namespace LegionRuntime {
 					     ReductionOpID redopid,
 					     off_t list_size,
                                              const Realm::ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst)
-      {
-	return create_instance_local(is, linearization_bits, bytes_needed,
-				     block_size, element_size, field_sizes, redopid,
-				     list_size, reqs, parent_inst);
-      }
+					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy)
-      {
-	destroy_instance_local(i, local_destroy);
-      }
+				    bool local_destroy);
 
-      virtual off_t alloc_bytes(size_t size)
-      {
-	return alloc_bytes_local(size);
-      }
+      virtual off_t alloc_bytes(size_t size);
 
-      virtual void free_bytes(off_t offset, size_t size)
-      {
-	free_bytes_local(offset, size);
-      }
+      virtual void free_bytes(off_t offset, size_t size);
 
       // these work, but they are SLOW
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-      virtual void *get_direct_ptr(off_t offset, size_t size)
-      {
-	return (base + offset);
-      }
+      virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size)
-      {
-	return -1;
-      }
+      virtual int get_home_node(off_t offset, size_t size);
 
     public:
-      GPUProcessor *gpu;
-      char *base;
+      GPU *gpu;
+      CUdeviceptr base;
     };
 
     class GPUZCMemory : public MemoryImpl {
     public:
-      GPUZCMemory(Memory _me, GPUProcessor *_gpu);
+      GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
       virtual ~GPUZCMemory(void);
 
@@ -597,51 +586,25 @@ namespace LegionRuntime {
 					     ReductionOpID redopid,
 					     off_t list_size,
                                              const Realm::ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst)
-      {
-	return create_instance_local(is, linearization_bits, bytes_needed,
-				     block_size, element_size, field_sizes, redopid,
-				     list_size, reqs, parent_inst);
-      }
+					     RegionInstance parent_inst);
 
       virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy)
-      {
-	destroy_instance_local(i, local_destroy);
-      }
+				    bool local_destroy);
 
-      virtual off_t alloc_bytes(size_t size)
-      {
-	return alloc_bytes_local(size);
-      }
+      virtual off_t alloc_bytes(size_t size);
 
-      virtual void free_bytes(off_t offset, size_t size)
-      {
-	free_bytes_local(offset, size);
-      }
+      virtual void free_bytes(off_t offset, size_t size);
 
-      virtual void get_bytes(off_t offset, void *dst, size_t size)
-      {
-	memcpy(dst, cpu_base+offset, size);
-      }
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
 
-      virtual void put_bytes(off_t offset, const void *src, size_t size)
-      {
-	memcpy(cpu_base+offset, src, size);
-      }
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-      virtual void *get_direct_ptr(off_t offset, size_t size)
-      {
-	return (cpu_base + offset);
-      }
+      virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size)
-      {
-	return ID(me).node();
-      }
+      virtual int get_home_node(off_t offset, size_t size);
 
     public:
-      GPUProcessor *gpu;
+      CUdeviceptr gpu_base;
       char *cpu_base;
     };
 

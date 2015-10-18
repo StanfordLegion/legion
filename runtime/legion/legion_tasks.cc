@@ -4742,6 +4742,17 @@ namespace LegionRuntime {
               !(regions[idx].flags & NO_ACCESS_FLAG))
           {
             Memory inst_mem = physical_instances[idx].get_memory();
+            if (visible_memories.find(inst_mem) == visible_memories.end())
+            {
+              log_region.error("Illegal mapped region for region requirement "
+                               "%d of task %s (UID %lld)! Memory " IDFMT 
+                               " is not visible from processor " IDFMT "!",
+                               idx, this->variants->name, 
+                               this->get_unique_task_id(),
+                               inst_mem.id, target_proc.id);
+              assert(false);
+              exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+            }
             assert(visible_memories.find(inst_mem) != visible_memories.end());
           }
 #endif
@@ -4757,8 +4768,18 @@ namespace LegionRuntime {
                   additional_procs.begin(); it != additional_procs.end(); it++)
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(additional_visible_memories.find(*it) !=
-                      additional_visible_memories.end());
+              if (additional_visible_memories.find(*it) ==
+                  additional_visible_memories.end())
+              {
+                log_region.error("Illegal mapped region for region requirement "
+                                 "%d of task %s (UID %lld)! Memory " IDFMT 
+                                 " is not visible from processor " IDFMT "!",
+                                 idx, this->variants->name, 
+                                 this->get_unique_task_id(), it->id,
+                                 target_proc.id);
+                assert(false);
+                exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+              }
 #endif
               const std::set<Memory> &visible_mems = 
                               additional_visible_memories[*it];

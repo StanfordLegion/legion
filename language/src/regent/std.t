@@ -218,9 +218,12 @@ function std.tuple.__eq(a, b)
 end
 
 function std.tuple.__concat(a, b)
-  assert(std.is_tuple(a) and std.is_tuple(b))
+  assert(std.is_tuple(a) and (not b or std.is_tuple(b)))
   local result = std.newtuple()
   result:insertall(a)
+  if not b then
+    return result
+  end
   result:insertall(b)
   return result
 end

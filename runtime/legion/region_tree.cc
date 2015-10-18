@@ -5744,6 +5744,12 @@ namespace LegionRuntime {
       {
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+#ifdef LEGION_SPY
+        IndexPartNode *p1 = color_map[c1];
+        IndexPartNode *p2 = color_map[c2];
+        LegionSpy::log_index_partition_independence(handle.get_id(),
+                          p1->handle.get_id(), p2->handle.get_id());
+#endif
       }
       else
       {
@@ -6972,6 +6978,12 @@ namespace LegionRuntime {
       {
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+#ifdef LEGION_SPY
+        IndexSpaceNode *s1 = color_map[c1];
+        IndexSpaceNode *s2 = color_map[c2];
+        LegionSpy::log_index_space_independence(handle.get_id(),
+                      s1->handle.get_id(), s2->handle.get_id());
+#endif
       }
       else
       {
