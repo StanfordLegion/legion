@@ -40,6 +40,7 @@ typedef ptrdiff_t intptr_t;
 namespace Realm {
 
   class ProfilingRequestSet;
+  class CodeDescriptor;
   
     class ElementMask {
     public:
@@ -1240,11 +1241,22 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    // this version allows the "function" described by the field to be composed with a
+    //  second (computable) function before matching the colors - the second function
+    //  is provided via a CodeDescriptor object and should have the type FT->FT2
+    template <typename FT, typename FT2>
+    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+				    const CodeDescriptor& codedesc,
+				    const std::vector<FT2>& colors,
+				    std::vector<ZIndexSpace<N,T> >& subspaces,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets are reachable from
     //  subsets of some other index space - the field data points from the other index space to
-    //  ours - i.e. upon return (and waiting for the finish event), the following invariant holds
-    //  for each pair in the map:
-    //    (it->first) ==> field_data = (it->second)
+    //  ours and is used to compute the image of each source - i.e. upon return (and waiting
+    //  for the finish event), the following invariant holds:
+    //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
     template <int N2, typename T2>
     Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 				    const std::vector<ZIndexSpace<N2,T2> >& sources,
@@ -1252,6 +1264,11 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    // computes subspaces of this index space by determining what subsets can reach subsets
+    //  of some other index space - the field data points from this index space to the other
+    //  and is used to compute the preimage of each target - i.e. upon return (and waiting
+    //  for the finish event), the following invariant holds:
+    //    preimages[i] = { x | field_data(x) in targets[i] }
     template <int N2, typename T2>
     Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
 				                         ZPoint<N2,T2> > >& field_data,
@@ -1340,9 +1357,7 @@ namespace Realm {
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    // set reduction operations
-
-    // just union and intersection
+    // set reduction operations (union and intersection)
 
     static Event compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
 			       ZIndexSpace<N,T>& result,
