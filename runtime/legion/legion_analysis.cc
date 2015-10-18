@@ -2385,12 +2385,8 @@ namespace LegionRuntime {
             legion_delete(*it);
         }
         persistent_views.clear();
-        has_persistent = false;
       }
-#ifdef DEBUG_HIGH_LEVEL
-      else
-        assert(!has_persistent);
-#endif
+      has_persistent = false;
     } 
 
     //--------------------------------------------------------------------------
