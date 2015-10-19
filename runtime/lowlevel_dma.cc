@@ -1913,8 +1913,8 @@ namespace LegionRuntime {
 
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
         {
-          cb.aio_buf = (uint64_t)(src_base + dst_offset);
-          cb.aio_offset = src_offset;
+          cb.aio_buf = (uint64_t)(src_base + src_offset);
+          cb.aio_offset = dst_offset;
           cb.aio_nbytes = bytes;
           cbs[0] = &cb;
           int ret = io_submit(ctx, max_nr, cbs);
