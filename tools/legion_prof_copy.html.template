@@ -70,6 +70,9 @@
       <input type="radio" name="type" value="3">
         <text class="radio-label">count</text>
       </input>
+      <input type="radio" name="type" value="4">
+        <text class="radio-label">bandwidth</text>
+      </input>
     </div>
     <div id="chart"></div>
 
@@ -88,6 +91,7 @@
             if (type == 0) value = d.total;
             else if (type == 1) value = d.average;
             else if (type == 2) value = d.count;
+            else if (type == 3) value = d.bandwidth;
             return {
               source: d.source,
               target: d.target,
@@ -95,6 +99,7 @@
               total: d.total,
               average: d.average,
               count: d.count,
+              bandwidth: d.bandwidth
             };
           },
           function(error, data) {
@@ -171,17 +176,20 @@
                                       x2+","+y2+" "+x3+","+y3+" "+x4+","+y4+" ")
                       .attr("class", "tooltip");
 
+                    var detailText = detailView.append("text")
+                      .attr("class", "desc")
+                      .attr("y", d.source * gridSize + gridSize * 5 / 4);
                     var desc = ["source: " + memories[d.source],
                                 "target: " + memories[d.target],
                                 "total: " + Math.round(d.total * 100) / 100 + "ms",
                                 "average: " + Math.round(d.average * 100) / 100 + "us",
-                                "count: " + d.count];
+                                "count: " + d.count,
+                                "bandwidth: " + d.bandwidth + "B/s"];
                     for (var j = 0; j < desc.length; ++j) {
-                      detailView.append("text")
-                        .attr("x", (d.target - 1) * gridSize + 15)
-                        .attr("y", d.source * gridSize + gridSize * 3 / 2 + gridSize * j / desc.length)
+                      detailText.append("tspan")
+                        .attr("x", (d.target - 1) * gridSize + 10)
+                        .attr("dy", "15")
                         .attr("text-anchor", "start")
-                        .attr("class", "desc")
                         .text(desc[j]);
                     }
                 })
@@ -267,6 +275,7 @@
         if ($(this).val() == 1) load(0, "ms");
         else if($(this).val() == 2) load(1, "us");
         else if($(this).val() == 3) load(2, "");
+        else if($(this).val() == 4) load(3, " B/s");
       })
       load(0, "ms");
     </script>

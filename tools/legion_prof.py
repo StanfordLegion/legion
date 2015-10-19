@@ -690,6 +690,7 @@ class Copy(object):
         self.src = src
         self.dst = dst
         self.op = op
+        self.size = None
         self.create = None
         self.ready = None
         self.start = None
@@ -953,7 +954,7 @@ class State(object):
                     self.log_copy_info(long(m.group('opid')),
                                        int(m.group('src'),16),
                                        int(m.group('dst'),16),
-                                       m.group('size'),
+                                       int(m.group('size')),
                                        read_time(m.group('create')),
                                        read_time(m.group('ready')),
                                        read_time(m.group('start')),
@@ -1329,7 +1330,7 @@ class State(object):
         memories = sorted(self.memories.itervalues())
 
         tsv_file = open(tsv_file_name, "w")
-        tsv_file.write("source\ttarget\tremote\ttotal\tcount\taverage\n")
+        tsv_file.write("source\ttarget\tremote\ttotal\tcount\taverage\tbandwidth\n")
         for i in range(0, len(memories)):
             for j in range(0, len(memories)):
                 src = memories[i]
@@ -1339,12 +1340,17 @@ class State(object):
                     dst.kind == memory_kinds[0]
                 sum = 0.0
                 cnt = 0
+                bandwidth = 0.0
                 channel = self.find_channel(src, dst)
                 for copy in channel.copies:
-                    sum = sum + (copy.stop - copy.start) * 1e-6
+                    time = copy.stop - copy.start
+                    sum = sum + time * 1e-6
+                    bandwidth = bandwidth + copy.size / time
                     cnt = cnt + 1
-                tsv_file.write(str(i)+"\t"+str(j)+"\t"+str(int(is_remote))+"\t"+str(sum)+\
-                        "\t"+str(cnt)+"\t"+str(sum / cnt * 1000 if cnt > 0 else 0)+"\n")
+                tsv_file.write("%d\t%d\t%d\t%f\t%d\t%f\t%f\n" % \
+                        (i, j, int(is_remote), sum, cnt,
+                         sum / cnt * 1000 if cnt > 0 else 0,
+                         bandwidth / cnt if cnt > 0 else 0))
         tsv_file.close()
 
         template_file = open(template_file_name, "r")
