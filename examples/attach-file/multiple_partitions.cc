@@ -241,8 +241,9 @@ void top_level_task(const Task *task,
   copy_launcher.add_src_field(0, FID_DERIV);
   copy_launcher.add_dst_field(0, FID_CP);
   runtime->issue_copy_operation(ctx, copy_launcher);
-  runtime->detach_file(ctx, cp_pr);
   
+  runtime->detach_file(ctx, cp_pr);
+
   // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
       TaskArgument(&num_elements, sizeof(num_elements)));
@@ -256,8 +257,11 @@ void top_level_task(const Task *task,
 
   // Clean up our region, index space, and field space
   runtime->destroy_logical_region(ctx, stencil_lr);
+  runtime->destroy_logical_region(ctx, cp_lr);
+  runtime->destroy_field_space(ctx, cp_fs);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
+  printf("End of TOP_LEVEL_TASK\n");
 }
 
 // The standard initialize field task from earlier examples

@@ -192,7 +192,7 @@ namespace Realm {
         }
         case LEGION_FILE_CREATE:
         {
-          fd = open(file_name, O_CREAT | O_EXCL | O_RDWR, 00777);
+          fd = open(file_name, O_CREAT | O_RDWR, 00777);
           assert(fd != -1);
           // resize the file to what we want
           size_t field_size = 0;
