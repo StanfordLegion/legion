@@ -208,10 +208,14 @@ namespace Realm {
       }
 
       pthread_mutex_lock(&vector_lock);
-      if (inst.id < file_vec.size())
-        file_vec[inst.id] = fd;
-      else
+      ID id(inst);
+      unsigned index = id.index_l();
+      if (index < file_vec.size())
+        file_vec[index] = fd;
+      else {
+        assert(index == file_vec.size());
         file_vec.push_back(fd);
+      }
       pthread_mutex_unlock(&vector_lock);
       return inst;
     }
@@ -220,8 +224,10 @@ namespace Realm {
                       bool local_destroy)
     {
       pthread_mutex_lock(&vector_lock);
-      assert(i.id < file_vec.size());
-      int fd = file_vec[i.id];
+      ID id(i);
+      unsigned index = id.index_l();
+      assert(index < file_vec.size());
+      int fd = file_vec[index];
       pthread_mutex_unlock(&vector_lock);
       close(fd);
       destroy_instance_local(i, local_destroy);
@@ -235,7 +241,7 @@ namespace Realm {
 
     void FileMemory::free_bytes(off_t offset, size_t size)
     {
-      assert(0);
+      // Do nothing in this function.
     }
 
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -282,8 +288,9 @@ namespace Realm {
     int FileMemory::get_file_des(ID::IDType inst_id)
     {
       pthread_mutex_lock(&vector_lock);
-      return file_vec[inst_id];
+      int fd = file_vec[inst_id];
       pthread_mutex_unlock(&vector_lock);
+      return fd;
     }
 
 #ifdef USE_HDF
