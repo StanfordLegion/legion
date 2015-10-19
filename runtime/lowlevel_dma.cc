@@ -2245,19 +2245,21 @@ namespace LegionRuntime {
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
 
+      mpc->flush(this);
+
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         const InstPair &pair = oas_by_inst->begin()->first; 
 
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
         usage.target = pair.second.get_location();
+        usage.size = mpc->get_total_bytes();
         measurements.add_measurement(usage);
       }
 
       // if(after_copy.exists())
       // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
 
-      mpc->flush(this);
       delete mpc;
 
 #ifdef EVEN_MORE_DEAD_DMA_CODE
@@ -2953,6 +2955,7 @@ namespace LegionRuntime {
 
       // we have the same jumble of memory type and layout permutations here - again we'll
       //  solve a few of them point-wise and then try to unify later
+      size_t total_bytes = 0;
       if(domain.get_dim() == 0) {
 	// index space
 	IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -3151,6 +3154,8 @@ namespace LegionRuntime {
 	    assert(0);
 	  }
 	}
+        // TODO: we don't track the size of reduction on unstructred index spaces
+        total_bytes = 0;
       } else {
 	MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, redop_id, red_fold);
 
@@ -3162,6 +3167,7 @@ namespace LegionRuntime {
 	}
 
 	mpc->flush(this);
+        total_bytes = mpc->get_total_bytes();
 
 	// if an instance lock was taken, release it after copy completes
 	if(inst_lock_needed)
@@ -3186,6 +3192,7 @@ namespace LegionRuntime {
         // Not precise, but close enough for now
         usage.source = srcs[0].inst.get_location();
         usage.target = dst.inst.get_location();
+        usage.size = total_bytes;
         measurements.add_measurement(usage);
       }
     }

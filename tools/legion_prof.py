@@ -23,7 +23,7 @@ from getopt import getopt
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
@@ -700,7 +700,8 @@ class Copy(object):
         return self.op.get_color()
 
     def __repr__(self):
-        return 'Copy initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
+        return 'Copy initiated by="'+repr(self.op)+'" size='+str(self.size)+\
+                ' total='+str(self.stop-self.start)+ \
                 ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
 
 class Fill(object):
@@ -952,6 +953,7 @@ class State(object):
                     self.log_copy_info(long(m.group('opid')),
                                        int(m.group('src'),16),
                                        int(m.group('dst'),16),
+                                       m.group('size'),
                                        read_time(m.group('create')),
                                        read_time(m.group('ready')),
                                        read_time(m.group('start')),
@@ -1058,12 +1060,13 @@ class State(object):
         proc = self.find_processor(proc_id)
         proc.add_task(meta)
 
-    def log_copy_info(self, op_id, src_mem, dst_mem,
+    def log_copy_info(self, op_id, src_mem, dst_mem, size,
                       create, ready, start, stop):
         op = self.find_op(op_id)
         src = self.find_memory(src_mem)
         dst = self.find_memory(dst_mem)
         copy = self.create_copy(src, dst, op)
+        copy.size = size
         copy.create = create
         assert create <= ready
         copy.ready = ready
