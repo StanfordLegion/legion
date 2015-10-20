@@ -1164,6 +1164,8 @@ namespace Realm {
     bool empty(void) const;
     size_t volume(void) const;
 
+    bool contains(const ZPoint<N,T>& p) const;
+
     // true if all points in other are in this rectangle
     bool contains(const ZRect<N,T>& other) const;
 

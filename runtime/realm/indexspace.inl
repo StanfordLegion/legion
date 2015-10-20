@@ -210,6 +210,14 @@ namespace Realm {
     return v;
   }
 
+  template <int N, typename T>
+  bool ZRect<N,T>::contains(const ZPoint<N,T>& p) const
+  {
+    for(int i = 0; i < N; i++)
+      if((p[i] < lo[i]) || (p[i] > hi[i])) return false;
+    return true;
+  }
+
   // true if all points in other are in this rectangle
   template <int N, typename T>
   bool ZRect<N,T>::contains(const ZRect<N,T>& other) const
