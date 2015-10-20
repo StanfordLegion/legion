@@ -184,7 +184,7 @@
                                 "total: " + Math.round(d.total * 100) / 100 + "ms",
                                 "average: " + Math.round(d.average * 100) / 100 + "us",
                                 "count: " + d.count,
-                                "bandwidth: " + d.bandwidth + "B/s"];
+                                "bandwidth: " + Math.round(d.bandwidth * 100) / 100 + "MB/s"];
                     for (var j = 0; j < desc.length; ++j) {
                       detailText.append("tspan")
                         .attr("x", (d.target - 1) * gridSize + 10)
@@ -217,7 +217,7 @@
                     else return "mono";
                 })
                 .text(function(d) {
-                    if (type != 2) return Math.round(d.value * 100) / 100;
+                    if (type < 3) return Math.round(d.value * 100) / 100;
                     else return Math.round(d.value)
                 });
 
@@ -237,7 +237,7 @@
               .attr("class", "mono")
               .attr("text-anchor", "middle")
               .text(function(d) {
-                  var legend = type != 2 ? Math.round(d * 100) / 100 : Math.round(d);
+                  var legend = type < 3 ? Math.round(d * 100) / 100 : Math.round(d);
                   return "≥" + legend + unit;
               })
               .attr("x", function(d, i) { return legendElementWidth * i + legendElementWidth / 2; })
@@ -275,7 +275,7 @@
         if ($(this).val() == 1) load(0, "ms");
         else if($(this).val() == 2) load(1, "us");
         else if($(this).val() == 3) load(2, "");
-        else if($(this).val() == 4) load(3, " B/s");
+        else if($(this).val() == 4) load(3, "MB/s");
       })
       load(0, "ms");
     </script>
