@@ -2230,14 +2230,14 @@ namespace Realm {
 	    CUresult ret;
 	    {
 	      AutoGPUContext agc(gpus[i]);
-	      ret = cuMemHostGetDevicePointer(&gpuptr, zcmem_cpu_base, 0);
+	      ret = cuMemHostGetDevicePointer(&gpuptr, base, 0);
 	    }
 	    if(ret == CUDA_SUCCESS) {
 	      // no test for && ((void *)gpuptr == base)) {
 	      log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
 	      gpus[i]->pinned_sysmems.insert((*it)->me);
 	    } else {
-	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << base << ") !?";
+	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";
 	    }
 	  }
 	}
