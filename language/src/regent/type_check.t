@@ -77,17 +77,19 @@ end
 function type_check.expr_id(cx, node)
   local expr_type = cx.type_env:lookup(node, node.value)
 
-  return ast.typed.ExprID {
+  return ast.typed.expr.ID {
     value = node.value,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.expr_constant(cx, node)
-  return ast.typed.ExprConstant {
+  return ast.typed.expr.Constant {
     value = node.value,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -100,9 +102,10 @@ end
 
 function type_check.expr_function(cx, node)
   -- Functions are type checked at the call site.
-  return ast.typed.ExprFunction {
+  return ast.typed.expr.Function {
     value = node.value,
     expr_type = untyped,
+    options = node.options,
     span = node.span,
   }
 end
@@ -125,10 +128,11 @@ function type_check.expr_field_access(cx, node)
                   tostring(std.as_read(value_type)))
     end
 
-    return ast.typed.ExprFieldAccess {
+    return ast.typed.expr.FieldAccess {
       value = value,
       field_name = node.field_name,
       expr_type = field_type,
+      options = node.options,
       span = node.span,
     }
   else
@@ -186,10 +190,11 @@ function type_check.expr_field_access(cx, node)
                   tostring(std.as_read(value_type)))
     end
 
-    return ast.typed.ExprFieldAccess {
+    return ast.typed.expr.FieldAccess {
       value = value,
       field_name = node.field_name,
       expr_type = field_type,
+      options = node.options,
       span = node.span,
     }
   end
@@ -206,8 +211,8 @@ function type_check.expr_index_access(cx, node)
       log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
     end
 
-    if index:is(ast.typed.ExprConstant) or
-      (index:is(ast.typed.ExprID) and not std.is_rawref(index.expr_type))
+    if index:is(ast.typed.expr.Constant) or
+      (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
     then
       local parent = value_type:parent_region()
       local partition = value_type:partition()
@@ -224,10 +229,11 @@ function type_check.expr_index_access(cx, node)
         end
       end
 
-      return ast.typed.ExprIndexAccess {
+      return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
         expr_type = subregion,
+        options = node.options,
         span = node.span,
       }
     else
@@ -237,10 +243,11 @@ function type_check.expr_index_access(cx, node)
       std.add_constraint(cx, partition, parent, "<=", false)
       std.add_constraint(cx, subregion, partition, "<=", false)
 
-      return ast.typed.ExprIndexAccess {
+      return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
         expr_type = subregion,
+        options = node.options,
         span = node.span,
       }
     end
@@ -253,17 +260,18 @@ function type_check.expr_index_access(cx, node)
     end
 
     local region_symbol
-    if value:is(ast.typed.ExprID) then
+    if value:is(ast.typed.expr.ID) then
       region_symbol = value.value
     else
       region_symbol = terralib.newsymbol(value_type)
     end
     local result_type = std.ref(region_index_type(value_type.fspace_type, region_symbol))
 
-    return ast.typed.ExprIndexAccess {
+    return ast.typed.expr.IndexAccess {
       value = value,
       index = index,
       expr_type = result_type,
+      options = node.options,
       span = node.span,
     }
   else
@@ -287,10 +295,11 @@ function type_check.expr_index_access(cx, node)
       result_type = std.rawref(&result_type)
     end
 
-    return ast.typed.ExprIndexAccess {
+    return ast.typed.expr.IndexAccess {
       value = value,
       index = index,
       expr_type = result_type,
+      options = node.options,
       span = node.span,
     }
   end
@@ -320,11 +329,12 @@ function type_check.expr_method_call(cx, node)
                 node.method_name .. "(" .. arg_types:mkstring(", ") .. ")")
   end
 
-  return ast.typed.ExprMethodCall {
+  return ast.typed.expr.MethodCall {
     value = value,
     method_name = node.method_name,
     args = args,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -388,7 +398,7 @@ function type_check.expr_call(cx, node)
   local arg_symbols = terralib.newlist()
   for i, arg in ipairs(args) do
     local arg_type = arg_types[i]
-    if arg:is(ast.typed.ExprID) then
+    if arg:is(ast.typed.expr.ID) then
       arg_symbols:insert(arg.value)
     else
       arg_symbols:insert(terralib.newsymbol(arg_type))
@@ -435,11 +445,11 @@ function type_check.expr_call(cx, node)
     end
   end
 
-  local result = ast.typed.ExprCall {
+  local result = ast.typed.expr.Call {
     fn = fn,
-    inline = node.inline,
     args = args,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
   if expr_type == untyped then
@@ -473,9 +483,9 @@ function type_check.expr_cast(cx, node)
     local to_fields = std.struct_entries_symbols(to_type)
 
     local from_symbols = {}
-    if arg:is(ast.typed.ExprCtor) and arg.named then
+    if arg:is(ast.typed.expr.Ctor) and arg.named then
       for _, field in ipairs(arg.fields) do
-        if field.value:is(ast.typed.ExprID) and
+        if field.value:is(ast.typed.expr.ID) and
           terralib.issymbol(field.value.value) and
           terralib.types.istype(field.value.value.type)
         then
@@ -503,10 +513,11 @@ function type_check.expr_cast(cx, node)
     end
   end
 
-  return ast.typed.ExprCast {
+  return ast.typed.expr.Cast {
     fn = fn,
     arg = arg,
     expr_type = to_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -514,9 +525,10 @@ end
 function type_check.expr_ctor_list_field(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  return ast.typed.ExprCtorListField {
+  return ast.typed.expr.CtorListField {
     value = value,
     expr_type = value_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -524,18 +536,19 @@ end
 function type_check.expr_ctor_rec_field(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  return ast.typed.ExprCtorRecField {
+  return ast.typed.expr.CtorRecField {
     name = node.name,
     value = value,
     expr_type = value_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.expr_ctor_field(cx, node)
-  if node:is(ast.specialized.ExprCtorListField) then
+  if node:is(ast.specialized.expr.CtorListField) then
     return type_check.expr_ctor_list_field(cx, node)
-  elseif node:is(ast.specialized.ExprCtorRecField) then
+  elseif node:is(ast.specialized.expr.CtorRecField) then
     return type_check.expr_ctor_rec_field(cx, node)
   else
     assert(false)
@@ -556,17 +569,19 @@ function type_check.expr_ctor(cx, node)
       function(field) return field.expr_type end)))
   end
 
-  return ast.typed.ExprCtor {
+  return ast.typed.expr.Ctor {
     fields = fields,
     named = node.named,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.expr_raw_context(cx, node)
-  return ast.typed.ExprRawContext {
+  return ast.typed.expr.RawContext {
     expr_type = std.c.legion_context_t,
+    options = node.options,
     span = node.span,
   }
 end
@@ -584,10 +599,11 @@ function type_check.expr_raw_fields(cx, node)
   end
   local fields_type = std.c.legion_field_id_t[#privilege_fields]
 
-  return ast.typed.ExprRawFields {
+  return ast.typed.expr.RawFields {
     region = region,
     fields = privilege_fields,
     expr_type = fields_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -605,17 +621,19 @@ function type_check.expr_raw_physical(cx, node)
   end
   local physical_type = std.c.legion_physical_region_t[#privilege_fields]
 
-  return ast.typed.ExprRawPhysical {
+  return ast.typed.expr.RawPhysical {
     region = region,
     fields = privilege_fields,
     expr_type = physical_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.expr_raw_runtime(cx, node)
-  return ast.typed.ExprRawRuntime {
+  return ast.typed.expr.RawRuntime {
     expr_type = std.c.legion_runtime_t,
+    options = node.options,
     span = node.span,
   }
 end
@@ -637,9 +655,10 @@ function type_check.expr_raw_value(cx, node)
     log.error(node, "raw expected an ispace, region, partition, or cross product, got " .. tostring(value_type))
   end
 
-  return ast.typed.ExprRawValue {
+  return ast.typed.expr.RawValue {
     value = value,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -650,9 +669,10 @@ function type_check.expr_isnull(cx, node)
   if not std.is_bounded_type(pointer_type) then
     log.error(node, "isnull requires bounded type, got " .. tostring(pointer_type))
   end
-  return ast.typed.ExprIsnull {
+  return ast.typed.expr.Isnull {
     pointer = pointer,
     expr_type = bool,
+    options = node.options,
     span = node.span,
   }
 end
@@ -661,10 +681,11 @@ function type_check.expr_new(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
   -- Checked in specialize.
-  return ast.typed.ExprNew {
+  return ast.typed.expr.New {
     pointer_type = node.pointer_type,
     region = region,
     expr_type = node.pointer_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -674,9 +695,10 @@ function type_check.expr_null(cx, node)
   if not std.is_bounded_type(pointer_type) then
     log.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
-  return ast.typed.ExprNull {
+  return ast.typed.expr.Null {
     pointer_type = pointer_type,
     expr_type = pointer_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -695,9 +717,10 @@ function type_check.expr_dynamic_cast(cx, node)
     log.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
-  return ast.typed.ExprDynamicCast {
+  return ast.typed.expr.DynamicCast {
     value = value,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -732,10 +755,11 @@ function type_check.expr_static_cast(cx, node)
     end
   end
 
-  return ast.typed.ExprStaticCast {
+  return ast.typed.expr.StaticCast {
     value = value,
     parent_region_map = parent_region_map,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -756,11 +780,12 @@ function type_check.expr_ispace(cx, node)
                 tostring(index_type) .. " but got " .. tostring(start_type))
   end
 
-  return ast.typed.ExprIspace {
+  return ast.typed.expr.Ispace {
     index_type = index_type,
     extent = extent,
     start = start,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -795,10 +820,11 @@ function type_check.expr_region(cx, node)
   end
   cx:intern_region(region)
 
-  return ast.typed.ExprRegion {
+  return ast.typed.expr.Region {
     ispace = ispace,
     fspace_type = node.fspace_type,
     expr_type = region,
+    options = node.options,
     span = node.span,
   }
 end
@@ -836,11 +862,12 @@ function type_check.expr_partition(cx, node)
     end
   end
 
-  return ast.typed.ExprPartition {
+  return ast.typed.expr.Partition {
     disjointness = disjointness,
     region = region,
     coloring = coloring,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -856,9 +883,10 @@ function type_check.expr_cross_product(cx, node)
     end
   end
 
-  return ast.typed.ExprCrossProduct {
+  return ast.typed.expr.CrossProduct {
     args = args,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -893,10 +921,11 @@ function type_check.expr_unary(cx, node)
 
   local expr_type = unary_ops[node.op](cx, rhs_type)
 
-  return ast.typed.ExprUnary {
+  return ast.typed.expr.Unary {
     op = node.op,
     rhs = rhs,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -963,11 +992,12 @@ function type_check.expr_binary(cx, node)
 
   local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
 
-  return ast.typed.ExprBinary {
+  return ast.typed.expr.Binary {
     op = node.op,
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -982,93 +1012,94 @@ function type_check.expr_deref(cx, node)
 
   local expr_type = std.ref(value_type)
 
-  return ast.typed.ExprDeref {
+  return ast.typed.expr.Deref {
     value = value,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.expr(cx, node)
-  if node:is(ast.specialized.ExprID) then
+  if node:is(ast.specialized.expr.ID) then
     return type_check.expr_id(cx, node)
 
-  elseif node:is(ast.specialized.ExprConstant) then
+  elseif node:is(ast.specialized.expr.Constant) then
     return type_check.expr_constant(cx, node)
 
-  elseif node:is(ast.specialized.ExprFunction) then
+  elseif node:is(ast.specialized.expr.Function) then
     return type_check.expr_function(cx, node)
 
-  elseif node:is(ast.specialized.ExprFieldAccess) then
+  elseif node:is(ast.specialized.expr.FieldAccess) then
     return type_check.expr_field_access(cx, node)
 
-  elseif node:is(ast.specialized.ExprIndexAccess) then
+  elseif node:is(ast.specialized.expr.IndexAccess) then
     return type_check.expr_index_access(cx, node)
 
-  elseif node:is(ast.specialized.ExprMethodCall) then
+  elseif node:is(ast.specialized.expr.MethodCall) then
     return type_check.expr_method_call(cx, node)
 
-  elseif node:is(ast.specialized.ExprCall) then
+  elseif node:is(ast.specialized.expr.Call) then
     return type_check.expr_call(cx, node)
 
-  elseif node:is(ast.specialized.ExprCast) then
+  elseif node:is(ast.specialized.expr.Cast) then
     return type_check.expr_cast(cx, node)
 
-  elseif node:is(ast.specialized.ExprCtor) then
+  elseif node:is(ast.specialized.expr.Ctor) then
     return type_check.expr_ctor(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawContext) then
+  elseif node:is(ast.specialized.expr.RawContext) then
     return type_check.expr_raw_context(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawFields) then
+  elseif node:is(ast.specialized.expr.RawFields) then
     return type_check.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawPhysical) then
+  elseif node:is(ast.specialized.expr.RawPhysical) then
     return type_check.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawRuntime) then
+  elseif node:is(ast.specialized.expr.RawRuntime) then
     return type_check.expr_raw_runtime(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawValue) then
+  elseif node:is(ast.specialized.expr.RawValue) then
     return type_check.expr_raw_value(cx, node)
 
-  elseif node:is(ast.specialized.ExprIsnull) then
+  elseif node:is(ast.specialized.expr.Isnull) then
     return type_check.expr_isnull(cx, node)
 
-  elseif node:is(ast.specialized.ExprNew) then
+  elseif node:is(ast.specialized.expr.New) then
     return type_check.expr_new(cx, node)
 
-  elseif node:is(ast.specialized.ExprNull) then
+  elseif node:is(ast.specialized.expr.Null) then
     return type_check.expr_null(cx, node)
 
-  elseif node:is(ast.specialized.ExprDynamicCast) then
+  elseif node:is(ast.specialized.expr.DynamicCast) then
     return type_check.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.specialized.ExprStaticCast) then
+  elseif node:is(ast.specialized.expr.StaticCast) then
     return type_check.expr_static_cast(cx, node)
 
-  elseif node:is(ast.specialized.ExprIspace) then
+  elseif node:is(ast.specialized.expr.Ispace) then
     return type_check.expr_ispace(cx, node)
 
-  elseif node:is(ast.specialized.ExprRegion) then
+  elseif node:is(ast.specialized.expr.Region) then
     return type_check.expr_region(cx, node)
 
-  elseif node:is(ast.specialized.ExprPartition) then
+  elseif node:is(ast.specialized.expr.Partition) then
     return type_check.expr_partition(cx, node)
 
-  elseif node:is(ast.specialized.ExprCrossProduct) then
+  elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
 
-  elseif node:is(ast.specialized.ExprUnary) then
+  elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)
 
-  elseif node:is(ast.specialized.ExprBinary) then
+  elseif node:is(ast.specialized.expr.Binary) then
     return type_check.expr_binary(cx, node)
 
-  elseif node:is(ast.specialized.ExprDeref) then
+  elseif node:is(ast.specialized.expr.Deref) then
     return type_check.expr_deref(cx, node)
 
-  elseif node:is(ast.specialized.ExprLuaTable) then
+  elseif node:is(ast.specialized.expr.LuaTable) then
     log.error(node, "unable to specialize value of type table")
 
   else
@@ -1090,12 +1121,13 @@ function type_check.stat_if(cx, node)
 
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
-  return ast.typed.StatIf {
+  return ast.typed.stat.If {
     cond = cond,
     then_block = type_check.block(then_cx, node.then_block),
     elseif_blocks = node.elseif_blocks:map(
       function(block) return type_check.stat_elseif(cx, block) end),
     else_block = type_check.block(else_cx, node.else_block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -1105,9 +1137,10 @@ function type_check.stat_elseif(cx, node)
   local cond_type = std.check_read(cx, cond)
 
   local body_cx = cx:new_local_scope()
-  return ast.typed.StatElseif {
+  return ast.typed.stat.Elseif {
     cond = cond,
     block = type_check.block(body_cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -1117,9 +1150,10 @@ function type_check.stat_while(cx, node)
   local cond_type = std.check_read(cx, cond)
 
   local body_cx = cx:new_local_scope()
-  return ast.typed.StatWhile {
+  return ast.typed.stat.While {
     cond = cond,
     block = type_check.block(body_cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -1150,11 +1184,11 @@ function type_check.stat_for_num(cx, node)
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
-  return ast.typed.StatForNum {
+  return ast.typed.stat.ForNum {
     symbol = node.symbol,
     values = values,
     block = type_check.block(cx, node.block),
-    parallel = node.parallel,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1173,7 +1207,7 @@ function type_check.stat_for_list(cx, node)
 
   -- Hack: Try to recover the original symbol for this bound if possible
   local bound
-  if value:is(ast.typed.ExprID) then
+  if value:is(ast.typed.expr.ID) then
     bound = value.value
   else
     bound = terralib.newsymbol(value_type)
@@ -1205,11 +1239,11 @@ function type_check.stat_for_list(cx, node)
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
-  return ast.typed.StatForList {
+  return ast.typed.stat.ForList {
     symbol = node.symbol,
     value = value,
     block = type_check.block(cx, node.block),
-    vectorize = node.vectorize,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1219,17 +1253,19 @@ function type_check.stat_repeat(cx, node)
   local until_cond_type = std.check_read(cx, until_cond)
 
   local cx = cx:new_local_scope()
-  return ast.typed.StatRepeat {
+  return ast.typed.stat.Repeat {
     block = type_check.block(cx, node.block),
     until_cond = until_cond,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.stat_block(cx, node)
   local cx = cx:new_local_scope()
-  return ast.typed.StatBlock {
+  return ast.typed.stat.Block {
     block = type_check.block(cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -1238,7 +1274,7 @@ function type_check.stat_var(cx, node)
   for i, symbol in ipairs(node.symbols) do
     local var_type = symbol.type
     local value = node.values[i]
-    if value and value:is(ast.specialized.ExprRegion) then
+    if value and value:is(ast.specialized.expr.Region) then
       cx.type_env:insert(node, symbol, std.rawref(&std.as_read(value.expr_type)))
     end
   end
@@ -1268,16 +1304,17 @@ function type_check.stat_var(cx, node)
       -- to ptr types if necessary.
       symbol.type = var_type
     end
-    if not (node.values[i] and node.values[i]:is(ast.specialized.ExprRegion)) then
+    if not (node.values[i] and node.values[i]:is(ast.specialized.expr.Region)) then
       cx.type_env:insert(node, symbol, std.rawref(&var_type))
     end
     types:insert(var_type)
   end
 
-  return ast.typed.StatVar {
+  return ast.typed.stat.Var {
     symbols = node.symbols,
     types = types,
     values = values,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1331,11 +1368,12 @@ function type_check.stat_var_unpack(cx, node)
     std.add_constraints(cx, constraints)
   end
 
-  return ast.typed.StatVarUnpack {
+  return ast.typed.stat.VarUnpack {
     symbols = node.symbols,
     fields = node.fields,
     field_types = field_types,
     value = value,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1361,14 +1399,16 @@ function type_check.stat_return(cx, node)
     cx:set_return_type(result_type)
   end
 
-  return ast.typed.StatReturn {
+  return ast.typed.stat.Return {
     value = value,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.stat_break(cx, node)
-  return ast.typed.StatBreak {
+  return ast.typed.stat.Break {
+    options = node.options,
     span = node.span,
   }
 end
@@ -1392,9 +1432,10 @@ function type_check.stat_assignment(cx, node)
     end
   end
 
-  return ast.typed.StatAssignment {
+  return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1410,10 +1451,11 @@ function type_check.stat_reduce(cx, node)
   local rhs_types = rhs:map(
     function(rh) return std.check_read(cx, rh) end)
 
-  return ast.typed.StatReduce {
+  return ast.typed.stat.Reduce {
     op = node.op,
     lhs = lhs,
     rhs = rhs,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1422,50 +1464,51 @@ function type_check.stat_expr(cx, node)
   local value = type_check.expr(cx, node.expr)
   local value_type = std.check_read(cx, value)
 
-  return ast.typed.StatExpr {
+  return ast.typed.stat.Expr {
     expr = value,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.stat(cx, node)
-  if node:is(ast.specialized.StatIf) then
+  if node:is(ast.specialized.stat.If) then
     return type_check.stat_if(cx, node)
 
-  elseif node:is(ast.specialized.StatWhile) then
+  elseif node:is(ast.specialized.stat.While) then
     return type_check.stat_while(cx, node)
 
-  elseif node:is(ast.specialized.StatForNum) then
+  elseif node:is(ast.specialized.stat.ForNum) then
     return type_check.stat_for_num(cx, node)
 
-  elseif node:is(ast.specialized.StatForList) then
+  elseif node:is(ast.specialized.stat.ForList) then
     return type_check.stat_for_list(cx, node)
 
-  elseif node:is(ast.specialized.StatRepeat) then
+  elseif node:is(ast.specialized.stat.Repeat) then
     return type_check.stat_repeat(cx, node)
 
-  elseif node:is(ast.specialized.StatBlock) then
+  elseif node:is(ast.specialized.stat.Block) then
     return type_check.stat_block(cx, node)
 
-  elseif node:is(ast.specialized.StatVar) then
+  elseif node:is(ast.specialized.stat.Var) then
     return type_check.stat_var(cx, node)
 
-  elseif node:is(ast.specialized.StatVarUnpack) then
+  elseif node:is(ast.specialized.stat.VarUnpack) then
     return type_check.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.specialized.StatReturn) then
+  elseif node:is(ast.specialized.stat.Return) then
     return type_check.stat_return(cx, node)
 
-  elseif node:is(ast.specialized.StatBreak) then
+  elseif node:is(ast.specialized.stat.Break) then
     return type_check.stat_break(cx, node)
 
-  elseif node:is(ast.specialized.StatAssignment) then
+  elseif node:is(ast.specialized.stat.Assignment) then
     return type_check.stat_assignment(cx, node)
 
-  elseif node:is(ast.specialized.StatReduce) then
+  elseif node:is(ast.specialized.stat.Reduce) then
     return type_check.stat_reduce(cx, node)
 
-  elseif node:is(ast.specialized.StatExpr) then
+  elseif node:is(ast.specialized.stat.Expr) then
     return type_check.stat_expr(cx, node)
 
   else
@@ -1477,9 +1520,10 @@ function type_check.stat_task_param(cx, node)
   local param_type = node.symbol.type
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
-  return ast.typed.StatTaskParam {
+  return ast.typed.stat.TaskParam {
     symbol = node.symbol,
     param_type = param_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1525,7 +1569,7 @@ function type_check.stat_task(cx, node)
   prototype:settype(task_type)
 
   for _, fixup_node in ipairs(cx.fixup_nodes) do
-    if fixup_node:is(ast.typed.ExprCall) then
+    if fixup_node:is(ast.typed.expr.Call) then
       local fn_type = fixup_node.fn.value:gettype()
       assert(fn_type.returntype ~= untyped)
       fixup_node.expr_type = fn_type.returntype
@@ -1537,39 +1581,39 @@ function type_check.stat_task(cx, node)
   prototype:set_constraints(cx.constraints)
   prototype:set_region_universe(cx.region_universe)
 
-  return ast.typed.StatTask {
+  return ast.typed.stat.Task {
     name = node.name,
     params = params,
     return_type = return_type,
     privileges = privileges,
     constraints = constraints,
     body = body,
-    config_options = ast.typed.StatTaskConfigOptions {
+    config_options = ast.TaskConfigOptions {
       leaf = false,
       inner = false,
       idempotent = false,
     },
     region_divergence = false,
     prototype = prototype,
-    inline = node.inline,
-    cuda = node.cuda,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.stat_fspace(cx, node)
-  return ast.typed.StatFspace {
+  return ast.typed.stat.Fspace {
     name = node.name,
     fspace = node.fspace,
+    options = node.options,
     span = node.span,
   }
 end
 
 function type_check.stat_top(cx, node)
-  if node:is(ast.specialized.StatTask) then
+  if node:is(ast.specialized.stat.Task) then
     return type_check.stat_task(cx, node)
 
-  elseif node:is(ast.specialized.StatFspace) then
+  elseif node:is(ast.specialized.stat.Fspace) then
     return type_check.stat_fspace(cx, node)
 
   else

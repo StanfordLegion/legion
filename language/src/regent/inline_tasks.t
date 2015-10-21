@@ -43,19 +43,21 @@ end
 local global_env = context:new_global_scope({})
 
 local function expr_id(sym, node)
-  return ast.typed.ExprID {
+  return ast.typed.expr.ID {
     value = sym,
     expr_type = std.rawref(&sym.type),
+    options = node.options,
     span = node.span,
   }
 end
 
-local function make_block(stats, span)
-  return ast.typed.StatBlock {
+local function make_block(stats, options, span)
+  return ast.typed.stat.Block {
     block = ast.typed.Block {
       stats = stats,
       span = span,
     },
+    options = options,
     span = span,
   }
 end
@@ -68,10 +70,11 @@ local function stat_var(lhs, rhs, node)
   symbols:insert(lhs)
   types:insert(lhs.type)
   if rhs then values:insert(rhs) end
-  return ast.typed.StatVar {
+  return ast.typed.stat.Var {
     symbols = symbols,
     types = types,
     values = values,
+    options = node.options,
     span = node.span,
   }
 end
@@ -82,41 +85,34 @@ local function stat_asgn(lh, rh, node)
 
   lhs:insert(lh)
   rhs:insert(rh)
-  return ast.typed.StatAssignment {
+  return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
+    options = node.options,
     span = node.span,
   }
 end
 
 local function count_returns(node)
   local num_returns = 0
-  local ctor = rawget(node, "node_type")
 
-  if node:is(ast.typed.StatReturn) then num_returns = 1 end
+  if node:is(ast.typed.stat.Return) then num_returns = 1 end
 
-  for _, k in ipairs(ctor.expected_fields) do
-    local field = node[k]
-    if type(field) == "table" then
-      local node_type = tostring(rawget(field, "node_type"))
-      if node_type and string.find(node_type, ".Stat") then
-        num_returns = num_returns + count_returns(field)
+  for _, field in pairs(node) do
+    if ast.is_node(field) and field:is(ast.typed.stat) then
+      num_returns = num_returns + count_returns(field)
 
-      elseif node_type and string.find(node_type, ".Block") then
-        field.stats:map(function(node)
-          num_returns = num_returns + count_returns(node)
-        end)
+    elseif ast.is_node(field) and field:is(ast.typed.Block) then
+      field.stats:map(function(node)
+        num_returns = num_returns + count_returns(node)
+      end)
 
-      elseif terralib.islist(field) then
-        field:map(function(field)
-          if type(field) == "table" then
-            local node_type = tostring(rawget(field, "node_type"))
-            if node_type and string.find(node_type, ".Stat") then
-              num_returns = num_returns + count_returns(field)
-            end
-          end
-        end)
-      end
+    elseif terralib.islist(field) then
+      field:map(function(field)
+        if ast.is_node(field) and field:is(ast.typed.stat) then
+          num_returns = num_returns + count_returns(field)
+        end
+      end)
     end
   end
 
@@ -124,40 +120,33 @@ local function count_returns(node)
 end
 
 local function find_self_recursion(prototype, node)
-  local ctor = rawget(node, "node_type")
-
-  if node:is(ast.typed.ExprCall) and node.fn.value == prototype then
+  if node:is(ast.typed.expr.Call) and node.fn.value == prototype then
     return true
   end
 
-  for _, k in ipairs(ctor.expected_fields) do
-    local field = node[k]
-    if type(field) == "table" then
-      local node_type = tostring(rawget(field, "node_type"))
-      if node_type and
-        (string.find(node_type, ".Stat") or string.find(node_type, ".Expr")) then
-        if find_self_recursion(prototype, field) then return true end
+  for _, field in pairs(node) do
+    if ast.is_node(field) and
+      (field:is(ast.typed.stat) or field:is(ast.typed.expr))
+    then
+      if find_self_recursion(prototype, field) then return true end
 
-      elseif node_type and string.find(node_type, ".Block") then
-        local recursion_found = false
-        field.stats:map(function(field)
+    elseif ast.is_node(field) and field:is(ast.typed.Block) then
+      local recursion_found = false
+      field.stats:map(function(field)
+        recursion_found = recursion_found or find_self_recursion(prototype, field)
+      end)
+      if recursion_found then return true end
+
+    elseif terralib.islist(field) then
+      local recursion_found = false
+      field:map(function(field)
+        if ast.is_node(field) and
+          (field:is(ast.typed.stat) or field:is(ast.typed.expr))
+        then
           recursion_found = recursion_found or find_self_recursion(prototype, field)
-        end)
-        if recursion_found then return true end
-
-      elseif terralib.islist(field) then
-        local recursion_found = false
-        field:map(function(field)
-          if type(field) == "table" then
-            local node_type = tostring(rawget(field, "node_type"))
-            if node_type and
-              (string.find(node_type, ".Stat") or string.find(node_type, ".Expr"))  then
-              recursion_found = recursion_found or find_self_recursion(prototype, field)
-            end
-          end
-        end)
-        if recursion_found then return true end
-      end
+        end
+      end)
+      if recursion_found then return true end
     end
   end
 
@@ -180,7 +169,7 @@ local function check_valid_inline_task(task)
   if num_returns > 1 then
     log.error(task, "inline tasks cannot have multiple return statements")
   end
-  if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.StatReturn) then
+  if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.stat.Return) then
     log.error(task, "the return statement in an inline task should be the last statement")
   end
 
@@ -190,11 +179,11 @@ local function check_valid_inline_task(task)
 end
 
 local function check_rf(node)
-  if node:is(ast.typed.ExprID) then return true
-  elseif node:is(ast.typed.ExprConstant) then return true
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  if node:is(ast.typed.expr.ID) then return true
+  elseif node:is(ast.typed.expr.Constant) then return true
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return check_rf(node.value)
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return check_rf(node.value) and check_rf(node.index)
   else
     return false
@@ -202,19 +191,19 @@ local function check_rf(node)
 end
 
 local function get_root_subregion(node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     local ty = std.as_read(node.expr_type)
     if std.is_region(ty) then return node.value
     elseif std.is_partition(ty) then return ty.parent_region_symbol
     else return nil end
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return get_root_subregion(node.value)
   end
   return nil
 end
 
 function inline_tasks.expr(cx, node)
-  if node:is(ast.typed.ExprCall) then
+  if node:is(ast.typed.expr.Call) then
     local stats = terralib.newlist()
     if type(node.fn.value) ~= "table" or not std.is_task(node.fn.value) then
       return stats, node
@@ -222,9 +211,12 @@ function inline_tasks.expr(cx, node)
 
     local task = node.fn.value
     local task_ast = task:getast()
-    if node.inline == "demand" then
+    if node.options.inline:is(ast.options.Demand) then
       check_valid_inline_task(task_ast)
-    elseif not task_ast or not task_ast.inline or node.inline == "forbid" then
+    elseif not task_ast or
+      not task_ast.options.inline:is(ast.options.Demand) or
+      node.options.inline:is(ast.options.Forbid)
+    then
       return stats, node
     end
 
@@ -270,16 +262,17 @@ function inline_tasks.expr(cx, node)
       end)
 
       if #new_local_params > 0 then
-        stats:insert(ast.typed.StatVar {
+        stats:insert(ast.typed.stat.Var {
           symbols = new_local_params,
           types = new_local_param_types,
           values = new_args,
+          options = node.options,
           span = node.span
         })
       end
       local function subst(node)
         if rawget(node, "expr_type") then
-          if node:is(ast.typed.ExprID) and expr_mapping[node.value] then
+          if node:is(ast.typed.expr.ID) and expr_mapping[node.value] then
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
             else node = node { value = tgt } end
@@ -290,13 +283,13 @@ function inline_tasks.expr(cx, node)
         end
       end
       stats:insertall(task_body.stats)
-      if stats[#stats]:is(ast.typed.StatReturn) then
+      if stats[#stats]:is(ast.typed.stat.Return) then
         local num_stats = #stats
         local return_stat = stats[num_stats]
         stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
       end
       stats = ast.map_node_postorder(subst, stats)
-      new_block = make_block(stats, node.span)
+      new_block = make_block(stats, node.options, node.span)
     end
     stats:insert(new_block)
 
@@ -305,16 +298,10 @@ function inline_tasks.expr(cx, node)
   else
     local stats = terralib.newlist()
     local fields = {}
-    local ctor = rawget(node, "node_type")
 
-    for _, k in ipairs(ctor.expected_fields) do
-      local field = node[k]
-      if type(field) ~= "table" then
-        fields[k] = field
-      else
-        local node_type = tostring(rawget(field, "node_type"))
-
-        if node_type and string.find(node_type, ".Expr") then
+    for k, field in pairs(node) do
+      if k ~= "node_type" then
+        if ast.is_node(field) and field:is(ast.typed.expr) then
           local new_stats, new_node = inline_tasks.expr(cx, field)
           stats:insertall(new_stats)
           fields[k] = new_node
@@ -325,7 +312,7 @@ function inline_tasks.expr(cx, node)
       end
     end
 
-    return stats, ctor(fields)
+    return stats, node(fields)
   end
 end
 
@@ -342,29 +329,24 @@ end
 function inline_tasks.stat(cx, node)
   local stats = terralib.newlist()
   local fields = {}
-  local ctor = rawget(node, "node_type")
 
-  for _, k in ipairs(ctor.expected_fields) do
-    local field = node[k]
-    if type(field) ~= "table" then
-      fields[k] = field
-    else
-      local node_type = tostring(rawget(field, "node_type"))
-      if node_type and string.find(node_type, ".Stat") then
+  for k, field in pairs(node) do
+    if k ~= "node_type" then
+      if ast.is_node(field) and field:is(ast.typed.stat) then
         local new_stats, new_node = inline_tasks.stat(cx, field)
         stats:insertall(new_stats)
         fields[k] = field
 
-      elseif node_type and string.find(node_type, ".Expr") then
+      elseif ast.is_node(field) and field:is(ast.typed.expr) then
         local new_stats, new_node = inline_tasks.expr(cx, field)
         stats:insertall(new_stats)
         fields[k] = new_node
 
-      elseif node_type and string.find(node_type, ".Block") then
+      elseif ast.is_node(field) and field:is(ast.typed.Block) then
         local new_node = inline_tasks.block(cx, field)
         fields[k] = new_node
 
-      elseif node_type and string.find(node_type, ".Span") then
+      elseif ast.is_node(field) and field:is(ast.location.Span) then
         fields[k] = field
 
       elseif terralib.islist(field) then
@@ -372,13 +354,12 @@ function inline_tasks.stat(cx, node)
           if type(field) ~= "table" then
             return field
           else
-            local node_type = tostring(rawget(field, "node_type"))
-            if node_type and string.find(node_type, ".Stat") then
+            if ast.is_node(field) and field:is(ast.typed.stat) then
               local new_stats, new_node = inline_tasks.stat(cx, field)
               stats:insertall(new_stats)
               return new_node
 
-            elseif node_type and string.find(node_type, ".Expr") then
+            elseif ast.is_node(field) and field:is(ast.typed.Expr) then
               local new_stats, new_node = inline_tasks.expr(cx, field)
               stats:insertall(new_stats)
               return new_node
@@ -395,7 +376,7 @@ function inline_tasks.stat(cx, node)
     end
   end
 
-  local node = ctor(fields)
+  node = node(fields)
   return stats, node
 end
 
@@ -406,13 +387,15 @@ function inline_tasks.stat_task(cx, node)
 end
 
 function inline_tasks.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
-    if node.inline then check_valid_inline_task(node) end
+  if node:is(ast.typed.stat.Task) then
+    if node.options.inline:is(ast.options.Demand) then
+      check_valid_inline_task(node)
+    end
     local new_node = inline_tasks.stat_task(cx, node)
     new_node.prototype:setast(new_node)
     return new_node
 
-  elseif node:is(ast.typed.StatFspace) then
+  elseif node:is(ast.typed.stat.Fspace) then
     return node
 
   else
