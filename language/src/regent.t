@@ -12,54 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Language Entry Point
+-- Regent Language Entry Point
 
-local ast = require("regent/ast")
 local builtins = require("regent/builtins")
-local codegen = require("regent/codegen")
-local optimize_config_options = require("regent/optimize_config_options")
-local optimize_divergence = require("regent/optimize_divergence")
-local optimize_futures = require("regent/optimize_futures")
-local optimize_inlines = require("regent/optimize_inlines")
-local optimize_loops = require("regent/optimize_loops")
-local parser = require("regent/parser")
-local specialize = require("regent/specialize")
+local passes = require("regent/passes")
 local std = require("regent/std")
-local type_check = require("regent/type_check")
-local vectorize_loops = require("regent/vectorize_loops")
-local inline_tasks = require("regent/inline_tasks")
 
 -- Add Language Builtins to Global Environment
 
-for k, v in pairs(builtins) do
+local function add_builtin(k, v)
   assert(rawget(_G, k) == nil, "Builtin " .. tostring(k) .. " already defined")
-  _G[k] = v
+  rawset(_G, k, v)
 end
 
--- Add Interface to Helper Functions
-
-_G["regentlib"] = std
-
--- Compiler
-
-function compile(lex)
-  local node = parser:parse(lex)
-  local function ctor(environment_function)
-    local env = environment_function()
-    local ast = specialize.entry(env, node)
-    ast = type_check.entry(ast)
-    if std.config["task-inlines"] then ast = inline_tasks.entry(ast) end
-    if std.config["index-launches"] then ast = optimize_loops.entry(ast) end
-    if std.config["futures"] then ast = optimize_futures.entry(ast) end
-    if std.config["inlines"] then ast = optimize_inlines.entry(ast) end
-    if std.config["leaf"] then ast = optimize_config_options.entry(ast) end
-    if std.config["no-dynamic-branches"] then ast = optimize_divergence.entry(ast) end
-    if std.config["vectorize"] then ast = vectorize_loops.entry(ast) end
-    ast = codegen.entry(ast)
-    return ast
-  end
-  return ctor, {node.name}
+for k, v in pairs(builtins) do
+  add_builtin(k, v)
 end
+add_builtin("regentlib", std)
 
 -- Language Definition
 
@@ -118,11 +87,11 @@ local language = {
 -- end
 
 function language:statement(lex)
-  return compile(lex)
+  return passes.compile(lex)
 end
 
 function language:localstatement(lex)
-  return compile(lex)
+  return passes.compile(lex)
 end
 
 return language
