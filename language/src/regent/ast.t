@@ -15,7 +15,6 @@
 -- Legion AST
 
 local ast_factory = {}
-ast_factory.__index = ast_factory
 
 local function make_factory(name)
   return setmetatable(
@@ -107,7 +106,14 @@ end
 -- Constructors
 
 local ast_ctor = {}
-ast_ctor.__index = ast_ctor
+
+function ast_ctor:__index(field)
+  local value = ast_ctor[field]
+  if value ~= nil then
+    return value
+  end
+  error(tostring(self) .. " has no field '" .. field .. "'", 2)
+end
 
 function ast_ctor:__call(node)
   assert(type(node) == "table", tostring(self) .. " expected table")
@@ -146,6 +152,14 @@ local function merge_fields(...)
     end
   end
   return result
+end
+
+function ast_factory:__index(field)
+  local value = ast_factory[field]
+  if value ~= nil then
+    return value
+  end
+  error(tostring(self) .. " has no field '" .. field .. "'", 2)
 end
 
 function ast_factory:inner(ctor_name, expected_fields)

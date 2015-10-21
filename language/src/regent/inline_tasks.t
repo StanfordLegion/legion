@@ -359,7 +359,7 @@ function inline_tasks.stat(cx, node)
               stats:insertall(new_stats)
               return new_node
 
-            elseif ast.is_node(field) and field:is(ast.typed.Expr) then
+            elseif ast.is_node(field) and field:is(ast.typed.expr) then
               local new_stats, new_node = inline_tasks.expr(cx, field)
               stats:insertall(new_stats)
               return new_node
