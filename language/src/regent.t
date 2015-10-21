@@ -76,17 +76,18 @@ local language = {
   },
   keywords = {
     "__context",
-    "__forbid",
+    "__cuda",
     "__demand",
     "__fields",
+    "__forbid",
+    "__inline",
     "__parallel",
-    "__vectorize",
     "__physical",
     "__raw",
     "__runtime",
-    "__inline",
-    "__cuda",
+    "__spmd",
     "__unroll",
+    "__vectorize",
     "aliased", -- reserved for future use
     "cross_product",
     "disjoint", -- reserved for future use
