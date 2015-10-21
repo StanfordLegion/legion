@@ -87,6 +87,14 @@ namespace Realm {
       get_runtime()->get_memory_impl(i_impl->memory)->destroy_instance(*this, true);
     }
 
+    void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
+				 Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: actually call destructor
+      assert(destroyed_fields.empty());
+      destroy(wait_on);
+    }
+
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
 
     // a generic accessor just holds a pointer to the impl and passes all 

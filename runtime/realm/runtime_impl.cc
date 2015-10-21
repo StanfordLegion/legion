@@ -128,6 +128,17 @@ namespace Realm {
       return true;
     }
 
+    bool Runtime::register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez)
+    {
+      assert(impl != 0);
+
+      if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
+	return false;
+
+      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez;
+      return true;
+    }
+
     void Runtime::run(Processor::TaskFuncID task_id /*= 0*/,
 		      RunStyle style /*= ONE_TASK_ONLY*/,
 		      const void *args /*= 0*/, size_t arglen /*= 0*/,
