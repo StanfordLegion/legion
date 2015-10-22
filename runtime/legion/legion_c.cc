@@ -19,6 +19,15 @@
 #include "utilities.h"
 #include "default_mapper.h"
 
+#ifndef USE_LEGION_PARTAPI_SHIM
+#ifdef SHARED_LOWLEVEL
+#define USE_LEGION_PARTAPI_SHIM 0
+#else
+// General LLR can't handle new partion API yet. Use a shim instead.
+#define USE_LEGION_PARTAPI_SHIM 1
+#endif
+#endif
+
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::HighLevel::MappingUtilities;
@@ -451,6 +460,101 @@ legion_index_partition_create_domain_coloring(
   return CObjectWrapper::wrap(ip);
 }
 
+// Shim for Legion Dependent Partition API
+
+#if USE_LEGION_PARTAPI_SHIM
+class PartitionByFieldShim {
+public:
+  static TaskID register_task();
+  static IndexPartition launch(HighLevelRuntime *runtime,
+                               Context ctx,
+                               LogicalRegion handle,
+                               LogicalRegion parent,
+                               FieldID fid,
+                               const Domain &color_space,
+                               int color = AUTO_GENERATE_ID,
+                               bool allocable = false);
+  static IndexPartition task(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, HighLevelRuntime *runtime);
+private:
+  static const TaskID task_id = 539418; // a "unique" number
+  struct Args {
+    Domain color_space;
+    int color;
+    bool allocable;
+  };
+};
+
+Processor::TaskFuncID
+PartitionByFieldShim::register_task()
+{
+  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+    task_id, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionByFieldShim::task");
+}
+
+IndexPartition
+PartitionByFieldShim::launch(HighLevelRuntime *runtime,
+                             Context ctx,
+                             LogicalRegion handle,
+                             LogicalRegion parent,
+                             FieldID fid,
+                             const Domain &color_space,
+                             int color,
+                             bool allocable)
+{
+  Args args;
+  args.color_space = color_space;
+  args.color = color;
+  args.allocable = allocable;
+  TaskArgument targs(&args, sizeof(args));
+  TaskLauncher task(task_id, targs);
+  task.add_region_requirement(
+    RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent)
+    .add_field(fid));
+  Future f = runtime->execute_task(ctx, task);
+  return f.get_result<IndexPartition>();
+}
+
+IndexPartition
+PartitionByFieldShim::task(const Task *task,
+                           const std::vector<PhysicalRegion> &regions,
+                           Context ctx, HighLevelRuntime *runtime)
+{
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+
+  Coloring coloring;
+  assert(args.color_space.get_dim() == 1);
+  for(GenericPointInRectIterator<1> it(args.color_space.get_rect<1>());
+      it; ++it) {
+    coloring[it.p[0]];
+  }
+
+  Accessor::RegionAccessor<SOA, Color> accessor =
+    regions[0].get_accessor().typeify<Color>().convert<SOA>();
+  for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
+       it.has_next();) {
+    ptr_t p = it.next();
+    Color c = accessor.read(p);
+    if (coloring.count(c)) {
+      coloring[c].points.insert(p);
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, regions[0].get_logical_region().get_index_space(),
+      coloring, true, args.color);
+  return ip;
+}
+
+static TaskID force_shim_static_initialize =
+  PartitionByFieldShim::register_task();
+#endif
+
 legion_index_partition_t
 legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_context_t ctx_,
@@ -468,8 +572,14 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
   Domain color_space = CObjectWrapper::unwrap(color_space_);
 
   IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    PartitionByFieldShim::launch(runtime, ctx, handle, parent, fid, color_space,
+                                 color, allocable);
+#else
     runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
                                        color, allocable);
+#endif
+
   return CObjectWrapper::wrap(ip);
 }
 
