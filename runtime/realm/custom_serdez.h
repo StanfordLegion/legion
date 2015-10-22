@@ -23,6 +23,7 @@
 
 #include "serialize.h"
 
+#include <stdint.h>
 #include <sys/types.h>
 
 namespace Realm {
