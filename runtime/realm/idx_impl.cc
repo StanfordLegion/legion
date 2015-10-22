@@ -579,10 +579,10 @@ namespace Realm {
     }
 
     ElementMask::ElementMask(const ElementMask &copy_from, 
-			     int _num_elements = -1, int _first_element /*= -1*/)
+			     int _num_elements, int _first_element /*= -1*/)
     {
       first_element = (_first_element >= 0) ? _first_element : copy_from.first_element;
-      num_elements = num_elements;
+      num_elements = _num_elements;
       first_enabled_elmt = copy_from.first_enabled_elmt;
       last_enabled_elmt = copy_from.last_enabled_elmt;
       // if we have bounds, make sure they're trimmed to what we actually cover
