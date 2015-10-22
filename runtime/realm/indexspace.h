@@ -1210,6 +1210,14 @@ namespace Realm {
     // true if there is no sparsity map (i.e. the bounds fully define the domain)
     bool dense(void) const;
 
+    // queries for individual points or rectangles
+    bool contains(const ZPoint<N,T>& p) const;
+    bool contains_all(const ZRect<N,T>& r) const;
+    bool contains_any(const ZRect<N,T>& r) const;
+
+    // actual number of points in index space (may be less than volume of bounding box)
+    size_t volume(void) const;
+
     // as an alternative to IndexSpaceIterator's, this will internally iterate over rectangles
     //  and call your callable/lambda for each subrectangle
     template <typename LAMBDA>
@@ -1234,7 +1242,20 @@ namespace Realm {
 				 const ProfilingRequestSet &reqs,
 				 Event wait_on = Event::NO_EVENT) const;
 
+    Event create_weighted_subspaces(size_t count, size_t granularity,
+				    const std::vector<int>& weights,
+				    std::vector<ZIndexSpace<N,T> >& subspaces,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
     // field-based:
+
+    template <typename FT>
+    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+				   FT color,
+				   ZIndexSpace<N,T>& subspace,
+				   const ProfilingRequestSet &reqs,
+				   Event wait_on = Event::NO_EVENT) const;
 
     template <typename FT>
     Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
@@ -1246,6 +1267,14 @@ namespace Realm {
     // this version allows the "function" described by the field to be composed with a
     //  second (computable) function before matching the colors - the second function
     //  is provided via a CodeDescriptor object and should have the type FT->FT2
+    template <typename FT, typename FT2>
+    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+				   const CodeDescriptor& codedesc,
+				   FT2 color,
+				   ZIndexSpace<N,T>& subspace,
+				   const ProfilingRequestSet &reqs,
+				   Event wait_on = Event::NO_EVENT) const;
+
     template <typename FT, typename FT2>
     Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
 				    const CodeDescriptor& codedesc,
@@ -1260,6 +1289,13 @@ namespace Realm {
     //  for the finish event), the following invariant holds:
     //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
     template <int N2, typename T2>
+    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+				   const ZIndexSpace<N2,T2>& source,
+				   ZIndexSpace<N,T>& image,
+				   const ProfilingRequestSet &reqs,
+				   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
     Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 				    const std::vector<ZIndexSpace<N2,T2> >& sources,
 				    std::vector<ZIndexSpace<N,T> >& images,
@@ -1271,6 +1307,14 @@ namespace Realm {
     //  and is used to compute the preimage of each target - i.e. upon return (and waiting
     //  for the finish event), the following invariant holds:
     //    preimages[i] = { x | field_data(x) in targets[i] }
+    template <int N2, typename T2>
+    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+				                        ZPoint<N2,T2> > >& field_data,
+				      const ZIndexSpace<N2,T2>& target,
+				      ZIndexSpace<N,T>& preimage,
+				      const ProfilingRequestSet &reqs,
+				      Event wait_on = Event::NO_EVENT) const;
+
     template <int N2, typename T2>
     Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
 				                         ZPoint<N2,T2> > >& field_data,

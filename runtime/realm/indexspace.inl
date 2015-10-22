@@ -305,6 +305,63 @@ namespace Realm {
     return !sparsity.exists();
   }
 
+  // queries for individual points or rectangles
+  template <int N, typename T>
+  inline bool ZIndexSpace<N,T>::contains(const ZPoint<N,T>& p) const
+  {
+    // test on bounding box first
+    if(!bounds.contains(p))
+      return false;
+
+    if(!dense()) {
+      // test against sparsity map too
+      assert(0);
+    }
+
+    return true;
+  }
+
+  template <int N, typename T>
+  inline bool ZIndexSpace<N,T>::contains_all(const ZRect<N,T>& r) const
+  {
+    // test on bounding box first
+    if(!bounds.contains(r))
+      return false;
+
+    if(!dense()) {
+      // test against sparsity map too
+      assert(0);
+    }
+
+    return true;
+  }
+
+  template <int N, typename T>
+  inline bool ZIndexSpace<N,T>::contains_any(const ZRect<N,T>& r) const
+  {
+    // test on bounding box first
+    if(!bounds.overlaps(r))
+      return false;
+
+    if(!dense()) {
+      // test against sparsity map too
+      assert(0);
+    }
+
+    return true;
+  }
+
+  // actual number of points in index space (may be less than volume of bounding box)
+  template <int N, typename T>
+  inline size_t ZIndexSpace<N,T>::volume(void) const
+  {
+    if(dense())
+      return bounds.volume();
+
+    assert(0);
+    return 0;
+  }
+
   template <int N, typename T>
   inline Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
 							std::vector<ZIndexSpace<N,T> >& subspaces,
@@ -339,6 +396,65 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  inline Event ZIndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
+							   const std::vector<int>& weights,
+							   std::vector<ZIndexSpace<N,T> >& subspaces,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+    //assert(reqs.empty());
+
+    // determine the total weight
+    size_t total_weight = 0;
+    assert(weights.size() == count);
+    for(size_t i = 0; i < count; i++)
+      total_weight += weights[i];
+
+    // dense case is easy(er)
+    if(dense()) {
+      // always split in x dimension for now
+      assert(count >= 1);
+      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, 0);
+      subspaces.reserve(count);
+      T px = bounds.lo.x;
+      size_t cum_weight = 0;
+      for(size_t i = 0; i < count; i++) {
+	ZIndexSpace<N,T> ss(*this);
+	cum_weight += weights[i];
+	T nx = bounds.lo.x + (total_x * cum_weight / total_weight);
+	ss.bounds.lo.x = px;
+	ss.bounds.hi.x = nx - 1;
+	subspaces.push_back(ss);
+	px = nx;
+      }
+      return Event::NO_EVENT;
+    }
+
+    // TODO: sparse case
+    assert(0);
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  template <typename FT>
+  inline Event ZIndexSpace<N,T>::create_subspace_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+							  FT color,
+							  ZIndexSpace<N,T>& subspace,
+							  const ProfilingRequestSet &reqs,
+							  Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    subspace = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
   template <typename FT>
   inline Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
 							   const std::vector<FT>& colors,
@@ -360,6 +476,23 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
+  inline Event ZIndexSpace<N,T>::create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+							  const ZIndexSpace<N2,T2>& source,
+							  ZIndexSpace<N,T>& image,
+							  const ProfilingRequestSet &reqs,
+							  Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    image = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
   inline Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 							   const std::vector<ZIndexSpace<N2,T2> >& sources,
 							   std::vector<ZIndexSpace<N,T> >& images,
@@ -374,6 +507,23 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++)
       images[i] = *this;
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  Event ZIndexSpace<N,T>::create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
+						      const ZIndexSpace<N2,T2>& target,
+						      ZIndexSpace<N,T>& preimage,
+						      const ProfilingRequestSet &reqs,
+						      Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+
+    // just give copies of ourselves for now
+    preimage = *this;
 
     return Event::NO_EVENT;
   }
@@ -616,7 +766,7 @@ namespace Realm {
     ptrdiff_t element_stride;
     inst.get_strided_access_parameters(0, alis.volume, field_offset, sizeof(FT), base, element_stride);
 
-    base += element_stride * alis.offset;
+    base -= element_stride * alis.offset;
     strides = element_stride * alis.strides;
   }
 
