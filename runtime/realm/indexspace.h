@@ -37,11 +37,13 @@ namespace Realm {
     public:
       ElementMask(void);
       explicit ElementMask(int num_elements, int first_element = 0);
-      ElementMask(const ElementMask &copy_from, int num_elements = -1, int first_element = 0);
+      explicit ElementMask(const ElementMask &copy_from, int num_elements, int first_element = -1);
+      ElementMask(const ElementMask &copy_from, bool trim = false);
       ~ElementMask(void);
 
       void init(int _first_element, int _num_elements, Memory _memory, off_t _offset);
 
+      int get_first_element(void) const { return first_element; }
       int get_num_elmts(void) const { return num_elements; }
 
       void enable(int start, int count = 1);
@@ -118,7 +120,7 @@ namespace Realm {
       int num_elements;
       Memory memory;
       off_t offset;
-      void *raw_data;
+      char *raw_data;
       int first_enabled_elmt, last_enabled_elmt;
     };
 

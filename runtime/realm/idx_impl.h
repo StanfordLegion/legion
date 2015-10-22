@@ -30,12 +30,11 @@ namespace Realm {
     struct ElementMaskImpl {
       //int count, offset;
       typedef unsigned long long uint64;
-      uint64_t dummy;
       uint64_t bits[0];
 
       static size_t bytes_needed(off_t offset, off_t count)
       {
-	size_t need = sizeof(ElementMaskImpl) + (((count + 63) >> 6) << 3);
+	size_t need = (((count + 63) >> 6) << 3);
 	return need;
       }
 	
