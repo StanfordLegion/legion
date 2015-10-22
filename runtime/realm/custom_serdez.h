@@ -23,7 +23,6 @@
 
 #include "serialize.h"
 
-#include <stdint.h>
 #include <sys/types.h>
 
 namespace Realm {
@@ -85,17 +84,17 @@ namespace Realm {
 
     static size_t serialize(const FIELD_TYPE& val, void *buffer)
     {
-      Serialization::FixedBufferSerializer fbs(buffer, SIZE_MAX);
+      Serialization::FixedBufferSerializer fbs(buffer, ((size_t)-1));
       fbs << *val;
-      return SIZE_MAX - fbs.bytes_left();  // because we didn't really tell it how many bytes we had
+      return ((size_t)-1) - fbs.bytes_left();  // because we didn't really tell it how many bytes we had
     }
 
     static size_t deserialize(FIELD_TYPE& val, const void *buffer)
     {
       val = new T;  // assumes existence of default constructor
-      Serialization::FixedBufferDeserializer fbd(buffer, SIZE_MAX);
+      Serialization::FixedBufferDeserializer fbd(buffer, ((size_t)-1));
       fbd >> (*val);
-      return SIZE_MAX - fbd.bytes_left();
+      return ((size_t)-1) - fbd.bytes_left();
     }
 
     static void destroy(FIELD_TYPE& val)
