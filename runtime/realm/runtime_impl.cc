@@ -51,7 +51,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
-  extern Logger log_task; // defined in proc_impl.cc
+  extern Logger log_proc; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1067,13 +1067,13 @@ namespace Realm {
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
       if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
-	log_task.info("spawning processor init task on local cpus");
+	log_proc.info("spawning processor init task on local cpus");
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
       } else {
-	log_task.info("no processor init task");
+	log_proc.info("no processor init task");
       }
 
       if(task_id != 0 && 
@@ -1206,7 +1206,7 @@ namespace Realm {
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
       if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
-	log_task.info("spawning processor shutdown task on local cpus");
+	log_proc.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 
@@ -1214,7 +1214,7 @@ namespace Realm {
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
       } else {
-	log_task.info("no processor shutdown task");
+	log_proc.info("no processor shutdown task");
       }
 
       {
