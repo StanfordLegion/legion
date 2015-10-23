@@ -1451,6 +1451,16 @@ function type_check.stat_reduce(cx, node)
   local rhs_types = rhs:map(
     function(rh) return std.check_read(cx, rh) end)
 
+  std.zip(lhs_types, rhs_types):map(
+    function(types)
+      local lhs_type, rhs_type = unpack(types)
+      local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
+      if not std.validate_explicit_cast(expr_type, lhs_type) then
+        log.error(node, "type mismatch between " .. tostring(expr_type) .. " and " .. tostring(lhs_type))
+      end
+    end)
+
+
   return ast.typed.stat.Reduce {
     op = node.op,
     lhs = lhs,
