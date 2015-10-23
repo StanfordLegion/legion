@@ -180,13 +180,13 @@ namespace Realm {
       switch (file_mode) {
         case LEGION_FILE_READ_ONLY:
         {
-          fd = open(file_name, O_RDONLY);
+          fd = open(file_name, O_RDONLY | O_DIRECT, 00777);
           assert(fd != -1);
           break;
         }
         case LEGION_FILE_READ_WRITE:
         {
-          fd = open(file_name, O_RDWR);
+          fd = open(file_name, O_RDWR, 00777);
           assert(fd != -1);
           break;
         }

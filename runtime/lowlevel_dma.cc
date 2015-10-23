@@ -2165,14 +2165,14 @@ namespace LegionRuntime {
         // can we perform transfer between disk and cpu memory
         if (((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
             (dst_kind == MemoryImpl::MKIND_DISK)) {
-          printf("Create DiskfromCPUMemPairCopier\n");
+          // printf("Create DiskfromCPUMemPairCopier\n");
           int fd = ((DiskMemory *)dst_impl)->fd;
           return new DiskfromCPUMemPairCopier(src_mem, fd);
         }
 
         if ((src_kind == MemoryImpl::MKIND_DISK) &&
             ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-          printf("Create DisktoCPUMemPairCopier\n");
+          // printf("Create DisktoCPUMemPairCopier\n");
           int fd = ((DiskMemory *)src_impl)->fd;
           return new DisktoCPUMemPairCopier(fd, dst_mem);
         }
