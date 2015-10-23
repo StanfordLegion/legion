@@ -1832,6 +1832,72 @@ legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher_,
 }
 
 // -----------------------------------------------------------------------
+// Must Epoch Operations
+// -----------------------------------------------------------------------
+
+legion_must_epoch_launcher_t
+legion_must_epoch_launcher_create(
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  MustEpochLauncher *launcher = new MustEpochLauncher(id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_must_epoch_launcher_destroy(legion_must_epoch_launcher_t handle_)
+{
+  MustEpochLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_future_map_t
+legion_must_epoch_launcher_execute(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_must_epoch_launcher_t launcher_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  FutureMap f = runtime->execute_must_epoch(ctx, *launcher);
+  return CObjectWrapper::wrap(new FutureMap(f));
+}
+
+void
+legion_must_epoch_launcher_add_single_task(
+  legion_must_epoch_launcher_t launcher_,
+  legion_domain_point_t point_,
+  legion_task_launcher_t handle_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  {
+    TaskLauncher *handle = CObjectWrapper::unwrap(handle_);
+    launcher->add_single_task(point, *handle);
+  }
+
+  // Destroy handle.
+  legion_task_launcher_destroy(handle_);
+}
+
+void
+legion_must_epoch_launcher_add_index_task(
+  legion_must_epoch_launcher_t launcher_,
+  legion_index_launcher_t handle_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  {
+    IndexLauncher *handle = CObjectWrapper::unwrap(handle_);
+    launcher->add_index_task(*handle);
+  }
+
+  // Destroy handle.
+  legion_index_launcher_destroy(handle_);
+}
+
+// -----------------------------------------------------------------------
 // Tracing Operations
 // -----------------------------------------------------------------------
 

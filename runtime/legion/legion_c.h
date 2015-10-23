@@ -57,6 +57,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
   NEW_OPAQUE_TYPE(legion_copy_launcher_t);
+  NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_generic_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_t);
@@ -1626,8 +1627,6 @@ extern "C" {
   legion_copy_launcher_destroy(legion_copy_launcher_t handle);
 
   /**
-   * @return Caller takes ownership of return value.
-   *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::issue_copy_operation()
    */
   void
@@ -1678,6 +1677,59 @@ extern "C" {
                                      unsigned idx,
                                      legion_field_id_t fid,
                                      bool inst /* = true */);
+
+  // -----------------------------------------------------------------------
+  // Must Epoch Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::MustEpochLauncher::MustEpochLauncher()
+   */
+  legion_must_epoch_launcher_t
+  legion_must_epoch_launcher_create(
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::MustEpochLauncher::~MustEpochLauncher()
+   */
+  void
+  legion_must_epoch_launcher_destroy(legion_must_epoch_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::execute_must_epoch()
+   */
+  legion_future_map_t
+  legion_must_epoch_launcher_execute(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_must_epoch_launcher_t launcher);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::Must_EpochLauncher::add_single_task()
+   */
+  void
+  legion_must_epoch_launcher_add_single_task(
+    legion_must_epoch_launcher_t launcher,
+    legion_domain_point_t point,
+    legion_task_launcher_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::Must_EpochLauncher::add_index_task()
+   */
+  void
+  legion_must_epoch_launcher_add_index_task(
+    legion_must_epoch_launcher_t launcher,
+    legion_index_launcher_t handle);
 
   // -----------------------------------------------------------------------
   // Fence Operations
