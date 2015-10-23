@@ -21,7 +21,9 @@ local function make_factory(name)
     {
       parent = false,
       name = name,
-      expected_fields = false },
+      expected_fields = false,
+      print_collapsed = false,
+    },
     ast_factory)
 end
 
@@ -51,22 +53,33 @@ function ast.is_node(node)
 end
 
 local function ast_node_tostring(node, indent)
+  local newline = "\n"
+  local spaces = string.rep("  ", indent)
+  local spaces1 = string.rep("  ", indent + 1)
   if ast.is_node(node) then
-    local str = tostring(node.node_type) .. "(\n"
+    local collapsed = node.node_type.print_collapsed
+    if collapsed then
+      newline = ""
+      spaces = ""
+      spaces1 = ""
+    end
+    local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
       if k ~= "node_type" then
-        str = str .. string.rep("  ", indent + 1) .. k .. " = " ..
-          ast_node_tostring(v, indent + 1) .. ",\n"
+        str = str .. spaces1 .. k .. " = " ..
+          ast_node_tostring(v, indent + 1) .. "," .. newline
       end
     end
-    return str .. string.rep("  ", indent) .. ")"
+    return str .. spaces .. ")"
   elseif terralib.islist(node) then
-    local str = "{\n"
+    local str = "{" .. newline
     for i, v in ipairs(node) do
-      str = str .. string.rep("  ", indent + 1) ..
-        ast_node_tostring(v, indent + 1) .. ",\n"
+      str = str .. spaces1 ..
+        ast_node_tostring(v, indent + 1) .. "," .. newline
     end
-    return str .. string.rep("  ", indent) .. "}"
+    return str .. spaces .. "}"
+  elseif type(node) == "string" then
+    return string.format("%q", node)
   else
     return tostring(node)
   end
@@ -162,12 +175,13 @@ function ast_factory:__index(field)
   error(tostring(self) .. " has no field '" .. field .. "'", 2)
 end
 
-function ast_factory:inner(ctor_name, expected_fields)
+function ast_factory:inner(ctor_name, expected_fields, print_collapsed)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
     }, ast_factory)
 
   assert(rawget(self, ctor_name) == nil,
@@ -176,12 +190,13 @@ function ast_factory:inner(ctor_name, expected_fields)
   return ctor
 end
 
-function ast_factory:leaf(ctor_name, expected_fields)
+function ast_factory:leaf(ctor_name, expected_fields, print_collapsed)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
     }, ast_ctor)
 
   assert(rawget(self, ctor_name) == nil,
@@ -248,7 +263,7 @@ end
 -- Location
 
 ast:inner("location")
-ast.location:leaf("Position", {"line", "offset"})
+ast.location:leaf("Position", {"line", "offset"}, true)
 ast.location:leaf("Span", {"source", "start", "stop"})
 
 -- Helpers for extracting location from token stream.
@@ -296,12 +311,12 @@ end
 ast:inner("options")
 
 -- Options: Dispositions
-ast.options:leaf("Allow", {"value"})
-ast.options:leaf("Demand", {"value"})
-ast.options:leaf("Forbid", {"value"})
+ast.options:leaf("Allow", {"value"}, true)
+ast.options:leaf("Demand", {"value"}, true)
+ast.options:leaf("Forbid", {"value"}, true)
 
 -- Options: Values
-ast.options:leaf("Unroll", {"value"})
+ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
 ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"})
