@@ -907,6 +907,10 @@ function vectorize_loops.stat_repeat(node)
   return node { block = vectorize_loops.block(node.block) }
 end
 
+function vectorize_loops.stat_must_epoch(node)
+  return node { block = vectorize_loops.block(node.block) }
+end
+
 function vectorize_loops.stat_block(node)
   return node { block = vectorize_loops.block(node.block) }
 end
@@ -930,6 +934,9 @@ function vectorize_loops.stat(node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return vectorize_loops.stat_repeat(node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return vectorize_loops.stat_must_epoch(node)
 
   elseif node:is(ast.typed.stat.Block) then
     return vectorize_loops.stat_block(node)

@@ -258,6 +258,10 @@ function analyze_region_divergence.stat_repeat(cx, node)
   analyze_region_divergence.expr(cx, node.until_cond)
 end
 
+function analyze_region_divergence.stat_must_epoch(cx, node)
+  analyze_region_divergence.block(cx, node.block)
+end
+
 function analyze_region_divergence.stat_block(cx, node)
   analyze_region_divergence.block(cx, node.block)
 end
@@ -312,6 +316,9 @@ function analyze_region_divergence.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     analyze_region_divergence.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    analyze_region_divergence.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     analyze_region_divergence.stat_block(cx, node)

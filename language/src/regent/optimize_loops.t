@@ -655,6 +655,10 @@ function optimize_loops.stat_repeat(cx, node)
   return node { block = optimize_loops.block(cx, node.block) }
 end
 
+function optimize_loops.stat_must_epoch(cx, node)
+  return node { block = optimize_loops.block(cx, node.block) }
+end
+
 function optimize_loops.stat_block(cx, node)
   return node { block = optimize_loops.block(cx, node.block) }
 end
@@ -677,6 +681,9 @@ function optimize_loops.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return optimize_loops.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_loops.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return optimize_loops.stat_block(cx, node)

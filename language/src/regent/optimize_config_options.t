@@ -259,6 +259,12 @@ function analyze_leaf.stat_repeat(cx, node)
     analyze_leaf.expr(cx, node.until_cond)
 end
 
+function analyze_leaf.stat_must_epoch(cx, node)
+  return
+    analyze_leaf.block(cx, node.block) and
+    analyze_leaf.expr(cx, node.until_cond)
+end
+
 function analyze_leaf.stat_block(cx, node)
   return analyze_leaf.block(cx, node.block)
 end
@@ -323,6 +329,9 @@ function analyze_leaf.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return analyze_leaf.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_leaf.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return analyze_leaf.stat_block(cx, node)
@@ -599,6 +608,10 @@ function analyze_inner.stat_repeat(cx, node)
     analyze_inner.expr(cx, node.until_cond)
 end
 
+function analyze_inner.stat_must_epoch(cx, node)
+  return analyze_inner.block(cx, node.block)
+end
+
 function analyze_inner.stat_block(cx, node)
   return analyze_inner.block(cx, node.block)
 end
@@ -666,6 +679,9 @@ function analyze_inner.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return analyze_inner.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_inner.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return analyze_inner.stat_block(cx, node)

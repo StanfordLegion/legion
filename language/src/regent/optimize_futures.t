@@ -200,6 +200,10 @@ function analyze_var_flow.stat_repeat(cx, node)
   analyze_var_flow.block(cx, node.block)
 end
 
+function analyze_var_flow.stat_must_epoch(cx, node)
+  analyze_var_flow.block(cx, node.block)
+end
+
 function analyze_var_flow.stat_block(cx, node)
   analyze_var_flow.block(cx, node.block)
 end
@@ -284,6 +288,9 @@ function analyze_var_flow.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return analyze_var_flow.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_var_flow.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return analyze_var_flow.stat_block(cx, node)
@@ -714,6 +721,12 @@ function optimize_futures.stat_repeat(cx, node)
   }
 end
 
+function optimize_futures.stat_must_epoch(cx, node)
+  return node {
+    block = optimize_futures.block(cx, node.block),
+  }
+end
+
 function optimize_futures.stat_block(cx, node)
   return node {
     block = optimize_futures.block(cx, node.block),
@@ -847,6 +860,9 @@ function optimize_futures.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return optimize_futures.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_futures.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return optimize_futures.stat_block(cx, node)

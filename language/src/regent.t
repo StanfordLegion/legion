@@ -66,6 +66,7 @@ local language = {
     "ispace",
     "max",
     "min",
+    "must_epoch",
     "new",
     "null",
     "partition",

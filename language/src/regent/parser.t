@@ -719,6 +719,18 @@ function parser.stat_repeat(p, options)
   }
 end
 
+function parser.stat_must_epoch(p, options)
+  local start = ast.save(p)
+  p:expect("must_epoch")
+  local block = p:block()
+  p:expect("end")
+  return ast.unspecialized.stat.MustEpoch {
+    block = block,
+    options = options,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_block(p, options)
   local start = ast.save(p)
   p:expect("do")
@@ -904,6 +916,9 @@ function parser.stat(p)
 
   elseif p:matches("repeat") then
     return p:stat_repeat(options)
+
+  elseif p:matches("must_epoch") then
+    return p:stat_must_epoch(options)
 
   elseif p:matches("do") then
     return p:stat_block(options)

@@ -838,6 +838,15 @@ function specialize.stat_repeat(cx, node)
   }
 end
 
+function specialize.stat_must_epoch(cx, node)
+  local cx = cx:new_local_scope()
+  return ast.specialized.stat.MustEpoch {
+    block = specialize.block(cx, node.block),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return ast.specialized.stat.Block {
@@ -980,6 +989,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Repeat) then
     return specialize.stat_repeat(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.MustEpoch) then
+    return specialize.stat_must_epoch(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Block) then
     return specialize.stat_block(cx, node)

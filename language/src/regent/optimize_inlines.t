@@ -528,6 +528,14 @@ function optimize_inlines.stat_repeat(cx, node)
     loop_usage, loop_usage)
 end
 
+function optimize_inlines.stat_must_epoch(cx, node)
+  local block, block_in_usage, block_out_usage = unpack(
+    optimize_inlines.block(cx, node.block))
+  return annotate(
+    node { block = block },
+    block_in_usage, block_out_usage)
+end
+
 function optimize_inlines.stat_block(cx, node)
   local block, block_in_usage, block_out_usage = unpack(
     optimize_inlines.block(cx, node.block))
@@ -611,6 +619,9 @@ function optimize_inlines.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return optimize_inlines.stat_repeat(cx, node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_inlines.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
     return optimize_inlines.stat_block(cx, node)

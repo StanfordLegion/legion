@@ -24,7 +24,9 @@ local type_check = {}
 local context = {}
 context.__index = context
 
-function context:new_local_scope()
+function context:new_local_scope(must_epoch)
+  assert(not (self.must_epoch and must_epoch))
+  must_epoch = self.must_epoch or must_epoch or false
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
@@ -32,6 +34,7 @@ function context:new_local_scope()
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
     fixup_nodes = self.fixup_nodes,
+    must_epoch = must_epoch,
   }
   setmetatable(cx, context)
   return cx
@@ -45,6 +48,7 @@ function context:new_task_scope(expected_return_type)
     region_universe = {},
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
+    must_epoch = false,
   }
   setmetatable(cx, context)
   return cx
@@ -408,6 +412,11 @@ function type_check.expr_call(cx, node)
     node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, false)
 
   if std.is_task(fn.value) then
+    if cx.must_epoch then
+      -- Inside a must epoch tasks are not allowed to return.
+      expr_type = terralib.types.unit
+    end
+
     local mapping = {}
     for i, arg_symbol in ipairs(arg_symbols) do
       local param_symbol = param_symbols[i]
@@ -1261,6 +1270,19 @@ function type_check.stat_repeat(cx, node)
   }
 end
 
+function type_check.stat_must_epoch(cx, node)
+  if cx.must_epoch then
+    log.error(node, "nested must epochs are not supported")
+  end
+
+  local cx = cx:new_local_scope(true)
+  return ast.typed.stat.MustEpoch {
+    block = type_check.block(cx, node.block),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return ast.typed.stat.Block {
@@ -1496,6 +1518,9 @@ function type_check.stat(cx, node)
 
   elseif node:is(ast.specialized.stat.Repeat) then
     return type_check.stat_repeat(cx, node)
+
+  elseif node:is(ast.specialized.stat.MustEpoch) then
+    return type_check.stat_must_epoch(cx, node)
 
   elseif node:is(ast.specialized.stat.Block) then
     return type_check.stat_block(cx, node)

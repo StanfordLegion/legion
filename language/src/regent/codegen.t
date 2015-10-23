@@ -55,17 +55,21 @@ local c = std.c
 local context = {}
 context.__index = context
 
-function context:new_local_scope(div)
-  if div == nil then
-    div = self.divergence
-  end
+function context:new_local_scope(divergence, must_epoch, must_epoch_point)
+  assert(not (self.must_epoch and must_epoch))
+  divergence = self.divergence or divergence
+  must_epoch = self.must_epoch or must_epoch
+  must_epoch_point = self.must_epoch_point or must_epoch_point
+  assert((must_epoch == nil) == (must_epoch_point == nil))
   return setmetatable({
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
-    divergence = div,
+    divergence = divergence,
+    must_epoch = must_epoch,
+    must_epoch_point = must_epoch_point,
     context = self.context,
     runtime = self.runtime,
     ispaces = self.ispaces:new_local_scope(),
@@ -82,6 +86,8 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     task_meta = task_meta,
     leaf = leaf,
     divergence = nil,
+    must_epoch = nil,
+    must_epoch_point = nil,
     context = ctx,
     runtime = runtime,
     ispaces = symbol_table.new_global_scope({}),
@@ -1940,7 +1946,11 @@ function codegen.expr_call(cx, node)
         cx, fn.value, arg_type, param_type, launcher, false, region_args_setup)
     end
 
-    local future = terralib.newsymbol("future")
+    local future
+    if not cx.must_epoch then
+      future = terralib.newsymbol("future")
+    end
+
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
@@ -1953,11 +1963,30 @@ function codegen.expr_call(cx, node)
       [future_args_setup]
       [ispace_args_setup]
       [region_args_setup]
-      var [future] = c.legion_task_launcher_execute(
-        [cx.runtime], [cx.context], [launcher])
     end
-    local launcher_cleanup = quote
-      c.legion_task_launcher_destroy(launcher)
+
+    local launcher_execute
+    if not cx.must_epoch then
+      launcher_execute = quote
+        var [future] = c.legion_task_launcher_execute(
+          [cx.runtime], [cx.context], [launcher])
+        c.legion_task_launcher_destroy(launcher)
+      end
+    else
+      launcher_execute = quote
+        c.legion_must_epoch_launcher_add_single_task(
+          [cx.must_epoch],
+          c.legion_domain_point_from_point_1d(
+            c.legion_point_1d_t { x = arrayof(int, [cx.must_epoch_point]) }),
+          [launcher])
+        [cx.must_epoch_point] = [cx.must_epoch_point] + 1
+      end
+    end
+
+    actions = quote
+      [actions]
+      [launcher_setup]
+      [launcher_execute]
     end
 
     local future_type = value_type
@@ -1965,25 +1994,27 @@ function codegen.expr_call(cx, node)
       future_type = std.future(value_type)
     end
 
-    actions = quote
-      [actions]
-      [launcher_setup]
-      [launcher_cleanup]
+    local future_value
+    if future then
+      future_value = values.value(
+        expr.once_only(actions, `([future_type]{ __result = [future] })),
+        value_type)
     end
-    local future_value = values.value(
-      expr.once_only(actions, `([future_type]{ __result = [future] })),
-      value_type)
 
     if std.is_future(value_type) then
+      assert(future_value)
       return future_value
     elseif value_type == terralib.types.unit then
-      actions = quote
-        [actions]
-        c.legion_future_destroy(future)
+      if future then
+        actions = quote
+          [actions]
+          c.legion_future_destroy(future)
+        end
       end
 
       return values.value(expr.just(actions, quote end), terralib.types.unit)
     else
+      assert(future_value)
       return codegen.expr(
         cx,
         ast.typed.expr.FutureGetResult {
@@ -3479,6 +3510,23 @@ function codegen.stat_repeat(cx, node)
   end
 end
 
+function codegen.stat_must_epoch(cx, node)
+  local must_epoch = terralib.newsymbol("must_epoch")
+  local must_epoch_point = terralib.newsymbol("must_epoch_point")
+
+  local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
+  return quote
+    do
+      var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
+      var [must_epoch_point] = 0
+      [codegen.block(cx, node.block)]
+      c.legion_must_epoch_launcher_execute(
+        [cx.runtime], [cx.context], [must_epoch])
+      c.legion_must_epoch_launcher_destroy([must_epoch])
+    end
+  end
+end
+
 function codegen.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return quote
@@ -3640,10 +3688,27 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
+  local domain1, domain2, domain_setup
+  if not cx.must_epoch then
+    domain1 = domain[1].value
+    domain2 = domain[2].value
+    domain_setup = quote end
+  else
+    domain1 = terralib.newsymbol("domain1")
+    domain2 = terralib.newsymbol("domain2")
+    domain_setup = quote
+      var launch_size = std.fmax([domain[2].value] - [domain[1].value], 0)
+      var [domain1] = [cx.must_epoch_point]
+      var [domain2] = [cx.must_epoch_point] + launch_size
+      [cx.must_epoch_point] = [cx.must_epoch_point] + launch_size
+    end
+  end
+
   local argument_map = terralib.newsymbol("argument_map")
   local launcher_setup = quote
+    [domain_setup]
     var [argument_map] = c.legion_argument_map_create()
-    for [node.symbol] = [domain[1].value], [domain[2].value] do
+    for [node.symbol] = [domain1], [domain2] do
       var [task_args]
       [task_args_setup]
       var t_args : c.legion_task_argument_t
@@ -3662,8 +3727,8 @@ function codegen.stat_index_launch(cx, node)
       [fn.value:gettaskid()],
       c.legion_domain_from_rect_1d(
         c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(int32, [domain[1].value]) },
-          hi = c.legion_point_1d_t { x = arrayof(int32, [domain[2].value] - 1) },
+          lo = c.legion_point_1d_t { x = arrayof(int32, [domain1]) },
+          hi = c.legion_point_1d_t { x = arrayof(int32, [domain2] - 1) },
         }),
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
@@ -3687,12 +3752,21 @@ function codegen.stat_index_launch(cx, node)
     execute_args:insert(op)
   end
 
-  local future = terralib.newsymbol("future")
-  local launcher_execute = quote
-    var [future] = execute_fn(execute_args)
+  local future, launcher_execute
+  if not cx.must_epoch then
+    future = terralib.newsymbol("future")
+    launcher_execute = quote
+      var [future] = execute_fn(execute_args)
+    end
+  else
+    launcher_execute = quote
+      c.legion_must_epoch_launcher_add_index_task(
+        [cx.must_epoch], [launcher])
+    end
   end
 
   if node.reduce_lhs then
+    assert(not cx.must_epoch)
     local rhs_type = std.as_read(node.call.expr_type)
     local future_type = rhs_type
     if not std.is_future(rhs_type) then
@@ -3736,10 +3810,17 @@ function codegen.stat_index_launch(cx, node)
     destroy_future_fn = c.legion_future_destroy
   end
 
-  local launcher_cleanup = quote
-    c.legion_argument_map_destroy([argument_map])
-    destroy_future_fn([future])
-    c.legion_index_launcher_destroy([launcher])
+  local launcher_cleanup
+  if not cx.must_epoch then
+    launcher_cleanup = quote
+      c.legion_argument_map_destroy([argument_map])
+      destroy_future_fn([future])
+      c.legion_index_launcher_destroy([launcher])
+    end
+  else
+    launcher_cleanup = quote
+      c.legion_argument_map_destroy([argument_map])
+    end
   end
 
   actions = quote
@@ -3988,6 +4069,9 @@ function codegen.stat(cx, node)
   elseif node:is(ast.typed.stat.Repeat) then
     return codegen.stat_repeat(cx, node)
 
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return codegen.stat_must_epoch(cx, node)
+
   elseif node:is(ast.typed.stat.Block) then
     return codegen.stat_block(cx, node)
 
@@ -4081,7 +4165,8 @@ function codegen.stat_task(cx, node)
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
-      return { field = param.symbol.displayname, type = param.param_type }
+      local param_name = param.symbol.displayname or tostring(param.symbol)
+      return { field = param_name, type = param.param_type }
     end))
 
   -- Regions require some special handling here. Specifically, field
@@ -4181,7 +4266,7 @@ function codegen.stat_task(cx, node)
           -- Force unaligned access because malloc does not provide
           -- blocks aligned for all purposes (e.g. SSE vectors).
           [param] = terralib.attrload(
-            (&args.[param.displayname]),
+            (&args.[param.displayname or tostring(param)]),
             { align = [param_type_alignment] })
         else
           std.assert([future_i] < [future_count], "missing future in task param")
