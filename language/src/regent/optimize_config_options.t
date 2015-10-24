@@ -261,8 +261,7 @@ end
 
 function analyze_leaf.stat_must_epoch(cx, node)
   return
-    analyze_leaf.block(cx, node.block) and
-    analyze_leaf.expr(cx, node.until_cond)
+    analyze_leaf.block(cx, node.block)
 end
 
 function analyze_leaf.stat_block(cx, node)
