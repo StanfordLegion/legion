@@ -955,7 +955,7 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
       span = node.span,
     }
 
-  else -- if node:is(ast.unspecialized.stat.Reduce)
+  elseif node:is(ast.unspecialized.stat.Reduce) then
     return ast.specialized.stat.Reduce {
       lhs = flattened_lhs,
       rhs = flattened_rhs,
@@ -963,6 +963,8 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
       options = node.options,
       span = node.span,
     }
+  else
+    assert(false)
   end
 end
 
@@ -1022,58 +1024,88 @@ function specialize.stat(cx, node)
   end
 end
 
-function specialize.privilege_region_field(cx, node)
-  local prefix = std.newtuple(node.field_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-  return fields:map(
-    function(field) return prefix .. field end)
-end
-
-function specialize.privilege_region_fields(cx, node)
-  if not node then
-    return terralib.newlist({std.newtuple()})
-  end
-  local fields = node:map(
-    function(field) return specialize.privilege_region_field(cx, field) end)
-  local result = terralib.newlist()
-  for _, f in ipairs(fields) do
-    result:insertall(f)
-  end
-  return result
-end
-
-function specialize.privilege_region(cx, node)
-  local region = cx.env:lookup(node, node.region_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-
-  return {
-    region = region,
-    fields = fields,
+function specialize.region_field(cx, node)
+  return ast.specialized.region.Field {
+    field_name = node.field_name,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
   }
 end
 
-function specialize.privilege(cx, node)
-  local privilege
-  if node.privilege == "reads" then
-    privilege = std.reads
-  elseif node.privilege == "writes" then
-    privilege = std.writes
-  elseif node.privilege == "reduces" then
-    privilege = std.reduces(node.op)
-  else
-    assert(false)
-  end
+function specialize.region_fields(cx, node)
+  return node and node:map(
+    function(field) return specialize.region_field(cx, field) end)
+end
 
-  local region_fields = node.regions:map(
-    function(region) return specialize.privilege_region(cx, region) end)
-  return std.privilege(privilege, region_fields)
+function specialize.region_root(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Root {
+    symbol = region,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
+  }
+end
+
+function specialize.region_bare(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Bare {
+    symbol = region,
+    span = node.span,
+  }
+end
+
+function specialize.privilege_kind(cx, node)
+  if node:is(ast.unspecialized.privilege_kind.Reads) then
+    return ast.specialized.privilege_kind.Reads(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Writes) then
+    return ast.specialized.privilege_kind.Writes(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Reduces) then
+    return ast.specialized.privilege_kind.Reduces(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.regions(cx, node)
+  return node:map(
+    function(region) return specialize.region_root(cx, region) end)
+end
+
+function specialize.privilege(cx, node)
+  return ast.specialized.Privilege {
+    privilege = specialize.privilege_kind(cx, node.privilege),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.privileges(cx, node)
+  return node:map(
+    function(privilege) return specialize.privilege(cx, privilege) end)
+end
+
+function specialize.constraint_kind(cx, node)
+  if node:is(ast.unspecialized.constraint_kind.Subregion) then
+    return ast.specialized.constraint_kind.Subregion(node)
+  elseif node:is(ast.unspecialized.constraint_kind.Disjointness) then
+    return ast.specialized.constraint_kind.Disjointness(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
 end
 
 function specialize.constraint(cx, node)
-  local lhs = cx.env:lookup(node, node.lhs)
-  local rhs = cx.env:lookup(node, node.rhs)
+  return ast.specialized.Constraint {
+    lhs = specialize.region_bare(cx, node.lhs),
+    op = specialize.constraint_kind(cx, node.op),
+    rhs = specialize.region_bare(cx, node.rhs),
+    span = node.span,
+  }
+end
 
-  return std.constraint(lhs, rhs, node.op)
+function specialize.constraints(cx, node)
+  return node:map(
+    function(constraint) return specialize.constraint(cx, constraint) end)
 end
 
 function specialize.stat_task_param(cx, node)
@@ -1092,6 +1124,11 @@ function specialize.stat_task_param(cx, node)
   }
 end
 
+function specialize.stat_task_params(cx, node)
+  return node:map(
+    function(param) return specialize.stat_task_param(cx, param) end)
+end
+
 function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
@@ -1099,13 +1136,10 @@ function specialize.stat_task(cx, node)
   cx.env:insert(node, node.name, proto)
   cx = cx:new_local_scope()
 
-  local params = node.params:map(
-    function(param) return specialize.stat_task_param(cx, param) end)
+  local params = specialize.stat_task_params(cx, node.params)
   local return_type = node.return_type_expr(cx.env:env())
-  local privileges = node.privileges:map(
-    function(privilege) return specialize.privilege(cx, privilege) end)
-  local constraints = node.constraints:map(
-    function(constraint) return specialize.constraint(cx, constraint) end)
+  local privileges = specialize.privileges(cx, node.privileges)
+  local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
   return ast.specialized.stat.Task {
@@ -1155,12 +1189,12 @@ function specialize.stat_fspace(cx, node)
       function(param) return specialize.stat_fspace_param(cx, param) end)
   fs.fields = node.fields:map(
       function(field) return specialize.stat_fspace_field(cx, field) end)
-  fs.constraints = node.constraints:map(
-      function(constraint) return specialize.constraint(cx, constraint) end)
+  local constraints = specialize.constraints(cx, node.constraints)
 
   return ast.specialized.stat.Fspace {
     name = node.name,
     fspace = fs,
+    constraints = constraints,
     options = node.options,
     span = node.span,
   }

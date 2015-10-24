@@ -336,6 +336,22 @@ end
 
 ast:inner("unspecialized", {"span"})
 
+ast.unspecialized:inner("region")
+ast.unspecialized.region:leaf("Bare", {"region_name"})
+ast.unspecialized.region:leaf("Root", {"region_name", "fields"})
+ast.unspecialized.region:leaf("Field", {"field_name", "fields"})
+
+ast.unspecialized:inner("constraint_kind")
+ast.unspecialized.constraint_kind:leaf("Subregion")
+ast.unspecialized.constraint_kind:leaf("Disjointness")
+ast.unspecialized:leaf("Constraint", {"lhs", "op", "rhs"})
+
+ast.unspecialized:inner("privilege_kind", {})
+ast.unspecialized.privilege_kind:leaf("Reads")
+ast.unspecialized.privilege_kind:leaf("Writes")
+ast.unspecialized.privilege_kind:leaf("Reduces", {"op"})
+ast.unspecialized:leaf("Privilege", {"privilege", "regions"})
+
 ast.unspecialized:inner("expr", {"options"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
@@ -386,11 +402,6 @@ ast.unspecialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 
-ast.unspecialized:leaf("Constraint", {"lhs", "op", "rhs"})
-ast.unspecialized:leaf("Privilege", {"privilege", "op", "regions"})
-ast.unspecialized:leaf("PrivilegeRegion", {"region_name", "fields"})
-ast.unspecialized:leaf("PrivilegeRegionField", {"field_name", "fields"})
-
 ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
                                "privileges", "constraints", "body"})
 ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
@@ -402,6 +413,22 @@ ast.unspecialized.stat:leaf("FspaceField", {"field_name", "type_expr"})
 -- Node Types (Specialized)
 
 ast:inner("specialized", {"span"})
+
+ast.specialized:inner("region")
+ast.specialized.region:leaf("Bare", {"symbol"})
+ast.specialized.region:leaf("Root", {"symbol", "fields"})
+ast.specialized.region:leaf("Field", {"field_name", "fields"})
+
+ast.specialized:inner("constraint_kind")
+ast.specialized.constraint_kind:leaf("Subregion")
+ast.specialized.constraint_kind:leaf("Disjointness")
+ast.specialized:leaf("Constraint", {"lhs", "op", "rhs"})
+
+ast.specialized:inner("privilege_kind", {})
+ast.specialized.privilege_kind:leaf("Reads")
+ast.specialized.privilege_kind:leaf("Writes")
+ast.specialized.privilege_kind:leaf("Reduces", {"op"})
+ast.specialized:leaf("Privilege", {"privilege", "regions"})
 
 ast.specialized:inner("expr", {"options"})
 ast.specialized.expr:leaf("ID", {"value"})
@@ -460,7 +487,7 @@ ast.specialized.stat:leaf("Expr", {"expr"})
 ast.specialized.stat:leaf("Task", {"name", "params", "return_type", "privileges",
                                    "constraints", "body", "prototype"})
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
-ast.specialized.stat:leaf("Fspace", {"name", "fspace"})
+ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
 
 -- Node Types (Typed)
 

@@ -965,58 +965,74 @@ function parser.stat_task_return(p)
   return function(env) return std.untyped end
 end
 
-function parser.privilege_region_field(p)
+function parser.region_field(p)
   local start = ast.save(p)
   local field_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
-    fields = p:privilege_region_fields()
+    fields = p:region_fields()
   end
-  return ast.unspecialized.PrivilegeRegionField {
+  return ast.unspecialized.region.Field {
     field_name = field_name,
     fields = fields,
     span = ast.span(start, p),
   }
 end
 
-function parser.privilege_region_fields(p)
+function parser.region_fields(p)
   local fields = terralib.newlist()
   if p:nextif("{") then
     repeat
       if p:matches("}") then break end
-      fields:insert(p:privilege_region_field())
+      fields:insert(p:region_field())
     until not p:sep()
     p:expect("}")
   else
-    fields:insert(p:privilege_region_field())
+    fields:insert(p:region_field())
   end
   return fields
 end
 
-function parser.privilege_region(p)
+function parser.region_root(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
-    fields = p:privilege_region_fields()
+    fields = p:region_fields()
   end
-  return ast.unspecialized.PrivilegeRegion {
+  return ast.unspecialized.region.Root {
     region_name = region_name,
     fields = fields,
     span = ast.span(start, p),
   }
 end
 
-function parser.privilege(p)
+function parser.regions(p)
+  local regions = terralib.newlist()
+  repeat
+    local region = p:region_root()
+    regions:insert(region)
+  until not p:nextif(",")
+  return regions
+end
+
+function parser.region_bare(p)
   local start = ast.save(p)
-  local privilege
-  local op = false
+  local region_name = p:expect(p.name).value
+  return ast.unspecialized.region.Bare {
+    region_name = region_name,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.privilege_kind(p)
+  local start = ast.save(p)
   if p:nextif("reads") then
-    privilege = "reads"
+    return ast.unspecialized.privilege_kind.Reads { span = ast.span(start, p) }
   elseif p:nextif("writes") then
-    privilege = "writes"
+    return ast.unspecialized.privilege_kind.Writes { span = ast.span(start, p) }
   elseif p:nextif("reduces") then
-    privilege = "reduces"
+    local op = false
     if p:nextif("+") then
       op = "+"
     elseif p:nextif("-") then
@@ -1032,38 +1048,49 @@ function parser.privilege(p)
     else
       p:error("expected operator")
     end
+    return ast.unspecialized.privilege_kind.Reduces {
+      op = op,
+      span = ast.span(start, p),
+    }
   else
-    p:error("expected reads or writes")
+    p:error("expected reads, writes or reduces")
   end
+end
 
+function parser.privilege(p)
+  local start = ast.save(p)
+  local privilege = p:privilege_kind()
   p:expect("(")
-  local regions = terralib.newlist()
-  repeat
-    local region = p:privilege_region()
-    regions:insert(region)
-  until not p:nextif(",")
+  local regions = p:regions()
   p:expect(")")
 
   return ast.unspecialized.Privilege {
     privilege = privilege,
-    op = op,
     regions = regions,
     span = ast.span(start, p),
   }
 end
 
-function parser.constraint(p)
+function parser.constraint_kind(p)
   local start = ast.save(p)
-  local lhs = p:expect(p.name).value
-  local op
   if p:nextif("<=") then
-    op = "<="
+    return ast.unspecialized.constraint_kind.Subregion {
+      span = ast.span(start, p),
+    }
   elseif p:nextif("*") then
-    op = "*"
+    return ast.unspecialized.constraint_kind.Disjointness {
+      span = ast.span(start, p),
+    }
   else
     p:error("unexpected token in constraint")
   end
-  local rhs = p:expect(p.name).value
+end
+
+function parser.constraint(p)
+  local start = ast.save(p)
+  local lhs = p:region_bare()
+  local op = p:constraint_kind()
+  local rhs = p:region_bare()
   return ast.unspecialized.Constraint {
     lhs = lhs,
     op = op,

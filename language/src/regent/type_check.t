@@ -1563,6 +1563,87 @@ function type_check.stat_task_param(cx, node)
   }
 end
 
+function type_check.region_field(cx, node)
+  local prefix = std.newtuple(node.field_name)
+  local fields = type_check.region_fields(cx, node.fields)
+  return fields:map(
+    function(field) return prefix .. field end)
+end
+
+function type_check.region_fields(cx, node)
+  if not node then
+    return terralib.newlist({std.newtuple()})
+  end
+  local fields = node:map(
+    function(field) return type_check.region_field(cx, field) end)
+  local result = terralib.newlist()
+  for _, f in ipairs(fields) do
+    result:insertall(f)
+  end
+  return result
+end
+
+function type_check.region_root(cx, node)
+  return {
+    region = node.symbol,
+    fields = type_check.region_fields(cx, node.fields),
+  }
+end
+
+function type_check.region_bare(cx, node)
+  return node.symbol
+end
+
+function type_check.privilege_kind(cx, node)
+  if node:is(ast.specialized.privilege_kind.Reads) then
+    return std.reads
+  elseif node:is(ast.specialized.privilege_kind.Writes) then
+    return std.writes
+  elseif node:is(ast.specialized.privilege_kind.Reduces) then
+    return std.reduces(node.op)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.regions(cx, node)
+  return node:map(
+    function(region) return type_check.region_root(cx, region) end)
+end
+
+function type_check.privilege(cx, node)
+  local privilege = type_check.privilege_kind(cx, node.privilege)
+  local region_fields = type_check.regions(cx, node.regions)
+  return std.privilege(privilege, region_fields)
+end
+
+function type_check.privileges(cx, node)
+  return node:map(
+    function(privilege) return type_check.privilege(cx, privilege) end)
+end
+
+function type_check.constraint_kind(cx, node)
+  if node:is(ast.specialized.constraint_kind.Subregion) then
+    return "<="
+  elseif node:is(ast.specialized.constraint_kind.Disjointness) then
+    return "*"
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.constraint(cx, node)
+  local lhs = type_check.region_bare(cx, node.lhs)
+  local op = type_check.constraint_kind(cx, node.op)
+  local rhs = type_check.region_bare(cx, node.rhs)
+  return std.constraint(lhs, rhs, op)
+end
+
+function type_check.constraints(cx, node)
+  return node:map(
+    function(constraint) return type_check.constraint(cx, constraint) end)
+end
+
 function type_check.stat_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
@@ -1570,13 +1651,14 @@ function type_check.stat_task(cx, node)
   local params = node.params:map(
     function(param) return type_check.stat_task_param(cx, param) end)
   local prototype = node.prototype
-  prototype:set_param_symbols(params:map(function(param) return param.symbol end))
+  prototype:set_param_symbols(
+    params:map(function(param) return param.symbol end))
 
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), return_type, false)
   prototype:settype(task_type)
 
-  local privileges = node.privileges
+  local privileges = type_check.privileges(cx, node.privileges)
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
       local privilege_type = privilege.privilege
@@ -1589,7 +1671,7 @@ function type_check.stat_task(cx, node)
   end
   prototype:setprivileges(privileges)
 
-  local constraints = node.constraints
+  local constraints = type_check.constraints(cx, node.constraints)
   std.add_constraints(cx, constraints)
   prototype:set_param_constraints(constraints)
 
@@ -1636,6 +1718,7 @@ function type_check.stat_task(cx, node)
 end
 
 function type_check.stat_fspace(cx, node)
+  node.fspace.constraints = type_check.constraints(cx, node.constraints)
   return ast.typed.stat.Fspace {
     name = node.name,
     fspace = node.fspace,
