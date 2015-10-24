@@ -307,8 +307,7 @@ function _t1() end -- seems like I need this to break up the statements
 task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)))
 where
-  reads(rs.{mapsp1, mapsp2}),
-  writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2})
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)
@@ -626,8 +625,8 @@ task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     use_foreign : bool, enable : bool)
 where
-  reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
-  writes(rpp.pmaswt),
+  reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
+  reads writes(rpp.pmaswt),
   reduces+(rpg.pmaswt)
 do
   if not enable then return end
@@ -1031,8 +1030,8 @@ task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point)
                      rs : region(side(rz, rpp, rpg, rs)),
                      use_foreign : bool, enable : bool)
 where
-  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
-  writes(rpp.pf),
+  reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
+  reads writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
   if not enable then return end
@@ -1062,8 +1061,8 @@ end
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx, has_bcy}),
-  writes(rp.{pu0, pf})
+  reads(rp.{has_bcx, has_bcy}),
+  reads writes(rp.{pu0, pf})
 do
   if not enable then return end
 
@@ -1388,8 +1387,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rs_all_p : partition(disjoint, rs_all),
               conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var alfa = conf.alfa
@@ -1645,8 +1643,7 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rs_all_p : partition(disjoint, rs_all),
                 conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var einit = conf.einit

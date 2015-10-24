@@ -316,8 +316,7 @@ task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs_spans_p : partition(disjoint, rs),
                    nspans_zones : int64)
 where
-  reads(rs.{mapsp1, mapsp2}),
-  writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2})
 do
   for span = 0, nspans_zones do
     var rs_span = rs_spans_p[span]
@@ -594,8 +593,8 @@ where
   reads(rz.{zvolp, zm}),
   writes(rz.zrp),
 
-  reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
-  writes(rpp.pmaswt),
+  reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
+  reads writes(rpp.pmaswt),
   reduces+(rpg.pmaswt),
 
   reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate}),
@@ -622,8 +621,8 @@ where
         rs.{mapsp1, mapsp2, mapsz, elen}),
   writes(rz.{zdu, z0tmp}),
 
-  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
-  writes(rpp.pf),
+  reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
+  reads writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
   if not enable then return end
@@ -1010,8 +1009,8 @@ task adv_pos_full(rp : region(point),
                   nspans_points : int64,
                   enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx, has_bcy}),
-  writes(rp.{pu0, pf}),
+  reads(rp.{has_bcx, has_bcy}),
+  reads writes(rp.{pu0, pf}),
 
   reads(rp.{px0, pu0, pf, pmaswt}),
   writes(rp.{px, pu})
@@ -1310,8 +1309,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rs_spans : cross_product(rs_all_p, rs_spans_p),
               conf : config) : double
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var alfa = conf.alfa
@@ -1470,8 +1468,7 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rs_spans : cross_product(rs_all_p, rs_spans_p),
                 conf : config) : double
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var einit = conf.einit

@@ -1054,6 +1054,11 @@ function specialize.region_bare(cx, node)
   }
 end
 
+function specialize.regions(cx, node)
+  return node:map(
+    function(region) return specialize.region_root(cx, region) end)
+end
+
 function specialize.privilege_kind(cx, node)
   if node:is(ast.unspecialized.privilege_kind.Reads) then
     return ast.specialized.privilege_kind.Reads(node)
@@ -1066,14 +1071,14 @@ function specialize.privilege_kind(cx, node)
   end
 end
 
-function specialize.regions(cx, node)
+function specialize.privilege_kinds(cx, node)
   return node:map(
-    function(region) return specialize.region_root(cx, region) end)
+    function(privilege) return specialize.privilege_kind(cx, privilege) end)
 end
 
 function specialize.privilege(cx, node)
   return ast.specialized.Privilege {
-    privilege = specialize.privilege_kind(cx, node.privilege),
+    privileges = specialize.privilege_kinds(cx, node.privileges),
     regions = specialize.regions(cx, node.regions),
     span = node.span,
   }

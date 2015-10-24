@@ -1057,15 +1057,23 @@ function parser.privilege_kind(p)
   end
 end
 
+function parser.privilege_kinds(p)
+  local privileges = terralib.newlist()
+  while not p:matches("(") do
+    privileges:insert(p:privilege_kind())
+  end
+  return privileges
+end
+
 function parser.privilege(p)
   local start = ast.save(p)
-  local privilege = p:privilege_kind()
+  local privileges = p:privilege_kinds()
   p:expect("(")
   local regions = p:regions()
   p:expect(")")
 
   return ast.unspecialized.Privilege {
-    privilege = privilege,
+    privileges = privileges,
     regions = regions,
     span = ast.span(start, p),
   }

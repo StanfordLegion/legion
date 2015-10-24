@@ -1620,15 +1620,24 @@ function type_check.privilege_kind(cx, node)
   end
 end
 
+function type_check.privilege_kinds(cx, node)
+  return node:map(
+    function(privilege) return type_check.privilege_kind(cx, privilege) end)
+end
+
 function type_check.privilege(cx, node)
-  local privilege = type_check.privilege_kind(cx, node.privilege)
+  local privileges = type_check.privilege_kinds(cx, node.privileges)
   local region_fields = type_check.regions(cx, node.regions)
-  return std.privilege(privilege, region_fields)
+  return privileges:map(
+    function(privilege) return std.privilege(privilege, region_fields) end)
 end
 
 function type_check.privileges(cx, node)
-  return node:map(
-    function(privilege) return type_check.privilege(cx, privilege) end)
+  local result = terralib.newlist()
+  for _, privilege in ipairs(node) do
+    result:insertall(type_check.privilege(cx, privilege))
+  end
+  return result
 end
 
 function type_check.constraint_kind(cx, node)
