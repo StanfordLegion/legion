@@ -1563,31 +1563,45 @@ function type_check.stat_task_param(cx, node)
   }
 end
 
-function type_check.region_field(cx, node)
-  local prefix = std.newtuple(node.field_name)
-  local fields = type_check.region_fields(cx, node.fields)
-  return fields:map(
-    function(field) return prefix .. field end)
+function type_check.region_field(cx, node, region, prefix_path, value_type)
+  local field_path = prefix_path .. std.newtuple(node.field_name)
+  local field_type = std.get_field(value_type, node.field_name)
+  if not field_type then
+    log.error(node, "no field '" .. node.field_name ..
+                "' in region " .. (std.newtuple(region) .. prefix_path):mkstring("."))
+  end
+
+  return type_check.region_fields(
+    cx, node.fields, region, field_path, field_type)
 end
 
-function type_check.region_fields(cx, node)
+function type_check.region_fields(cx, node, region, prefix_path, value_type)
   if not node then
-    return terralib.newlist({std.newtuple()})
+    return terralib.newlist({prefix_path})
   end
-  local fields = node:map(
-    function(field) return type_check.region_field(cx, field) end)
   local result = terralib.newlist()
-  for _, f in ipairs(fields) do
-    result:insertall(f)
+  for _, field in ipairs(node) do
+    result:insertall(
+      type_check.region_field(cx, field, region, prefix_path, value_type))
   end
   return result
 end
 
 function type_check.region_root(cx, node)
+  local region = node.symbol
+  local region_type = region.type
+  assert(std.is_region(region_type)) -- FIXME: make this a type error
+  local value_type = region_type.fspace_type
   return {
-    region = node.symbol,
-    fields = type_check.region_fields(cx, node.fields),
+    region = region,
+    fields = type_check.region_fields(
+      cx, node.fields, region, std.newtuple(), value_type),
   }
+end
+
+function type_check.regions(cx, node)
+  return node:map(
+    function(region) return type_check.region_root(cx, region) end)
 end
 
 function type_check.region_bare(cx, node)
@@ -1604,11 +1618,6 @@ function type_check.privilege_kind(cx, node)
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
-end
-
-function type_check.regions(cx, node)
-  return node:map(
-    function(region) return type_check.region_root(cx, region) end)
 end
 
 function type_check.privilege(cx, node)

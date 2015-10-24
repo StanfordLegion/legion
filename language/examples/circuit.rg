@@ -666,7 +666,7 @@ task dense_calculate_new_currents(steps : uint,
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap,
-            current. voltage}),
+            current, voltage}),
   writes(rw.{current, voltage})
 do
   var phy_rpn = __physical(rpn)
