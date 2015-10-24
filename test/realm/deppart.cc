@@ -17,6 +17,7 @@ enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   INIT_CIRCUIT_DATA_TASK,
   INIT_PENNANT_DATA_TASK,
+  INIT_MINIAERO_DATA_TASK,
 };
 
 // we're going to use alarm() as a watchdog to detect deadlocks
@@ -58,8 +59,509 @@ namespace {
   int random_seed = 12345;
   bool random_colors = false;
   bool wait_on_events = false;
-  bool show_graph = true;
+  bool show_graph = false;
   TestInterface *testcfg = 0;
+};
+
+template <typename T>
+void split_evenly(T total, T pieces, std::vector<T>& cuts)
+{
+  cuts.resize(pieces + 1);
+  for(T i = 0; i <= pieces; i++)
+    cuts[i] = (total * i) / pieces;
+}
+
+template <typename T>
+int find_split(const std::vector<T>& cuts, T v)
+{
+  // dumb linear search
+  assert(v >= cuts[0]);
+  for(size_t i = 1; i < cuts.size(); i++)
+    if(v < cuts[i])
+      return i - 1;
+  assert(false);
+  return 0;
+}
+
+class MiniAeroTest : public TestInterface {
+public:
+  enum ProblemType {
+    PTYPE_0,
+    PTYPE_1,
+    PTYPE_2,
+  };
+  enum FaceType {
+    BC_INTERIOR = 0,
+    BC_TANGENT = 1,
+    BC_EXTRAPOLATE = 2,
+    BC_INFLOW = 3,
+    BC_NOSLIP = 4,
+    BC_BLOCK_BORDER = 5,
+    BC_TOTAL = 6,
+  };
+
+  WithDefault<ProblemType, PTYPE_0> problem_type;
+  WithDefault<int,  4> global_x, global_y, global_z;
+  WithDefault<int,   2> blocks_x, blocks_y, blocks_z;
+
+  int n_cells;  // total cell count
+  int n_blocks; // total block count
+  int n_faces;  // total face count
+  std::vector<int> xsplit, ysplit, zsplit;  // cut planes
+  std::vector<int> cells_per_block, faces_per_block;
+
+  MiniAeroTest(int argc, const char *argv[])
+  {
+#define INT_ARG(s, v) if(!strcmp(argv[i], s)) { v = atoi(argv[++i]); continue; }
+    for(int i = 1; i < argc; i++) {
+      INT_ARG("-type", (int&)problem_type);
+      INT_ARG("-gx",   global_x);
+      INT_ARG("-gy",   global_y);
+      INT_ARG("-gz",   global_z);
+      INT_ARG("-bx",   blocks_x);
+      INT_ARG("-by",   blocks_y);
+      INT_ARG("-bz",   blocks_z);
+    }
+#undef INT_ARG
+
+    // don't allow degenerate blocks
+    assert(global_x >= blocks_x);
+    assert(global_y >= blocks_y);
+    assert(global_z >= blocks_z);
+
+    split_evenly<int>(global_x, blocks_x, xsplit);
+    split_evenly<int>(global_y, blocks_y, ysplit);
+    split_evenly<int>(global_z, blocks_z, zsplit);
+
+    n_blocks = blocks_x * blocks_y * blocks_z;
+    n_cells = 0;
+    n_faces = 0;
+    for(int bz = 0; bz < blocks_z; bz++)
+      for(int by = 0; by < blocks_y; by++)
+	for(int bx = 0; bx < blocks_x; bx++) {
+          int nx = xsplit[bx + 1] - xsplit[bx];
+          int ny = ysplit[by + 1] - ysplit[by];
+          int nz = zsplit[bz + 1] - zsplit[bz];
+
+	  int c = nx * ny * nz;
+	  int f = (((nx + 1) * ny * nz) +
+		   (nx * (ny + 1) * nz) +
+		   (nx * ny * (nz + 1)));
+	  cells_per_block.push_back(c);
+	  faces_per_block.push_back(f);
+
+	  n_cells += c;
+	  n_faces += f;
+        }
+    assert(n_cells == global_x * global_y * global_z);
+    assert(n_faces == (((global_x + blocks_x) * global_y * global_z) +
+		       (global_x * (global_y + blocks_y) * global_z) +
+		       (global_x * global_y * (global_z + blocks_z))));
+  }
+
+  virtual void print_info(void)
+  {
+    printf("Realm dependent partitioning test - miniaero: %d x %d x %d cells, %d x %d x %d blocks\n",
+           (int)global_x, (int)global_y, (int)global_z,
+           (int)blocks_x, (int)blocks_y, (int)blocks_z);
+  }
+
+  ZIndexSpace<1> is_cells, is_faces;
+  std::vector<RegionInstance> ri_cells;
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > cell_blockid_field_data;
+  std::vector<RegionInstance> ri_faces;
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > face_left_field_data;
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > face_right_field_data;
+  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > face_type_field_data;
+  
+  struct InitDataArgs {
+    int index;
+    RegionInstance ri_cells, ri_faces;
+  };
+
+  virtual Event initialize_data(const std::vector<Memory>& memories,
+				const std::vector<Processor>& procs)
+  {
+    // top level index spaces
+    is_cells = ZRect<1>(0, n_cells - 1);
+    is_faces = ZRect<1>(0, n_faces - 1);
+
+    // weighted partitions based on the distribution we already computed
+    std::vector<ZIndexSpace<1> > ss_cells_w;
+    std::vector<ZIndexSpace<1> > ss_faces_w;
+
+    is_cells.create_weighted_subspaces(n_blocks, 1, cells_per_block, ss_cells_w,
+				       Realm::ProfilingRequestSet()).wait();
+    is_faces.create_weighted_subspaces(n_blocks, 1, faces_per_block, ss_faces_w,
+				       Realm::ProfilingRequestSet()).wait();
+
+    log_app.debug() << "Initial partitions:";
+    for(size_t i = 0; i < ss_cells_w.size(); i++)
+      log_app.debug() << " Cells #" << i << ": " << ss_cells_w[i];
+    for(size_t i = 0; i < ss_faces_w.size(); i++)
+      log_app.debug() << " Faces #" << i << ": " << ss_faces_w[i];
+
+    // create instances for each of these subspaces
+    std::vector<size_t> cell_fields, face_fields;
+    cell_fields.push_back(sizeof(int));  // blockid
+    assert(sizeof(int) == sizeof(ZPoint<1>));
+    face_fields.push_back(sizeof(ZPoint<1>));  // left
+    face_fields.push_back(sizeof(ZPoint<1>));  // right
+    face_fields.push_back(sizeof(int));  // type
+
+    ri_cells.resize(n_blocks);
+    cell_blockid_field_data.resize(n_blocks);
+
+    for(size_t i = 0; i < ss_cells_w.size(); i++) {
+      RegionInstance ri = ss_cells_w[i].create_instance(memories[i % memories.size()],
+							 cell_fields,
+							 1,
+							 Realm::ProfilingRequestSet());
+      ri_cells[i] = ri;
+    
+      cell_blockid_field_data[i].index_space = ss_cells_w[i];
+      cell_blockid_field_data[i].inst = ri_cells[i];
+      cell_blockid_field_data[i].field_offset = 0;
+    }
+
+    ri_faces.resize(n_blocks);
+    face_left_field_data.resize(n_blocks);
+    face_right_field_data.resize(n_blocks);
+    face_type_field_data.resize(n_blocks);
+
+    for(size_t i = 0; i < ss_faces_w.size(); i++) {
+      RegionInstance ri = ss_faces_w[i].create_instance(memories[i % memories.size()],
+							 face_fields,
+							 1,
+							 Realm::ProfilingRequestSet());
+      ri_faces[i] = ri;
+
+      face_left_field_data[i].index_space = ss_faces_w[i];
+      face_left_field_data[i].inst = ri_faces[i];
+      face_left_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      
+      face_right_field_data[i].index_space = ss_faces_w[i];
+      face_right_field_data[i].inst = ri_faces[i];
+      face_right_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
+
+      face_type_field_data[i].index_space = ss_faces_w[i];
+      face_type_field_data[i].inst = ri_faces[i];
+      face_type_field_data[i].field_offset = 2 * sizeof(ZPoint<1>);
+    }
+
+    // fire off tasks to initialize data
+    std::set<Event> events;
+    for(int i = 0; i < n_blocks; i++) {
+      Processor p = procs[i % memories.size()];
+      InitDataArgs args;
+      args.index = i;
+      args.ri_cells = ri_cells[i];
+      args.ri_faces = ri_faces[i];
+      Event e = p.spawn(INIT_MINIAERO_DATA_TASK, &args, sizeof(args));
+      events.insert(e);
+    }
+
+    return Event::merge_events(events);
+  }
+
+  static void init_data_task_wrapper(const void *args, size_t arglen, Processor p)
+  {
+    MiniAeroTest *me = (MiniAeroTest *)testcfg;
+    me->init_data_task(args, arglen, p);
+  }
+
+  ZPoint<1> global_cell_pointer(int cx, int cy, int cz)
+  {
+    int p = 0;
+
+    // out of range?  return -1
+    if((cx < 0) || (cx >= global_x) ||
+       (cy < 0) || (cy >= global_y) ||
+       (cz < 0) || (cz >= global_z))
+      return -1;
+
+    // first chunks in z, then y, then x
+    int zi = find_split(zsplit, cz);
+    p += global_x * global_y * zsplit[zi];
+    cz -= zsplit[zi];
+    int local_z = zsplit[zi + 1] - zsplit[zi];
+
+    int yi = find_split(ysplit, cy);
+    p += global_x * ysplit[yi] * local_z;
+    cy -= ysplit[yi];
+    int local_y = ysplit[yi + 1] - ysplit[yi];
+
+    int xi = find_split(xsplit, cx);
+    p += xsplit[xi] * local_y * local_z;
+    cx -= xsplit[xi];
+    int local_x = xsplit[xi + 1] - xsplit[xi];
+
+    // now local addressing within this block
+    p += (cx +
+	  (cy * local_x) +
+	  (cz * local_x * local_y));
+    return p;
+  }
+
+  void init_data_task(const void *args, size_t arglen, Processor p)
+  {
+    const InitDataArgs& i_args = *(const InitDataArgs *)args;
+
+    log_app.info() << "init task #" << i_args.index << " (ri_cells=" << i_args.ri_cells << ", ri_faces=" << i_args.ri_faces << ")";
+
+    ZIndexSpace<1> is_cells = i_args.ri_cells.get_indexspace<1>();
+    ZIndexSpace<1> is_faces = i_args.ri_faces.get_indexspace<1>();
+
+    log_app.debug() << "C: " << is_cells;
+    log_app.debug() << "F: " << is_faces;
+    
+    int bx = i_args.index % blocks_x;
+    int by = (i_args.index / blocks_x) % blocks_y;
+    int bz = i_args.index / blocks_x / blocks_y;
+
+    int nx = xsplit[bx + 1] - xsplit[bx];
+    int ny = ysplit[by + 1] - ysplit[by];
+    int nz = zsplit[bz + 1] - zsplit[bz];
+
+    size_t c = nx * ny * nz;
+    size_t f = (((nx + 1) * ny * nz) +
+		(nx * (ny + 1) * nz) +
+		(nx * ny * (nz + 1)));
+    assert(is_cells.bounds.volume() == c);
+    assert(is_faces.bounds.volume() == f);
+
+    // cells are all assigned to the local block
+    {
+      AffineAccessor<int,1> a_cell_blockid(i_args.ri_cells, 0 /* offset */);
+
+      for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
+	for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++)
+	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
+	    ZPoint<1> pz = global_cell_pointer(cx, cy, cz);
+	    assert(is_cells.bounds.contains(pz));
+
+	    a_cell_blockid.write(pz, i_args.index);
+	  }
+    }
+
+    // faces aren't in any globally-visible order
+    {
+      AffineAccessor<ZPoint<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<ZPoint<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(ZPoint<1>) /* offset */);
+      
+      ZPoint<1> pf = is_faces.bounds.lo;
+
+      //  --           type 0      | type 1      | type 2
+      //  --           ------      | ------      | ------
+      //  -- left      extrapolate | inflow      | inflow
+      //  -- right     extrapolate | extrapolate | extrapolate
+      //  -- down      tangent     | noslip      | tangent
+      //  -- up        tangent     | extrapolate | tangent
+      //  -- back      tangent     | tangent     | tangent
+      //  -- front     tangent     | tangent     | tangent
+
+      // left/right faces first
+      for(int fx = xsplit[bx]; fx <= xsplit[bx + 1]; fx++) {
+	int ftype;
+	bool reversed = false;
+	if(fx == xsplit[bx]) {
+	  // low boundary
+	  reversed = true;
+	  if(fx == 0)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_EXTRAPOLATE;
+	    case PTYPE_1: ftype = BC_INFLOW;
+	    case PTYPE_2: ftype = BC_INFLOW;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else if(fx == xsplit[bx + 1]) {
+	  // high boundary
+	  if(fx == global_x)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_EXTRAPOLATE;
+	    case PTYPE_1: ftype = BC_EXTRAPOLATE;
+	    case PTYPE_2: ftype = BC_EXTRAPOLATE;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else
+	  ftype = BC_INTERIOR;
+
+	for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
+	  for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++) {
+	    a_face_left.write(pf, global_cell_pointer(fx - (reversed ? 0 : 1), cy, cz));
+	    a_face_right.write(pf, global_cell_pointer(fx - (reversed ? 1 : 0), cy, cz));
+	    a_face_type.write(pf, ftype);
+	    pf.x++;
+	  }
+      }
+
+      // down/up faces next
+      for(int fy = ysplit[by]; fy <= ysplit[by + 1]; fy++) {
+	int ftype;
+	bool reversed = false;
+	if(fy == ysplit[by]) {
+	  // low boundary
+	  reversed = true;
+	  if(fy == 0)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_TANGENT;
+	    case PTYPE_1: ftype = BC_NOSLIP;
+	    case PTYPE_2: ftype = BC_TANGENT;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else if(fy == ysplit[by + 1]) {
+	  // high boundary
+	  if(fy == global_y)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_TANGENT;
+	    case PTYPE_1: ftype = BC_EXTRAPOLATE;
+	    case PTYPE_2: ftype = BC_TANGENT;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else
+	  ftype = BC_INTERIOR;
+
+	for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
+	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
+	    a_face_left.write(pf, global_cell_pointer(cx, fy - (reversed ? 0 : 1), cz));
+	    a_face_right.write(pf, global_cell_pointer(cx, fy - (reversed ? 1 : 0), cz));
+	    a_face_type.write(pf, ftype);
+	    pf.x++;
+	  }
+      }
+
+      // back/front faces last
+      for(int fz = zsplit[bz]; fz <= zsplit[bz + 1]; fz++) {
+	int ftype;
+	bool reversed = false;
+	if(fz == zsplit[bz]) {
+	  // low boundary
+	  reversed = true;
+	  if(fz == 0)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_TANGENT;
+	    case PTYPE_1: ftype = BC_TANGENT;
+	    case PTYPE_2: ftype = BC_TANGENT;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else if(fz == zsplit[bz + 1]) {
+	  // high boundary
+	  if(fz == global_z)
+	    switch(problem_type) {
+	    case PTYPE_0: ftype = BC_TANGENT;
+	    case PTYPE_1: ftype = BC_TANGENT;
+	    case PTYPE_2: ftype = BC_TANGENT;
+	    }
+	  else
+	    ftype = BC_BLOCK_BORDER;
+	} else
+	  ftype = BC_INTERIOR;
+
+	for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++)
+	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
+	    a_face_left.write(pf, global_cell_pointer(cx, cy, fz - (reversed ? 0 : 1)));
+	    a_face_right.write(pf, global_cell_pointer(cx, cy, fz - (reversed ? 1 : 0)));
+	    a_face_type.write(pf, ftype);
+	    pf.x++;
+	  }
+      }
+
+      assert(pf.x == is_faces.bounds.hi.x + 1);
+    }
+    
+    if(show_graph) {
+      AffineAccessor<int,1> a_cell_blockid(i_args.ri_cells, 0 /* offset */);
+
+      for(int i = is_cells.bounds.lo; i <= is_cells.bounds.hi; i++)
+	std::cout << "Z[" << i << "]: blockid=" << a_cell_blockid.read(i) << std::endl;
+
+      AffineAccessor<ZPoint<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<ZPoint<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(ZPoint<1>) /* offset */);
+
+      for(int i = is_faces.bounds.lo; i <= is_faces.bounds.hi; i++)
+	std::cout << "S[" << i << "]:"
+		  << " left=" << a_face_left.read(i)
+		  << " right=" << a_face_right.read(i)
+		  << " type=" << a_face_type.read(i)
+		  << std::endl;
+    }
+  }
+
+  // the outputs of our partitioning will be:
+  //  p_cells               - subsets of is_cells split by block
+  //  p_faces               - subsets of_is_faces split by block (based on left cell)
+  //  p_facetypes[6]        - subsets of p_faces split further by face type
+  //  p_ghost               - subsets of is_cells reachable by each block's boundary faces
+
+  std::vector<ZIndexSpace<1> > p_cells;
+  std::vector<ZIndexSpace<1> > p_faces;
+  std::vector<std::vector<ZIndexSpace<1> > > p_facetypes;
+  std::vector<ZIndexSpace<1> > p_ghost;
+
+  virtual Event perform_partitioning(void)
+  {
+    // partition cells first
+    std::vector<int> colors(n_blocks);
+    for(int i = 0; i < n_blocks; i++)
+      colors[i] = i;
+
+    Event e1 = is_cells.create_subspaces_by_field(cell_blockid_field_data,
+						  colors,
+						  p_cells,
+						  Realm::ProfilingRequestSet());
+    if(wait_on_events) e1.wait();
+
+    // now a preimage to get faces
+    Event e2 = is_faces.create_subspaces_by_preimage(face_left_field_data,
+						     p_cells,
+						     p_faces,
+						     Realm::ProfilingRequestSet(),
+						     e1);
+    if(wait_on_events) e2.wait();
+
+    // now split by face type
+    std::set<Event> evs;
+    std::vector<int> ftcolors(BC_TOTAL);
+    for(int i = 0; i < BC_TOTAL; i++)
+      ftcolors[i] = i;
+    p_facetypes.resize(n_blocks);
+    std::vector<ZIndexSpace<1> > p_border_faces(n_blocks);
+    
+    for(int idx = 0; idx < n_blocks; idx++) {
+      Event e = p_faces[idx].create_subspaces_by_field(face_type_field_data,
+						       ftcolors,
+						       p_facetypes[idx],
+						       Realm::ProfilingRequestSet(),
+						       e2);
+      if(wait_on_events) e.wait();
+      evs.insert(e);
+      p_border_faces[idx] = p_facetypes[idx][BC_BLOCK_BORDER];
+    }
+    Event e3 = Event::merge_events(evs);
+
+    // finally, the image of just the boundary faces through the right face gets us
+    //  ghost cells
+    Event e4 = is_cells.create_subspaces_by_image(face_right_field_data,
+						  p_border_faces,
+						  p_ghost,
+						  Realm::ProfilingRequestSet(),
+						  e3);
+    if(wait_on_events) e4.wait();
+
+    return e4;
+  }
+
+  virtual int check_partitioning(void)
+  {
+    return 0;
+  }
 };
 
 class CircuitTest : public TestInterface {
@@ -113,13 +615,13 @@ public:
   {
     const InitDataArgs& i_args = *(const InitDataArgs *)args;
 
-    log_app.print() << "init task #" << i_args.index << " (ri_nodes=" << i_args.ri_nodes << ", ri_edges=" << i_args.ri_edges << ")";
+    log_app.info() << "init task #" << i_args.index << " (ri_nodes=" << i_args.ri_nodes << ", ri_edges=" << i_args.ri_edges << ")";
 
     ZIndexSpace<1> is_nodes = i_args.ri_nodes.get_indexspace<1>();
     ZIndexSpace<1> is_edges = i_args.ri_edges.get_indexspace<1>();
 
-    log_app.print() << "N: " << is_nodes;
-    log_app.print() << "E: " << is_edges;
+    log_app.debug() << "N: " << is_nodes;
+    log_app.debug() << "E: " << is_edges;
     
     unsigned short rngstate[3];
     rngstate[0] = random_seed;
@@ -199,11 +701,11 @@ public:
     is_nodes.create_equal_subspaces(num_pieces, 1, ss_nodes_eq, Realm::ProfilingRequestSet()).wait();
     is_edges.create_equal_subspaces(num_pieces, 1, ss_edges_eq, Realm::ProfilingRequestSet()).wait();
 
-    std::cout << "Initial partitions:" << std::endl;
+    log_app.debug() << "Initial partitions:";
     for(size_t i = 0; i < ss_nodes_eq.size(); i++)
-      std::cout << " Nodes #" << i << ": " << ss_nodes_eq[i] << std::endl;
+      log_app.debug() << " Nodes #" << i << ": " << ss_nodes_eq[i];
     for(size_t i = 0; i < ss_edges_eq.size(); i++)
-      std::cout << " Edges #" << i << ": " << ss_edges_eq[i] << std::endl;
+      log_app.debug() << " Edges #" << i << ": " << ss_edges_eq[i];
 
     // create instances for each of these subspaces
     std::vector<size_t> node_fields, edge_fields;
@@ -377,6 +879,7 @@ public:
       INT_ARG("-numpcx", numpcx)
       INT_ARG("-numpcy", numpcy)
     }
+#undef INT_ARG
 
     switch(mesh_type) {
     case RectangularMesh:
@@ -459,13 +962,13 @@ public:
     is_sides.create_weighted_subspaces(numpc, 1, ls, ss_sides_w, Realm::ProfilingRequestSet()).wait();
     is_points.create_weighted_subspaces(numpc, 1, lp, ss_points_w, Realm::ProfilingRequestSet()).wait();
 
-    std::cout << "Initial partitions:" << std::endl;
+    log_app.debug() << "Initial partitions:";
     for(size_t i = 0; i < ss_zones_w.size(); i++)
-      std::cout << " Zones #" << i << ": " << ss_zones_w[i] << std::endl;
+      log_app.debug() << " Zones #" << i << ": " << ss_zones_w[i];
     for(size_t i = 0; i < ss_sides_w.size(); i++)
-      std::cout << " Sides #" << i << ": " << ss_sides_w[i] << std::endl;
+      log_app.debug() << " Sides #" << i << ": " << ss_sides_w[i];
     for(size_t i = 0; i < ss_points_w.size(); i++)
-      std::cout << " Points #" << i << ": " << ss_points_w[i] << std::endl;
+      log_app.debug() << " Points #" << i << ": " << ss_points_w[i];
 
     // create instances for each of these subspaces
     std::vector<size_t> zone_fields, side_fields;
@@ -582,13 +1085,13 @@ public:
   {
     const InitDataArgs& i_args = *(const InitDataArgs *)args;
 
-    log_app.print() << "init task #" << i_args.index << " (ri_zones=" << i_args.ri_zones << ", ri_sides=" << i_args.ri_sides << ")";
+    log_app.info() << "init task #" << i_args.index << " (ri_zones=" << i_args.ri_zones << ", ri_sides=" << i_args.ri_sides << ")";
 
     ZIndexSpace<1> is_zones = i_args.ri_zones.get_indexspace<1>();
     ZIndexSpace<1> is_sides = i_args.ri_sides.get_indexspace<1>();
 
-    log_app.print() << "Z: " << is_zones;
-    log_app.print() << "S: " << is_sides;
+    log_app.debug() << "Z: " << is_zones;
+    log_app.debug() << "S: " << is_sides;
     
     int pcx = i_args.index % numpcx;
     int pcy = i_args.index / numpcx;
@@ -849,12 +1352,55 @@ int main(int argc, char **argv)
 
   rt.init(&argc, &argv);
 
-  //testcfg = new CircuitTest(argc, (const char **)argv);
-  testcfg = new PennantTest(argc, (const char **)argv);
+  // parse global options
+  for(int i = 1; i < argc; i++) {
+    if(!strcmp(argv[i], "-seed")) {
+      random_seed = atoi(argv[++i]);
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-random")) {
+      random_colors = true;
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-wait")) {
+      wait_on_events = true;
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-show")) {
+      show_graph = true;
+      continue;
+    }
+
+    // test cases consume the rest of the args
+    if(!strcmp(argv[i], "circuit")) {
+      testcfg = new CircuitTest(argc-i, const_cast<const char **>(argv+i));
+      break;
+    }
+  
+    if(!strcmp(argv[i], "pennant")) {
+      testcfg = new PennantTest(argc-i, const_cast<const char **>(argv+i));
+      break;
+    }
+  
+    if(!strcmp(argv[i], "miniaero")) {
+      testcfg = new MiniAeroTest(argc-i, const_cast<const char **>(argv+i));
+      break;
+    }
+
+    printf("unknown parameter: %s\n", argv[i]);
+  }
+
+  // if no test specified, use circuit (with default parameters)
+  if(!testcfg)
+    testcfg = new CircuitTest(0, 0);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(INIT_CIRCUIT_DATA_TASK, CircuitTest::init_data_task_wrapper);
   rt.register_task(INIT_PENNANT_DATA_TASK, PennantTest::init_data_task_wrapper);
+  rt.register_task(INIT_MINIAERO_DATA_TASK, MiniAeroTest::init_data_task_wrapper);
 
   signal(SIGALRM, sigalrm_handler);
 
