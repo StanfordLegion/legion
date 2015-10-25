@@ -19,6 +19,8 @@
 
 #include "profiling.h"
 
+#include "runtime_impl.h"
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -111,18 +113,27 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
-    // just give copies of ourselves for now
+    // create a new sparsity map for each subspace
     size_t n = colors.size();
     subspaces.resize(n);
-    for(size_t i = 0; i < n; i++) 
-      subspaces[i] = *this;
+    for(size_t i = 0; i < n; i++) {
+      subspaces[i].bounds = this->bounds;
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(subspaces.size());
+      subspaces[i].sparsity = sparsity;
+      
+    }
 
     for(size_t i = 0; i < field_data.size(); i++) {
       ByFieldMicroOp<N,T,FT> uop(*this,
 				 field_data[i].index_space,
 				 field_data[i].inst,
 				 field_data[i].field_offset);
-      uop.set_value_set(colors);
+      for(size_t j = 0; j < colors.size(); j++)
+	uop.add_sparsity_output(colors[j], subspaces[j].sparsity);
+      //uop.set_value_set(colors);
       uop.execute();
     }
 
@@ -419,12 +430,82 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class SparsityMap<N,T>
+
+  // looks up the public subset of the implementation object
+  template <int N, typename T>
+  SparsityMapPublicImpl<N,T> *SparsityMap<N,T>::impl(void) const
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
+    return wrapper->get_or_create<N,T>();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapImplWrapper
+
+  SparsityMapImplWrapper::SparsityMapImplWrapper(void)
+    : me((ID::IDType)-1), owner(-1), dim(0), idxtype(0), map_impl(0)
+  {}
+
+  void SparsityMapImplWrapper::init(ID _me, unsigned _init_owner)
+  {
+    me = _me;
+    owner = _init_owner;
+  }
+
+  template <int N, typename T>
+  /*static*/ SparsityMapImpl<N,T> *SparsityMapImplWrapper::get_or_create(void)
+  {
+    // set the size if it's zero and check if it's not
+    int olddim = __sync_val_compare_and_swap(&dim, 0, N);
+    assert((olddim == 0) || (olddim == N));
+    int oldtype = __sync_val_compare_and_swap(&idxtype, 0, (int)sizeof(T));
+    assert((oldtype == 0) || (oldtype == (int)sizeof(T)));
+    // now see if the pointer is valid
+    void *impl = map_impl;
+    if(impl)
+      return static_cast<SparsityMapImpl<N,T> *>(impl);
+
+    // create one and try to swap it in
+    SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>;
+    impl = __sync_val_compare_and_swap(&map_impl, 0, (void *)new_impl);
+    if(impl != 0) {
+      // we lost the race - free the one we made and return the winner
+      delete new_impl;
+      return static_cast<SparsityMapImpl<N,T> *>(impl);
+    } else {
+      // ours is the winner - return it
+      return new_impl;
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapPublicImpl<N,T>
+
+  template <int N, typename T>
+  SparsityMapPublicImpl<N,T>::SparsityMapPublicImpl(void)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class SparsityMapImpl<N,T>
 
   template <int N, typename T>
   SparsityMapImpl<N,T>::SparsityMapImpl(void)
     : remaining_contributor_count(0)
   {}
+
+  template <int N, typename T>
+  inline /*static*/ SparsityMapImpl<N,T> *SparsityMapImpl<N,T>::lookup(SparsityMap<N,T> sparsity)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(sparsity);
+    return wrapper->get_or_create<N,T>();
+  }
 
   // methods used in the population of a sparsity map
 
@@ -443,6 +524,7 @@ namespace Realm {
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
     int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+    assert(left >= 0);
     if(left == 0)
       finalize();
   }
@@ -458,8 +540,8 @@ namespace Realm {
       // can't use iterators on entry list, since push_back invalidates end()
       size_t orig_count = this->entries.size();
 
-      for(typename std::vector<ZRect<N,T> >::const_iterator it = rects.begin();
-	  it != rects.end();
+      for(typename std::vector<ZRect<N,T> >::const_iterator it = rects.rects.begin();
+	  it != rects.rects.end();
 	  it++) {
 	const ZRect<N,T>& r = *it;
 
@@ -492,13 +574,14 @@ namespace Realm {
 	  // no matches against existing stuff, so add a new entry
 	  this->entries.resize(idx + 1);
 	  this->entries[idx].bounds = r;
-	  this->entries[idx].sparsity = SparsityMap<N,T>::NO_SPACE;
+	  this->entries[idx].sparsity.id = 0; //SparsityMap<N,T>::NO_SPACE;
 	  this->entries[idx].bitmap = 0;
 	}
       }
     }
 
     int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+    assert(left >= 0);
     if(left == 0)
       finalize();
   }
@@ -507,7 +590,7 @@ namespace Realm {
   void SparsityMapImpl<N,T>::finalize(void)
   {
     std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
-    for(size_t i = 0; i < this->entries().size; i++)
+    for(size_t i = 0; i < this->entries.size(); i++)
       std::cout << "  [" << i
 		<< "]: bounds=" << this->entries[i].bounds
 		<< " sparsity=" << this->entries[i].sparsity
@@ -561,6 +644,13 @@ namespace Realm {
     assert(!value_set_valid);
     value_set.insert(_value_set.begin(), _value_set.end());
     value_set_valid = true;
+  }
+
+  template <int N, typename T, typename FT>
+  void ByFieldMicroOp<N,T,FT>::add_sparsity_output(FT _val, SparsityMap<N,T> _sparsity)
+  {
+    value_set.insert(_val);
+    sparsity_outputs[_val] = _sparsity;
   }
 
   template <int N, typename T, typename FT>
@@ -636,6 +726,20 @@ namespace Realm {
 	it != rect_map.end();
 	it++)
       std::cout << "  " << it->first << " = " << it->second->rects.size() << " rectangles" << std::endl;
+
+    // iterate over sparsity outputs and contribute to all (even if we didn't have any
+    //  points found for it)
+    for(typename std::map<FT, SparsityMap<N,T> >::const_iterator it = sparsity_outputs.begin();
+	it != sparsity_outputs.end();
+	it++) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->second);
+      typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(it->first);
+      if(it2 != rect_map.end()) {
+	impl->contribute_dense_rect_list(*(it2->second));
+	delete it2->second;
+      } else
+	impl->contribute_nothing();
+    }
   }
 
 

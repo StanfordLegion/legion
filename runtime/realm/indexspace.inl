@@ -548,7 +548,7 @@ namespace Realm {
     if(is.dense()) {
       os << ",dense";
     } else {
-      os << ",sparse(" << is.sparsity.id << ")";
+      os << ",sparse(" << is.sparsity << ")";
     }
     return os;
   }

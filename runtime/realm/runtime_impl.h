@@ -27,6 +27,7 @@
 
 #include "dynamic_table.h"
 #include "proc_impl.h"
+#include "partitions.h"
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)
@@ -105,6 +106,7 @@ namespace Realm {
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<IndexSpaceImpl, 10, 4> IndexSpaceTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
+    typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -120,6 +122,7 @@ namespace Realm {
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<IndexSpaceTableAllocator> index_spaces;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      DynamicTable<SparsityMapTableAllocator> sparsity_maps;
     };
 
     // the "core" module provides the basic memories and processors used by Realm
@@ -189,6 +192,7 @@ namespace Realm {
       ProcessorGroup *get_procgroup_impl(ID id);
       IndexSpaceImpl *get_index_space_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
+      SparsityMapImplWrapper *get_sparsity_impl(ID id);
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
@@ -210,6 +214,7 @@ namespace Realm {
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
+      SparsityMapTableAllocator::FreeList *local_sparsity_map_free_list;
 
       pthread_t *background_pthread;
 #ifdef DEADLOCK_TRACE

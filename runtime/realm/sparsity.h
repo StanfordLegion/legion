@@ -60,7 +60,7 @@ namespace Realm {
     bool operator==(const SparsityMap<N,T> &rhs) const;
     bool operator!=(const SparsityMap<N,T> &rhs) const;
 
-    static const SparsityMap<N,T> NO_SPACE;
+    //static const SparsityMap<N,T> NO_SPACE;
 
     bool exists(void) const;
 
@@ -68,20 +68,8 @@ namespace Realm {
     SparsityMapPublicImpl<N,T> *impl(void) const;
   };
 
-  class SparsityMapImplBase {
-  protected:
-    int dim;
-    int idxtype; // captured via sizeof(T) right now
-
-    // cannot be constructed directly
-    SparsityMapImplBase(int _dim, int _idxtype);
-
-    static SparsityMapImplBase *lookup(::legion_lowlevel_id_t id);
-
-  public:
-    template <int N, typename T>
-    static SparsityMapPublicImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
-  };
+  template <int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s) { return os << std::hex << s.id << std::dec; }
 
   template <int N, typename T>
   struct SparsityMapEntry {
@@ -91,7 +79,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class SparsityMapPublicImpl : public SparsityMapImplBase {
+  class SparsityMapPublicImpl {
   protected:
     // cannot be constructed directly
     SparsityMapPublicImpl(void);

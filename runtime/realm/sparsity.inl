@@ -48,41 +48,6 @@ namespace Realm {
     return id != 0;
   }
 
-  // looks up the public subset of the implementation object
-  template <int N, typename T>
-  inline SparsityMapPublicImpl<N,T> *SparsityMap<N,T>::impl(void) const
-  {
-    return SparsityMapImplBase::lookup(*this);
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SparsityMapImplBase
-
-  // cannot be constructed directly
-  inline SparsityMapImplBase::SparsityMapImplBase(int _dim, int _idxtype)
-    : dim(_dim), idxtype(_idxtype)
-  {}
-    
-  template <int N, typename T>
-  /*static*/ SparsityMapPublicImpl<N,T> *SparsityMapImplBase::lookup(SparsityMap<N,T> sparsity)
-  {
-    SparsityMapImplBase *i = lookup(sparsity.id);
-    assert((i->dim == N) && (i->idxtype == (int)(sizeof(T))));
-    return static_cast<SparsityMapPublicImpl<N,T> *>(i);
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SparsityMapPublicImpl<N,T>
-
-  template <int N, typename T>
-  inline SparsityMapPublicImpl<N,T>::SparsityMapPublicImpl(void)
-    : SparsityMapImplBase(N, (int)(sizeof(T)))
-  {}
-
 
 }; // namespace Realm
 

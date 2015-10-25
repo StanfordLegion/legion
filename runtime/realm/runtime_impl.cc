@@ -268,7 +268,8 @@ namespace Realm {
       : machine(0), nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
-	local_proc_group_free_list(0), background_pthread(0),
+	local_proc_group_free_list(0), local_sparsity_map_free_list(0),
+	background_pthread(0),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
@@ -630,6 +631,7 @@ namespace Realm {
 	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
 	local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
 	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
+	local_sparsity_map_free_list = new SparsityMapTableAllocator::FreeList(n.sparsity_maps, gasnet_mynode());
       }
 
 #ifdef DEADLOCK_TRACE
@@ -1133,6 +1135,7 @@ namespace Realm {
 	delete local_reservation_free_list;
 	delete local_index_space_free_list;
 	delete local_proc_group_free_list;
+	delete local_sparsity_map_free_list;
 
 	// delete all the DMA channels that we were given
 	delete_vector_contents(dma_channels);
@@ -1271,6 +1274,14 @@ namespace Realm {
 
       Node *n = &nodes[id.node()];
       BarrierImpl *impl = n->barriers.lookup_entry(id.index(), id.node());
+      assert(impl->me == id);
+      return impl;
+    }
+
+    SparsityMapImplWrapper *RuntimeImpl::get_sparsity_impl(ID id)
+    {
+      Node *n = &nodes[id.node()];
+      SparsityMapImplWrapper *impl = n->sparsity_maps.lookup_entry(id.index(), id.node());
       assert(impl->me == id);
       return impl;
     }

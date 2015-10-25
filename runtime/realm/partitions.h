@@ -21,6 +21,7 @@
 #include "indexspace.h"
 #include "sparsity.h"
 #include "activemsg.h"
+#include "id.h"
 
 // NOTE: all these interfaces are templated, which means partitions.cc is going
 //  to have to somehow know which ones to instantiate - we'll try to have a 
@@ -68,6 +69,8 @@ namespace Realm {
   public:
     SparsityMapImpl(void);
 
+    static SparsityMapImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
+
     // methods used in the population of a sparsity map
 
     // when we plan out a partitioning operation, we'll know how many
@@ -84,6 +87,28 @@ namespace Realm {
     
     int remaining_contributor_count;
     GASNetHSL mutex;
+  };
+
+  // we need a type-erased wrapper to store in the runtime's lookup table
+  class SparsityMapImplWrapper {
+  public:
+    static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
+
+    SparsityMapImplWrapper(void);
+
+    void init(ID _me, unsigned _init_owner);
+
+    ID me;
+    unsigned owner;
+    SparsityMapImplWrapper *next_free;
+    int dim;
+    int idxtype; // captured via sizeof(T) right now
+    void *map_impl;  // actual implementation
+
+    template <int N, typename T>
+    SparsityMapImpl<N,T> *get_or_create(void);
+
+    void destroy(void);
   };
 
 
