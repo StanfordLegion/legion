@@ -736,13 +736,13 @@ namespace LegionRuntime {
         to_create.push_back(global);
         // Only make one new instance
         create_one = true;
-        blocking_factor = 1;
+        blocking_factor = max_blocking_factor; // 1
       }
       else
       {
         to_reuse.insert(current_instances.begin(),current_instances.end());
         create_one = false;
-        blocking_factor = 1;
+        blocking_factor = max_blocking_factor; // 1
       }
       // Don't make any composite instances since they're 
       // not fully supported yet

@@ -55,17 +55,21 @@ local c = std.c
 local context = {}
 context.__index = context
 
-function context:new_local_scope(div)
-  if div == nil then
-    div = self.divergence
-  end
+function context:new_local_scope(divergence, must_epoch, must_epoch_point)
+  assert(not (self.must_epoch and must_epoch))
+  divergence = self.divergence or divergence
+  must_epoch = self.must_epoch or must_epoch
+  must_epoch_point = self.must_epoch_point or must_epoch_point
+  assert((must_epoch == nil) == (must_epoch_point == nil))
   return setmetatable({
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
-    divergence = div,
+    divergence = divergence,
+    must_epoch = must_epoch,
+    must_epoch_point = must_epoch_point,
     context = self.context,
     runtime = self.runtime,
     ispaces = self.ispaces:new_local_scope(),
@@ -82,6 +86,8 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     task_meta = task_meta,
     leaf = leaf,
     divergence = nil,
+    must_epoch = nil,
+    must_epoch_point = nil,
     context = ctx,
     runtime = runtime,
     ispaces = symbol_table.new_global_scope({}),
@@ -1337,17 +1343,22 @@ function rawref:reduce(cx, value, op)
   local ref_type = self.value_type.type
   local value_type = std.as_read(value.value_type)
 
-  local reduce = ast.typed.ExprBinary {
+  local reduce = ast.typed.expr.Binary {
     op = op,
-    lhs = ast.typed.ExprInternal {
+    lhs = ast.typed.expr.Internal {
       value = values.value(expr.just(quote end, ref_expr.value), ref_type),
       expr_type = ref_type,
+      options = ast.default_options,
+      span = ast.trivial_span(),
     },
-    rhs = ast.typed.ExprInternal {
+    rhs = ast.typed.expr.Internal {
       value = values.value(expr.just(quote end, value_expr.value), value_type),
       expr_type = value_type,
+      options = ast.default_options,
+      span = ast.trivial_span(),
     },
     expr_type = ref_type,
+    options = ast.default_options,
     span = ast.trivial_span(),
   }
 
@@ -1935,7 +1946,11 @@ function codegen.expr_call(cx, node)
         cx, fn.value, arg_type, param_type, launcher, false, region_args_setup)
     end
 
-    local future = terralib.newsymbol("future")
+    local future
+    if not cx.must_epoch then
+      future = terralib.newsymbol("future")
+    end
+
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
@@ -1948,11 +1963,30 @@ function codegen.expr_call(cx, node)
       [future_args_setup]
       [ispace_args_setup]
       [region_args_setup]
-      var [future] = c.legion_task_launcher_execute(
-        [cx.runtime], [cx.context], [launcher])
     end
-    local launcher_cleanup = quote
-      c.legion_task_launcher_destroy(launcher)
+
+    local launcher_execute
+    if not cx.must_epoch then
+      launcher_execute = quote
+        var [future] = c.legion_task_launcher_execute(
+          [cx.runtime], [cx.context], [launcher])
+        c.legion_task_launcher_destroy(launcher)
+      end
+    else
+      launcher_execute = quote
+        c.legion_must_epoch_launcher_add_single_task(
+          [cx.must_epoch],
+          c.legion_domain_point_from_point_1d(
+            c.legion_point_1d_t { x = arrayof(int, [cx.must_epoch_point]) }),
+          [launcher])
+        [cx.must_epoch_point] = [cx.must_epoch_point] + 1
+      end
+    end
+
+    actions = quote
+      [actions]
+      [launcher_setup]
+      [launcher_execute]
     end
 
     local future_type = value_type
@@ -1960,33 +1994,38 @@ function codegen.expr_call(cx, node)
       future_type = std.future(value_type)
     end
 
-    actions = quote
-      [actions]
-      [launcher_setup]
-      [launcher_cleanup]
+    local future_value
+    if future then
+      future_value = values.value(
+        expr.once_only(actions, `([future_type]{ __result = [future] })),
+        value_type)
     end
-    local future_value = values.value(
-      expr.once_only(actions, `([future_type]{ __result = [future] })),
-      value_type)
 
     if std.is_future(value_type) then
+      assert(future_value)
       return future_value
     elseif value_type == terralib.types.unit then
-      actions = quote
-        [actions]
-        c.legion_future_destroy(future)
+      if future then
+        actions = quote
+          [actions]
+          c.legion_future_destroy(future)
+        end
       end
 
       return values.value(expr.just(actions, quote end), terralib.types.unit)
     else
+      assert(future_value)
       return codegen.expr(
         cx,
-        ast.typed.ExprFutureGetResult {
-          value = ast.typed.ExprInternal {
+        ast.typed.expr.FutureGetResult {
+          value = ast.typed.expr.Internal {
             value = future_value,
             expr_type = future_type,
+            options = node.options,
+            span = node.span,
           },
           expr_type = value_type,
+          options = node.options,
           span = node.span,
         })
     end
@@ -2021,9 +2060,9 @@ function codegen.expr_ctor_rec_field(cx, node)
 end
 
 function codegen.expr_ctor_field(cx, node)
-  if node:is(ast.typed.ExprCtorListField) then
+  if node:is(ast.typed.expr.CtorListField) then
     return codegen.expr_ctor_list_field(cx, node)
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     return codegen.expr_ctor_rec_field(cx, node)
   else
   end
@@ -2601,12 +2640,13 @@ local lift_unary_op_to_futures = terralib.memoize(
     local name = "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op)
     local rhs_symbol = terralib.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
-    local node = ast.typed.StatTask {
+    local node = ast.typed.stat.Task {
       name = name,
       params = terralib.newlist({
-          ast.typed.StatTaskParam {
+          ast.typed.stat.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            options = ast.default_options(),
             span = ast.trivial_span(),
           },
       }),
@@ -2615,31 +2655,33 @@ local lift_unary_op_to_futures = terralib.memoize(
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({
-            ast.typed.StatReturn {
-              value = ast.typed.ExprUnary {
+            ast.typed.stat.Return {
+              value = ast.typed.expr.Unary {
                 op = op,
-                rhs = ast.typed.ExprID {
+                rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
+                  options = ast.default_options(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
+                options = ast.default_options(),
                 span = ast.trivial_span(),
               },
+              options = ast.default_options(),
               span = ast.trivial_span(),
             },
         }),
         span = ast.trivial_span(),
       },
-      config_options = ast.typed.StatTaskConfigOptions {
+      config_options = ast.TaskConfigOptions {
         leaf = true,
         inner = false,
         idempotent = true,
       },
       region_divergence = false,
       prototype = task,
-      inline = false,
-      cuda = false,
+      options = ast.default_options(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -2674,17 +2716,19 @@ local lift_binary_op_to_futures = terralib.memoize(
     local lhs_symbol = terralib.newsymbol(lhs_type, "lhs")
     local rhs_symbol = terralib.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
-    local node = ast.typed.StatTask {
+    local node = ast.typed.stat.Task {
       name = name,
       params = terralib.newlist({
-         ast.typed.StatTaskParam {
+         ast.typed.stat.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
+            options = ast.default_options(),
             span = ast.trivial_span(),
          },
-         ast.typed.StatTaskParam {
+         ast.typed.stat.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            options = ast.default_options(),
             span = ast.trivial_span(),
          },
       }),
@@ -2693,36 +2737,39 @@ local lift_binary_op_to_futures = terralib.memoize(
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({
-            ast.typed.StatReturn {
-              value = ast.typed.ExprBinary {
+            ast.typed.stat.Return {
+              value = ast.typed.expr.Binary {
                 op = op,
-                lhs = ast.typed.ExprID {
+                lhs = ast.typed.expr.ID {
                   value = lhs_symbol,
                   expr_type = lhs_type,
+                  options = ast.default_options(),
                   span = ast.trivial_span(),
                 },
-                rhs = ast.typed.ExprID {
+                rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
+                  options = ast.default_options(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
+                options = ast.default_options(),
                 span = ast.trivial_span(),
               },
+              options = ast.default_options(),
               span = ast.trivial_span(),
             },
         }),
         span = ast.trivial_span(),
       },
-      config_options = ast.typed.StatTaskConfigOptions {
+      config_options = ast.TaskConfigOptions {
         leaf = true,
         inner = false,
         idempotent = true,
       },
       region_divergence = false,
       prototype = task,
-      inline = false,
-      cuda = false,
+      options = ast.default_options(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -2743,16 +2790,18 @@ function codegen.expr_unary(cx, node)
     local rhs_type = std.as_read(node.rhs.expr_type)
     local task = lift_unary_op_to_futures(node.op, rhs_type, expr_type)
 
-    local call = ast.typed.ExprCall {
-      fn = ast.typed.ExprFunction {
+    local call = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
+        options = ast.default_options(),
         span = node.span,
       },
       inline = "allow",
       fn_unspecialized = false,
       args = terralib.newlist({node.rhs}),
       expr_type = expr_type,
+      options = node.options,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -2776,16 +2825,18 @@ function codegen.expr_binary(cx, node)
     local task = lift_binary_op_to_futures(
       node.op, lhs_type, rhs_type, expr_type)
 
-    local call = ast.typed.ExprCall {
-      fn = ast.typed.ExprFunction {
+    local call = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
-      span = node.span,
+        options = ast.default_options(),
+        span = node.span,
       },
       inline = "allow",
       fn_unspecialized = false,
       args = terralib.newlist({node.lhs, node.rhs}),
       expr_type = expr_type,
+      options = node.options,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -2904,91 +2955,91 @@ function codegen.expr_future_get_result(cx, node)
 end
 
 function codegen.expr(cx, node)
-  if node:is(ast.typed.ExprInternal) then
+  if node:is(ast.typed.expr.Internal) then
     return codegen.expr_internal(cx, node)
 
-  elseif node:is(ast.typed.ExprID) then
+  elseif node:is(ast.typed.expr.ID) then
     return codegen.expr_id(cx, node)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return codegen.expr_constant(cx, node)
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return codegen.expr_function(cx, node)
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return codegen.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return codegen.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return codegen.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return codegen.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return codegen.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return codegen.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return codegen.expr_raw_context(cx, node)
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return codegen.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return codegen.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return codegen.expr_raw_runtime(cx, node)
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return codegen.expr_raw_value(cx, node)
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return codegen.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return codegen.expr_new(cx, node)
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return codegen.expr_null(cx, node)
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return codegen.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return codegen.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return codegen.expr_ispace(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return codegen.expr_region(cx, node)
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return codegen.expr_partition(cx, node)
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     return codegen.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return codegen.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return codegen.expr_deref(cx, node)
 
-  elseif node:is(ast.typed.ExprFuture) then
+  elseif node:is(ast.typed.expr.Future) then
     return codegen.expr_future(cx, node)
 
-  elseif node:is(ast.typed.ExprFutureGetResult) then
+  elseif node:is(ast.typed.expr.FutureGetResult) then
     return codegen.expr_future_get_result(cx, node)
 
   else
@@ -3280,7 +3331,7 @@ end
 function codegen.stat_for_list_vectorized(cx, node)
   if cx.task_meta:getcuda() then
     return codegen.stat_for_list(cx,
-      ast.typed.StatForList {
+      ast.typed.stat.ForList {
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
@@ -3459,6 +3510,23 @@ function codegen.stat_repeat(cx, node)
   end
 end
 
+function codegen.stat_must_epoch(cx, node)
+  local must_epoch = terralib.newsymbol("must_epoch")
+  local must_epoch_point = terralib.newsymbol("must_epoch_point")
+
+  local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
+  return quote
+    do
+      var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
+      var [must_epoch_point] = 0
+      [codegen.block(cx, node.block)]
+      c.legion_must_epoch_launcher_execute(
+        [cx.runtime], [cx.context], [must_epoch])
+      c.legion_must_epoch_launcher_destroy([must_epoch])
+    end
+  end
+end
+
 function codegen.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return quote
@@ -3490,15 +3558,18 @@ function codegen.stat_index_launch(cx, node)
       local partition_type = std.as_read(arg.value.expr_type)
       local region = codegen.expr(
         cx,
-        ast.typed.ExprIndexAccess {
-          value = ast.typed.ExprInternal {
+        ast.typed.expr.IndexAccess {
+          value = ast.typed.expr.Internal {
             value = values.value(
               expr.just(quote end, partition.value),
               partition_type),
             expr_type = partition_type,
+            options = node.options,
+            span = node.span,
           },
           index = arg.index,
           expr_type = arg.expr_type,
+          options = node.options,
           span = node.span,
         }):read(cx)
       args:insert(region)
@@ -3617,10 +3688,27 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
+  local domain1, domain2, domain_setup
+  if not cx.must_epoch then
+    domain1 = domain[1].value
+    domain2 = domain[2].value
+    domain_setup = quote end
+  else
+    domain1 = terralib.newsymbol("domain1")
+    domain2 = terralib.newsymbol("domain2")
+    domain_setup = quote
+      var launch_size = std.fmax([domain[2].value] - [domain[1].value], 0)
+      var [domain1] = [cx.must_epoch_point]
+      var [domain2] = [cx.must_epoch_point] + launch_size
+      [cx.must_epoch_point] = [cx.must_epoch_point] + launch_size
+    end
+  end
+
   local argument_map = terralib.newsymbol("argument_map")
   local launcher_setup = quote
+    [domain_setup]
     var [argument_map] = c.legion_argument_map_create()
-    for [node.symbol] = [domain[1].value], [domain[2].value] do
+    for [node.symbol] = [domain1], [domain2] do
       var [task_args]
       [task_args_setup]
       var t_args : c.legion_task_argument_t
@@ -3639,8 +3727,8 @@ function codegen.stat_index_launch(cx, node)
       [fn.value:gettaskid()],
       c.legion_domain_from_rect_1d(
         c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(int32, [domain[1].value]) },
-          hi = c.legion_point_1d_t { x = arrayof(int32, [domain[2].value] - 1) },
+          lo = c.legion_point_1d_t { x = arrayof(int32, [domain1]) },
+          hi = c.legion_point_1d_t { x = arrayof(int32, [domain2] - 1) },
         }),
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
@@ -3664,12 +3752,21 @@ function codegen.stat_index_launch(cx, node)
     execute_args:insert(op)
   end
 
-  local future = terralib.newsymbol("future")
-  local launcher_execute = quote
-    var [future] = execute_fn(execute_args)
+  local future, launcher_execute
+  if not cx.must_epoch then
+    future = terralib.newsymbol("future")
+    launcher_execute = quote
+      var [future] = execute_fn(execute_args)
+    end
+  else
+    launcher_execute = quote
+      c.legion_must_epoch_launcher_add_index_task(
+        [cx.must_epoch], [launcher])
+    end
   end
 
   if node.reduce_lhs then
+    assert(not cx.must_epoch)
     local rhs_type = std.as_read(node.call.expr_type)
     local future_type = rhs_type
     if not std.is_future(rhs_type) then
@@ -3677,23 +3774,27 @@ function codegen.stat_index_launch(cx, node)
     end
 
     local rh = terralib.newsymbol(future_type)
-    local rhs = ast.typed.ExprInternal {
+    local rhs = ast.typed.expr.Internal {
       value = values.value(expr.just(quote end, rh), future_type),
       expr_type = future_type,
+      options = node.options,
+      span = node.span,
     }
 
     if not std.is_future(rhs_type) then
-      rhs = ast.typed.ExprFutureGetResult {
+      rhs = ast.typed.expr.FutureGetResult {
         value = rhs,
         expr_type = rhs_type,
+        options = node.options,
         span = node.span,
       }
     end
 
-    local reduce = ast.typed.StatReduce {
+    local reduce = ast.typed.stat.Reduce {
       op = node.reduce_op,
       lhs = terralib.newlist({node.reduce_lhs}),
       rhs = terralib.newlist({rhs}),
+      options = node.options,
       span = node.span,
     }
 
@@ -3709,10 +3810,17 @@ function codegen.stat_index_launch(cx, node)
     destroy_future_fn = c.legion_future_destroy
   end
 
-  local launcher_cleanup = quote
-    c.legion_argument_map_destroy([argument_map])
-    destroy_future_fn([future])
-    c.legion_index_launcher_destroy([launcher])
+  local launcher_cleanup
+  if not cx.must_epoch then
+    launcher_cleanup = quote
+      c.legion_argument_map_destroy([argument_map])
+      destroy_future_fn([future])
+      c.legion_index_launcher_destroy([launcher])
+    end
+  else
+    launcher_cleanup = quote
+      c.legion_argument_map_destroy([argument_map])
+    end
   end
 
   actions = quote
@@ -3748,12 +3856,12 @@ function codegen.stat_var(cx, node)
   if #rhs > 0 then
     local decls = terralib.newlist()
     for i, lh in ipairs(lhs) do
-      if node.values[i]:is(ast.typed.ExprIspace) then
+      if node.values[i]:is(ast.typed.expr.Ispace) then
         actions = quote
           [actions]
           c.legion_index_space_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
         end
-      elseif node.values[i]:is(ast.typed.ExprRegion) then
+      elseif node.values[i]:is(ast.typed.expr.Region) then
         actions = quote
           [actions]
           c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
@@ -3943,55 +4051,58 @@ function codegen.stat_unmap_regions(cx, node)
 end
 
 function codegen.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return codegen.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return codegen.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return codegen.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return codegen.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatForListVectorized) then
+  elseif node:is(ast.typed.stat.ForListVectorized) then
     return codegen.stat_for_list_vectorized(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return codegen.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return codegen.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return codegen.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return codegen.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return codegen.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return codegen.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return codegen.stat_return(cx, node)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return codegen.stat_break(cx, node)
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return codegen.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return codegen.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return codegen.stat_expr(cx, node)
 
-  elseif node:is(ast.typed.StatMapRegions) then
+  elseif node:is(ast.typed.stat.MapRegions) then
     return codegen.stat_map_regions(cx, node)
 
-  elseif node:is(ast.typed.StatUnmapRegions) then
+  elseif node:is(ast.typed.stat.UnmapRegions) then
     return codegen.stat_unmap_regions(cx, node)
 
   else
@@ -4026,7 +4137,9 @@ end
 function codegen.stat_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
-  if node.cuda then node.region_divergence = false end
+  if node.options.cuda:is(ast.options.Demand) then
+    node = node { region_divergence = false }
+  end
 
   task:set_config_options(node.config_options)
 
@@ -4052,7 +4165,8 @@ function codegen.stat_task(cx, node)
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
-      return { field = param.symbol.displayname, type = param.param_type }
+      local param_name = param.symbol.displayname or tostring(param.symbol)
+      return { field = param_name, type = param.param_type }
     end))
 
   -- Regions require some special handling here. Specifically, field
@@ -4132,14 +4246,17 @@ function codegen.stat_task(cx, node)
       local future_type = std.future(param_type)
       local future_result = codegen.expr(
         cx,
-        ast.typed.ExprFutureGetResult {
-          value = ast.typed.ExprInternal {
+        ast.typed.expr.FutureGetResult {
+          value = ast.typed.expr.Internal {
             value = values.value(
               expr.just(quote end, `([future_type]{ __result = [future] })),
               future_type),
             expr_type = future_type,
+            options = node.options,
+            span = node.span,
           },
           expr_type = param_type,
+          options = node.options,
           span = node.span,
       }):read(cx)
 
@@ -4149,7 +4266,7 @@ function codegen.stat_task(cx, node)
           -- Force unaligned access because malloc does not provide
           -- blocks aligned for all purposes (e.g. SSE vectors).
           [param] = terralib.attrload(
-            (&args.[param.displayname]),
+            (&args.[param.displayname or tostring(param)]),
             { align = [param_type_alignment] })
         else
           std.assert([future_i] < [future_count], "missing future in task param")
@@ -4408,15 +4525,18 @@ function codegen.stat_fspace(cx, node)
 end
 
 function codegen.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
-    if not node.cuda then
+  if node:is(ast.typed.stat.Task) then
+    if not node.options.cuda:is(ast.options.Demand) then
       local cpu_task = codegen.stat_task(cx, node)
       std.register_task(cpu_task)
       return cpu_task
     else
       local cuda_opts = node.cuda
-      node.cuda = false
-      local cpu_task = codegen.stat_task(cx, node)
+      local cpu_task = codegen.stat_task(
+        cx,
+        node {
+          options = node.options {
+            cuda = ast.options.Forbid { value = false } } })
       local cuda_task = cpu_task:make_variant()
       cuda_task:setcuda(cuda_opts)
       local new_node = node {
@@ -4429,7 +4549,7 @@ function codegen.stat_top(cx, node)
       return cpu_task
     end
 
-  elseif node:is(ast.typed.StatFspace) then
+  elseif node:is(ast.typed.stat.Fspace) then
     return codegen.stat_fspace(cx, node)
 
   else

@@ -55,42 +55,48 @@ end
 function convert_lua_value(cx, node, value)
   if type(value) == "number" or type(value) == "boolean" then
     local expr_type = guess_type_for_literal(value)
-    return ast.specialized.ExprConstant {
+    return ast.specialized.expr.Constant {
       value = value,
       expr_type = expr_type,
+      options = node.options,
       span = node.span,
     }
   elseif type(value) == "function" or terralib.isfunction(value) or
     terralib.isfunctiondefinition(value) or terralib.ismacro(value) or
     terralib.types.istype(value) or std.is_task(value)
   then
-    return ast.specialized.ExprFunction {
+    return ast.specialized.expr.Function {
       value = value,
+      options = node.options,
       span = node.span,
     }
   elseif terralib.isconstant(value) then
     if value.type then
-      return ast.specialized.ExprConstant {
+      return ast.specialized.expr.Constant {
         value = value.object,
         expr_type = value.type,
+        options = node.options,
         span = node.span,
       }
     else
       local expr_type = guess_type_for_literal(value.object)
-      return ast.specialized.ExprConstant {
+      return ast.specialized.expr.Constant {
         value = value.object,
         expr_type = expr_type,
+        options = node.options,
         span = node.span,
       }
     end
   elseif terralib.issymbol(value) then
-    return ast.specialized.ExprID {
+    return ast.specialized.expr.ID {
       value = value,
+      options = node.options,
       span = node.span,
     }
   elseif type(value) == "table" then
-    return ast.specialized.ExprLuaTable {
+    return ast.specialized.expr.LuaTable {
       value = value,
+      options = node.options,
       span = node.span,
     }
   else
@@ -116,112 +122,112 @@ end
 local function get_num_accessed_fields(node)
   if type(node) == "function" then return 1 end
 
-  if node:is(ast.unspecialized.ExprID) then
+  if node:is(ast.unspecialized.expr.ID) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprEscape) then
+  elseif node:is(ast.unspecialized.expr.Escape) then
     if get_num_accessed_fields(node.expr) > 1 then return false
     else return 1 end
 
-  elseif node:is(ast.unspecialized.ExprConstant) then
+  elseif node:is(ast.unspecialized.expr.Constant) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprFieldAccess) then
+  elseif node:is(ast.unspecialized.expr.FieldAccess) then
     return get_num_accessed_fields(node.value) * #node.field_names
 
-  elseif node:is(ast.unspecialized.ExprIndexAccess) then
+  elseif node:is(ast.unspecialized.expr.IndexAccess) then
     if get_num_accessed_fields(node.value) > 1 then return false end
     if get_num_accessed_fields(node.index) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprMethodCall) then
+  elseif node:is(ast.unspecialized.expr.MethodCall) then
     if get_num_accessed_fields(node.value) > 1 then return false end
     for _, arg in pairs(node.args) do
       if get_num_accessed_fields(arg) > 1 then return false end
     end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprCall) then
+  elseif node:is(ast.unspecialized.expr.Call) then
     if get_num_accessed_fields(node.fn) > 1 then return false end
     for _, arg in pairs(node.args) do
       if get_num_accessed_fields(arg) > 1 then return false end
     end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprCtor) then
+  elseif node:is(ast.unspecialized.expr.Ctor) then
     node.fields:map(function(field)
-      if field:is(ast.unspecialized.ExprCtorListField) then
+      if field:is(ast.unspecialized.expr.CtorListField) then
         if get_num_accessed_fields(field.value) > 1 then return false end
-      elseif field:is(ast.unspecialized.ExprCtorListField) then
+      elseif field:is(ast.unspecialized.expr.CtorListField) then
         if get_num_accessed_fields(field.num_expr) > 1 then return false end
         if get_num_accessed_fields(field.value) > 1 then return false end
       end
     end)
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRawContext) then
+  elseif node:is(ast.unspecialized.expr.RawContext) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRawFields) then
+  elseif node:is(ast.unspecialized.expr.RawFields) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRawPhysical) then
+  elseif node:is(ast.unspecialized.expr.RawPhysical) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRawRuntime) then
+  elseif node:is(ast.unspecialized.expr.RawRuntime) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRawValue) then
+  elseif node:is(ast.unspecialized.expr.RawValue) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprIsnull) then
+  elseif node:is(ast.unspecialized.expr.Isnull) then
     if get_num_accessed_fields(node.pointer) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprNew) then
+  elseif node:is(ast.unspecialized.expr.New) then
     if get_num_accessed_fields(node.pointer_type_expr) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprNull) then
+  elseif node:is(ast.unspecialized.expr.Null) then
     if get_num_accessed_fields(node.pointer_type_expr) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprDynamicCast) then
+  elseif node:is(ast.unspecialized.expr.DynamicCast) then
     if get_num_accessed_fields(node.type_expr) > 1 then return false end
     if get_num_accessed_fields(node.value) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprStaticCast) then
+  elseif node:is(ast.unspecialized.expr.StaticCast) then
     if get_num_accessed_fields(node.type_expr) > 1 then return false end
     if get_num_accessed_fields(node.value) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprIspace) then
+  elseif node:is(ast.unspecialized.expr.Ispace) then
     if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprRegion) then
+  elseif node:is(ast.unspecialized.expr.Region) then
     if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprPartition) then
+  elseif node:is(ast.unspecialized.expr.Partition) then
     if get_num_accessed_fields(node.disjointness_expr) > 1 then return false end
     if get_num_accessed_fields(node.region_type_expr) > 1 then return false end
     return 1
 
-  elseif node:is(ast.unspecialized.ExprCrossProduct) then
+  elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
-  elseif node:is(ast.unspecialized.ExprUnary) then
+  elseif node:is(ast.unspecialized.expr.Unary) then
     return get_num_accessed_fields(node.rhs)
 
-  elseif node:is(ast.unspecialized.ExprBinary) then
+  elseif node:is(ast.unspecialized.expr.Binary) then
     return join_num_accessed_fields(get_num_accessed_fields(node.lhs),
                                     get_num_accessed_fields(node.rhs))
 
-  elseif node:is(ast.unspecialized.ExprDeref) then
+  elseif node:is(ast.unspecialized.expr.Deref) then
     if get_num_accessed_fields(node.value) > 1 then return false end
     return 1
 
@@ -231,7 +237,7 @@ local function get_num_accessed_fields(node)
 end
 
 local function get_nth_field_access(node, idx)
-  if node:is(ast.unspecialized.ExprFieldAccess) then
+  if node:is(ast.unspecialized.expr.FieldAccess) then
     local num_accessed_fields_value = get_num_accessed_fields(node.value)
     local num_accessed_fields = #node.field_names
 
@@ -245,10 +251,10 @@ local function get_nth_field_access(node, idx)
       field_names = field_names,
     }
 
-  elseif node:is(ast.unspecialized.ExprUnary) then
+  elseif node:is(ast.unspecialized.expr.Unary) then
     return node { rhs = get_nth_field_access(node.rhs, idx) }
 
-  elseif node:is(ast.unspecialized.ExprBinary) then
+  elseif node:is(ast.unspecialized.expr.Binary) then
     return node {
       lhs = get_nth_field_access(node.lhs, idx),
       rhs = get_nth_field_access(node.rhs, idx),
@@ -260,8 +266,8 @@ local function get_nth_field_access(node, idx)
 end
 
 local function has_all_valid_field_accesses(node)
-  if node:is(ast.unspecialized.StatAssignment) or
-     node:is(ast.unspecialized.StatReduce) then
+  if node:is(ast.unspecialized.stat.Assignment) or
+     node:is(ast.unspecialized.stat.Reduce) then
 
     local valid = true
     std.zip(node.lhs, node.rhs):map(function(pair)
@@ -300,9 +306,10 @@ function specialize.expr_escape(cx, node)
 end
 
 function specialize.expr_constant(cx, node)
-  return ast.specialized.ExprConstant {
+  return ast.specialized.expr.Constant {
     value = node.value,
     expr_type = node.expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -313,31 +320,34 @@ function specialize.expr_field_access(cx, node)
     log.error(node, "illegal use of multi-field access")
   end
   local value = specialize.expr(cx, node.value)
-  if value:is(ast.specialized.ExprLuaTable) then
+  if value:is(ast.specialized.expr.LuaTable) then
     return convert_lua_value(cx, node, value.value[node.field_names[1]])
   else
-    return ast.specialized.ExprFieldAccess {
+    return ast.specialized.expr.FieldAccess {
       value = value,
       field_name = node.field_names[1],
+      options = node.options,
       span = node.span,
     }
   end
 end
 
 function specialize.expr_index_access(cx, node)
-  return ast.specialized.ExprIndexAccess {
+  return ast.specialized.expr.IndexAccess {
     value = specialize.expr(cx, node.value),
     index = specialize.expr(cx, node.index),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_method_call(cx, node)
-  return ast.specialized.ExprMethodCall {
+  return ast.specialized.expr.MethodCall {
     value = specialize.expr(cx, node.value),
     method_name = node.method_name,
     args = node.args:map(
       function(arg) return specialize.expr(cx, arg) end),
+    options = node.options,
     span = node.span,
   }
 end
@@ -350,18 +360,19 @@ function specialize.expr_call(cx, node)
     std.is_task(fn.value) or
     type(fn.value) == "function"
   then
-    return ast.specialized.ExprCall {
+    return ast.specialized.expr.Call {
       fn = fn,
-      inline = node.inline,
       args = node.args:map(
         function(arg) return specialize.expr(cx, arg) end),
+      options = node.options,
       span = node.span,
     }
   elseif terralib.types.istype(fn.value) then
-    return ast.specialized.ExprCast {
+    return ast.specialized.expr.Cast {
       fn = fn,
       args = node.args:map(
         function(arg) return specialize.expr(cx, arg) end),
+      options = node.options,
       span = node.span,
     }
   else
@@ -370,8 +381,9 @@ function specialize.expr_call(cx, node)
 end
 
 function specialize.expr_ctor_list_field(cx, node)
-  return ast.specialized.ExprCtorListField {
+  return ast.specialized.expr.CtorListField {
     value = specialize.expr(cx, node.value),
+    options = node.options,
     span = node.span,
   }
 end
@@ -384,17 +396,18 @@ function specialize.expr_ctor_rec_field(cx, node)
     assert("expected a string or symbol but found " .. tostring(type(name)))
   end
 
-  return ast.specialized.ExprCtorRecField {
+  return ast.specialized.expr.CtorRecField {
     name = name,
     value = specialize.expr(cx, node.value),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_ctor_field(cx, node)
-  if node:is(ast.unspecialized.ExprCtorListField) then
+  if node:is(ast.unspecialized.expr.CtorListField) then
     return specialize.expr_ctor_list_field(cx, node)
-  elseif node:is(ast.unspecialized.ExprCtorRecField) then
+  elseif node:is(ast.unspecialized.expr.CtorRecField) then
     return specialize.expr_ctor_rec_field(cx, node)
   else
   end
@@ -408,11 +421,11 @@ function specialize.expr_ctor(cx, node)
   local all_named = false
   local all_unnamed = false
   for _, field in ipairs(fields) do
-    if field:is(ast.specialized.ExprCtorRecField) then
+    if field:is(ast.specialized.expr.CtorRecField) then
       assert(not all_unnamed,
              "some entries in constructor are named while others are not")
       all_named = true
-    elseif field:is(ast.specialized.ExprCtorListField) then
+    elseif field:is(ast.specialized.expr.CtorListField) then
       assert(not all_named,
              "some entries in constructor are named while others are not")
       all_unnamed = true
@@ -421,50 +434,57 @@ function specialize.expr_ctor(cx, node)
     end
   end
 
-  return ast.specialized.ExprCtor {
+  return ast.specialized.expr.Ctor {
     fields = fields,
     named = all_named,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_raw_context(cx, node)
-  return ast.specialized.ExprRawContext {
+  return ast.specialized.expr.RawContext {
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_raw_fields(cx, node)
-  return ast.specialized.ExprRawFields {
+  return ast.specialized.expr.RawFields {
     region = specialize.expr(cx, node.region),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_raw_physical(cx, node)
-  return ast.specialized.ExprRawPhysical {
+  return ast.specialized.expr.RawPhysical {
     region = specialize.expr(cx, node.region),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_raw_runtime(cx, node)
-  return ast.specialized.ExprRawRuntime {
+  return ast.specialized.expr.RawRuntime {
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_raw_value(cx, node)
-  return ast.specialized.ExprRawValue {
+  return ast.specialized.expr.RawValue {
     value = specialize.expr(cx, node.value),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_isnull(cx, node)
   local pointer = specialize.expr(cx, node.pointer)
-  return ast.specialized.ExprIsnull {
+  return ast.specialized.expr.Isnull {
     pointer = pointer,
+    options = node.options,
     span = node.span,
   }
 end
@@ -478,21 +498,24 @@ function specialize.expr_new(cx, node)
   if #bounds ~= 1 then
     log.error(node, "new requires bounded type with exactly one region, got " .. tostring(pointer_type))
   end
-  local region = ast.specialized.ExprID {
+  local region = ast.specialized.expr.ID {
     value = bounds[1],
+    options = node.options,
     span = node.span,
   }
-  return ast.specialized.ExprNew {
+  return ast.specialized.expr.New {
     pointer_type = pointer_type,
     region = region,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_null(cx, node)
   local pointer_type = node.pointer_type_expr(cx.env:env())
-  return ast.specialized.ExprNull {
+  return ast.specialized.expr.Null {
     pointer_type = pointer_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -500,9 +523,10 @@ end
 function specialize.expr_dynamic_cast(cx, node)
   local expr_type = node.type_expr(cx.env:env())
   local value = specialize.expr(cx, node.value)
-  return ast.specialized.ExprDynamicCast {
+  return ast.specialized.expr.DynamicCast {
     value = value,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -510,9 +534,10 @@ end
 function specialize.expr_static_cast(cx, node)
   local expr_type = node.type_expr(cx.env:env())
   local value = specialize.expr(cx, node.value)
-  return ast.specialized.ExprStaticCast {
+  return ast.specialized.expr.StaticCast {
     value = value,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -524,11 +549,12 @@ function specialize.expr_ispace(cx, node)
   end
 
   local expr_type = std.ispace(index_type)
-  return ast.specialized.ExprIspace {
+  return ast.specialized.expr.Ispace {
     index_type = index_type,
     extent = specialize.expr(cx, node.extent),
     start = node.start and specialize.expr(cx, node.start),
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -536,18 +562,19 @@ end
 function specialize.expr_region(cx, node)
   local ispace = specialize.expr(cx, node.ispace)
   local ispace_symbol
-  if ispace:is(ast.specialized.ExprID) then
+  if ispace:is(ast.specialized.expr.ID) then
     ispace_symbol = ispace.value
   else
     ispace_symbol = terralib.newsymbol()
   end
   local fspace_type = node.fspace_type_expr(cx.env:env())
   local expr_type = std.region(ispace_symbol, fspace_type)
-  return ast.specialized.ExprRegion {
+  return ast.specialized.expr.Region {
     ispace = ispace,
     ispace_symbol = ispace_symbol,
     fspace_type = fspace_type,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -562,15 +589,17 @@ function specialize.expr_partition(cx, node)
                 tostring(disjointness))
   end
   local expr_type = std.partition(disjointness, region_type)
-  local region = ast.specialized.ExprID {
+  local region = ast.specialized.expr.ID {
     value = expr_type.parent_region_symbol,
+    options = node.options,
     span = node.span,
   }
-  return ast.specialized.ExprPartition {
+  return ast.specialized.expr.Partition {
     disjointness = disjointness,
     region = region,
     coloring = specialize.expr(cx, node.coloring),
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
@@ -587,116 +616,121 @@ function specialize.expr_cross_product(cx, node)
   local expr_type = std.cross_product(unpack(arg_types))
   local args = expr_type.partition_symbols:map(
     function(partition)
-      return ast.specialized.ExprID {
+      return ast.specialized.expr.ID {
         value = partition,
+        options = node.options,
         span = node.span,
       }
   end)
-  return ast.specialized.ExprCrossProduct {
+  return ast.specialized.expr.CrossProduct {
     args = args,
     expr_type = expr_type,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_unary(cx, node)
-  return ast.specialized.ExprUnary {
+  return ast.specialized.expr.Unary {
     op = node.op,
     rhs = specialize.expr(cx, node.rhs),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_binary(cx, node)
-  return ast.specialized.ExprBinary {
+  return ast.specialized.expr.Binary {
     op = node.op,
     lhs = specialize.expr(cx, node.lhs),
     rhs = specialize.expr(cx, node.rhs),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_deref(cx, node)
-  return ast.specialized.ExprDeref {
+  return ast.specialized.expr.Deref {
     value = specialize.expr(cx, node.value),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr(cx, node)
-  if node:is(ast.unspecialized.ExprID) then
+  if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprEscape) then
+  elseif node:is(ast.unspecialized.expr.Escape) then
     return specialize.expr_escape(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprConstant) then
+  elseif node:is(ast.unspecialized.expr.Constant) then
     return specialize.expr_constant(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprFieldAccess) then
+  elseif node:is(ast.unspecialized.expr.FieldAccess) then
     return specialize.expr_field_access(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprIndexAccess) then
+  elseif node:is(ast.unspecialized.expr.IndexAccess) then
     return specialize.expr_index_access(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprMethodCall) then
+  elseif node:is(ast.unspecialized.expr.MethodCall) then
     return specialize.expr_method_call(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprCall) then
+  elseif node:is(ast.unspecialized.expr.Call) then
     return specialize.expr_call(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprCtor) then
+  elseif node:is(ast.unspecialized.expr.Ctor) then
     return specialize.expr_ctor(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRawContext) then
+  elseif node:is(ast.unspecialized.expr.RawContext) then
     return specialize.expr_raw_context(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRawFields) then
+  elseif node:is(ast.unspecialized.expr.RawFields) then
     return specialize.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRawPhysical) then
+  elseif node:is(ast.unspecialized.expr.RawPhysical) then
     return specialize.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRawRuntime) then
+  elseif node:is(ast.unspecialized.expr.RawRuntime) then
     return specialize.expr_raw_runtime(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRawValue) then
+  elseif node:is(ast.unspecialized.expr.RawValue) then
     return specialize.expr_raw_value(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprIsnull) then
+  elseif node:is(ast.unspecialized.expr.Isnull) then
     return specialize.expr_isnull(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprNew) then
+  elseif node:is(ast.unspecialized.expr.New) then
     return specialize.expr_new(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprNull) then
+  elseif node:is(ast.unspecialized.expr.Null) then
     return specialize.expr_null(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprDynamicCast) then
+  elseif node:is(ast.unspecialized.expr.DynamicCast) then
     return specialize.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprStaticCast) then
+  elseif node:is(ast.unspecialized.expr.StaticCast) then
     return specialize.expr_static_cast(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprIspace) then
+  elseif node:is(ast.unspecialized.expr.Ispace) then
     return specialize.expr_ispace(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprRegion) then
+  elseif node:is(ast.unspecialized.expr.Region) then
     return specialize.expr_region(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprPartition) then
+  elseif node:is(ast.unspecialized.expr.Partition) then
     return specialize.expr_partition(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprCrossProduct) then
+  elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprUnary) then
+  elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprBinary) then
+  elseif node:is(ast.unspecialized.expr.Binary) then
     return specialize.expr_binary(cx, node)
 
-  elseif node:is(ast.unspecialized.ExprDeref) then
+  elseif node:is(ast.unspecialized.expr.Deref) then
     return specialize.expr_deref(cx, node)
 
   else
@@ -715,30 +749,33 @@ end
 function specialize.stat_if(cx, node)
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
-  return ast.specialized.StatIf {
+  return ast.specialized.stat.If {
     cond = specialize.expr(cx, node.cond),
     then_block = specialize.block(then_cx, node.then_block),
     elseif_blocks = node.elseif_blocks:map(
       function(block) return specialize.stat_elseif(cx, block) end),
     else_block = specialize.block(else_cx, node.else_block),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_elseif(cx, node)
   local body_cx = cx:new_local_scope()
-  return ast.specialized.StatElseif {
+  return ast.specialized.stat.Elseif {
     cond = specialize.expr(cx, node.cond),
     block = specialize.block(body_cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_while(cx, node)
   local body_cx = cx:new_local_scope()
-  return ast.specialized.StatWhile {
+  return ast.specialized.stat.While {
     cond = specialize.expr(cx, node.cond),
     block = specialize.block(body_cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -757,11 +794,11 @@ function specialize.stat_for_num(cx, node)
   local cx = cx:new_local_scope()
   local block = specialize.block(cx, node.block)
 
-  return ast.specialized.StatForNum {
+  return ast.specialized.stat.ForNum {
     symbol = symbol,
     values = values,
     block = block,
-    parallel = node.parallel,
+    options = node.options,
     span = node.span,
   }
 end
@@ -782,28 +819,39 @@ function specialize.stat_for_list(cx, node)
   local cx = cx:new_local_scope()
   local block = specialize.block(cx, node.block)
 
-  return ast.specialized.StatForList {
+  return ast.specialized.stat.ForList {
     symbol = symbol,
     value = value,
     block = block,
-    vectorize = node.vectorize,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_repeat(cx, node)
   local cx = cx:new_local_scope()
-  return ast.specialized.StatRepeat {
+  return ast.specialized.stat.Repeat {
     block = specialize.block(cx, node.block),
     until_cond = specialize.expr(cx, node.until_cond),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.stat_must_epoch(cx, node)
+  local cx = cx:new_local_scope()
+  return ast.specialized.stat.MustEpoch {
+    block = specialize.block(cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_block(cx, node)
   local cx = cx:new_local_scope()
-  return ast.specialized.StatBlock {
+  return ast.specialized.stat.Block {
     block = specialize.block(cx, node.block),
+    options = node.options,
     span = node.span,
   }
 end
@@ -813,7 +861,7 @@ function specialize.stat_var(cx, node)
   -- before looking at either types or values.
   local symbols = terralib.newlist()
   for i, var_name in ipairs(node.var_names) do
-    if node.values[i] and node.values[i]:is(ast.unspecialized.ExprRegion) then
+    if node.values[i] and node.values[i]:is(ast.unspecialized.expr.Region) then
       local symbol = terralib.newsymbol(var_name)
       cx.env:insert(node, var_name, symbol)
       symbols[i] = symbol
@@ -837,9 +885,10 @@ function specialize.stat_var(cx, node)
     end
   end
 
-  return ast.specialized.StatVar {
+  return ast.specialized.stat.Var {
     symbols = symbols,
     values = values,
+    options = node.options,
     span = node.span,
   }
 end
@@ -854,23 +903,26 @@ function specialize.stat_var_unpack(cx, node)
 
   local value = specialize.expr(cx, node.value)
 
-  return ast.specialized.StatVarUnpack {
+  return ast.specialized.stat.VarUnpack {
     symbols = symbols,
     fields = node.fields,
     value = value,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_return(cx, node)
-  return ast.specialized.StatReturn {
+  return ast.specialized.stat.Return {
     value = node.value and specialize.expr(cx, node.value),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_break(cx, node)
-  return ast.specialized.StatBreak {
+  return ast.specialized.stat.Break {
+    options = node.options,
     span = node.span,
   }
 end
@@ -895,68 +947,76 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
     end
   end)
 
-  if node:is(ast.unspecialized.StatAssignment) then
-    return ast.specialized.StatAssignment {
+  if node:is(ast.unspecialized.stat.Assignment) then
+    return ast.specialized.stat.Assignment {
       lhs = flattened_lhs,
       rhs = flattened_rhs,
+      options = node.options,
       span = node.span,
     }
 
-  else -- if node:is(ast.unspecialized.StatReduce)
-    return ast.specialized.StatReduce {
+  elseif node:is(ast.unspecialized.stat.Reduce) then
+    return ast.specialized.stat.Reduce {
       lhs = flattened_lhs,
       rhs = flattened_rhs,
       op = node.op,
+      options = node.options,
       span = node.span,
     }
+  else
+    assert(false)
   end
 end
 
 function specialize.stat_expr(cx, node)
-  return ast.specialized.StatExpr {
+  return ast.specialized.stat.Expr {
     expr = specialize.expr(cx, node.expr),
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat(cx, node)
-  if node:is(ast.unspecialized.StatIf) then
+  if node:is(ast.unspecialized.stat.If) then
     return specialize.stat_if(cx, node)
 
-  elseif node:is(ast.unspecialized.StatWhile) then
+  elseif node:is(ast.unspecialized.stat.While) then
     return specialize.stat_while(cx, node)
 
-  elseif node:is(ast.unspecialized.StatForNum) then
+  elseif node:is(ast.unspecialized.stat.ForNum) then
     return specialize.stat_for_num(cx, node)
 
-  elseif node:is(ast.unspecialized.StatForList) then
+  elseif node:is(ast.unspecialized.stat.ForList) then
     return specialize.stat_for_list(cx, node)
 
-  elseif node:is(ast.unspecialized.StatRepeat) then
+  elseif node:is(ast.unspecialized.stat.Repeat) then
     return specialize.stat_repeat(cx, node)
 
-  elseif node:is(ast.unspecialized.StatBlock) then
+  elseif node:is(ast.unspecialized.stat.MustEpoch) then
+    return specialize.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.Block) then
     return specialize.stat_block(cx, node)
 
-  elseif node:is(ast.unspecialized.StatVar) then
+  elseif node:is(ast.unspecialized.stat.Var) then
     return specialize.stat_var(cx, node)
 
-  elseif node:is(ast.unspecialized.StatVarUnpack) then
+  elseif node:is(ast.unspecialized.stat.VarUnpack) then
     return specialize.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.unspecialized.StatReturn) then
+  elseif node:is(ast.unspecialized.stat.Return) then
     return specialize.stat_return(cx, node)
 
-  elseif node:is(ast.unspecialized.StatBreak) then
+  elseif node:is(ast.unspecialized.stat.Break) then
     return specialize.stat_break(cx, node)
 
-  elseif node:is(ast.unspecialized.StatAssignment) then
+  elseif node:is(ast.unspecialized.stat.Assignment) then
     return specialize.stat_assignment_or_stat_reduce(cx, node)
 
-  elseif node:is(ast.unspecialized.StatReduce) then
+  elseif node:is(ast.unspecialized.stat.Reduce) then
     return specialize.stat_assignment_or_stat_reduce(cx, node)
 
-  elseif node:is(ast.unspecialized.StatExpr) then
+  elseif node:is(ast.unspecialized.stat.Expr) then
     return specialize.stat_expr(cx, node)
 
   else
@@ -964,58 +1024,93 @@ function specialize.stat(cx, node)
   end
 end
 
-function specialize.privilege_region_field(cx, node)
-  local prefix = std.newtuple(node.field_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-  return fields:map(
-    function(field) return prefix .. field end)
-end
-
-function specialize.privilege_region_fields(cx, node)
-  if not node then
-    return terralib.newlist({std.newtuple()})
-  end
-  local fields = node:map(
-    function(field) return specialize.privilege_region_field(cx, field) end)
-  local result = terralib.newlist()
-  for _, f in ipairs(fields) do
-    result:insertall(f)
-  end
-  return result
-end
-
-function specialize.privilege_region(cx, node)
-  local region = cx.env:lookup(node, node.region_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-
-  return {
-    region = region,
-    fields = fields,
+function specialize.region_field(cx, node)
+  return ast.specialized.region.Field {
+    field_name = node.field_name,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
   }
 end
 
-function specialize.privilege(cx, node)
-  local privilege
-  if node.privilege == "reads" then
-    privilege = std.reads
-  elseif node.privilege == "writes" then
-    privilege = std.writes
-  elseif node.privilege == "reduces" then
-    privilege = std.reduces(node.op)
-  else
-    assert(false)
-  end
+function specialize.region_fields(cx, node)
+  return node and node:map(
+    function(field) return specialize.region_field(cx, field) end)
+end
 
-  local region_fields = node.regions:map(
-    function(region) return specialize.privilege_region(cx, region) end)
-  return std.privilege(privilege, region_fields)
+function specialize.region_root(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Root {
+    symbol = region,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
+  }
+end
+
+function specialize.region_bare(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Bare {
+    symbol = region,
+    span = node.span,
+  }
+end
+
+function specialize.regions(cx, node)
+  return node:map(
+    function(region) return specialize.region_root(cx, region) end)
+end
+
+function specialize.privilege_kind(cx, node)
+  if node:is(ast.unspecialized.privilege_kind.Reads) then
+    return ast.specialized.privilege_kind.Reads(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Writes) then
+    return ast.specialized.privilege_kind.Writes(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Reduces) then
+    return ast.specialized.privilege_kind.Reduces(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.privilege_kinds(cx, node)
+  return node:map(
+    function(privilege) return specialize.privilege_kind(cx, privilege) end)
+end
+
+function specialize.privilege(cx, node)
+  return ast.specialized.Privilege {
+    privileges = specialize.privilege_kinds(cx, node.privileges),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.privileges(cx, node)
+  return node:map(
+    function(privilege) return specialize.privilege(cx, privilege) end)
+end
+
+function specialize.constraint_kind(cx, node)
+  if node:is(ast.unspecialized.constraint_kind.Subregion) then
+    return ast.specialized.constraint_kind.Subregion(node)
+  elseif node:is(ast.unspecialized.constraint_kind.Disjointness) then
+    return ast.specialized.constraint_kind.Disjointness(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
 end
 
 function specialize.constraint(cx, node)
-  local lhs = cx.env:lookup(node, node.lhs)
-  local rhs = cx.env:lookup(node, node.rhs)
+  return ast.specialized.Constraint {
+    lhs = specialize.region_bare(cx, node.lhs),
+    op = specialize.constraint_kind(cx, node.op),
+    rhs = specialize.region_bare(cx, node.rhs),
+    span = node.span,
+  }
+end
 
-  return std.constraint(lhs, rhs, node.op)
+function specialize.constraints(cx, node)
+  return node:map(
+    function(constraint) return specialize.constraint(cx, constraint) end)
 end
 
 function specialize.stat_task_param(cx, node)
@@ -1027,29 +1122,32 @@ function specialize.stat_task_param(cx, node)
   local param_type = node.type_expr(cx.env:env())
   symbol.type = param_type
 
-  return ast.specialized.StatTaskParam {
+  return ast.specialized.stat.TaskParam {
     symbol = symbol,
+    options = node.options,
     span = node.span,
   }
+end
+
+function specialize.stat_task_params(cx, node)
+  return node:map(
+    function(param) return specialize.stat_task_param(cx, param) end)
 end
 
 function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
-  proto:setinline(node.inline)
+  proto:setinline(node.options.inline)
   cx.env:insert(node, node.name, proto)
   cx = cx:new_local_scope()
 
-  local params = node.params:map(
-    function(param) return specialize.stat_task_param(cx, param) end)
+  local params = specialize.stat_task_params(cx, node.params)
   local return_type = node.return_type_expr(cx.env:env())
-  local privileges = node.privileges:map(
-    function(privilege) return specialize.privilege(cx, privilege) end)
-  local constraints = node.constraints:map(
-    function(constraint) return specialize.constraint(cx, constraint) end)
+  local privileges = specialize.privileges(cx, node.privileges)
+  local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
-  return ast.specialized.StatTask {
+  return ast.specialized.stat.Task {
     name = node.name,
     params = params,
     return_type = return_type,
@@ -1057,8 +1155,7 @@ function specialize.stat_task(cx, node)
     constraints = constraints,
     body = body,
     prototype = proto,
-    inline = node.inline,
-    cuda = node.cuda,
+    options = node.options,
     span = node.span,
   }
 end
@@ -1097,21 +1194,22 @@ function specialize.stat_fspace(cx, node)
       function(param) return specialize.stat_fspace_param(cx, param) end)
   fs.fields = node.fields:map(
       function(field) return specialize.stat_fspace_field(cx, field) end)
-  fs.constraints = node.constraints:map(
-      function(constraint) return specialize.constraint(cx, constraint) end)
+  local constraints = specialize.constraints(cx, node.constraints)
 
-  return ast.specialized.StatFspace {
+  return ast.specialized.stat.Fspace {
     name = node.name,
     fspace = fs,
+    constraints = constraints,
+    options = node.options,
     span = node.span,
   }
 end
 
 function specialize.stat_top(cx, node)
-  if node:is(ast.unspecialized.StatTask) then
+  if node:is(ast.unspecialized.stat.Task) then
     return specialize.stat_task(cx, node)
 
-  elseif node:is(ast.unspecialized.StatFspace) then
+  elseif node:is(ast.unspecialized.stat.Fspace) then
     return specialize.stat_fspace(cx, node)
 
   else

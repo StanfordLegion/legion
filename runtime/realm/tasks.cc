@@ -22,7 +22,6 @@
 namespace Realm {
 
   Logger log_task("task");
-  Logger log_util("util");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -32,14 +31,42 @@ namespace Realm {
   Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
+	     Event _before_event,
 	     Event _finish_event, int _priority)
     : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
       args(_args, _arglen), priority(_priority)
   {
+    log_task.info() << "task " << this << " created: func=" << func_id
+		    << " proc=" << _proc << " arglen=" << _arglen
+		    << " before=" << _before_event << " after=" << _finish_event;
   }
 
   Task::~Task(void)
   {
+  }
+
+  void Task::mark_ready(void)
+  {
+    log_task.info() << "task " << this << " ready: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_ready();
+  }
+
+  void Task::mark_started(void)
+  {
+    log_task.info() << "task " << this << " started: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_started();
+  }
+
+  void Task::mark_completed(void)
+  {
+    log_task.info() << "task " << this << " completed: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_completed();
   }
 
   void Task::execute_on_processor(Processor p)
@@ -62,8 +89,6 @@ namespace Realm {
     start_enclosing(finish_event);
     unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
-    log_task.info("thread running ready task %p for proc " IDFMT "",
-		  this, p.id);
 
     // does the profiler want to know where it was run?
     if(measurements.wants_measurement<ProfilingMeasurements::OperationProcessorUsage>()) {
@@ -85,8 +110,6 @@ namespace Realm {
 
     mark_finished();
 
-    log_task.info("thread finished running task %p for proc " IDFMT "",
-		  this, p.id);
 #ifdef EVENT_GRAPH_TRACE
     unsigned long long stop = TimeStamp::get_current_time_in_micros();
     finish_enclosing();
