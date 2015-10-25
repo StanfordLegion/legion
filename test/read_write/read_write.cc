@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <math.h>
 #include "legion.h"
+#include "default_mapper.h"
 
 #include <errno.h>
 #include <aio.h>
@@ -41,33 +42,64 @@ enum FieldIDs {
   FID_VAL,
 };
 
-inline int io_setup(unsigned nr, aio_context_t *ctxp)
-{
-  return syscall(__NR_io_setup, nr, ctxp);
-}
-
-inline int io_destroy(aio_context_t ctx)
-{
-  return syscall(__NR_io_destroy, ctx);
-}
-
-inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
-{
-  return syscall(__NR_io_submit, ctx, nr, iocbpp);
-}
-
-inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
-                        struct io_event *events, struct timespec *timeout)
-{
-  return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
-}
-
 enum TestMode {
   NONE,
   ATTACH,
   READFILE,
   INIT
 };
+
+class ReadWriteMapper : public DefaultMapper {
+public:
+  ReadWriteMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
+    : DefaultMapper(machine, runtime, local)
+  {
+    std::set<Memory> all_mem;
+    machine.get_all_memories(all_mem);
+    for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+      if (it->kind() == Memory::SYSTEM_MEM)
+        sys_mem.push_back(*it);
+    }
+    assert(sys_mem.size() == 1);
+  }
+
+  virtual void select_task_options(Task *task)
+  {
+    task->inline_task = false;
+    task->spawn_task = false;
+    task->map_locally = true;
+    task->profile_task = false;
+  }
+
+  virtual bool map_task(Task *task)
+  {
+    for (unsigned idx = 0; idx < task->regions.size(); idx++)
+    {
+      task->regions[idx].target_ranking.push_back(sys_mem[0]);
+      task->regions[idx].virtual_map = false;
+      task->regions[idx].enable_WAR_optimization = true;
+      task->regions[idx].reduction_list = false;
+      // Make everything SOA
+      task->regions[idx].blocking_factor =
+        task->regions[idx].max_blocking_factor;
+    }
+
+    return true;
+  }
+public:
+  std::vector<Memory> sys_mem;
+};
+
+static void update_mappers(Machine machine, HighLevelRuntime *rt,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    rt->replace_default_mapper(new ReadWriteMapper(machine, rt, *it), *it);
+  }
+}
+
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -148,19 +180,21 @@ void top_level_task(const Task *task,
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_VAL);
   pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_READ_WRITE);
-  runtime->remap_region(ctx, pr_A);
-  pr_A.wait_until_valid();
+  //runtime->remap_region(ctx, pr_A);
+  //pr_A.wait_until_valid();
 
   // Start Computation
   struct timespec ts_start, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
+  //runtime->unmap_region(ctx, pr_A);
   for (int iter = 0; iter < ntask; iter++) {
     // Acquire the logical reagion so that we can launch sub-operations that make copies
     AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
     acquire_launcher.add_field(FID_VAL);
     runtime->issue_acquire(ctx, acquire_launcher);
 
+    Future future;
     // Perform task
     if (iter % 2 < 2) {
       // read_only task
@@ -169,7 +203,7 @@ void top_level_task(const Task *task,
       task_launcher.add_region_requirement(
           RegionRequirement(lr_A, READ_ONLY, EXCLUSIVE, lr_A));
       task_launcher.add_field(0, FID_VAL);
-      runtime->execute_task(ctx, task_launcher);
+      future = runtime->execute_task(ctx, task_launcher);
     } else {
       // read_write task
       TaskLauncher task_launcher(READ_WRITE_TASK_ID,
@@ -177,7 +211,11 @@ void top_level_task(const Task *task,
       task_launcher.add_region_requirement(
           RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A));
       task_launcher.add_field(0, FID_VAL);
-      runtime->execute_task(ctx, task_launcher);
+      future = runtime->execute_task(ctx, task_launcher);
+    }
+
+    if(iter == ntask - 1) {
+      future.get_void_result();
     }
 
     //Release the attached physicalregion
@@ -188,7 +226,7 @@ void top_level_task(const Task *task,
 
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
-  runtime->unmap_region(ctx, pr_A);
+  //runtime->unmap_region(ctx, pr_A);
   runtime->detach_file(ctx, pr_A);
 
   double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
@@ -267,5 +305,8 @@ int main(int argc, char **argv)
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<read_write_task>(READ_WRITE_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
+
+  // Register custom mappers
+  HighLevelRuntime::set_registration_callback(update_mappers);
   return HighLevelRuntime::start(argc, argv);
 }

@@ -285,6 +285,14 @@ void top_level_task(const Task *task,
         RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
     compute_launcher.add_field(1, FID_VAL);
     FutureMap exec_f = runtime->execute_index_space(ctx, compute_launcher);
+    if (mode == ATTACH) {
+      //Release and unmap the attached physicalregion
+      ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+      release_launcher.add_field(FID_VAL);
+      runtime->issue_release(ctx, release_launcher);
+      runtime->unmap_region(ctx, pr_A);
+      runtime->detach_file(ctx, pr_A);
+    }
     exec_f.wait_all_results();
   } else {
     assert(mode == READFILE);
@@ -297,20 +305,10 @@ void top_level_task(const Task *task,
         RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
     compute_launcher.add_field(1, FID_VAL);
     FutureMap exec_f = runtime->execute_index_space(ctx, compute_launcher);
+    close(global_fd);
     exec_f.wait_all_results();
   }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
-
-  if (mode == ATTACH) {
-    //Release and unmap the attached physicalregion
-    ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
-    release_launcher.add_field(FID_VAL);
-    runtime->issue_release(ctx, release_launcher);
-    runtime->unmap_region(ctx, pr_A);
-    runtime->detach_file(ctx, pr_A);
-  } else if (mode == READFILE) {
-    close(global_fd);
-  }
 
   double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
                      (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
