@@ -10,6 +10,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "philox.h"
+
 using namespace Realm;
 
 // Task IDs, some IDs are reserved so start at first available number
@@ -60,6 +62,7 @@ namespace {
   bool random_colors = false;
   bool wait_on_events = false;
   bool show_graph = false;
+  bool skip_check = false;
   TestInterface *testcfg = 0;
 };
 
@@ -597,12 +600,41 @@ public:
     RegionInstance ri_nodes, ri_edges;
   };
 
-  ZPoint<1> random_node(const ZIndexSpace<1>& is_nodes, unsigned short *rngstate, bool in_piece)
+  enum PRNGStreams {
+    NODE_SUBCKT_STREAM,
+    EDGE_IN_NODE_STREAM,
+    EDGE_OUT_NODE_STREAM1,
+    EDGE_OUT_NODE_STREAM2,
+  };
+
+  // nodes and edges are generated pseudo-randomly so that we can check the results without
+  //  needing all the field data in any one place
+  void random_node_data(int idx, int& subckt)
   {
-    if(in_piece)
-      return (is_nodes.bounds.lo + (nrand48(rngstate) % (is_nodes.bounds.hi.x - is_nodes.bounds.lo.x + 1)));
+    if(random_colors)
+      subckt = Philox_2x32<>::rand_int(random_seed, idx, NODE_SUBCKT_STREAM, num_pieces);
     else
-      return (nrand48(rngstate) % num_nodes);
+      subckt = idx * num_pieces / num_nodes;
+  }
+
+  void random_edge_data(int idx, ZPoint<1>& in_node, ZPoint<1>& out_node)
+  {
+    if(random_colors) {
+      in_node = Philox_2x32<>::rand_int(random_seed, idx, EDGE_IN_NODE_STREAM, num_nodes);
+      out_node = Philox_2x32<>::rand_int(random_seed, idx, EDGE_OUT_NODE_STREAM1, num_nodes);
+    } else {
+      int subckt = idx * num_pieces / num_edges;
+      int n_lo = subckt * num_nodes / num_pieces;
+      int n_hi = (subckt + 1) * num_nodes / num_pieces;
+      in_node = n_lo + Philox_2x32<>::rand_int(random_seed, idx, EDGE_IN_NODE_STREAM,
+					      n_hi - n_lo);
+      int pct = Philox_2x32<>::rand_int(random_seed, idx, EDGE_OUT_NODE_STREAM2, 100);
+      if(pct < pct_wire_in_piece)
+	out_node = n_lo + Philox_2x32<>::rand_int(random_seed, idx, EDGE_OUT_NODE_STREAM1,
+						 n_hi - n_lo);
+      else
+	out_node = Philox_2x32<>::rand_int(random_seed, idx, EDGE_OUT_NODE_STREAM1, num_nodes);	
+    }
   }
 
   static void init_data_task_wrapper(const void *args, size_t arglen, Processor p)
@@ -623,22 +655,13 @@ public:
     log_app.debug() << "N: " << is_nodes;
     log_app.debug() << "E: " << is_edges;
     
-    unsigned short rngstate[3];
-    rngstate[0] = random_seed;
-    rngstate[1] = is_nodes.bounds.lo;
-    rngstate[2] = 0;
-    for(int i = 0; i < 20; i++) nrand48(rngstate);
-
     {
       AffineAccessor<int,1> a_subckt_id(i_args.ri_nodes, 0 /* offset */);
       
       for(int i = is_nodes.bounds.lo; i <= is_nodes.bounds.hi; i++) {
-	int color;
-	if(random_colors)
-	  color = nrand48(rngstate) % num_pieces;
-	else
-	  color = i_args.index;
-	a_subckt_id.write(i, color);
+	int subckt;
+	random_node_data(i, subckt);
+	a_subckt_id.write(i, subckt);
       }
     }
     
@@ -647,10 +670,8 @@ public:
       AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
       
       for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++) {
-	int in_node = random_node(is_nodes, rngstate,
-				  !random_colors);
-	int out_node = random_node(is_nodes, rngstate,
-				   !random_colors && ((nrand48(rngstate) % 100) < pct_wire_in_piece));
+	ZPoint<1> in_node, out_node;
+	random_edge_data(i, in_node, out_node);
 	a_in_node.write(i, in_node);
 	a_out_node.write(i, out_node);
       }
@@ -847,8 +868,84 @@ public:
 
   virtual int check_partitioning(void)
   {
-    // TODO
-    return 0;
+    int errors = 0;
+
+    // we'll make up the list of nodes we expect to be shared as we walk the edges
+    std::map<int, std::set<int> > ghost_nodes;
+
+    for(int i = 0; i < num_edges; i++) {
+      // regenerate the random info for this edge and the two nodes it touches
+      ZPoint<1> in_node, out_node;
+      int in_subckt, out_subckt;
+      random_edge_data(i, in_node, out_node);
+      random_node_data(in_node, in_subckt);
+      random_node_data(out_node, out_subckt);
+
+      // the edge should be in exactly the p_edges for in_subckt
+      for(int p = 0; p < num_pieces; p++) {
+	bool exp = (p == in_subckt);
+	bool act = p_edges[p].contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: edge " << i << " in p_edges[" << p << "]: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+
+      // is the output node a ghost for this wire?
+      if(in_subckt != out_subckt)
+	ghost_nodes[out_node].insert(in_subckt);
+    }
+
+    // now we can check the nodes
+    for(int i = 0; i < num_nodes; i++) {
+      int subckt;
+      random_node_data(i, subckt);
+      // check is_private and is_shared first
+      {
+	bool exp = ghost_nodes.count(i) == 0;
+	bool act = is_private.contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: node " << i << " in is_private: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+      {
+	bool exp = ghost_nodes.count(i) > 0;
+	bool act = is_shared.contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: node " << i << " in is_shared: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+
+      // now check p_pvt/shr/ghost
+      for(int p = 0; p < num_pieces; p++) {
+	bool exp = (subckt == p) && (ghost_nodes.count(i) == 0);
+	bool act = p_pvt[p].contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: node " << i << " in p_pvt[" << p << "]: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+      for(int p = 0; p < num_pieces; p++) {
+	bool exp = (subckt == p) && (ghost_nodes.count(i) > 0);
+	bool act = p_shr[p].contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: node " << i << " in p_shr[" << p << "]: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+      for(int p = 0; p < num_pieces; p++) {
+	bool exp = (subckt != p) && (ghost_nodes.count(i) > 0) && (ghost_nodes[i].count(p) > 0);
+	bool act = p_ghost[p].contains(i);
+	if(exp != act) {
+	  log_app.error() << "mismatch: node " << i << " in p_ghost[" << p << "]: exp=" << exp << " act=" << act;
+	  errors++;
+	}
+      }
+    }
+
+    return errors;
   }
 };
 
@@ -1333,7 +1430,10 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     e.wait();
   }
 
-  errors += testcfg->check_partitioning();
+  if(!skip_check) {
+    log_app.print() << "checking correctness of partitioning";
+    errors += testcfg->check_partitioning();
+  }
 
   if(errors > 0) {
     printf("Exiting with errors\n");
@@ -1371,6 +1471,11 @@ int main(int argc, char **argv)
 
     if(!strcmp(argv[i], "-show")) {
       show_graph = true;
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-nocheck")) {
+      skip_check = true;
       continue;
     }
 
