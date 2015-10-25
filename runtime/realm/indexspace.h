@@ -1173,6 +1173,10 @@ namespace Realm {
     bool overlaps(const ZRect<N,T>& other) const;
 
     ZRect<N,T> intersection(const ZRect<N,T>& other) const;
+
+    // returns the _bounding box_ of the union of two rectangles (the actual union
+    //  might not be a rectangle)
+    ZRect<N,T> union_bbox(const ZRect<N,T>& other) const;
   };
 
   template <int N, typename T>
@@ -1486,6 +1490,7 @@ namespace Realm {
   struct ZIndexSpaceIterator {
     ZRect<N,T> rect;
     ZIndexSpace<N,T> space;
+    ZRect<N,T> restriction;
     bool valid;
     // probably more goo here for iterating over SparsityMap's
 

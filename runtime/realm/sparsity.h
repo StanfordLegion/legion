@@ -84,6 +84,13 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  struct SparsityMapEntry {
+    ZRect<N,T> bounds;
+    SparsityMap<N,T> sparsity;
+    HierarchicalBitMap<N,T> *bitmap;
+  };
+
+  template <int N, typename T>
   class SparsityMapPublicImpl : public SparsityMapImplBase {
   protected:
     // cannot be constructed directly
@@ -100,13 +107,8 @@ namespace Realm {
     // a sparsity map entry is similar to an IndexSpace - it's a rectangle and optionally a
     //  reference to another SparsityMap OR a pointer to a HierarchicalBitMap, which is a 
     //  dense array of bits describing the validity of each point in the rectangle
-    struct MapEntry {
-      ZRect<N,T> bounds;
-      SparsityMap<N,T> sparsity;
-      HierarchicalBitMap<N,T> *bitmap;
-    };
 
-    std::vector<MapEntry> entries;
+    std::vector<SparsityMapEntry<N,T> > entries;
   };
 
 }; // namespace Realm

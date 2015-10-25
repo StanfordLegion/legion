@@ -263,6 +263,17 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  ZRect<N,T> ZRect<N,T>::union_bbox(const ZRect<N,T>& other) const
+  {
+    ZRect<N,T> out;
+    for(int i = 0; i < N; i++) {
+      out.lo[i] = std::min(lo[i], other.lo[i]);
+      out.hi[i] = std::max(hi[i], other.hi[i]);
+    }
+    return out;
+  };
+
+  template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p)
   {
     os << p.lo << ".." << p.hi;
@@ -555,6 +566,82 @@ namespace Realm {
 					   AffineLinearizedIndexSpace<N,T>(*this),
 					   field_sizes,
 					   reqs);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ZIndexSpaceIterator<N,T>
+
+  template <int N, typename T>
+  inline ZIndexSpaceIterator<N,T>::ZIndexSpaceIterator(void)
+    : valid(false)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpaceIterator<N,T>::ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space)
+    : valid(false)
+  {
+    reset(_space);
+  }
+
+  template <int N, typename T>
+  inline ZIndexSpaceIterator<N,T>::ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space,
+						       const ZRect<N,T>& _restrict)
+    : valid(false)
+  {
+    reset(_space, _restrict);
+  }
+
+  template <int N, typename T>
+  inline void ZIndexSpaceIterator<N,T>::reset(const ZIndexSpace<N,T>& _space)
+  {
+    space = _space;
+    restriction = space.bounds;
+    if(restriction.empty()) {
+      valid = false;
+      return;
+    }
+    if(space.dense()) {
+      valid = true;
+      rect = restriction;
+    } else {
+      assert(0);
+    }
+  }
+
+  template <int N, typename T>
+  inline void ZIndexSpaceIterator<N,T>::reset(const ZIndexSpace<N,T>& _space,
+					      const ZRect<N,T>& _restrict)
+  {
+    space = _space;
+    restriction = space.bounds.intersection(_restrict);
+    if(restriction.empty()) {
+      valid = false;
+      return;
+    }
+    if(space.dense()) {
+      valid = true;
+      rect = restriction;
+    } else {
+      assert(0);
+    }
+  }
+
+  // steps to the next subrect, returning true if a next subrect exists
+  template <int N, typename T>
+  inline bool ZIndexSpaceIterator<N,T>::step(void)
+  {
+    assert(valid);  // can't step an interator that's already done
+
+    // a dense space is covered in the first step
+    if(space.dense()) {
+      valid = false;
+      return false;
+    }
+    
+    assert(0);
+    return false;
   }
 
 
