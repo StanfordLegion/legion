@@ -85,82 +85,82 @@ function analyze_var_flow.expr_binary(cx, node)
 end
 
 function analyze_var_flow.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return analyze_var_flow.expr_id(cx, node)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return nil
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return nil
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return nil
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return nil
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return nil
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_var_flow.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return nil
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return nil
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return nil
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return nil
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return nil
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return nil
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return nil
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return nil
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return nil
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return nil
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_var_flow.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return nil
 
   else
@@ -197,6 +197,10 @@ function analyze_var_flow.stat_for_list(cx, node)
 end
 
 function analyze_var_flow.stat_repeat(cx, node)
+  analyze_var_flow.block(cx, node.block)
+end
+
+function analyze_var_flow.stat_must_epoch(cx, node)
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -270,46 +274,49 @@ function analyze_var_flow.stat_reduce(cx, node)
 end
 
 function analyze_var_flow.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return analyze_var_flow.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return analyze_var_flow.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return analyze_var_flow.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return analyze_var_flow.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return analyze_var_flow.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_var_flow.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return analyze_var_flow.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return analyze_var_flow.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return analyze_var_flow.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return analyze_var_flow.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return analyze_var_flow.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return
 
   else
@@ -350,9 +357,10 @@ local optimize_futures = {}
 function concretize(node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
-    return ast.typed.ExprFutureGetResult {
+    return ast.typed.expr.FutureGetResult {
       value = node,
       expr_type = expr_type.result_type,
+      options = node.options,
       span = node.span,
     }
   end
@@ -362,9 +370,10 @@ end
 function promote(node)
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
-    return ast.typed.ExprFuture {
+    return ast.typed.expr.Future {
       value = node,
       expr_type = std.future(expr_type),
+      options = node.options,
       span = node.span,
     }
   end
@@ -451,9 +460,9 @@ function optimize_futures.expr_ctor_rec_field(cx, node)
 end
 
 function optimize_futures.expr_ctor_field(cx, node)
-  if node:is(ast.typed.ExprCtorListField) then
+  if node:is(ast.typed.expr.CtorListField) then
     return optimize_futures.expr_ctor_list_field(cx, node)
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     return optimize_futures.expr_ctor_rec_field(cx, node)
   else
     assert(false)
@@ -576,82 +585,82 @@ function optimize_futures.expr_deref(cx, node)
 end
 
 function optimize_futures.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return optimize_futures.expr_id(cx, node)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return node
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return node
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return optimize_futures.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return optimize_futures.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return optimize_futures.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return optimize_futures.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return optimize_futures.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return optimize_futures.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return node
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return optimize_futures.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return optimize_futures.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return node
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return optimize_futures.expr_raw_value(cx, node)
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return optimize_futures.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return optimize_futures.expr_new(cx, node)
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return optimize_futures.expr_null(cx, node)
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return optimize_futures.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return optimize_futures.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return optimize_futures.expr_ispace(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return optimize_futures.expr_region(cx, node)
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return optimize_futures.expr_partition(cx, node)
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return optimize_futures.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return optimize_futures.expr_deref(cx, node)
 
   else
@@ -709,6 +718,12 @@ function optimize_futures.stat_repeat(cx, node)
   return node {
     block = optimize_futures.block(cx, node.block),
     until_cond = concretize(optimize_futures.expr(cx, node.until_cond)),
+  }
+end
+
+function optimize_futures.stat_must_epoch(cx, node)
+  return node {
+    block = optimize_futures.block(cx, node.block),
   }
 end
 
@@ -831,46 +846,49 @@ function optimize_futures.stat_expr(cx, node)
 end
 
 function optimize_futures.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return optimize_futures.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return optimize_futures.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return optimize_futures.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return optimize_futures.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return optimize_futures.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_futures.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return optimize_futures.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return optimize_futures.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return optimize_futures.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return optimize_futures.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return optimize_futures.stat_return(cx, node)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return optimize_futures.stat_break(cx, node)
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return optimize_futures.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return optimize_futures.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return optimize_futures.stat_expr(cx, node)
 
   else
@@ -888,7 +906,7 @@ function optimize_futures.stat_task(cx, node)
 end
 
 function optimize_futures.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return optimize_futures.stat_task(cx, node)
 
   else

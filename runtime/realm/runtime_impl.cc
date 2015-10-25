@@ -51,7 +51,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
-  extern Logger log_task; // defined in proc_impl.cc
+  extern Logger log_proc; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -412,6 +412,35 @@ namespace Realm {
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
 	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+
+      // and one more... disable GASNet's probing of pinnable memory - it's
+      //  painfully slow on most systems (the gemini conduit doesn't probe
+      //  at all, so it's ok)
+      // we can do this because in gasnet_attach() we will ask for exactly as
+      //  much as we need, and we can detect failure there if that much memory
+      //  doesn't actually exist
+      // inconveniently, we have to set a PHYSMEM_MAX before we call
+      //  gasnet_init and we don't have our argc/argv until after, so we can't
+      //  set PHYSMEM_MAX correctly, but setting it to something really big to
+      //  prevent all the early checks from failing gets us to that final actual
+      //  alloc/pin in gasnet_attach ok
+      {
+	// the only way to control this is with environment variables, so set
+	//  them unless the user has already set them (in which case, we assume
+	//  they know what they're doing)
+	// do handle the case where NOPROBE is set to 1, but PHYSMEM_MAX isn't
+	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
+	if(!e || (atoi(e) > 0)) {
+	  if(!e)
+	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	  if(!getenv("GASNET_PHYSMEM_MAX")) {
+	    // just because it's fun to read things like this 20 years later:
+	    // "nobody will ever build a system with more than 1 TB of RAM..."
+	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	  }
+	}
+      }
+
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
         char s[80];
@@ -1051,13 +1080,13 @@ namespace Realm {
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
       if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
-	log_task.info("spawning processor init task on local cpus");
+	log_proc.info("spawning processor init task on local cpus");
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
       } else {
-	log_task.info("no processor init task");
+	log_proc.info("no processor init task");
       }
 
       if(task_id != 0 && 
@@ -1190,7 +1219,7 @@ namespace Realm {
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
       if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
-	log_task.info("spawning processor shutdown task on local cpus");
+	log_proc.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 
@@ -1198,7 +1227,7 @@ namespace Realm {
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
       } else {
-	log_task.info("no processor shutdown task");
+	log_proc.info("no processor shutdown task");
       }
 
       {

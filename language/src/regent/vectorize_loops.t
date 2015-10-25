@@ -119,10 +119,10 @@ function flip_types.block(cx, simd_width, symbol, node)
 end
 
 function flip_types.stat(cx, simd_width, symbol, node)
-  if node:is(ast.typed.StatBlock) then
+  if node:is(ast.typed.stat.Block) then
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     local types = terralib.newlist()
     local values = terralib.newlist()
 
@@ -135,8 +135,8 @@ function flip_types.stat(cx, simd_width, symbol, node)
 
     return node { types = types, values = values }
 
-  elseif node:is(ast.typed.StatAssignment) or
-         node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Assignment) or
+         node:is(ast.typed.stat.Reduce) then
     local lhs = terralib.newlist()
     local rhs = terralib.newlist()
 
@@ -147,16 +147,16 @@ function flip_types.stat(cx, simd_width, symbol, node)
       rhs:insert(flip_types.expr(cx, simd_width, symbol, exp))
     end)
 
-    if node:is(ast.typed.StatAssignment) then
+    if node:is(ast.typed.stat.Assignment) then
       return node { lhs = lhs, rhs = rhs }
-    else -- node:is(ast.typed.StatReduce)
+    else -- node:is(ast.typed.stat.Reduce)
       return node { lhs = lhs, rhs = rhs }
     end
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
-  elseif node:is(ast.typed.StatIf) then
+  elseif node:is(ast.typed.stat.If) then
     return node {
       then_block = flip_types.block(cx, simd_width, symbol, node.then_block),
       elseif_blocks = node.elseif_blocks:map(function(elseif_block)
@@ -165,7 +165,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
       else_block = flip_types.block(cx, simd_width, symbol, node.else_block),
     }
 
-  elseif node:is(ast.typed.StatElseif) then
+  elseif node:is(ast.typed.stat.Elseif) then
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
   else
@@ -180,13 +180,13 @@ function flip_types.expr(cx, simd_width, symbol, node)
   for k, v in pairs(node) do
     new_node[k] = v
   end
-  if node:is(ast.typed.ExprFieldAccess) then
+  if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     new_node.lhs = flip_types.expr(cx, simd_width, symbol, new_node.lhs)
     new_node.rhs = flip_types.expr(cx, simd_width, symbol, new_node.rhs)
 
@@ -205,61 +205,63 @@ function flip_types.expr(cx, simd_width, symbol, node)
       local rval_type = std.as_read(expr_type)
       local fn = std["v" .. node.op](rval_type)
       local fn_type = ({rval_type, rval_type} -> rval_type).type
-      local fn_node = ast.typed.ExprFunction {
+      local fn_node = ast.typed.expr.Function {
         expr_type = fn_type,
         value = fn,
+        options = node.options,
         span = node.span,
       }
-      return ast.typed.ExprCall {
+      return ast.typed.expr.Call {
         fn = fn_node,
         inline = "allow",
         args = args,
         expr_type = rval_type,
+        options = node.options,
         span = node.span,
       }
     end
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     new_node.rhs = flip_types.expr(cx, simd_width, symbol, new_node.rhs)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     new_node.fields = node.fields:map(
       function(field)
         return flip_types.expr(cx, simd_width, symbol, field)
       end)
 
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     new_node.args = node.args:map(
       function(arg)
         return flip_types.expr(cx, simd_width, symbol, arg)
       end)
     new_node.fn = flip_types.expr_function(simd_width, node.fn)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     if cx:lookup_expr_type(node) == V then
       new_node.arg = flip_types.expr(cx, simd_width, symbol, node.arg)
-      new_node.fn = ast.typed.ExprFunction {
+      new_node.fn = ast.typed.expr.Function {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
         span = node.span,
       }
     end
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
 
-  elseif node:is(ast.typed.ExprID) then
+  elseif node:is(ast.typed.expr.ID) then
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
 
   end
   if cx:lookup_expr_type(node) == V and
-    not (node:is(ast.typed.ExprID) and node.value == symbol)
+    not (node:is(ast.typed.expr.ID) and node.value == symbol)
   then
     new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
   end
@@ -320,10 +322,10 @@ function min_simd_width.block(cx, reg_size, node)
 end
 
 function min_simd_width.stat(cx, reg_size, node)
-  if node:is(ast.typed.StatBlock) then
+  if node:is(ast.typed.stat.Block) then
     return min_simd_width.block(cx, reg_size, node.block)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     local simd_width = reg_size
     node.types:map(function(type)
       simd_width = min(simd_width, min_simd_width.type(reg_size, type))
@@ -333,8 +335,8 @@ function min_simd_width.stat(cx, reg_size, node)
     end)
     return simd_width
 
-  elseif node:is(ast.typed.StatAssignment) or
-         node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Assignment) or
+         node:is(ast.typed.stat.Reduce) then
     local simd_width = reg_size
     node.lhs:map(function(lh)
       simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, lh))
@@ -344,10 +346,10 @@ function min_simd_width.stat(cx, reg_size, node)
     end)
     return simd_width
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return min_simd_width.block(cx, reg_size, node.block)
 
-  elseif node:is(ast.typed.StatIf) then
+  elseif node:is(ast.typed.stat.If) then
     local simd_width = reg_size
     min(simd_width, min_simd_width.block(cx, reg_size, node.then_block))
     node.elseif_blocks:map(function(elseif_block)
@@ -356,7 +358,7 @@ function min_simd_width.stat(cx, reg_size, node)
     min(simd_width, min_simd_width.block(cx, reg_size, node.else_block))
     return simd_width
 
-  elseif node:is(ast.typed.StatElseif) then
+  elseif node:is(ast.typed.stat.Elseif) then
     return min_simd_width.block(cx, reg_size, node.block)
 
   else
@@ -370,43 +372,43 @@ function min_simd_width.expr(cx, reg_size, node)
     simd_width = min_simd_width.type(reg_size, std.as_read(node.expr_type))
   end
 
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
-    if not node.value:is(ast.typed.ExprID) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
+    if not node.value:is(ast.typed.expr.ID) then
       simd_width = min(simd_width,
                        min_simd_width.expr(cx, reg_size, node.value))
     end
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     simd_width = min_simd_width.expr(cx, reg_size, node.rhs)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     simd_width = min(min_simd_width.expr(cx, reg_size, node.lhs),
                      min_simd_width.expr(cx, reg_size, node.rhs))
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     for _, field in pairs(node.fields) do
       simd_width = min(simd_width, min_simd_width.expr(cx, reg_size,field))
     end
 
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     simd_width = min_simd_width.expr(cx, reg_size, node.value)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     for _, arg in pairs(node.args) do
       simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, arg))
     end
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.arg))
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   else
@@ -442,19 +444,20 @@ function vectorize.stat_for_list(cx, node)
   local simd_width = min_simd_width.block(cx, SIMD_REG_SIZE, node.block)
   assert(simd_width >= 1)
   local body = flip_types.block(cx, simd_width, node.symbol, node.block)
-  return ast.typed.StatForListVectorized {
+  return ast.typed.stat.ForListVectorized {
     symbol = node.symbol,
     value = node.value,
     block = body,
     orig_block = node.block,
     vector_width = simd_width,
+    options = node.options,
     span = node.span,
   }
 end
 
 function collect_bounds(node)
   local bounds = terralib.newlist()
-  if node:is(ast.typed.ExprFieldAccess) then
+  if node:is(ast.typed.expr.FieldAccess) then
     local value_type = std.as_read(node.value.expr_type)
     if std.is_bounded_type(value_type) then
       value_type:bounds():map(function(bound)
@@ -463,31 +466,31 @@ function collect_bounds(node)
     end
     bounds:insertall(collect_bounds(node.value))
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     bounds:insertall(collect_bounds(node.value))
     bounds:insertall(collect_bounds(node.index))
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     bounds:insertall(collect_bounds(node.rhs))
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     bounds:insertall(collect_bounds(node.lhs))
     bounds:insertall(collect_bounds(node.rhs))
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     for _, field in pairs(node.fields) do
       bounds:insertall(collect_bounds(field))
     end
 
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     bounds:insertall(collect_bounds(node.value))
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     for _, arg in pairs(node.args) do
       bounds:insertall(collect_bounds(arg))
     end
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     bounds:insertall(collect_bounds(node.arg))
   end
 
@@ -508,10 +511,10 @@ function check_vectorizability.block(cx, node)
 end
 
 function check_vectorizability.stat(cx, node)
-  if node:is(ast.typed.StatBlock) then
+  if node:is(ast.typed.stat.Block) then
     return check_vectorizability.block(cx, node.block)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     for i, symbol in pairs(node.symbols) do
       if #node.values > 0 then
         local value = node.values[i]
@@ -531,8 +534,8 @@ function check_vectorizability.stat(cx, node)
     end
     return true
 
-  elseif node:is(ast.typed.StatAssignment) or
-         node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Assignment) or
+         node:is(ast.typed.stat.Reduce) then
     local bounds_lhs = {}
     local bounds_rhs = {}
     for i, rh in pairs(node.rhs) do
@@ -590,7 +593,7 @@ function check_vectorizability.stat(cx, node)
     end
     return true
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     for _, value in pairs(node.values) do
       if not check_vectorizability.expr(cx, value) then return false end
       if cx:lookup_expr_type(value) ~= S then
@@ -603,7 +606,7 @@ function check_vectorizability.stat(cx, node)
     cx:assign(node.symbol, S)
     return check_vectorizability.block(cx, node.block)
 
-  elseif node:is(ast.typed.StatIf) then
+  elseif node:is(ast.typed.stat.If) then
     if not check_vectorizability.expr(cx, node.cond) then return false end
     if cx:lookup_expr_type(node.cond) ~= S then
       cx:report_error_when_demanded(node,
@@ -621,7 +624,7 @@ function check_vectorizability.stat(cx, node)
 
     return check_vectorizability.block(cx, node.else_block)
 
-  elseif node:is(ast.typed.StatElseif) then
+  elseif node:is(ast.typed.stat.Elseif) then
     if not check_vectorizability.expr(cx, node.cond) then return false end
     if cx:lookup_expr_type(node.cond) ~= S then
       cx:report_error_when_demanded(node,
@@ -632,25 +635,25 @@ function check_vectorizability.stat(cx, node)
     return check_vectorizability.block(cx, node.block)
 
   else
-    if node:is(ast.typed.StatWhile) then
+    if node:is(ast.typed.stat.While) then
       cx:report_error_when_demanded(node, error_prefix .. "an inner loop")
 
-    elseif node:is(ast.typed.StatForList) then
+    elseif node:is(ast.typed.stat.ForList) then
       cx:report_error_when_demanded(node, error_prefix .. "an inner loop")
 
-    elseif node:is(ast.typed.StatRepeat) then
+    elseif node:is(ast.typed.stat.Repeat) then
       cx:report_error_when_demanded(node, error_prefix .. "an inner loop")
 
-    elseif node:is(ast.typed.StatVarUnpack) then
+    elseif node:is(ast.typed.stat.VarUnpack) then
       cx:report_error_when_demanded(node, error_prefix .. "an unpack statement")
 
-    elseif node:is(ast.typed.StatReturn) then
+    elseif node:is(ast.typed.stat.Return) then
       cx:report_error_when_demanded(node, error_prefix .. "a return statement")
 
-    elseif node:is(ast.typed.StatBreak) then
+    elseif node:is(ast.typed.stat.Break) then
       cx:report_error_when_demanded(node, error_prefix .. "a break statement")
 
-    elseif node:is(ast.typed.StatExpr) then
+    elseif node:is(ast.typed.stat.Expr) then
       cx:report_error_when_demanded(node,
         error_prefix .. "an expression as a statement")
 
@@ -663,19 +666,19 @@ function check_vectorizability.stat(cx, node)
 end
 
 function check_vectorizability.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     -- treats variables from the outer scope as scalars
     local fact = cx.var_type:safe_lookup(node.value) or S
     cx:assign_expr_type(node, fact)
     return true
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
-    if not node.value:is(ast.typed.ExprID) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
+    if not node.value:is(ast.typed.expr.ID) then
       cx:report_error_when_demanded(node, "vectorization failed: " ..
         "array access should be in a form of 'a[exp]'")
       return false
@@ -698,12 +701,12 @@ function check_vectorizability.expr(cx, node)
            cx:lookup_expr_type(node.index)))
     return true
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     if not check_vectorizability.expr(cx, node.rhs) then return true end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.rhs))
     return true
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     if not check_vectorizability.binary_op(node.op,
                                            std.as_read(node.expr_type)) then
       cx:report_error_when_demanded(node,
@@ -721,7 +724,7 @@ function check_vectorizability.expr(cx, node)
            cx:lookup_expr_type(node.rhs)))
     return true
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     cx:assign_expr_type(node, S)
     for _, field in pairs(node.fields) do
       if not check_vectorizability.expr(cx, field) then return false end
@@ -729,75 +732,75 @@ function check_vectorizability.expr(cx, node)
     end
     return true
 
-  elseif node:is(ast.typed.ExprCtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     cx:assign_expr_type(node, S)
     return true
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return check_vectorizability.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
   else
-    if node:is(ast.typed.ExprMethodCall) then
+    if node:is(ast.typed.expr.MethodCall) then
       cx:report_error_when_demanded(node, error_prefix .. "a method call")
 
-    elseif node:is(ast.typed.ExprCtorListField) then
+    elseif node:is(ast.typed.expr.CtorListField) then
       cx:report_error_when_demanded(node, error_prefix .. "a list constructor")
 
-    elseif node:is(ast.typed.ExprRawContext) then
+    elseif node:is(ast.typed.expr.RawContext) then
       cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
 
-    elseif node:is(ast.typed.ExprRawFields) then
+    elseif node:is(ast.typed.expr.RawFields) then
       cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
 
-    elseif node:is(ast.typed.ExprRawPhysical) then
+    elseif node:is(ast.typed.expr.RawPhysical) then
       cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
 
-    elseif node:is(ast.typed.ExprRawRuntime) then
+    elseif node:is(ast.typed.expr.RawRuntime) then
       cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
 
-    elseif node:is(ast.typed.ExprIsnull) then
+    elseif node:is(ast.typed.expr.Isnull) then
       cx:report_error_when_demanded(node,
         error_prefix .. "an isnull expression")
 
-    elseif node:is(ast.typed.ExprNew) then
+    elseif node:is(ast.typed.expr.New) then
       cx:report_error_when_demanded(node, error_prefix .. "a new expression")
 
-    elseif node:is(ast.typed.ExprNull) then
+    elseif node:is(ast.typed.expr.Null) then
       cx:report_error_when_demanded(node, error_prefix .. "a null expression")
 
-    elseif node:is(ast.typed.ExprDynamicCast) then
+    elseif node:is(ast.typed.expr.DynamicCast) then
       cx:report_error_when_demanded(node, error_prefix .. "a dynamic cast")
 
-    elseif node:is(ast.typed.ExprStaticCast) then
+    elseif node:is(ast.typed.expr.StaticCast) then
       cx:report_error_when_demanded(node, error_prefix .. "a static cast")
 
-    elseif node:is(ast.typed.ExprRegion) then
+    elseif node:is(ast.typed.expr.Region) then
       cx:report_error_when_demanded(node, error_prefix .. "a region expression")
 
-    elseif node:is(ast.typed.ExprPartition) then
+    elseif node:is(ast.typed.expr.Partition) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a patition expression")
 
-    elseif node:is(ast.typed.ExprCrossProduct) then
+    elseif node:is(ast.typed.expr.CrossProduct) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a cross product operation")
 
-    elseif node:is(ast.typed.ExprFunction) then
+    elseif node:is(ast.typed.expr.Function) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a function reference")
 
@@ -812,7 +815,7 @@ end
 local predefined_functions = {}
 
 function check_vectorizability.expr_call(cx, node)
-  assert(node:is(ast.typed.ExprCall))
+  assert(node:is(ast.typed.expr.Call))
 
   if std.is_math_op(node.fn.value) then
     local fact = S
@@ -887,10 +890,10 @@ function vectorize_loops.stat_for_num(node)
 end
 
 function vectorize_loops.stat_for_list(node)
-  if node.vectorize == "forbid" then return node end
+  if node.options.vectorize:is(ast.options.Forbid) then return node end
   local cx = context:new_global_scope()
   cx:assign(node.symbol, V)
-  cx.demanded = node.vectorize == "demand"
+  cx.demanded = node.options.vectorize:is(ast.options.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
   if vectorizable then
@@ -904,61 +907,68 @@ function vectorize_loops.stat_repeat(node)
   return node { block = vectorize_loops.block(node.block) }
 end
 
+function vectorize_loops.stat_must_epoch(node)
+  return node { block = vectorize_loops.block(node.block) }
+end
+
 function vectorize_loops.stat_block(node)
   return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat(node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return vectorize_loops.stat_if(node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return vectorize_loops.stat_while(node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return vectorize_loops.stat_for_num(node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     if std.is_bounded_type(node.symbol.type) and node.symbol.type.dim <= 1 then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }
     end
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return vectorize_loops.stat_repeat(node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return vectorize_loops.stat_must_epoch(node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return vectorize_loops.stat_block(node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return node
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return node
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return node
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return node
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return node
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return node
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return node
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return node
 
-  elseif node:is(ast.typed.StatMapRegions) then
+  elseif node:is(ast.typed.stat.MapRegions) then
     return node
 
-  elseif node:is(ast.typed.StatUnmapRegions) then
+  elseif node:is(ast.typed.stat.UnmapRegions) then
     return node
 
   else
@@ -973,7 +983,7 @@ function vectorize_loops.stat_task(node)
 end
 
 function vectorize_loops.stat_top(node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return vectorize_loops.stat_task(node)
   else
     return node

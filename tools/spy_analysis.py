@@ -3574,6 +3574,18 @@ class ConnectedComponent(object):
                 key=lambda op: op.iid, reverse=True)
 
     def generate_igraph(self, idx, path):
+        def print_igraph_edges_for_multiple_copies(printer, copies):
+            copy = copies[0]
+            edge_label = 'copy '+hex(copy.uid)+' (fields: '+copy.field_mask_string()+')'
+            for i in range(1, len(copies)):
+                copy = copies[i]
+                edge_label = edge_label + ', copy '+hex(copy.uid)+\
+                        ' (fields: '+copy.field_mask_string()+')'
+            copy.dst_inst.print_incoming_edge(printer,
+                    copy.src_inst.node_name,
+                    edge_type='dashed',
+                    edge_label=edge_label)
+
         self.collect_physical_instances()
         name = 'instance_graph_'+str(idx)
         printer = GraphPrinter(path,name)
@@ -3591,8 +3603,18 @@ class ConnectedComponent(object):
             t.print_igraph_edges(printer)
         for m in self.maps.itervalues():
             m.print_igraph_edges(printer)
+        copy_groups = {}
         for c in self.copies.itervalues():
-            c.print_igraph_edges(printer)
+            inst_pair = (c.src_inst.node_name, c.dst_inst.node_name)
+            if not inst_pair in copy_groups:
+                copy_groups[inst_pair] = []
+            copy_groups[inst_pair].append(c)
+        for inst_pair in copy_groups:
+            copies = copy_groups[inst_pair]
+            if len(copies) == 1:
+                copies[0].print_igraph_edges(printer)
+            else:
+                print_igraph_edges_for_multiple_copies(printer, copies)
 
         printer.print_pdf_after_close(True)
 

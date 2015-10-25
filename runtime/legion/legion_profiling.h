@@ -69,6 +69,7 @@ namespace LegionRuntime {
       public:
         UniqueID op_id;
         Memory source, target;
+        unsigned long long size;
         unsigned long long create, ready, start, stop;
       };
       struct FillInfo {
