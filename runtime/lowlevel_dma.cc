@@ -2180,13 +2180,13 @@ namespace LegionRuntime {
         // can we perform transfer between cpu and file memory
         if (((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
             (dst_kind == MemoryImpl::MKIND_FILE)) {
-          printf("Create FilefromCPUMemPairCopier\n");
+          //printf("Create FilefromCPUMemPairCopier\n");
           return new FilefromCPUMemPairCopier(src_mem, dst_mem);
         }
 
         if ((src_kind == MemoryImpl::MKIND_FILE) &&
             ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-          printf("Create FiletoCPUMemPairCopier\n");
+          //printf("Create FiletoCPUMemPairCopier\n");
           return new FiletoCPUMemPairCopier(src_mem, dst_mem);
         }
 
