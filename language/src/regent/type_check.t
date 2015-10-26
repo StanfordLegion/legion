@@ -44,7 +44,7 @@ end
 function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
-    privileges = {},
+    privileges = data.newmap(),
     constraints = {},
     region_universe = {},
     expected_return_type = {expected_return_type},
@@ -370,7 +370,7 @@ function type_check.expr_call(cx, node)
         end
         return query:gettype()
       end
-      local valid, result_type = pcall(test)
+        local valid, result_type = pcall(test)
 
       if valid then
         fn_type = result_type
@@ -437,9 +437,11 @@ function type_check.expr_call(cx, node)
         if not std.check_privilege(cx, privilege_type, arg_region.type, field_path) then
           for i, arg in ipairs(arg_symbols) do
             if std.type_eq(arg.type, arg_region.type) then
-              log.error(node, "invalid privileges in argument " .. tostring(i) ..
-                          ": " .. tostring(privilege_type) .. "(" ..
-                          (data.newtuple(arg_region) .. field_path):hash() .. ")")
+              log.error(
+                node, "invalid privileges in argument " .. tostring(i) ..
+                  ": " .. tostring(privilege_type) .. "(" ..
+                  (data.newtuple(arg_region) .. field_path):mkstring(".") ..
+                  ")")
             end
           end
           assert(false)

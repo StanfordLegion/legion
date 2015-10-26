@@ -26,11 +26,15 @@
 -- alone, and regular functions and methods are used instead. So for
 -- example:
 --
+--   * Using metamethods:
 --     x + y        -- addition (via __add)
 --     x .. y       -- concatenation (via __concat)
---     x:get(k)     -- key lookup (NOT via __index, since it's unreliable)
---     x:put(k, v)  -- key assignment (NOT via __newindex, again: unreliable)
---     x:items()    -- key, value iterator (NO __pairs in LuaJIT)
+--     x[k]         -- key lookup (via __index)
+--     x[k] = v     -- key assignment (via __newindex)
+--     tostring(x)  -- stringification (via __tostring)
+--
+--   * Using regular methods and functions:
+--     x:items()    -- key, value iterator (__pairs does not exist in LuaJIT)
 --     x:keys()     -- key iterator
 --     x:values()   -- value iterator
 --     data.hash(x) -- calls x:hash() if supported, otherwise returns x
@@ -44,6 +48,15 @@ local data = {}
 -- #####################################
 -- ## Hashing
 -- #################
+
+-- Note: Unlike a normal hash function, it is important that the
+-- values returned by this function are unique. This is because the
+-- hash values are frequently used in Lua tables as the keys
+-- themselves---thus, they get treated as if they were the values. Lua
+-- itself has no alternative (there is no __hash metamethod), so this
+-- is the best you can do without building your own separate-chaining
+-- hash map, which would either be slow (if you did it in Lua) or
+-- would require extensions (if you did it in C).
 
 function data.hash(x)
   if type(x) == "table" and x.hash then
@@ -210,11 +223,11 @@ function data.tuple:starts_with(t)
 end
 
 function data.tuple:__tostring()
-  return "<" .. self:hash() .. ">"
+  return self:mkstring("<", ".", ">")
 end
 
 function data.tuple:hash()
-  return self:mkstring(".")
+  return "data.tuple" .. tostring(self)
 end
 
 function data.newtuple(...)
@@ -223,6 +236,77 @@ end
 
 function data.is_tuple(x)
   return getmetatable(x) == data.tuple
+end
+
+-- #####################################
+-- ## Maps
+-- #################
+
+data.map = {}
+
+function data.newmap()
+  return setmetatable({ __keys_by_hash = {}, __values_by_hash = {} }, data.map)
+end
+
+function data.map:__index(k)
+  return self.__values_by_hash[data.hash(k)] or data.map[k]
+end
+
+function data.map:__newindex(k, v)
+  self.__keys_by_hash[data.hash(k)] = k
+  self.__values_by_hash[data.hash(k)] = v
+end
+
+function data.map:get(k)
+  return self.__values_by_hash[data.hash(k)]
+end
+
+function data.map:put(k, v)
+  self.__keys_by_hash[data.hash(k)] = k
+  self.__values_by_hash[data.hash(k)] = v
+end
+
+function data.map:next_item(k)
+  local next_kh, next_k = next(self.__keys_by_hash, data.hash(k))
+  if next_kh == nil then
+    return
+  end
+  return next_k, self.__values_by_hash[next_kh]
+end
+
+function data.map:items()
+  return data.map.next_item, self, nil
+end
+
+function data.map:keys()
+  return pairs(self.__keys_by_hash)
+end
+
+function data.map:values()
+  return pairs(self.__values_by_hash)
+end
+
+function data.map:map(fn)
+  local result = data.newmap()
+  for k, v in self:items() do
+    result:put(k, fn(k, v))
+  end
+  return result
+end
+
+function data.map:map_list(fn)
+  local result = terralib.newlist()
+  for k, v in self:items() do
+    result:insert(fn(k, v))
+  end
+  return result
+end
+
+function data.map:__tostring()
+  return self:map_list(
+    function(k, v)
+      return tostring(k) .. "=" .. tostring(v)
+    end):mkstring("{", ",", "}")
 end
 
 return data

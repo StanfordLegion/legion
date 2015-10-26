@@ -98,12 +98,12 @@ end
 function std.add_privilege(cx, privilege, region, field_path)
   assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
   if not cx.privileges[privilege] then
-    cx.privileges[privilege] = {}
+    cx.privileges[privilege] = data.newmap()
   end
   if not cx.privileges[privilege][region] then
-    cx.privileges[privilege][region] = {}
+    cx.privileges[privilege][region] = data.newmap()
   end
-  cx.privileges[privilege][region][field_path:hash()] = true
+  cx.privileges[privilege][region][field_path] = true
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
@@ -156,7 +156,7 @@ function std.search_privilege(cx, privilege, region, field_path, visited)
     function(cx, region)
       return cx.privileges[privilege] and
         cx.privileges[privilege][region] and
-        cx.privileges[privilege][region][field_path:hash()]
+        cx.privileges[privilege][region][field_path]
     end)
 end
 
@@ -182,8 +182,8 @@ function std.search_any_privilege(cx, region, field_path, visited)
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
-      for _, regions in pairs(cx.privileges) do
-        if regions[region] and regions[region][field_path:hash()] then
+      for _, regions in cx.privileges:items() do
+        if regions[region] and regions[region][field_path] then
           return true
         end
       end
@@ -930,7 +930,7 @@ function std.check_read(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege reads(" ..
-                  (data.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -948,7 +948,7 @@ function std.check_write(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege writes(" ..
-                  (data.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -970,7 +970,7 @@ function std.check_reduce(cx, op, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
-                  (data.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1549,6 +1549,10 @@ function std.region(ispace_symbol, fspace_type)
     return `([to] { impl = [expr].impl })
   end
 
+  function st:hash()
+    return self
+  end
+
   function st.metamethods.__typename(st)
     return "region(" .. tostring(st.fspace_type) .. ")"
   end
@@ -1616,6 +1620,10 @@ function std.partition(disjointness, region)
   function st:force_cast(from, to, expr)
     assert(std.is_partition(from) and std.is_partition(to))
     return `([to] { impl = [expr].impl })
+  end
+
+  function st:hash()
+    return self
   end
 
   function st.metamethods.__typename(st)
@@ -1730,6 +1738,10 @@ function std.cross_product(...)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
     -- FIXME: Potential for double (triple) evaluation here.
     return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
+  end
+
+  function st:hash()
+    return self
   end
 
   function st.metamethods.__typename(st)
