@@ -2020,6 +2020,15 @@ function std.privilege(privilege, regions_fields)
 end
 
 -- #####################################
+-- ## Coherence Modes
+-- #################
+
+std.exclusive = "exclusive"
+std.atomic = "atomic"
+std.simultaneous = "simultaneous"
+std.relaxed = "relaxed"
+
+-- #####################################
 -- ## Constraints
 -- #################
 

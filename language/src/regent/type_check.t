@@ -31,6 +31,7 @@ function context:new_local_scope(must_epoch)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
+    coherence_modes = self.coherence_modes,
     constraints = self.constraints,
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
@@ -45,6 +46,7 @@ function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
+    coherence_modes = data.newmap(),
     constraints = {},
     region_universe = {},
     expected_return_type = {expected_return_type},
@@ -1590,10 +1592,18 @@ function type_check.region_fields(cx, node, region, prefix_path, value_type)
   return result
 end
 
-function type_check.region_root(cx, node)
+function type_check.region_bare(cx, node)
   local region = node.symbol
   local region_type = region.type
-  assert(std.is_region(region_type)) -- FIXME: make this a type error
+  if not std.is_region(region_type) then
+    log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
+  end
+  return region
+end
+
+function type_check.region_root(cx, node)
+  local region = type_check.region_bare(cx, node)
+  local region_type = region.type
   local value_type = region_type.fspace_type
   return {
     region = region,
@@ -1605,10 +1615,6 @@ end
 function type_check.regions(cx, node)
   return node:map(
     function(region) return type_check.region_root(cx, region) end)
-end
-
-function type_check.region_bare(cx, node)
-  return node.symbol
 end
 
 function type_check.privilege_kind(cx, node)
@@ -1641,6 +1647,76 @@ function type_check.privileges(cx, node)
     result:insertall(type_check.privilege(cx, privilege))
   end
   return result
+end
+
+function type_check.coherence_kind(cx, node)
+  if node:is(ast.specialized.coherence_kind.Exclusive) then
+    return std.exclusive
+  elseif node:is(ast.specialized.coherence_kind.Atomic) then
+    return std.atomic
+  elseif node:is(ast.specialized.coherence_kind.Simultaneous) then
+    return std.simultaneous
+  elseif node:is(ast.specialized.coherence_kind.Relaxed) then
+    return std.relaxed
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.coherence_kinds(cx, node)
+  return node:map(
+    function(coherence) return type_check.coherence_kind(cx, coherence) end)
+end
+
+local function check_coherence_conflict_field(cx, node, region, field,
+                                              coherence, other_field)
+  local region_type = region.type
+  if field:starts_with(other_field) or other_field:starts_with(field) then
+    local other_coherence = cx.coherence_modes[region_type][other_field]
+    assert(other_coherence)
+    if other_coherence ~= coherence then
+      log.error(
+        node, "conflicting coherence modes: " .. other_coherence .. "(" ..
+          (data.newtuple(region) .. other_field):mkstring(".") .. ")" ..
+          " and " .. coherence .. "(" ..
+          (data.newtuple(region) .. field):mkstring(".") .. ")")
+    end
+  end
+end
+
+local function check_coherence_conflict(cx, node, region, field, coherence)
+  local region_type = region.type
+  for _, other_field in cx.coherence_modes[region_type]:keys() do
+    check_coherence_conflict_field(cx, node, region, field, coherence, other_field)
+  end
+end
+
+function type_check.coherence(cx, node)
+  local coherence_modes = type_check.coherence_kinds(cx, node.coherence_modes)
+  local region_fields = type_check.regions(cx, node.regions)
+
+  for _, coherence in ipairs(coherence_modes) do
+    for _, region_field in ipairs(region_fields) do
+      local region = region_field.region
+      local region_type = region.type
+      assert(std.is_region(region_type))
+      if not cx.coherence_modes[region_type] then
+        cx.coherence_modes[region_type] = data.newmap()
+      end
+
+      local fields = region_field.fields
+      for _, field in ipairs(fields) do
+        check_coherence_conflict(cx, node, region, field, coherence)
+        cx.coherence_modes[region_type][field] = coherence
+      end
+    end
+  end
+end
+
+function type_check.coherence_modes(cx, node)
+  for _, coherence in ipairs(node) do
+    type_check.coherence(cx, coherence)
+  end
 end
 
 function type_check.constraint_kind(cx, node)
@@ -1692,6 +1768,9 @@ function type_check.stat_task(cx, node)
   end
   prototype:setprivileges(privileges)
 
+  type_check.coherence_modes(cx, node.coherence_modes)
+  local coherence_modes = cx.coherence_modes
+
   local constraints = type_check.constraints(cx, node.constraints)
   std.add_constraints(cx, constraints)
   prototype:set_param_constraints(constraints)
@@ -1724,6 +1803,7 @@ function type_check.stat_task(cx, node)
     params = params,
     return_type = return_type,
     privileges = privileges,
+    coherence_modes = coherence_modes,
     constraints = constraints,
     body = body,
     config_options = ast.TaskConfigOptions {

@@ -2653,6 +2653,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       }),
       return_type = expr_type,
       privileges = terralib.newlist(),
+      coherence_modes = data.newmap(),
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({
@@ -2735,6 +2736,7 @@ local lift_binary_op_to_futures = terralib.memoize(
       }),
       return_type = expr_type,
       privileges = terralib.newlist(),
+      coherence_modes = data.newmap(),
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({

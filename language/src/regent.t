@@ -58,9 +58,11 @@ local language = {
     "__unroll",
     "__vectorize",
     "aliased", -- reserved for future use
+    "atomic",
     "cross_product",
     "disjoint", -- reserved for future use
     "dynamic_cast",
+    "exclusive",
     "index_type", -- reserved for future use
     "isnull",
     "ispace",
@@ -74,7 +76,9 @@ local language = {
     "ptr", -- reserved for future use
     "reads",
     "reduces",
+    "relaxed",
     "region",
+    "simultaneous",
     "static_cast",
     "wild", -- reserved for future use
     "where",
