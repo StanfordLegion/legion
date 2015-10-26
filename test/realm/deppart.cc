@@ -373,9 +373,9 @@ public:
 	  reversed = true;
 	  if(fx == 0)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_EXTRAPOLATE;
-	    case PTYPE_1: ftype = BC_INFLOW;
-	    case PTYPE_2: ftype = BC_INFLOW;
+	    case PTYPE_0: ftype = BC_EXTRAPOLATE; break;
+	    case PTYPE_1: ftype = BC_INFLOW; break;
+	    case PTYPE_2: ftype = BC_INFLOW; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -383,9 +383,9 @@ public:
 	  // high boundary
 	  if(fx == global_x)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_EXTRAPOLATE;
-	    case PTYPE_1: ftype = BC_EXTRAPOLATE;
-	    case PTYPE_2: ftype = BC_EXTRAPOLATE;
+	    case PTYPE_0: ftype = BC_EXTRAPOLATE; break;
+	    case PTYPE_1: ftype = BC_EXTRAPOLATE; break;
+	    case PTYPE_2: ftype = BC_EXTRAPOLATE; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -410,9 +410,9 @@ public:
 	  reversed = true;
 	  if(fy == 0)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_TANGENT;
-	    case PTYPE_1: ftype = BC_NOSLIP;
-	    case PTYPE_2: ftype = BC_TANGENT;
+	    case PTYPE_0: ftype = BC_TANGENT; break;
+	    case PTYPE_1: ftype = BC_NOSLIP; break;
+	    case PTYPE_2: ftype = BC_TANGENT; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -420,9 +420,9 @@ public:
 	  // high boundary
 	  if(fy == global_y)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_TANGENT;
-	    case PTYPE_1: ftype = BC_EXTRAPOLATE;
-	    case PTYPE_2: ftype = BC_TANGENT;
+	    case PTYPE_0: ftype = BC_TANGENT; break;
+	    case PTYPE_1: ftype = BC_EXTRAPOLATE; break;
+	    case PTYPE_2: ftype = BC_TANGENT; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -447,9 +447,9 @@ public:
 	  reversed = true;
 	  if(fz == 0)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_TANGENT;
-	    case PTYPE_1: ftype = BC_TANGENT;
-	    case PTYPE_2: ftype = BC_TANGENT;
+	    case PTYPE_0: ftype = BC_TANGENT; break;
+	    case PTYPE_1: ftype = BC_TANGENT; break;
+	    case PTYPE_2: ftype = BC_TANGENT; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -457,9 +457,9 @@ public:
 	  // high boundary
 	  if(fz == global_z)
 	    switch(problem_type) {
-	    case PTYPE_0: ftype = BC_TANGENT;
-	    case PTYPE_1: ftype = BC_TANGENT;
-	    case PTYPE_2: ftype = BC_TANGENT;
+	    case PTYPE_0: ftype = BC_TANGENT; break;
+	    case PTYPE_1: ftype = BC_TANGENT; break;
+	    case PTYPE_2: ftype = BC_TANGENT; break;
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
@@ -563,7 +563,133 @@ public:
 
   virtual int check_partitioning(void)
   {
-    return 0;
+    int errors = 0;
+
+    ZPoint<1> pc = is_cells.bounds.lo;
+    ZPoint<1> pf = is_faces.bounds.lo;
+
+    for(int blkid = 0; blkid < n_blocks; blkid++) {
+      int bx = blkid % blocks_x;
+      int by = (blkid / blocks_x) % blocks_y;
+      int bz = blkid / blocks_x / blocks_y;
+
+      int nx = xsplit[bx + 1] - xsplit[bx];
+      int ny = ysplit[by + 1] - ysplit[by];
+      int nz = zsplit[bz + 1] - zsplit[bz];
+
+      // check cells
+      for(int i = 0; i < cells_per_block[blkid]; i++) {
+	for(int j = 0; j < n_blocks; j++) {
+	  bool exp = (j == blkid);
+	  bool act = p_cells[j].contains(pc);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: cell " << pc << " in p_cells[" << j << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	}
+
+	std::set<int> exp_ghosts;
+	int cx = i % nx;
+	int cy = (i / nx) % ny;
+	int cz = i / nx / ny;
+	if((cx == 0) && (bx > 0))
+	  exp_ghosts.insert(blkid - 1);
+	if((cx == (nx - 1)) && (bx < (blocks_x - 1)))
+	  exp_ghosts.insert(blkid + 1);
+	if((cy == 0) && (by > 0))
+	  exp_ghosts.insert(blkid - blocks_x);
+	if((cy == (ny - 1)) && (by < (blocks_y - 1)))
+	  exp_ghosts.insert(blkid + blocks_x);
+	if((cz == 0) && (bz > 0))
+	  exp_ghosts.insert(blkid - blocks_x * blocks_y);
+	if((cz == (nz - 1)) && (bz < (blocks_z - 1)))
+	  exp_ghosts.insert(blkid + blocks_x * blocks_y);
+
+	for(int j = 0; j < n_blocks; j++) {
+	  bool exp = exp_ghosts.count(j) > 0;
+	  bool act = p_ghost[j].contains(pc);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: cell " << pc << " in p_ghost[" << j << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	}
+
+	pc.x++;
+      }
+
+      // check faces
+      for(int i = 0; i < faces_per_block[blkid]; i++) {
+	for(int j = 0; j < n_blocks; j++) {
+	  bool exp = (j == blkid);
+	  bool act = p_faces[j].contains(pf);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: face " << pf << " in p_faces[" << j << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	  FaceType exptype = BC_INTERIOR;
+	  // luckily the faces on the edge of a block come in chunks
+	  int lr_faces = (nx + 1) * ny * nz;
+	  int du_faces = nx * (ny + 1) * nz;
+	  int bf_faces = nx * ny * (nz + 1);
+	  assert((lr_faces + du_faces + bf_faces) == faces_per_block[blkid]);
+	  if(i < lr_faces) {
+	    int x = i / ny / nz;
+	    if(x == 0)
+	      exptype = ((bx == 0) ?
+			 ((problem_type == PTYPE_0) ? BC_EXTRAPOLATE :
+			  (problem_type == PTYPE_1) ? BC_INFLOW :
+			                              BC_INFLOW) :
+			 BC_BLOCK_BORDER);
+	    if(x == nx)
+	      exptype = ((bx == blocks_x - 1) ?
+			 ((problem_type == PTYPE_0) ? BC_EXTRAPOLATE :
+			  (problem_type == PTYPE_1) ? BC_EXTRAPOLATE :
+			                              BC_EXTRAPOLATE) :
+			 BC_BLOCK_BORDER);
+	  } else if(i < (lr_faces + du_faces)) {
+	    int y = (i - lr_faces) / nx / nz;
+	    if(y == 0)
+	      exptype = ((by == 0) ?
+			 ((problem_type == PTYPE_0) ? BC_TANGENT :
+			  (problem_type == PTYPE_1) ? BC_NOSLIP :
+			                              BC_TANGENT) :
+			 BC_BLOCK_BORDER);
+	    if(y == ny)
+	      exptype = ((by == blocks_y - 1) ?
+			 ((problem_type == PTYPE_0) ? BC_TANGENT :
+			  (problem_type == PTYPE_1) ? BC_EXTRAPOLATE :
+			                              BC_TANGENT) :
+			 BC_BLOCK_BORDER);
+	  } else {
+	    int z = (i - lr_faces - du_faces) / nx / ny;
+	    if(z == 0)
+	      exptype = ((bz == 0) ?
+			 ((problem_type == PTYPE_0) ? BC_TANGENT :
+			  (problem_type == PTYPE_1) ? BC_TANGENT :
+			                              BC_TANGENT) :
+			 BC_BLOCK_BORDER);
+	    if(z == nz)
+	      exptype = ((bz == blocks_z - 1) ?
+			 ((problem_type == PTYPE_0) ? BC_TANGENT :
+			  (problem_type == PTYPE_1) ? BC_TANGENT :
+			                              BC_TANGENT) :
+			 BC_BLOCK_BORDER);
+	  }
+	  
+	  for(int k = 0; k < BC_TOTAL; k++) {
+	    bool exp = (j == blkid) && (k == exptype);
+	    bool act = p_facetypes[j][k].contains(pf);
+	    if(exp != act) {
+	      log_app.error() << "mismatch: face " << pf << " in p_facetypes[" << j << "][" << k << "]: exp=" << exp << " act=" << act;
+	      errors++;
+	    }
+	  }
+	}
+	pf.x++;
+      }
+    }
+
+    return errors;
   }
 };
 
@@ -1372,6 +1498,55 @@ public:
 	}
       }
     }
+
+    // check zones
+    ZPoint<1> pz = is_zones.bounds.lo;
+    for(int pc = 0; pc < numpc; pc++) {
+      for(int i = 0; i < lz[pc]; i++) {
+	for(int j = 0; j < numpc; j++) {
+	  bool exp = (j == pc);
+	  bool act = p_zones[j].contains(pz);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: zone " << pz << " in p_zones[" << j << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	}
+	pz.x++;
+      }
+    }
+
+    // check sides
+    ZPoint<1> ps = is_sides.bounds.lo;
+    for(int pc = 0; pc < numpc; pc++) {
+      for(int i = 0; i < ls[pc]; i++) {
+	for(int j = 0; j < numpc; j++) {
+	  bool exp = (j == pc);
+	  bool act = p_sides[j].contains(ps);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: side " << ps << " in p_sides[" << j << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	}
+	ps.x++;
+      }
+    }
+
+    // check points (trickier due to ghosting)
+    for(int py = 0; py < npy; py++)
+      for(int px = 0; px < npx; px++) {
+	ZPoint<1> pp = global_point_pointer(py, px);
+	for(int pc = 0; pc < numpc; pc++) {
+	  int pcy = pc / numpcx;
+	  int pcx = pc % numpcx;
+	  bool exp = ((py >= zybound[pcy]) && (py <= zybound[pcy + 1]) &&
+		      (px >= zxbound[pcx]) && (px <= zxbound[pcx + 1]));
+	  bool act = p_points[pc].contains(pp);
+	  if(exp != act) {
+	    log_app.error() << "mismatch: point " << pp << " in p_points[" << pc << "]: exp=" << exp << " act=" << act;
+	    errors++;
+	  }
+	}
+      }
     
     return errors;
   }
