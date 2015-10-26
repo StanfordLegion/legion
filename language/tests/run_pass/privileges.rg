@@ -36,8 +36,9 @@ end
 
 task g(s : region(t))
 where
-  reads writes(s.a, s.b), writes reads reads reads writes(s.{}, s.{a, c}),
-  simultaneous(s.a), relaxed relaxed(s.b), simultaneous(s.a)
+  reads writes simultaneous(s.a), reads relaxed writes(s.b),
+  writes reads reads reads writes(s.{}, s.{a, c}),
+  relaxed relaxed(s.b), simultaneous(s.a)
 do
   for x in s do
     x.a *= 4
