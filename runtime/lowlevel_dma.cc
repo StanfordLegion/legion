@@ -1778,6 +1778,7 @@ namespace LegionRuntime {
         assert(aio_read(&cb) != -1);
         while (aio_error(&cb) == EINPROGRESS) {}
         assert((size_t)aio_return(&cb) == bytes);
+	record_bytes(bytes);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
@@ -1827,6 +1828,7 @@ namespace LegionRuntime {
         assert(aio_write(&cb) != -1);
         while (aio_error(&cb) == EINPROGRESS) {}
         assert((size_t)aio_return(&cb) == bytes);
+	record_bytes(bytes);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
@@ -1871,7 +1873,8 @@ namespace LegionRuntime {
       public:
         enum {max_nr = 1};
         FileWriteCopier(int _fd, char* _base, RegionInstance src_inst,
-                        RegionInstance dst_inst, OASVec &oas_vec)
+                        RegionInstance dst_inst, OASVec &oas_vec,
+			FilefromCPUMemPairCopier *_mpc)
         {
           ctx = 0;
           int ret = io_setup(max_nr, &ctx);
@@ -1881,6 +1884,7 @@ namespace LegionRuntime {
           cb.aio_fildes = _fd;
           inst_copier = new SpanBasedInstPairCopier<FileWriteCopier>(this, src_inst, dst_inst, oas_vec);
           src_base = _base;
+	  mpc = _mpc;
         }
 
         ~FileWriteCopier(void)
@@ -1926,7 +1930,9 @@ namespace LegionRuntime {
             perror("io_getevents error");
           assert(nr == max_nr);
           assert(events[0].res == (int64_t) bytes);
+	  mpc->record_bytes(bytes);
         }
+
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
                        off_t src_stride, off_t dst_stride, size_t lines)
         {
@@ -1944,6 +1950,7 @@ namespace LegionRuntime {
         char *src_base;
         struct io_event events[max_nr];
         InstPairCopier* inst_copier;
+	FilefromCPUMemPairCopier *mpc;
       };
 
       FilefromCPUMemPairCopier(Memory _src_mem, Memory _dst_mem)
@@ -1961,7 +1968,7 @@ namespace LegionRuntime {
         ID id(dst_inst);
         unsigned index = id.index_l();
         int fd = dst_mem->get_file_des(index);
-        return new FileWriteCopier(fd, src_base, src_inst, dst_inst, oas_vec);
+        return new FileWriteCopier(fd, src_base, src_inst, dst_inst, oas_vec, this);
       }
 
     protected:
@@ -1976,7 +1983,7 @@ namespace LegionRuntime {
       public:
         enum {max_nr = 1};
     	FileReadCopier(int _fd, char* _base, RegionInstance src_inst,
-                       RegionInstance dst_inst, OASVec &oas_vec)
+                       RegionInstance dst_inst, OASVec &oas_vec, FiletoCPUMemPairCopier *_mpc)
         {
           ctx = 0;
           int ret = io_setup(max_nr, &ctx);
@@ -1986,6 +1993,7 @@ namespace LegionRuntime {
           cb.aio_fildes = _fd;
           inst_copier = new SpanBasedInstPairCopier<FileReadCopier>(this, src_inst, dst_inst, oas_vec);
           dst_base = _base;
+	  mpc = _mpc;
         }
 
         ~FileReadCopier(void)
@@ -2031,7 +2039,9 @@ namespace LegionRuntime {
             perror("io_getevents error");
           assert(nr == max_nr);
           assert(events[0].res == (int64_t) bytes);
+	  mpc->record_bytes(bytes);
         }
+
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
                        off_t src_stride, off_t dst_stride, size_t lines)
         {
@@ -2049,6 +2059,7 @@ namespace LegionRuntime {
         char *dst_base;
         struct io_event events[max_nr];
         InstPairCopier* inst_copier;
+	FiletoCPUMemPairCopier *mpc;
       };
 
       FiletoCPUMemPairCopier(Memory _src_mem, Memory _dst_mem)
@@ -2066,7 +2077,7 @@ namespace LegionRuntime {
         ID id(src_inst);
         unsigned index = id.index_l();
         int fd = src_mem->get_file_des(index);
-        return new FileReadCopier(fd, dst_base, src_inst, dst_inst, oas_vec);
+        return new FileReadCopier(fd, dst_base, src_inst, dst_inst, oas_vec, this);
       }
     protected:
       char *dst_base;
