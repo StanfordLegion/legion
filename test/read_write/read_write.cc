@@ -61,6 +61,17 @@ public:
         sys_mem.push_back(*it);
     }
     assert(sys_mem.size() == 1);
+    std::set<Processor> all_procs;
+    machine.get_all_processors(all_procs);
+    first_proc = Processor::NO_PROC, last_proc = Processor::NO_PROC;
+    for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
+      if (it->kind() == Processor::LOC_PROC) {
+        if (first_proc == Processor::NO_PROC) {
+          first_proc = *it;
+        }
+        last_proc = *it;
+      }
+    }
   }
 
   virtual void select_task_options(Task *task)
@@ -69,6 +80,10 @@ public:
     task->spawn_task = false;
     task->map_locally = true;
     task->profile_task = false;
+    if (task->task_id == READ_ONLY_TASK_ID)
+      task->target_proc = first_proc;
+    else
+      task->target_proc = last_proc;
   }
 
   virtual bool map_task(Task *task)
@@ -83,11 +98,11 @@ public:
       task->regions[idx].blocking_factor =
         task->regions[idx].max_blocking_factor;
     }
-
     return true;
   }
 public:
   std::vector<Memory> sys_mem;
+  Processor first_proc, last_proc;
 };
 
 static void update_mappers(Machine machine, HighLevelRuntime *rt,
@@ -180,14 +195,14 @@ void top_level_task(const Task *task,
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_VAL);
   pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_READ_WRITE);
-  //runtime->remap_region(ctx, pr_A);
-  //pr_A.wait_until_valid();
+  runtime->remap_region(ctx, pr_A);
+  pr_A.wait_until_valid();
 
   // Start Computation
   struct timespec ts_start, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
-  //runtime->unmap_region(ctx, pr_A);
+  runtime->unmap_region(ctx, pr_A);
   for (int iter = 0; iter < ntask; iter++) {
     // Acquire the logical reagion so that we can launch sub-operations that make copies
     AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
@@ -196,7 +211,7 @@ void top_level_task(const Task *task,
 
     Future future;
     // Perform task
-    if (iter % 2 < 2) {
+    if (iter % 2 == 0) {
       // read_only task
       TaskLauncher task_launcher(READ_ONLY_TASK_ID,
                                  TaskArgument(NULL, 0));
@@ -226,7 +241,6 @@ void top_level_task(const Task *task,
 
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
-  //runtime->unmap_region(ctx, pr_A);
   runtime->detach_file(ctx, pr_A);
 
   double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
