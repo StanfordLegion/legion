@@ -24,6 +24,7 @@
 -- (Currently the optimization returns false for idempotent.)
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 
@@ -50,7 +51,7 @@ end
 function analyze_leaf.expr_method_call(cx, node)
   return
     analyze_leaf.expr(cx, node.value) and
-    std.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
+    data.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
 end
 
 function analyze_leaf.expr_call(cx, node)
@@ -60,7 +61,7 @@ function analyze_leaf.expr_call(cx, node)
 
   return
     analyze_leaf.expr(cx, node.fn) and
-    std.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
+    data.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
 end
 
 function analyze_leaf.expr_cast(cx, node)
@@ -70,7 +71,7 @@ function analyze_leaf.expr_cast(cx, node)
 end
 
 function analyze_leaf.expr_ctor(cx, node)
-  return std.all(
+  return data.all(
     node.fields:map(function(field) return analyze_leaf.expr(cx, field.value) end))
 end
 
@@ -214,7 +215,7 @@ function analyze_leaf.expr(cx, node)
 end
 
 function analyze_leaf.block(cx, node)
-  return std.all(
+  return data.all(
     node.stats:map(function(stat) return analyze_leaf.stat(cx, stat) end))
 end
 
@@ -222,7 +223,7 @@ function analyze_leaf.stat_if(cx, node)
   return
     analyze_leaf.expr(cx, node.cond) and
     analyze_leaf.block(cx, node.then_block) and
-    std.all(
+    data.all(
       node.elseif_blocks:map(
         function(block) return analyze_leaf.stat_elseif(cx, block) end)) and
     analyze_leaf.block(cx, node.else_block)
@@ -242,7 +243,7 @@ end
 
 function analyze_leaf.stat_for_num(cx, node)
   return
-    std.all(
+    data.all(
       node.values:map(function(value) return analyze_leaf.expr(cx, value) end)) and
     analyze_leaf.block(cx, node.block)
 end
@@ -273,7 +274,7 @@ function analyze_leaf.stat_index_launch(cx, node)
 end
 
 function analyze_leaf.stat_var(cx, node)
-  return std.all(
+  return data.all(
     node.values:map(function(value) return analyze_leaf.expr(cx, value) end))
 end
 
@@ -295,17 +296,17 @@ end
 
 function analyze_leaf.stat_assignment(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_leaf.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_leaf.expr(cx, rh) end))
 end
 
 function analyze_leaf.stat_reduce(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_leaf.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_leaf.expr(cx, rh) end))
 end
 
@@ -387,14 +388,14 @@ end
 function analyze_inner.expr_method_call(cx, node)
   return
     analyze_inner.expr(cx, node.value) and
-    std.all(
+    data.all(
       node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
 function analyze_inner.expr_call(cx, node)
   return
     analyze_leaf.expr(cx, node.fn) and
-    std.all(
+    data.all(
       node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
@@ -405,7 +406,7 @@ function analyze_inner.expr_cast(cx, node)
 end
 
 function analyze_inner.expr_ctor(cx, node)
-  return std.all(
+  return data.all(
     node.fields:map(function(field) return analyze_inner.expr(cx, field.value) end))
 end
 
@@ -443,7 +444,7 @@ function analyze_inner.expr_partition(cx, node)
 end
 
 function analyze_inner.expr_cross_product(cx, node)
-  return std.all(
+  return data.all(
     node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
@@ -562,7 +563,7 @@ function analyze_inner.expr(cx, node)
 end
 
 function analyze_inner.block(cx, node)
-  return std.all(
+  return data.all(
     node.stats:map(function(stat) return analyze_inner.stat(cx, stat) end))
 end
 
@@ -570,7 +571,7 @@ function analyze_inner.stat_if(cx, node)
   return
     analyze_inner.expr(cx, node.cond) and
     analyze_inner.block(cx, node.then_block) and
-    std.all(
+    data.all(
       node.elseif_blocks:map(
         function(block) return analyze_inner.stat_elseif(cx, block) end)) and
     analyze_inner.block(cx, node.else_block)
@@ -590,7 +591,7 @@ end
 
 function analyze_inner.stat_for_num(cx, node)
   return
-    std.all(
+    data.all(
       node.values:map(function(value) return analyze_inner.expr(cx, value) end)) and
     analyze_inner.block(cx, node.block)
 end
@@ -617,13 +618,13 @@ end
 
 function analyze_inner.stat_index_launch(cx, node)
   return
-    std.all(node.domain:map(function(value) return analyze_inner.expr(cx, value) end)) and
+    data.all(node.domain:map(function(value) return analyze_inner.expr(cx, value) end)) and
     analyze_inner.expr(cx, node.call) and
     (not node.reduce_lhs or analyze_inner.expr(cx, node.reduce_lhs))
 end
 
 function analyze_inner.stat_var(cx, node)
-  return std.all(
+  return data.all(
     node.values:map(function(value) return analyze_inner.expr(cx, value) end))
 end
 
@@ -645,17 +646,17 @@ end
 
 function analyze_inner.stat_assignment(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_inner.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_inner.expr(cx, rh) end))
 end
 
 function analyze_inner.stat_reduce(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_inner.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_inner.expr(cx, rh) end))
 end
 

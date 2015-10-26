@@ -15,6 +15,7 @@
 -- Legion Type Checker
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -43,7 +44,7 @@ end
 function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
-    privileges = {},
+    privileges = data.newmap(),
     constraints = {},
     region_universe = {},
     expected_return_type = {expected_return_type},
@@ -369,7 +370,7 @@ function type_check.expr_call(cx, node)
         end
         return query:gettype()
       end
-      local valid, result_type = pcall(test)
+        local valid, result_type = pcall(test)
 
       if valid then
         fn_type = result_type
@@ -436,9 +437,11 @@ function type_check.expr_call(cx, node)
         if not std.check_privilege(cx, privilege_type, arg_region.type, field_path) then
           for i, arg in ipairs(arg_symbols) do
             if std.type_eq(arg.type, arg_region.type) then
-              log.error(node, "invalid privileges in argument " .. tostring(i) ..
-                          ": " .. tostring(privilege_type) .. "(" ..
-                          (std.newtuple(arg_region) .. field_path):hash() .. ")")
+              log.error(
+                node, "invalid privileges in argument " .. tostring(i) ..
+                  ": " .. tostring(privilege_type) .. "(" ..
+                  (data.newtuple(arg_region) .. field_path):mkstring(".") ..
+                  ")")
             end
           end
           assert(false)
@@ -815,8 +818,8 @@ function type_check.expr_region(cx, node)
   assert(std.type_eq(ispace_symbol.type, ispace_type))
 
   local region = node.expr_type
-  std.add_privilege(cx, "reads", region, std.newtuple())
-  std.add_privilege(cx, "writes", region, std.newtuple())
+  std.add_privilege(cx, "reads", region, data.newtuple())
+  std.add_privilege(cx, "writes", region, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
   -- other regions.
   for other_region, _ in pairs(cx.region_universe) do
@@ -1473,7 +1476,7 @@ function type_check.stat_reduce(cx, node)
   local rhs_types = rhs:map(
     function(rh) return std.check_read(cx, rh) end)
 
-  std.zip(lhs_types, rhs_types):map(
+  data.zip(lhs_types, rhs_types):map(
     function(types)
       local lhs_type, rhs_type = unpack(types)
       local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
@@ -1564,11 +1567,11 @@ function type_check.stat_task_param(cx, node)
 end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
-  local field_path = prefix_path .. std.newtuple(node.field_name)
+  local field_path = prefix_path .. data.newtuple(node.field_name)
   local field_type = std.get_field(value_type, node.field_name)
   if not field_type then
     log.error(node, "no field '" .. node.field_name ..
-                "' in region " .. (std.newtuple(region) .. prefix_path):mkstring("."))
+                "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
   end
 
   return type_check.region_fields(
@@ -1595,7 +1598,7 @@ function type_check.region_root(cx, node)
   return {
     region = region,
     fields = type_check.region_fields(
-      cx, node.fields, region, std.newtuple(), value_type),
+      cx, node.fields, region, data.newtuple(), value_type),
   }
 end
 

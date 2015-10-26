@@ -13088,8 +13088,14 @@ namespace LegionRuntime {
           postconditions[copy_post] = pre_set.set_mask;
         }
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-        IndexSpace copy_index_space =
-                        dst->logical_node->as_region_node()->row_source->handle;
+        IndexSpaceID index_space_id;
+        if (dst->logical_node->is_region())
+          index_space_id =
+            dst->logical_node->as_region_node()->row_source->handle.get_id();
+        else
+          index_space_id =
+            dst->logical_node->as_partition_node()->row_source->handle.get_id();
+
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = update_views.begin(); it != update_views.end(); it++)
         {
@@ -13103,7 +13109,7 @@ namespace LegionRuntime {
                 Processor::get_executing_processor(),
                 it->first->manager->get_instance(),
                 dst->manager->get_instance(),
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle,
                 manager_node->handle.tree_id,
                 copy_pre, copy_post, copy_fields, 0/*redop*/);
@@ -13119,7 +13125,7 @@ namespace LegionRuntime {
             LegionSpy::log_copy_operation(
                 it->first->manager->get_instance().id,
                 dst->manager->get_instance().id,
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle.id,
                 manager_node->handle.tree_id, copy_pre, copy_post,
                 0/*redop*/, field_set);

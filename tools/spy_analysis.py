@@ -306,7 +306,7 @@ class IndexSpaceNode(object):
                         break
                 assert color != None
                 label = 'subspace '+hex(self.uid)+\
-                        ' (color: ' + str(color) +')'
+                        ' (color: ' + color.to_simple_string() +')'
 
         printer.println(self.node_name+' [label="'+label+\
                 '",shape=plaintext,fontsize=14,'+\
