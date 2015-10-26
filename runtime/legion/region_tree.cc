@@ -2009,9 +2009,10 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert(composite_view->get_parent() == NULL);
+      assert(composite_view->logical_node->is_region());
 #endif
-      RegionNode *child_node = get_node(req.region);
+      RegionNode *child_node = composite_view->logical_node->as_region_node();
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       child_node->register_virtual(ctx.get_id(), composite_view,
