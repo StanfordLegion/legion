@@ -15,6 +15,7 @@
 -- Legion Code Generation
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -113,7 +114,7 @@ function context:check_divergence(region_types, field_paths)
       end
     end
     for _, field_path in ipairs(field_paths) do
-      if not divergence.valid_fields[std.hash(field_path)] then
+      if not divergence.valid_fields[data.hash(field_path)] then
         contained = false
         break
       end
@@ -341,7 +342,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     local dim = index_type.dim
     local expected_stride = terralib.sizeof(field_type)
 
-    local dims = std.range(2, dim + 1)
+    local dims = data.range(2, dim + 1)
     local strides = terralib.newlist()
     strides:insert(expected_stride)
     for i = 2, dim do
@@ -366,7 +367,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
 
       -- Sanity check the outputs.
       std.assert(base_pointer ~= nil, "base pointer is nil")
-      [std.range(dim):map(
+      [data.range(dim):map(
          function(i)
            return quote
              std.assert(subrect.lo.x[i] == rect.lo.x[i], "subrect not equal to rect")
@@ -380,7 +381,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       -- regardless of where rect is located. This allows us to do
       -- pointer arithmetic later oblivious to what sort of a subrect
       -- we are working with.
-      [std.range(dim):map(
+      [data.range(dim):map(
          function(i)
            return quote
              [base_pointer] = [&field_type](([&int8]([base_pointer])) - rect.lo.x[i] * offsets[i].offset)
@@ -491,8 +492,8 @@ function values.value(value_expr, value_type, field_path)
   end
 
   if field_path == nil then
-    field_path = std.newtuple()
-  elseif not std.is_tuple(field_path) then
+    field_path = data.newtuple()
+  elseif not data.is_tuple(field_path) then
     error("value requires a valid field_path", 2)
   end
 
@@ -528,21 +529,21 @@ end
 
 function value:__get_field(cx, value_type, field_name)
   if value_type:ispointer() then
-    return values.rawptr(self:read(cx), value_type, std.newtuple(field_name))
+    return values.rawptr(self:read(cx), value_type, data.newtuple(field_name))
   elseif std.is_index_type(value_type) then
-    return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
+    return self:new(self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
     if std.get_field(value_type.index_type.base_type, field_name) then
-      return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
+      return self:new(self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
     else
       assert(value_type:is_ptr())
-      return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+      return values.ref(self:read(cx, value_type), value_type, data.newtuple(field_name))
     end
   elseif std.is_vptr(value_type) then
-    return values.vref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+    return values.vref(self:read(cx, value_type), value_type, data.newtuple(field_name))
   else
     return self:new(
-      self.expr, self.value_type, self.field_path .. std.newtuple(field_name))
+      self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
   end
 end
 
@@ -566,7 +567,7 @@ function value:get_index(cx, index, result_type)
   end
   local result = expr.just(quote [actions] end,
                            `([value_expr.value][ [index.value] ]))
-  return values.rawref(result, &result_type, std.newtuple())
+  return values.rawref(result, &result_type, data.newtuple())
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
@@ -736,7 +737,7 @@ function ref:__ref(cx, expr_type)
     base_pointers = base_pointers_by_region[1]
     strides = strides_by_region[1]
   else
-    base_pointers = std.zip(absolute_field_paths, field_types):map(
+    base_pointers = data.zip(absolute_field_paths, field_types):map(
       function(field)
         local field_path, field_type = unpack(field)
         return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
@@ -753,7 +754,7 @@ function ref:__ref(cx, expr_type)
     for i = #region_types, 1, -1 do
       local region_base_pointers = base_pointers_by_region[i]
       local region_strides = strides_by_region[i]
-      local case = std.zip(base_pointers, region_base_pointers, strides, region_strides):map(
+      local case = data.zip(base_pointers, region_base_pointers, strides, region_strides):map(
         function(pair)
           local base_pointer, region_base_pointer, field_strides, field_region_strides = unpack(pair)
           local setup = quote [base_pointer] = [region_base_pointer] end
@@ -789,14 +790,14 @@ function ref:__ref(cx, expr_type)
 
   local values
   if not expr_type or std.as_read(expr_type) == value_type then
-    values = std.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides):map(
       function(field)
         local field_type, base_pointer, stride = unpack(field)
         return get_element_pointer(cx, region_types, self.value_type, field_type, base_pointer, stride, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
-    values = std.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides):map(
       function(field)
         local field_type, base_pointer, stride = unpack(field)
         local vec = vector(field_type, std.as_read(expr_type).N)
@@ -817,7 +818,7 @@ function ref:read(cx, expr_type)
   actions = quote
     [actions];
     var [value] : value_type
-    [std.zip(values, field_paths, field_types):map(
+    [data.zip(values, field_paths, field_types):map(
        function(pair)
          local field_value, field_path, field_type = unpack(pair)
          local result = value
@@ -853,7 +854,7 @@ function ref:write(cx, value, expr_type)
   actions = quote
     [value_expr.actions];
     [actions];
-    [std.zip(values, field_paths, field_types):map(
+    [data.zip(values, field_paths, field_types):map(
        function(pair)
          local field_value, field_path, field_type = unpack(pair)
          local result = value_expr.value
@@ -900,7 +901,7 @@ function ref:reduce(cx, value, op, expr_type)
   actions = quote
     [value_expr.actions];
     [actions];
-    [std.zip(values, field_paths, field_types):map(
+    [data.zip(values, field_paths, field_types):map(
        function(pair)
          local field_value, field_path, field_type = unpack(pair)
          local result = value_expr.value
@@ -964,7 +965,7 @@ function ref:get_index(cx, index, result_type)
       end)
   end
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
-  return values.rawref(result, &result_type, std.newtuple())
+  return values.rawref(result, &result_type, data.newtuple())
 end
 
 local vref = setmetatable({}, { __index = value })
@@ -1032,7 +1033,7 @@ function vref:read(cx, expr_type)
   if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
-    std.zip(base_pointers, field_paths):map(
+    data.zip(base_pointers, field_paths):map(
       function(pair)
         local base_pointer, field_path = unpack(pair)
         for i = 1, vector_width do
@@ -1121,7 +1122,7 @@ function vref:write(cx, value, expr_type)
   if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
-    std.zip(base_pointers, field_paths):map(
+    data.zip(base_pointers, field_paths):map(
       function(pair)
         local base_pointer, field_path = unpack(pair)
         local result = value_expr.value
@@ -1206,7 +1207,7 @@ function vref:reduce(cx, value, op, expr_type)
   if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
-    std.zip(base_pointers, field_paths):map(
+    data.zip(base_pointers, field_paths):map(
       function(pair)
         local base_pointer, field_path = unpack(pair)
         local result = value_expr.value
@@ -1395,7 +1396,7 @@ function rawref:get_index(cx, index, result_type)
   local result = expr.just(
     quote [actions] end,
     `([ref_expr.value][ [index.value] ]))
-  return values.rawref(result, &result_type, std.newtuple())
+  return values.rawref(result, &result_type, data.newtuple())
 end
 
 -- A helper for capturing debug information.
@@ -2493,8 +2494,8 @@ function codegen.expr_region(cx, node)
     end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
-  local pr_actions, base_pointers, strides = unpack(std.zip(unpack(
-    std.zip(field_types, field_ids, field_privileges):map(
+  local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
+    data.zip(field_types, field_ids, field_privileges):map(
       function(field)
         local field_type, field_id, field_privilege = unpack(field)
         return terralib.newlist({
@@ -2504,12 +2505,12 @@ function codegen.expr_region(cx, node)
   cx:add_region_root(region_type, r,
                      field_paths,
                      terralib.newlist({field_paths}),
-                     std.dict(std.zip(field_paths:map(std.hash), field_privileges)),
-                     std.dict(std.zip(field_paths:map(std.hash), field_types)),
-                     std.dict(std.zip(field_paths:map(std.hash), field_ids)),
-                     std.dict(std.zip(field_paths:map(std.hash), physical_regions)),
-                     std.dict(std.zip(field_paths:map(std.hash), base_pointers)),
-                     std.dict(std.zip(field_paths:map(std.hash), strides)))
+                     data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
+                     data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
+                     data.dict(data.zip(field_paths:map(data.hash), strides)))
 
   actions = quote
     [actions]
@@ -2517,7 +2518,7 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
-    [std.zip(field_types, field_ids):map(
+    [data.zip(field_types, field_ids):map(
        function(field)
          local field_type, field_id = unpack(field)
          return `(c.legion_field_allocator_allocate_field(
@@ -2603,7 +2604,7 @@ function codegen.expr_cross_product(cx, node)
   actions = quote
     [actions]
     var [partitions]
-    [std.zip(std.range(#args), args):map(
+    [data.zip(data.range(#args), args):map(
        function(pair)
          local i, arg = unpack(pair)
          return quote partitions[i] = [arg.value].impl.index_partition end
@@ -2925,7 +2926,7 @@ function codegen.expr_future_get_result(cx, node)
     assert(false)
   elseif result_type == c.legion_task_result_t then
     local result_value = terralib.newsymbol(expr_type, "result_value")
-    local expr_type_alignment = std.min(terralib.sizeof(expr_type), 8)
+    local expr_type_alignment = data.min(terralib.sizeof(expr_type), 8)
     local actions = quote
       [actions]
       var result = c.legion_future_get_result([value.value].__result)
@@ -3582,7 +3583,7 @@ function codegen.stat_index_launch(cx, node)
     [domain[2].actions];
     -- Ignore domain[3] because we know it is a constant.
     [fn.actions];
-    [std.zip(args, args_partitions, node.args_provably.invariant):map(
+    [data.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
          local arg, arg_partition, invariant = unpack(pair)
 
@@ -3945,7 +3946,7 @@ function codegen.stat_assignment(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr_list(cx, node.lhs)
   local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = std.zip(rhs, node.rhs):map(
+  rhs = data.zip(rhs, node.rhs):map(
     function(pair)
       local rh_value, rh_node = unpack(pair)
       local rh_expr = rh_value:read(cx, rh_node.expr_type)
@@ -3959,7 +3960,7 @@ function codegen.stat_assignment(cx, node)
     end)
 
   actions:insertall(
-    std.zip(lhs, rhs, node.lhs):map(
+    data.zip(lhs, rhs, node.lhs):map(
       function(pair)
         local lh, rh, lh_node = unpack(pair)
         return lh:write(cx, rh, lh_node.expr_type).actions
@@ -3972,7 +3973,7 @@ function codegen.stat_reduce(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr_list(cx, node.lhs)
   local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = std.zip(rhs, node.rhs):map(
+  rhs = data.zip(rhs, node.rhs):map(
     function(pair)
       local rh_value, rh_node = unpack(pair)
       local rh_expr = rh_value:read(cx, rh_node.expr_type)
@@ -3983,7 +3984,7 @@ function codegen.stat_reduce(cx, node)
     end)
 
   actions:insertall(
-    std.zip(lhs, rhs, node.lhs):map(
+    data.zip(lhs, rhs, node.lhs):map(
       function(pair)
         local lh, rh, lh_node = unpack(pair)
         return lh:reduce(cx, rh, node.op, lh_node.expr_type).actions
@@ -4123,7 +4124,7 @@ end
 local function filter_fields(fields, privileges)
   local remove = terralib.newlist()
   for _, field in pairs(fields) do
-    local privilege = privileges[std.hash(field)]
+    local privilege = privileges[data.hash(field)]
     if not privilege or std.is_reduction_op(privilege) then
       remove:insert(field)
     end
@@ -4184,7 +4185,7 @@ function codegen.stat_task(cx, node)
       end)
     param_field_ids:insertall(field_ids)
     params_struct_type.entries:insertall(
-      std.zip(field_ids, field_types):map(
+      data.zip(field_ids, field_types):map(
         function(field)
           local field_id, field_type = unpack(field)
           return { field = field_id, type = c.legion_field_id_t }
@@ -4240,7 +4241,7 @@ function codegen.stat_task(cx, node)
     end)
     for i, param in ipairs(params) do
       local param_type = node.params[i].param_type
-      local param_type_alignment = std.min(terralib.sizeof(param_type), 8)
+      local param_type_alignment = data.min(terralib.sizeof(param_type), 8)
 
       local future = terralib.newsymbol("future")
       local future_type = std.future(param_type)
@@ -4345,8 +4346,8 @@ function codegen.stat_task(cx, node)
         physical_region_i = physical_region_i + 1
 
         if not task:get_config_options().inner then
-          local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
-            std.zip(field_paths, field_types):map(
+          local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
+            data.zip(field_paths, field_types):map(
               function(field)
                 local field_path, field_type = unpack(field)
                 local field_id = field_ids_by_field_path[field_path:hash()]
@@ -4407,7 +4408,7 @@ function codegen.stat_task(cx, node)
                          field_paths,
                          privilege_field_paths,
                          privileges_by_field_path,
-                         std.dict(std.zip(field_paths:map(std.hash), field_types)),
+                         data.dict(data.zip(field_paths:map(data.hash), field_types)),
                          field_ids_by_field_path,
                          physical_regions_by_field_path,
                          base_pointers_by_field_path,
@@ -4430,7 +4431,7 @@ function codegen.stat_task(cx, node)
         local rs_diagnostic = quote end
 
         local r1_fields = cx:region(r1).field_paths
-        local valid_fields = std.dict(std.zip(r1_fields, r1_fields))
+        local valid_fields = data.dict(data.zip(r1_fields, r1_fields))
         for _, r in ipairs(rs) do
           if not cx:has_region(r) then
             contained = false

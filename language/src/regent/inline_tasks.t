@@ -15,6 +15,7 @@
 -- Regent Task Inliner
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 local log = require("regent/log")
 local symbol_table = require("regent/symbol_table")
@@ -240,7 +241,7 @@ function inline_tasks.expr(cx, node)
       local new_local_params = terralib.newlist()
       local new_local_param_types = terralib.newlist()
       local new_args = terralib.newlist()
-      std.zip(params, param_types, args):map(function(tuple)
+      data.zip(params, param_types, args):map(function(tuple)
         local param, param_type, arg = unpack(tuple)
         if check_rf(arg) then
           expr_mapping[param] = arg
