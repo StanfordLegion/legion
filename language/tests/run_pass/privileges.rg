@@ -14,6 +14,8 @@
 
 import "regent"
 
+-- Tests privilege and coherence aggregation.
+
 struct t {
   a : int,
   b : int,
@@ -21,7 +23,10 @@ struct t {
 }
 
 task f(s : region(t))
-where reads(s.a), reads(s.{b, c}), writes(s.{a, b}, s.c) do
+where
+  reads(s.a), reads(s.{b, c}), writes(s.{a, b}, s.c),
+  exclusive(s.{a, b}), atomic(s.c)
+do
   for x in s do
     x.a += 1
     x.b += 20
@@ -30,7 +35,10 @@ where reads(s.a), reads(s.{b, c}), writes(s.{a, b}, s.c) do
 end
 
 task g(s : region(t))
-where reads writes(s.a, s.b), reads writes(s.{}, s.{a, c}) do
+where
+  reads writes(s.a, s.b), writes reads reads reads writes(s.{}, s.{a, c}),
+  simultaneous(s.a), relaxed relaxed(s.b), simultaneous(s.a)
+do
   for x in s do
     x.a *= 4
     x.b *= 2

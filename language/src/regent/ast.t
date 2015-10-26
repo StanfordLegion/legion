@@ -352,6 +352,13 @@ ast.unspecialized.privilege_kind:leaf("Writes")
 ast.unspecialized.privilege_kind:leaf("Reduces", {"op"})
 ast.unspecialized:leaf("Privilege", {"privileges", "regions"})
 
+ast.unspecialized:inner("coherence_kind", {})
+ast.unspecialized.coherence_kind:leaf("Exclusive")
+ast.unspecialized.coherence_kind:leaf("Atomic")
+ast.unspecialized.coherence_kind:leaf("Simultaneous")
+ast.unspecialized.coherence_kind:leaf("Relaxed")
+ast.unspecialized:leaf("Coherence", {"coherence_modes", "regions"})
+
 ast.unspecialized:inner("expr", {"options"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
@@ -403,7 +410,8 @@ ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 
 ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
-                               "privileges", "constraints", "body"})
+                                     "privileges", "coherence_modes",
+                                     "constraints", "body"})
 ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
                                        "constraints"})
@@ -429,6 +437,13 @@ ast.specialized.privilege_kind:leaf("Reads")
 ast.specialized.privilege_kind:leaf("Writes")
 ast.specialized.privilege_kind:leaf("Reduces", {"op"})
 ast.specialized:leaf("Privilege", {"privileges", "regions"})
+
+ast.specialized:inner("coherence_kind", {})
+ast.specialized.coherence_kind:leaf("Exclusive")
+ast.specialized.coherence_kind:leaf("Atomic")
+ast.specialized.coherence_kind:leaf("Simultaneous")
+ast.specialized.coherence_kind:leaf("Relaxed")
+ast.specialized:leaf("Coherence", {"coherence_modes", "regions"})
 
 ast.specialized:inner("expr", {"options"})
 ast.specialized.expr:leaf("ID", {"value"})
@@ -484,7 +499,8 @@ ast.specialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 
-ast.specialized.stat:leaf("Task", {"name", "params", "return_type", "privileges",
+ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
+                                   "privileges", "coherence_modes",
                                    "constraints", "body", "prototype"})
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
 ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
@@ -556,8 +572,9 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
 ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
-                             "constraints", "body", "config_options",
-                             "region_divergence", "prototype"})
+                             "coherence_modes", "constraints", "body",
+                             "config_options", "region_divergence",
+                             "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
 ast.typed.stat:leaf("Fspace", {"name", "fspace"})
 
