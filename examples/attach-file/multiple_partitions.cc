@@ -231,10 +231,13 @@ void top_level_task(const Task *task,
   // Launcher a copy operation that performs checkpoint
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_CP);
+  struct timespec ts_start, ts_mid, ts_end;
+  clock_gettime(CLOCK_MONOTONIC, &ts_start);
   PhysicalRegion cp_pr = runtime->attach_file(ctx, "checkpoint.dat", cp_lr, cp_lr, field_vec, LEGION_FILE_CREATE);
-  runtime->remap_region(ctx, cp_pr);
+  //runtime->remap_region(ctx, cp_pr);
   cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;
+  clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   copy_launcher.add_copy_requirements(
       RegionRequirement(stencil_lr, READ_ONLY, EXCLUSIVE, stencil_lr),
       RegionRequirement(cp_lr, WRITE_DISCARD, EXCLUSIVE, cp_lr));
@@ -243,7 +246,13 @@ void top_level_task(const Task *task,
   runtime->issue_copy_operation(ctx, copy_launcher);
   
   runtime->detach_file(ctx, cp_pr);
-
+  clock_gettime(CLOCK_MONOTONIC, &ts_end);
+  double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
+                     (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
+  double detach_time = ((1.0 * (ts_end.tv_sec - ts_mid.tv_sec)) +
+                     (1e-9 * (ts_end.tv_nsec - ts_mid.tv_nsec)));
+  printf("ELAPSED TIME = %7.3f s\n", attach_time);
+  printf("ELAPSED TIME = %7.3f s\n", detach_time);
   // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
       TaskArgument(&num_elements, sizeof(num_elements)));
