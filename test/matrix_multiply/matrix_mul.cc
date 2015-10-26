@@ -64,23 +64,6 @@ inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
   return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
 }
 
-
-void generate_hdf_file(const char* file_name, int num_elemnts)
-{
-  double *arr;
-  arr = (double*) calloc(num_elemnts, sizeof(double));
-  hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-  hsize_t dims[1];
-  dims[0] = num_elemnts;
-  hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-  hid_t dataset = H5Dcreate2(file_id, "FID_CP", H5T_IEEE_F64BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-  H5Dwrite(dataset, H5T_IEEE_F64BE, H5S_ALL, H5S_ALL, H5P_DEFAULT, arr);
-  H5Dclose(dataset);
-  H5Sclose(dataspace_id);
-  H5Fclose(file_id);
-  free(arr);
-}
-
 enum TestMode {
   NONE,
   ATTACH,
@@ -88,39 +71,13 @@ enum TestMode {
   INIT
 };
 
-void top_level_task(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, TestMode mode)
 {
-  int nsize = 1024;
-  int nregions = 4;
-  TestMode mode = NONE;
-  char input_file[128];
+  char input_file[64];
   //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
   sprintf(input_file, "input.dat");
 
-  // Check for any command line arguments
-  {
-      const InputArgs &command_args = HighLevelRuntime::get_input_args();
-    for (int i = 1; i < command_args.argc; i++)
-    {
-      if (!strcmp(command_args.argv[i],"-n"))
-        nsize = atoi(command_args.argv[++i]);
-      else if (!strcmp(command_args.argv[i],"-s"))
-        nregions = atoi(command_args.argv[++i]);
-      else if (!strcmp(command_args.argv[i],"-init"))
-        mode = INIT;
-      else if (!strcmp(command_args.argv[i], "-attach"))
-        mode = ATTACH;
-      else if (!strcmp(command_args.argv[i], "-readfile"))
-        mode = READFILE;
-    }
-  }
-
-  printf("Running matrix multiplication with nsize = %d...\n", nsize);
-  printf("Partitioning data into %d sub-regions...\n", nregions);
-  printf("TestMode = %d\n", mode);
-
+  printf ("nsize = %d, npar = %d, TestMode = %d, ", nsize, nregions, mode);
   Rect<1> rect_A(Point<1>(0), Point<1>(nsize * nregions * nsize - 1));
   IndexSpace is_A = runtime->create_index_space(ctx,
                           Domain::from_rect<1>(rect_A));
@@ -323,6 +280,40 @@ void top_level_task(const Task *task,
   runtime->destroy_index_space(ctx, is_B);
 }
 
+void top_level_task(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx, HighLevelRuntime *runtime)
+{
+  int nsize = 1024;
+  int nregions = 4;
+  TestMode mode = NONE;
+
+  // Check for any command line arguments
+  {
+      const InputArgs &command_args = HighLevelRuntime::get_input_args();
+    for (int i = 1; i < command_args.argc; i++)
+    {
+      if (!strcmp(command_args.argv[i],"-n"))
+        nsize = atoi(command_args.argv[++i]);
+      else if (!strcmp(command_args.argv[i],"-s"))
+        nregions = atoi(command_args.argv[++i]);
+      else if (!strcmp(command_args.argv[i],"-init"))
+        mode = INIT;
+      else if (!strcmp(command_args.argv[i], "-attach"))
+        mode = ATTACH;
+      else if (!strcmp(command_args.argv[i], "-readfile"))
+        mode = READFILE;
+    }
+  }
+
+  printf("Running matrix multiplication with nsize = %d...\n", nsize);
+  printf("Partitioning data into %d sub-regions...\n", nregions);
+  printf("TestMode = %d\n", mode);
+  for (int i = 0; i < 3; i++)
+    for(nregions = 16; nregions < 256; nregions *= 2)
+      main_task(ctx, runtime, nsize, nregions, (TestMode)i);
+}
+
 void compute_task(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
                   Context ctx, HighLevelRuntime *runtime)
@@ -349,14 +340,13 @@ void compute_task(const Task *task,
   int offset = lo_A.x[0];
   double sum = 0;
   int times = 0;
-  for (times = 0; times < 10; times++)
+  for (times = 0; times * times < nsize; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       double x = acc_A.read(ptr_t(offset + k * nsize + i));
       double y = acc_B.read(ptr_t(i));
       sum += x * y;
     }
-  printf("OK!\n");
   assert(fabs(sum/times - 0.01 * 0.88 * nsize * nsize) < 1e-6);
 }
 
@@ -401,7 +391,7 @@ void compute_from_file_task(const Task *task,
   cb.aio_buf = (uint64_t)(arr_A);
   cb.aio_nbytes = nsize * nsize * sizeof(double);
   cb.aio_offset = cb.aio_nbytes * index;
-  printf("aio_offset = %lld, aio_nbytes = %llu\n", cb.aio_offset, cb.aio_nbytes);
+  // printf("aio_offset = %lld, aio_nbytes = %llu\n", cb.aio_offset, cb.aio_nbytes);
   cbs[0] = &cb;
   ret = io_submit(ctx, 1, cbs);
   if (ret < 0) {
@@ -416,7 +406,7 @@ void compute_from_file_task(const Task *task,
 
   double sum = 0;
   int times = 0;
-  for (times = 0; times < 10; times++)
+  for (times = 0; times * times < nsize; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       double x = arr_A[k * nsize + i];
