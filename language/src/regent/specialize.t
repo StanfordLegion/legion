@@ -1090,6 +1090,38 @@ function specialize.privileges(cx, node)
     function(privilege) return specialize.privilege(cx, privilege) end)
 end
 
+function specialize.coherence_kind(cx, node)
+  if node:is(ast.unspecialized.coherence_kind.Exclusive) then
+    return ast.specialized.coherence_kind.Exclusive(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Atomic) then
+    return ast.specialized.coherence_kind.Atomic(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Simultaneous) then
+    return ast.specialized.coherence_kind.Simultaneous(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Relaxed) then
+    return ast.specialized.coherence_kind.Relaxed(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.coherence_kinds(cx, node)
+  return node:map(
+    function(coherence) return specialize.coherence_kind(cx, coherence) end)
+end
+
+function specialize.coherence(cx, node)
+  return ast.specialized.Coherence {
+    coherence_modes = specialize.coherence_kinds(cx, node.coherence_modes),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.coherence_modes(cx, node)
+  return node:map(
+    function(coherence) return specialize.coherence(cx, coherence) end)
+end
+
 function specialize.constraint_kind(cx, node)
   if node:is(ast.unspecialized.constraint_kind.Subregion) then
     return ast.specialized.constraint_kind.Subregion(node)
@@ -1145,6 +1177,7 @@ function specialize.stat_task(cx, node)
   local params = specialize.stat_task_params(cx, node.params)
   local return_type = node.return_type_expr(cx.env:env())
   local privileges = specialize.privileges(cx, node.privileges)
+  local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
   local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
@@ -1153,6 +1186,7 @@ function specialize.stat_task(cx, node)
     params = params,
     return_type = return_type,
     privileges = privileges,
+    coherence_modes = coherence_modes,
     constraints = constraints,
     body = body,
     prototype = proto,

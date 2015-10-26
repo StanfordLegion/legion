@@ -1025,6 +1025,10 @@ function parser.region_bare(p)
   }
 end
 
+function parser.is_privilege_kind(p)
+  return p:matches("reads") or p:matches("writes") or p:matches("reduces")
+end
+
 function parser.privilege_kind(p)
   local start = ast.save(p)
   if p:nextif("reads") then
@@ -1053,30 +1057,71 @@ function parser.privilege_kind(p)
       span = ast.span(start, p),
     }
   else
-    p:error("expected reads, writes or reduces")
+    p:error("expected privilege")
   end
 end
 
-function parser.privilege_kinds(p)
-  local privileges = terralib.newlist()
-  while not p:matches("(") do
-    privileges:insert(p:privilege_kind())
-  end
-  return privileges
+function parser.is_coherence_kind(p)
+  return p:matches("exclusive") or p:matches("atomic") or
+    p:matches("simultaneous") or p:matches("relaxed")
 end
 
-function parser.privilege(p)
+function parser.coherence_kind(p)
   local start = ast.save(p)
-  local privileges = p:privilege_kinds()
+  if p:nextif("exclusive") then
+    return ast.unspecialized.coherence_kind.Exclusive {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("atomic") then
+    return ast.unspecialized.coherence_kind.Atomic {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("simultaneous") then
+    return ast.unspecialized.coherence_kind.Simultaneous {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("relaxed") then
+    return ast.unspecialized.coherence_kind.Relaxed {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected coherence mode")
+  end
+end
+
+function parser.privilege_and_coherence_kinds(p)
+  local privileges = terralib.newlist()
+  local coherence_modes = terralib.newlist()
+  while not p:matches("(") do
+    if p:is_privilege_kind() then
+      privileges:insert(p:privilege_kind())
+    elseif p:is_coherence_kind() then
+      coherence_modes:insert(p:coherence_kind())
+    else
+      p:error("expected privilege or coherence mode")
+    end
+  end
+  return privileges, coherence_modes
+end
+
+function parser.privilege_and_coherence(p)
+  local start = ast.save(p)
+  local privileges, coherence_modes = p:privilege_and_coherence_kinds()
   p:expect("(")
   local regions = p:regions()
   p:expect(")")
 
-  return ast.unspecialized.Privilege {
+  local privilege = ast.unspecialized.Privilege {
     privileges = privileges,
     regions = regions,
     span = ast.span(start, p),
   }
+  local coherence = ast.unspecialized.Coherence {
+    coherence_modes = coherence_modes,
+    regions = regions,
+    span = ast.span(start, p),
+  }
+  return privilege, coherence
 end
 
 function parser.constraint_kind(p)
@@ -1109,18 +1154,21 @@ end
 
 function parser.stat_task_privileges_and_constraints(p)
   local privileges = terralib.newlist()
+  local coherence_modes = terralib.newlist()
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:matches("reads") or p:matches("writes") or p:matches("reduces") then
-        privileges:insert(p:privilege())
+      if p:is_privilege_kind() or p:is_coherence_kind() then
+        local privilege, coherence = p:privilege_and_coherence()
+        privileges:insert(privilege)
+        coherence_modes:insert(coherence)
       else
         constraints:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, constraints
+  return privileges, coherence_modes, constraints
 end
 
 function parser.stat_task(p, options)
@@ -1129,7 +1177,8 @@ function parser.stat_task(p, options)
   local name = p:expect(p.name).value
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
-  local privileges, constraints = p:stat_task_privileges_and_constraints()
+  local privileges, coherence_modes, constraints =
+    p:stat_task_privileges_and_constraints()
   local body = p:block()
   p:expect("end")
 
@@ -1138,6 +1187,7 @@ function parser.stat_task(p, options)
     params = params,
     return_type_expr = return_type,
     privileges = privileges,
+    coherence_modes = coherence_modes,
     constraints = constraints,
     body = body,
     options = options,

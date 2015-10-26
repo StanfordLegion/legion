@@ -1511,11 +1511,11 @@ def main():
         state.emit_visualization(output_prefix, show_procs, 
                                  show_channels, show_instances) 
 
-    if show_copy_matrix:
-        state.show_copy_matrix(copy_output_prefix)
     if interactive_timeline:
         state.emit_interactive_visualization(output_prefix, show_procs,
                              show_channels, show_instances)
+    if show_copy_matrix:
+        state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
     main()
