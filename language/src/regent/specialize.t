@@ -15,6 +15,7 @@
 -- Legion Specialization Pass
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -270,7 +271,7 @@ local function has_all_valid_field_accesses(node)
      node:is(ast.unspecialized.stat.Reduce) then
 
     local valid = true
-    std.zip(node.lhs, node.rhs):map(function(pair)
+    data.zip(node.lhs, node.rhs):map(function(pair)
       if valid then
         local lh, rh = unpack(pair)
         local num_accessed_fields_lh = get_num_accessed_fields(lh)
@@ -935,7 +936,7 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
   local flattened_lhs = terralib.newlist()
   local flattened_rhs = terralib.newlist()
 
-  std.zip(node.lhs, node.rhs):map(function(pair)
+  data.zip(node.lhs, node.rhs):map(function(pair)
     local lh, rh = unpack(pair)
     local num_accessed_fields =
       join_num_accessed_fields(get_num_accessed_fields(lh),

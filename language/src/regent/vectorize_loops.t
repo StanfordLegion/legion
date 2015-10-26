@@ -18,6 +18,7 @@
 --
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -461,7 +462,7 @@ function collect_bounds(node)
     local value_type = std.as_read(node.value.expr_type)
     if std.is_bounded_type(value_type) then
       value_type:bounds():map(function(bound)
-        bounds:insert(std.newtuple(bound, node.field_name))
+        bounds:insert(data.newtuple(bound, node.field_name))
       end)
     end
     bounds:insertall(collect_bounds(node.value))

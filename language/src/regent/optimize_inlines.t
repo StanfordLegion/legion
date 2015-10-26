@@ -17,6 +17,7 @@
 -- Attempts to place map/unmap calls to avoid thrashing inlines.
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local context = {}
@@ -236,7 +237,7 @@ function analyze_usage.expr_partition(cx, node)
 end
 
 function analyze_usage.expr_cross_product(cx, node)
-  return std.reduce(
+  return data.reduce(
     usage_meet,
     node.args:map(function(arg) return analyze_usage.expr(cx, arg) end))
 end
@@ -252,7 +253,7 @@ end
 
 function analyze_usage.expr_deref(cx, node)
   local ptr_type = std.as_read(node.value.expr_type)
-  return std.reduce(
+  return data.reduce(
     usage_meet,
     ptr_type:bounds():map(
       function(region) return uses(cx, region, inline) end),
@@ -457,8 +458,8 @@ function optimize_inlines.stat_if(cx, node)
     function(block) return optimize_inlines.stat_elseif(cx, block) end)
   local else_annotated = optimize_inlines.block(cx, node.else_block)
 
-  local initial_usage = std.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
-  local final_usage = std.reduce(
+  local initial_usage = data.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
+  local final_usage = data.reduce(
     usage_meet,
     elseif_annotated:map(annotated_out_usage),
     usage_meet(annotated_out_usage(then_annotated),
@@ -496,7 +497,7 @@ function optimize_inlines.stat_while(cx, node)
 end
 
 function optimize_inlines.stat_for_num(cx, node)
-  local values_usage = std.reduce(
+  local values_usage = data.reduce(
     usage_meet,
     node.values:map(function(value) return analyze_usage.expr(cx, value) end))
   local annotated_block = optimize_inlines.block(cx, node.block)
@@ -545,7 +546,7 @@ function optimize_inlines.stat_block(cx, node)
 end
 
 function optimize_inlines.stat_index_launch(cx, node)
-  local domain_usage = std.reduce(
+  local domain_usage = data.reduce(
     usage_meet,
     node.domain:map(function(value) return analyze_usage.expr(cx, value) end))
   local reduce_lhs_usage = (node.reduce_lhs and
@@ -578,10 +579,10 @@ function optimize_inlines.stat_break(cx, node)
 end
 
 function optimize_inlines.stat_assignment(cx, node)
-  local usage = std.reduce(
+  local usage = data.reduce(
     usage_meet,
     node.lhs:map(function(lh) return analyze_usage.expr(cx, lh) end))
-  usage = std.reduce(
+  usage = data.reduce(
     usage_meet,
     node.rhs:map(function(rh) return analyze_usage.expr(cx, rh) end),
     usage)
@@ -589,10 +590,10 @@ function optimize_inlines.stat_assignment(cx, node)
 end
 
 function optimize_inlines.stat_reduce(cx, node)
-  local usage = std.reduce(
+  local usage = data.reduce(
     usage_meet,
     node.lhs:map(function(lh) return analyze_usage.expr(cx, lh) end))
-  usage = std.reduce(
+  usage = data.reduce(
     usage_meet,
     node.rhs:map(function(rh) return analyze_usage.expr(cx, rh) end),
     usage)

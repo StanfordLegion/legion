@@ -9116,9 +9116,8 @@ namespace LegionRuntime {
         field_map[it->first] = strdup(it->second);
       }
       file_mode = mode;
-      // This instance is not automatically mapped
       region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
-                              completion_event, false/*mapped*/, ctx,
+                              completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
@@ -9548,6 +9547,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+      // Need to be sure we are going to get a valid reference
+      if (!region.is_valid())
+        region.wait_until_valid();
       reference = region.impl->get_reference();
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
