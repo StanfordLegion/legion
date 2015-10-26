@@ -231,7 +231,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
   Domain launch_domain = color_domain;
   ArgumentMap arg_map;
 
-  if (mode == ATTACH || mode == NONE) {
+  if (mode == NONE) {
     // First initialize the 'FID_VAL' field with some data
     IndexLauncher compute_launcher(COMPUTE_TASK_ID, launch_domain,
                                 TaskArgument(&nsize, sizeof(nsize)), arg_map);
@@ -251,6 +251,44 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
       runtime->detach_file(ctx, pr_A);
     }
     exec_f.wait_all_results();
+  } else if (mode == ATTACH) {
+    int nslots = 32;
+    LogicalRegion* lr_arr =  (LogicalRegion*) calloc(nslots, sizeof(LogicalRegion));
+    Rect<1> rect_I(Point<1>(0), Point<1>(nsize * nslots * nsize - 1));
+    IndexSpace is_I = runtime->create_index_space(ctx,
+	                          Domain::from_rect<1>(rect_I));
+    FieldSpace fs_I = runtime->create_field_space(ctx);
+    {
+      FieldAllocator allocator =
+        runtime->create_field_allocator(ctx, fs_I);
+      allocator.allocate_field(sizeof(double),FID_VAL);
+    }
+    for (int i = 0; i < nslots; i++) {
+      lr_arr[i] = runtime->create_logical_region(ctx, is_I, fs_I);
+    }
+
+    for (int i = 0; i < nregions; i++) {
+      CopyLauncher copy_launcher;
+      LogicalRegion lr_sub = runtime->get_logical_subregion_by_color(ctx, lp_A, i);
+      copy_launcher.add_copy_requirements(
+          RegionRequirement(lr_sub, READ_ONLY, EXCLUSIVE, lr_A),
+          RegionRequirement(lr_arr[i % nslots], WRITE_DISCARD, EXCLUSIVE, lr_arr[i % nslots]));
+      copy_launcher.add_src_field(0, FID_VAL);
+      copy_launcher.add_dst_field(0, FID_VAL);
+      runtime->issue_copy_operation(ctx, copy_launcher);
+      TaskLauncher task_launcher(COMPUTE_TASK_ID, TaskArgument(&nsize, sizeof(nsize)));
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_arr[i], READ_ONLY, EXCLUSIVE, lr_arr[i]));
+      task_launcher.add_field(0, FID_VAL);
+      Future future = runtime->execute_task(ctx, task_launcher);
+      if (i == nregions - 1)
+        future.get_void_result();
+    }
+
+    for (int i = 0; i < nslots; i++) {
+      runtime->destroy_logical_region(ctx, lr_arr[i]);
+    }
+    free(lr_arr);
   } else {
     assert(mode == READFILE);
     IndexLauncher compute_launcher(COMPUTE_FROM_FILE_TASK_ID, launch_domain,

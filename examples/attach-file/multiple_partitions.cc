@@ -234,10 +234,9 @@ void top_level_task(const Task *task,
   struct timespec ts_start, ts_mid, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
   PhysicalRegion cp_pr = runtime->attach_file(ctx, "checkpoint.dat", cp_lr, cp_lr, field_vec, LEGION_FILE_CREATE);
-  //runtime->remap_region(ctx, cp_pr);
+  runtime->remap_region(ctx, cp_pr);
   cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;
-  clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   copy_launcher.add_copy_requirements(
       RegionRequirement(stencil_lr, READ_ONLY, EXCLUSIVE, stencil_lr),
       RegionRequirement(cp_lr, WRITE_DISCARD, EXCLUSIVE, cp_lr));
@@ -245,6 +244,7 @@ void top_level_task(const Task *task,
   copy_launcher.add_dst_field(0, FID_CP);
   runtime->issue_copy_operation(ctx, copy_launcher);
   
+  clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   runtime->detach_file(ctx, cp_pr);
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
   double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
