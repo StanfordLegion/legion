@@ -121,9 +121,8 @@ namespace Realm {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
       SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(subspaces.size());
-      subspaces[i].sparsity = sparsity;
-      
+      impl->update_contributor_count(field_data.size());
+      subspaces[i].sparsity = sparsity;      
     }
 
     for(size_t i = 0; i < field_data.size(); i++) {
@@ -152,11 +151,27 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
-    // just give copies of ourselves for now
+    // create a new sparsity map for each subspace
     size_t n = sources.size();
     images.resize(n);
-    for(size_t i = 0; i < n; i++)
-      images[i] = *this;
+    for(size_t i = 0; i < n; i++) {
+      images[i].bounds = this->bounds;
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(field_data.size());
+      images[i].sparsity = sparsity;
+    }
+
+    for(size_t i = 0; i < field_data.size(); i++) {
+      ImageMicroOp<N,T,N2,T2> uop(*this,
+				  field_data[i].index_space,
+				  field_data[i].inst,
+				  field_data[i].field_offset);
+      for(size_t j = 0; j < sources.size(); j++)
+	uop.add_sparsity_output(sources[j], images[j].sparsity);
+      uop.execute();
+    }
 
     return Event::NO_EVENT;
   }
@@ -172,11 +187,27 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
-    // just give copies of ourselves for now
+    // create a new sparsity map for each subspace
     size_t n = targets.size();
     preimages.resize(n);
-    for(size_t i = 0; i < n; i++)
-      preimages[i] = *this;
+    for(size_t i = 0; i < n; i++) {
+      preimages[i].bounds = this->bounds;
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(field_data.size());
+      preimages[i].sparsity = sparsity;
+    }
+
+    for(size_t i = 0; i < field_data.size(); i++) {
+      PreimageMicroOp<N,T,N2,T2> uop(*this,
+				     field_data[i].index_space,
+				     field_data[i].inst,
+				     field_data[i].field_offset);
+      for(size_t j = 0; j < targets.size(); j++)
+	uop.add_sparsity_output(targets[j], preimages[j].sparsity);
+      uop.execute();
+    }
 
     return Event::NO_EVENT;
   }
@@ -191,11 +222,24 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
-    // just give copies of lhss for now
-    size_t n = lhss.size();
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
     results.resize(n);
-    for(size_t i = 0; i < n; i++)
-      results[i] = lhss[i];
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i].bounds = lhss[li].bounds.union_bbox(rhss[ri].bounds);
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(1);
+      results[i].sparsity = sparsity;
+
+      UnionMicroOp<N,T> uop(lhss[li],
+			    rhss[ri]);
+      uop.add_sparsity_output(results[i].sparsity);
+      uop.execute();
+    }
 
     return Event::NO_EVENT;
   }
@@ -210,11 +254,26 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
 
-    // just give copies of lhss for now
-    size_t n = lhss.size();
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
     results.resize(n);
-    for(size_t i = 0; i < n; i++)
-      results[i] = lhss[i];
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i].bounds = lhss[li].bounds.intersection(rhss[ri].bounds);
+      // TODO: early out for empty bounds intersection
+
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(1);
+      results[i].sparsity = sparsity;
+
+      IntersectionMicroOp<N,T> uop(lhss[li],
+				   rhss[ri]);
+      uop.add_sparsity_output(results[i].sparsity);
+      uop.execute();
+    }
 
     return Event::NO_EVENT;
   }
@@ -233,8 +292,19 @@ namespace Realm {
     assert(lhss.size() == rhss.size());
     size_t n = lhss.size();
     results.resize(n);
-    for(size_t i = 0; i < n; i++)
-      results[i] = lhss[i];
+    for(size_t i = 0; i < n; i++) {
+      results[i].bounds = lhss[i].bounds;
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+      impl->update_contributor_count(1);
+      results[i].sparsity = sparsity;
+
+      DifferenceMicroOp<N,T> uop(lhss[i],
+				 rhss[i]);
+      uop.add_sparsity_output(results[i].sparsity);
+      uop.execute();
+    }
 
     return Event::NO_EVENT;
   }
@@ -249,8 +319,21 @@ namespace Realm {
     assert(wait_on.has_triggered());
 
     assert(!subspaces.empty());
-    // WRONG
-    result = subspaces[0];
+    // build a union_bbox for the new bounds
+    ZRect<N,T> bounds = subspaces[0].bounds;
+    for(size_t i = 1; i < subspaces.size(); i++)
+      bounds = bounds.union_bbox(subspaces[i].bounds);
+
+    result.bounds = bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+    impl->update_contributor_count(1);
+    result.sparsity = sparsity;
+
+    UnionMicroOp<N,T> uop(subspaces);
+    uop.add_sparsity_output(result.sparsity);
+    uop.execute();
 
     return Event::NO_EVENT;
   }
@@ -265,8 +348,22 @@ namespace Realm {
     assert(wait_on.has_triggered());
 
     assert(!subspaces.empty());
-    // WRONG
-    result = subspaces[0];
+    // build an intersection of all bounds for the new bounds
+    // TODO: optimize empty case
+    ZRect<N,T> bounds = subspaces[0].bounds;
+    for(size_t i = 1; i < subspaces.size(); i++)
+      bounds = bounds.intersection(subspaces[i].bounds);
+
+    result.bounds = bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
+    impl->update_contributor_count(1);
+    result.sparsity = sparsity;
+
+    IntersectionMicroOp<N,T> uop(subspaces);
+    uop.add_sparsity_output(result.sparsity);
+    uop.execute();
 
     return Event::NO_EVENT;
   }
@@ -316,7 +413,7 @@ namespace Realm {
       int merge_hi = -1;
       for(size_t i = 0; i < rects.size(); i++) {
 	if((rects[i].lo.x <= p.x) && (p.x <= rects[i].hi.x))
-	  return true;
+	  return;
 	// keep track of adjacent rectangles, if any
 	if(rects[i].lo.x == p.x + 1)
 	  merge_hi = i;
@@ -572,6 +669,7 @@ namespace Realm {
 	}
 	if(idx == orig_count) {
 	  // no matches against existing stuff, so add a new entry
+	  idx = this->entries.size();
 	  this->entries.resize(idx + 1);
 	  this->entries[idx].bounds = r;
 	  this->entries[idx].sparsity.id = 0; //SparsityMap<N,T>::NO_SPACE;
@@ -662,42 +760,44 @@ namespace Realm {
 
     // double iteration - use the instance's space first, since it's probably smaller
     for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
-      const ZRect<N,T>& r = it.rect;
-      ZPoint<N,T> p = r.lo;
-      while(true) {
-	FT val = a_data.read(p);
-	ZPoint<N,T> p2 = p;
-	while(p2.x < r.hi.x) {
-	  ZPoint<N,T> p3 = p2;
-	  p3.x++;
-	  FT val2 = a_data.read(p3);
-	  if(val != val2) {
-	    // record old strip
-	    BM *&bmp = bitmasks[val];
-	    if(!bmp) bmp = new BM;
-	    bmp->add_rect(ZRect<N,T>(p,p2));
-	    //std::cout << val << ": " << p << ".." << p2 << std::endl;
-	    val = val2;
-	    p = p3;
+      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+	const ZRect<N,T>& r = it2.rect;
+	ZPoint<N,T> p = r.lo;
+	while(true) {
+	  FT val = a_data.read(p);
+	  ZPoint<N,T> p2 = p;
+	  while(p2.x < r.hi.x) {
+	    ZPoint<N,T> p3 = p2;
+	    p3.x++;
+	    FT val2 = a_data.read(p3);
+	    if(val != val2) {
+	      // record old strip
+	      BM *&bmp = bitmasks[val];
+	      if(!bmp) bmp = new BM;
+	      bmp->add_rect(ZRect<N,T>(p,p2));
+	      //std::cout << val << ": " << p << ".." << p2 << std::endl;
+	      val = val2;
+	      p = p3;
+	    }
+	    p2 = p3;
 	  }
-	  p2 = p3;
-	}
-	// record whatever strip we have at the end
-	BM *&bmp = bitmasks[val];
-	if(!bmp) bmp = new BM;
-	bmp->add_rect(ZRect<N,T>(p,p2));
-	//std::cout << val << ": " << p << ".." << p2 << std::endl;
+	  // record whatever strip we have at the end
+	  BM *&bmp = bitmasks[val];
+	  if(!bmp) bmp = new BM;
+	  bmp->add_rect(ZRect<N,T>(p,p2));
+	  //std::cout << val << ": " << p << ".." << p2 << std::endl;
 
-	// are we done?
-	if(p2 == r.hi) break;
+	  // are we done?
+	  if(p2 == r.hi) break;
 
-	// now go to the next span, if there is one (can't be in 1-D)
-	assert(N > 1);
-	for(int i = 0; i < (N - 1); i++) {
-	  p[i] = r.lo[i];
-	  if(p[i + 1] < r.hi[i+1]) {
-	    p[i + 1] += 1;
-	    break;
+	  // now go to the next span, if there is one (can't be in 1-D)
+	  assert(N > 1);
+	  for(int i = 0; i < (N - 1); i++) {
+	    p[i] = r.lo[i];
+	    if(p[i + 1] < r.hi[i+1]) {
+	      p[i + 1] += 1;
+	      break;
+	    }
 	  }
 	}
       }
@@ -739,6 +839,432 @@ namespace Realm {
 	delete it2->second;
       } else
 	impl->contribute_nothing();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ImageMicroOp<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2>
+  ImageMicroOp<N,T,N2,T2>::ImageMicroOp(ZIndexSpace<N,T> _parent_space,
+					ZIndexSpace<N2,T2> _inst_space,
+					RegionInstance _inst,
+					size_t _field_offset)
+    : parent_space(_parent_space)
+    , inst_space(_inst_space)
+    , inst(_inst)
+    , field_offset(_field_offset)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  ImageMicroOp<N,T,N2,T2>::~ImageMicroOp(void)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output(ZIndexSpace<N2,T2> _source,
+						    SparsityMap<N,T> _sparsity)
+  {
+    sources.push_back(_source);
+    sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void ImageMicroOp<N,T,N2,T2>::populate_bitmasks(std::map<int, BM *>& bitmasks)
+  {
+    // for now, one access for the whole instance
+    AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
+
+    // double iteration - use the instance's space first, since it's probably smaller
+    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(size_t i = 0; i < sources.size(); i++) {
+	for(ZIndexSpaceIterator<N,T> it2(sources[i], it.rect); it2.valid; it2.step()) {
+	  BM **bmpp = 0;
+
+	  // iterate over each point in the source and see if it points into the parent space	  
+	  for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	    ZPoint<N,T> ptr = a_data.read(pir.p);
+
+	    if(parent_space.contains(ptr)) {
+	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
+	      if(!bmpp) bmpp = &bitmasks[i];
+	      if(!*bmpp) *bmpp = new BM;
+	      (*bmpp)->add_point(ptr);
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void ImageMicroOp<N,T,N2,T2>::execute(void)
+  {
+    std::map<int, DenseRectangleList<N,T> *> rect_map;
+
+    populate_bitmasks(rect_map);
+
+    std::cout << rect_map.size() << " non-empty images present in instance " << inst << std::endl;
+    for(typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
+	it != rect_map.end();
+	it++)
+      std::cout << "  " << sources[it->first] << " = " << it->second->rects.size() << " rectangles" << std::endl;
+
+    // iterate over sparsity outputs and contribute to all (even if we didn't have any
+    //  points found for it)
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
+      typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
+      if(it2 != rect_map.end()) {
+	impl->contribute_dense_rect_list(*(it2->second));
+	delete it2->second;
+      } else
+	impl->contribute_nothing();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PreimageMicroOp<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2>
+  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(ZIndexSpace<N,T> _parent_space,
+					 ZIndexSpace<N,T> _inst_space,
+					 RegionInstance _inst,
+					 size_t _field_offset)
+    : parent_space(_parent_space)
+    , inst_space(_inst_space)
+    , inst(_inst)
+    , field_offset(_field_offset)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  PreimageMicroOp<N,T,N2,T2>::~PreimageMicroOp(void)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  void PreimageMicroOp<N,T,N2,T2>::add_sparsity_output(ZIndexSpace<N2,T2> _target,
+						       SparsityMap<N,T> _sparsity)
+  {
+    targets.push_back(_target);
+    sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks(std::map<int, BM *>& bitmasks)
+  {
+    // for now, one access for the whole instance
+    AffineAccessor<ZPoint<N2,T2>,N,T> a_data(inst, field_offset);
+
+    // double iteration - use the instance's space first, since it's probably smaller
+    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+	// now iterate over each point
+	for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	  // fetch the pointer and test it against every possible target (ugh)
+	  ZPoint<N2,T2> ptr = a_data.read(pir.p);
+
+	  for(size_t i = 0; i < targets.size(); i++)
+	    if(targets[i].contains(ptr)) {
+	      BM *&bmp = bitmasks[i];
+	      if(!bmp) bmp = new BM;
+	      bmp->add_point(pir.p);
+	    }
+	}
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void PreimageMicroOp<N,T,N2,T2>::execute(void)
+  {
+    std::map<int, DenseRectangleList<N,T> *> rect_map;
+
+    populate_bitmasks(rect_map);
+
+    std::cout << rect_map.size() << " non-empty preimages present in instance " << inst << std::endl;
+    for(typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
+	it != rect_map.end();
+	it++)
+      std::cout << "  " << targets[it->first] << " = " << it->second->rects.size() << " rectangles" << std::endl;
+
+    // iterate over sparsity outputs and contribute to all (even if we didn't have any
+    //  points found for it)
+    for(size_t i = 0; i < sparsity_outputs.size(); i++) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
+      typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
+      if(it2 != rect_map.end()) {
+	impl->contribute_dense_rect_list(*(it2->second));
+	delete it2->second;
+      } else
+	impl->contribute_nothing();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class UnionMicroOp<N,T>
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+    : inputs(_inputs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::UnionMicroOp(ZIndexSpace<N,T> _lhs,
+				  ZIndexSpace<N,T> _rhs)
+    : inputs(2)
+  {
+    inputs[0] = _lhs;
+    inputs[1] = _rhs;
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::~UnionMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void UnionMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // iterate over all the inputs, adding dense (sub)rectangles first
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(it->dense()) {
+	bitmask.add_rect(it->bounds);
+      } else {
+	SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->sparsity);
+	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = impl->entries.begin();
+	    it2 != impl->entries.end();
+	    it2++) {
+	  ZRect<N,T> isect = it->bounds.intersection(it2->bounds);
+	  if(isect.empty())
+	    continue;
+	  assert(!it2->sparsity.exists());
+	  assert(it2->bitmap == 0);
+	  bitmask.add_rect(isect);
+	}
+      }
+    }
+  }
+
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::execute(void)
+  {
+    std::cout << "calc union: " << inputs[0];
+    for(size_t i = 1; i < inputs.size(); i++)
+      std::cout << " + " << inputs[i];
+    std::cout << std::endl;
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntersectionMicroOp<N,T>
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+    : inputs(_inputs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(ZIndexSpace<N,T> _lhs,
+				  ZIndexSpace<N,T> _rhs)
+    : inputs(2)
+  {
+    inputs[0] = _lhs;
+    inputs[1] = _rhs;
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::~IntersectionMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void IntersectionMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // first build the intersection of all the bounding boxes
+    ZRect<N,T> bounds = inputs[0].bounds;
+    for(size_t i = 1; i < inputs.size(); i++)
+      bounds = bounds.intersection(inputs[i].bounds);
+    if(bounds.empty()) {
+      // early out
+      std::cout << "empty intersection bounds!" << std::endl;
+      return;
+    }
+
+    // handle 2 input case with simple double-iteration
+    if(inputs.size() == 2) {
+      // double iteration - use the instance's space first, since it's probably smaller
+      for(ZIndexSpaceIterator<N,T> it(inputs[0], bounds); it.valid; it.step())
+	for(ZIndexSpaceIterator<N,T> it2(inputs[1], it.rect); it2.valid; it2.step())
+	  bitmask.add_rect(it2.rect);
+    } else {
+      assert(0);
+    }
+  }
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::execute(void)
+  {
+    std::cout << "calc intersection: " << inputs[0];
+    for(size_t i = 1; i < inputs.size(); i++)
+      std::cout << " & " << inputs[i];
+    std::cout << std::endl;
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DifferenceMicroOp<N,T>
+
+  template <int N, typename T>
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(ZIndexSpace<N,T> _lhs,
+					    ZIndexSpace<N,T> _rhs)
+    : lhs(_lhs), rhs(_rhs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  DifferenceMicroOp<N,T>::~DifferenceMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  void subtract_rects(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs,
+		      std::vector<ZRect<N,T> >& pieces)
+  {
+    // should only be called if we have overlapping rectangles
+    assert(!lhs.empty() && !rhs.empty() && lhs.overlaps(rhs));
+    ZRect<N,T> r = lhs;
+    for(int i = 0; i < N; i++) {
+      if(lhs.lo[i] < rhs.lo[i]) {
+	// some coverage "below"
+	r.lo[i] = lhs.lo[i];
+	r.hi[i] = rhs.lo[i] - 1;
+	pieces.push_back(r);
+      }
+      if(lhs.hi[i] > rhs.hi[i]) {
+	// some coverage "below"
+	r.lo[i] = rhs.hi[i] + 1;
+	r.hi[i] = lhs.hi[i];
+	pieces.push_back(r);
+      }
+      // clamp to the rhs range for the next dimension
+      r.lo[i] = std::max(lhs.lo[i], rhs.lo[i]);
+      r.hi[i] = std::min(lhs.hi[i], rhs.hi[i]);
+    }
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void DifferenceMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // the basic idea here is to build a list of rectangles from the lhs and clip them
+    //  based on the rhs until we're done
+    std::deque<ZRect<N,T> > todo;
+
+    if(lhs.dense()) {
+      todo.push_back(lhs.bounds);
+    } else {
+      SparsityMapImpl<N,T> *l_impl = SparsityMapImpl<N,T>::lookup(lhs.sparsity);
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = l_impl->entries.begin();
+	  it != l_impl->entries.end();
+	  it++) {
+	ZRect<N,T> isect = lhs.bounds.intersection(it->bounds);
+	if(isect.empty())
+	  continue;
+	assert(!it->sparsity.exists());
+	assert(it->bitmap == 0);
+	todo.push_back(isect);
+      }
+    }
+
+    while(!todo.empty()) {
+      ZRect<N,T> r = todo.front();
+      todo.pop_front();
+
+      // iterate over all subrects in the rhs - any that contain it eliminate this rect,
+      //  overlap chops it into pieces
+      bool fully_covered = false;
+      for(ZIndexSpaceIterator<N,T> it(rhs); it.valid; it.step()) {
+	std::cout << "check " << r << " -= " << it.rect << std::endl;
+	if(it.rect.contains(r)) {
+	  fully_covered = true;
+	  break;
+	}
+
+	if(it.rect.overlaps(r)) {
+	  // subtraction is nasty - can result in 2N subrectangles
+	  std::vector<ZRect<N,T> > pieces;
+	  subtract_rects(r, it.rect, pieces);
+	  assert(!pieces.empty());
+
+	  // continue on with the first piece, and stick the rest on the todo list
+	  typename std::vector<ZRect<N,T> >::iterator it2 = pieces.begin();
+	  r = *(it2++);
+	  todo.insert(todo.end(), it2, pieces.end());
+	}
+      }
+      if(!fully_covered) {
+	std::cout << "difference += " << r << std::endl;
+	bitmask.add_rect(r);
+      }
+    }
+  }
+
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::execute(void)
+  {
+    std::cout << "calc difference: " << lhs << " - " << rhs << std::endl;
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl);
     }
   }
 

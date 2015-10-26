@@ -283,6 +283,53 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ZPointInRectIterator<N,T>
+
+  template <int N, typename T>
+  inline ZPointInRectIterator<N,T>::ZPointInRectIterator(const ZRect<N,T>& _r,
+							 bool _fortran_order /*= true*/)
+    : p(_r.lo), valid(!_r.empty()), rect(_r), fortran_order(_fortran_order)
+  {}
+
+  template <int N, typename T>
+  inline bool ZPointInRectIterator<N,T>::step(void)
+  {
+    assert(valid);  // can't step an iterator that's already done
+    if(N == 1) {
+      // 1-D doesn't care about fortran/C order
+      if(p.x < rect.hi.x) {
+	p.x++;
+	return true;
+      }
+    } else {
+      if(fortran_order) {
+	// do dimensions in increasing order
+	for(int i = 0; i < N; i++) {
+	  if(p[i] < rect.hi[i]) {
+	    p[i]++;
+	    return true;
+	  }
+	  p[i] = rect.lo[i];
+	}
+      } else {
+	// do dimensions in decreasing order
+	for(int i = N - 1; i >= 0; i--) {
+	  if(p[i] < rect.hi[i]) {
+	    p[i]++;
+	    return true;
+	  }
+	  p[i] = rect.lo[i];
+	}
+      }
+    }
+    // if we fall through, we're out of points
+    valid = false;
+    return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ZIndexSpace<N,T>
 
   template <int N, typename T>
@@ -324,12 +371,26 @@ namespace Realm {
     if(!bounds.contains(p))
       return false;
 
-    if(!dense()) {
-      // test against sparsity map too
-      assert(0);
+    // if it's a dense rectangle, no further tests
+    if(dense())
+      return true;
+
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = impl->entries.begin();
+	it != impl->entries.end();
+	it++) {
+      if(!it->bounds.contains(p)) continue;
+      if(it->sparsity.exists()) {
+	assert(0);
+      } else if(it->bitmap != 0) {
+	assert(0);
+      } else {
+	return true;
+      }
     }
 
-    return true;
+    // no entries matched, so the point is not contained in this space
+    return false;
   }
 
   template <int N, typename T>
@@ -369,8 +430,24 @@ namespace Realm {
     if(dense())
       return bounds.volume();
 
-    assert(0);
-    return 0;
+    size_t total = 0;
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = impl->entries.begin();
+	it != impl->entries.end();
+	it++) {
+      ZRect<N,T> isect = bounds.intersection(it->bounds);
+      if(isect.empty())
+	continue;
+      if(it->sparsity.exists()) {
+	assert(0);
+      } else if(it->bitmap != 0) {
+	assert(0);
+      } else {
+	total += isect.volume();
+      }
+    }
+
+    return total;
   }
 
   // simple wrapper for the multiple subspace version
@@ -605,8 +682,21 @@ namespace Realm {
     if(space.dense()) {
       valid = true;
       rect = restriction;
+      s_impl = 0;
     } else {
-      assert(0);
+      s_impl = space.sparsity.impl();
+      // no restrictions, so we'll take the first entry (assuming it exists)
+      if(s_impl->entries.empty()) {
+	valid = false;
+	return;
+      }
+      cur_entry = 0;
+      SparsityMapEntry<N,T>& e = s_impl->entries[cur_entry];
+
+      assert(!e.sparsity.exists());
+      assert(e.bitmap == 0);
+      valid = true;
+      rect = e.bounds;
     }
   }
 
@@ -623,8 +713,23 @@ namespace Realm {
     if(space.dense()) {
       valid = true;
       rect = restriction;
+      s_impl = 0;
     } else {
-      assert(0);
+      s_impl = space.sparsity.impl();
+      // find the first entry that overlaps our restriction
+      for(cur_entry = 0; cur_entry < s_impl->entries.size(); cur_entry++) {
+	SparsityMapEntry<N,T>& e = s_impl->entries[cur_entry];
+	rect = restriction.intersection(e.bounds);
+	if(rect.empty())
+	  continue;
+
+	assert(!e.sparsity.exists());
+	assert(e.bitmap == 0);
+	valid = true;
+	return;
+      }
+      // if we fall through, there was no intersection
+      valid = false;
     }
   }
 
@@ -635,12 +740,27 @@ namespace Realm {
     assert(valid);  // can't step an interator that's already done
 
     // a dense space is covered in the first step
-    if(space.dense()) {
+    if(!s_impl) {
       valid = false;
       return false;
     }
-    
-    assert(0);
+
+    // TODO: handle iteration within a sparsity entry
+
+    // move onto the next sparsity entry (that overlaps our restriction)
+    for(cur_entry++; cur_entry < s_impl->entries.size(); cur_entry++) {
+      SparsityMapEntry<N,T>& e = s_impl->entries[cur_entry];
+      rect = restriction.intersection(e.bounds);
+      if(rect.empty())
+	continue;
+
+      assert(!e.sparsity.exists());
+      assert(e.bitmap == 0);
+      return true;
+    }
+
+    // if we fall through, we're done
+    valid = false;
     return false;
   }
 

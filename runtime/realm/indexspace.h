@@ -1182,6 +1182,19 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
 
+  template <int N, typename T>
+  class ZPointInRectIterator {
+  public:
+    ZPoint<N,T> p;
+    bool valid;
+    ZRect<N,T> rect;
+    bool fortran_order;
+
+    ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
+
+    bool step(void);
+  };
+
   // a FieldDataDescriptor is used to describe field data provided for partitioning
   //  operations - it is templated on the dimensionality (N) and base type (T) of the
   //  index space that defines the domain over which the data is defined, and the
@@ -1492,7 +1505,9 @@ namespace Realm {
     ZIndexSpace<N,T> space;
     ZRect<N,T> restriction;
     bool valid;
-    // probably more goo here for iterating over SparsityMap's
+    // for iterating over SparsityMap's
+    SparsityMapPublicImpl<N,T> *s_impl;
+    size_t cur_entry;
 
     ZIndexSpaceIterator(void);
     ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space);

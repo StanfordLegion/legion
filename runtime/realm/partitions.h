@@ -133,12 +133,12 @@ namespace Realm {
     void set_value_set(const std::vector<FT>& _value_set);
     void add_sparsity_output(FT _val, SparsityMap<N,T> _sparsity);
 
-    template <typename BM>
-    void populate_bitmasks(std::map<FT, BM *>& bitmasks);
-
     virtual void execute(void);
 
   protected:
+    template <typename BM>
+    void populate_bitmasks(std::map<FT, BM *>& bitmasks);
+
     ZIndexSpace<N,T> parent_space, inst_space;
     RegionInstance inst;
     size_t field_offset;
@@ -146,6 +146,107 @@ namespace Realm {
     FT range_lo, range_hi;
     std::set<FT> value_set;
     std::map<FT, SparsityMap<N,T> > sparsity_outputs;
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class ImageMicroOp : public PartitioningMicroOp<N,T> {
+  public:
+    ImageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N2,T2> _inst_space,
+		   RegionInstance _inst, size_t _field_offset);
+    virtual ~ImageMicroOp(void);
+
+    void add_sparsity_output(ZIndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+  protected:
+    template <typename BM>
+    void populate_bitmasks(std::map<int, BM *>& bitmasks);
+
+    ZIndexSpace<N,T> parent_space;
+    ZIndexSpace<N2,T2> inst_space;
+    RegionInstance inst;
+    size_t field_offset;
+    std::vector<ZIndexSpace<N2,T2> > sources;
+    std::vector<SparsityMap<N,T> > sparsity_outputs;
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class PreimageMicroOp : public PartitioningMicroOp<N,T> {
+  public:
+    PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
+		   RegionInstance _inst, size_t _field_offset);
+    virtual ~PreimageMicroOp(void);
+
+    void add_sparsity_output(ZIndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+  protected:
+    template <typename BM>
+    void populate_bitmasks(std::map<int, BM *>& bitmasks);
+
+    ZIndexSpace<N,T> parent_space, inst_space;
+    RegionInstance inst;
+    size_t field_offset;
+    std::vector<ZIndexSpace<N2,T2> > targets;
+    std::vector<SparsityMap<N,T> > sparsity_outputs;
+  };
+
+  template <int N, typename T>
+  class UnionMicroOp : public PartitioningMicroOp<N,T> {
+  public:
+    UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
+    UnionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    virtual ~UnionMicroOp(void);
+
+    void add_sparsity_output(SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+  protected:
+    template <typename BM>
+    void populate_bitmask(BM& bitmask);
+
+    std::vector<ZIndexSpace<N,T> > inputs;
+    SparsityMap<N,T> sparsity_output;
+  };
+
+  template <int N, typename T>
+  class IntersectionMicroOp : public PartitioningMicroOp<N,T> {
+  public:
+    IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
+    IntersectionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    virtual ~IntersectionMicroOp(void);
+
+    void add_sparsity_output(SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+  protected:
+    template <typename BM>
+    void populate_bitmask(BM& bitmask);
+
+    std::vector<ZIndexSpace<N,T> > inputs;
+    SparsityMap<N,T> sparsity_output;
+  };
+
+  template <int N, typename T>
+  class DifferenceMicroOp : public PartitioningMicroOp<N,T> {
+  public:
+    DifferenceMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    virtual ~DifferenceMicroOp(void);
+
+    void add_sparsity_output(SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+  protected:
+    template <typename BM>
+    void populate_bitmask(BM& bitmask);
+
+    ZIndexSpace<N,T> lhs, rhs;
+    SparsityMap<N,T> sparsity_output;
   };
 
 };
