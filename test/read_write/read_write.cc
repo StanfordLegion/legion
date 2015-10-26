@@ -82,7 +82,7 @@ public:
     task->profile_task = false;
     if (task->task_id == READ_ONLY_TASK_ID)
       task->target_proc = first_proc;
-    else
+    else if (task->task_id == READ_WRITE_TASK_ID)
       task->target_proc = last_proc;
   }
 
@@ -241,6 +241,7 @@ void top_level_task(const Task *task,
 
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
+  runtime->remap_region(ctx, pr_A);
   runtime->detach_file(ctx, pr_A);
 
   double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
