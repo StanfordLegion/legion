@@ -18,7 +18,9 @@
 #include <cassert>
 #include <cstdlib>
 #include <math.h>
+#include <queue>
 #include "legion.h"
+#include "default_mapper.h"
 
 #include <errno.h>
 #include <aio.h>
@@ -30,6 +32,8 @@
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
+
+typedef int ElementType;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -71,6 +75,77 @@ enum TestMode {
   INIT
 };
 
+class PipelineMapper : public DefaultMapper {
+public:
+  PipelineMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
+    : DefaultMapper(machine, runtime, local)
+  {
+    std::set<Memory> all_mem;
+    machine.get_all_memories(all_mem);
+    for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+      if (it->kind() == Memory::SYSTEM_MEM)
+        sys_mem.push_back(*it);
+    }
+    assert(sys_mem.size() == 1);
+    std::set<Processor> all_procs;
+    machine.get_all_processors(all_procs);
+    for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
+      if (it->kind() == Processor::LOC_PROC) {
+        cpu_procs.push_back(*it);
+      }
+    }
+  }
+
+  virtual void select_task_options(Task *task)
+  {
+    task->inline_task = false;
+    task->spawn_task = false;
+    task->map_locally = true;
+    task->profile_task = false;
+    std::set<Processor> all_procs;
+    machine.get_all_processors(all_procs);
+    if (task->task_id == COMPUTE_TASK_ID) {
+      int idx = *((int*)task->args);
+      task->target_proc = cpu_procs[idx % cpu_procs.size()];
+    }
+  }
+
+  virtual bool map_task(Task *task)
+  {
+    for (unsigned idx = 0; idx < task->regions.size(); idx++)
+    {
+      task->regions[idx].target_ranking.push_back(sys_mem[0]);
+      task->regions[idx].virtual_map = false;
+      task->regions[idx].enable_WAR_optimization = true;
+      task->regions[idx].reduction_list = false;
+      task->regions[idx].blocking_factor =
+        task->regions[idx].max_blocking_factor;
+    }
+    return true;
+  }
+
+  virtual bool map_copy(Copy *copy)
+  {
+    bool ret = DefaultMapper::map_copy(copy);
+    copy->dst_requirements[0].target_ranking.clear();
+    copy->dst_requirements[0].target_ranking.push_back(sys_mem[0]);
+    return ret;
+  }
+public:
+  std::vector<Memory> sys_mem;
+  std::vector<Processor> cpu_procs;
+};
+
+static void update_mappers(Machine machine, HighLevelRuntime *rt,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    rt->replace_default_mapper(new PipelineMapper(machine, rt, *it), *it);
+  }
+}
+
 void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, TestMode mode)
 {
   char input_file[64];
@@ -85,7 +160,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs_A);
-    allocator.allocate_field(sizeof(double),FID_VAL);
+    allocator.allocate_field(sizeof(ElementType),FID_VAL);
   }
   LogicalRegion lr_A = runtime->create_logical_region(ctx, is_A, fs_A);
 
@@ -96,8 +171,8 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     InlineLauncher input_launcher(req);
     PhysicalRegion pr_A = runtime->map_region(ctx, input_launcher);
     pr_A.wait_until_valid();
-    RegionAccessor<AccessorType::Generic, double> acc =
-      pr_A.get_field_accessor(FID_VAL).typeify<double>();
+    RegionAccessor<AccessorType::Generic, ElementType> acc =
+      pr_A.get_field_accessor(FID_VAL).typeify<ElementType>();
     for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
       acc.write(DomainPoint::from_point<1>(pir.p), 0.01);
     }
@@ -132,7 +207,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
   {
     FieldAllocator allocator =
       runtime->create_field_allocator(ctx, fs_B);
-    allocator.allocate_field(sizeof(double),FID_VAL);
+    allocator.allocate_field(sizeof(ElementType),FID_VAL);
   }
   LogicalRegion lr_B = runtime->create_logical_region(ctx, is_B, fs_B);
 
@@ -142,13 +217,13 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     std::vector<FieldID> field_vec;
     field_vec.push_back(FID_VAL);
     pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_READ_ONLY);
-    runtime->remap_region(ctx, pr_A);
     pr_A.wait_until_valid();
+    runtime->unmap_region(ctx, pr_A);
 
     // Acquire the logical reagion so that we can launch sub-operations that make copies
-    AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+    /*AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
     acquire_launcher.add_field(FID_VAL);
-    runtime->issue_acquire(ctx, acquire_launcher);
+    runtime->issue_acquire(ctx, acquire_launcher);*/
   } else if (mode == READFILE) {
     global_fd = open(input_file, O_RDONLY | O_DIRECT, 00777);
     assert(global_fd != 0);
@@ -160,10 +235,10 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     InlineLauncher input_launcher(req);
     PhysicalRegion pr_A = runtime->map_region(ctx, input_launcher);
     pr_A.wait_until_valid();
-    RegionAccessor<AccessorType::Generic, double> acc =
-      pr_A.get_field_accessor(FID_VAL).typeify<double>();
+    RegionAccessor<AccessorType::Generic, ElementType> acc =
+      pr_A.get_field_accessor(FID_VAL).typeify<ElementType>();
     for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
-      acc.write(DomainPoint::from_point<1>(pir.p), 0.01);
+      acc.write(DomainPoint::from_point<1>(pir.p), 1);
     }
   }
 
@@ -174,10 +249,10 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     InlineLauncher input_launcher(req);
     PhysicalRegion pr_B = runtime->map_region(ctx, input_launcher);
     pr_B.wait_until_valid();
-    RegionAccessor<AccessorType::Generic, double> acc =
-      pr_B.get_field_accessor(FID_VAL).typeify<double>();
+    RegionAccessor<AccessorType::Generic, ElementType> acc =
+      pr_B.get_field_accessor(FID_VAL).typeify<ElementType>();
     for (GenericPointInRectIterator<1> pir(rect_B); pir; pir++) {
-      acc.write(DomainPoint::from_point<1>(pir.p), 0.88);
+      acc.write(DomainPoint::from_point<1>(pir.p), 1);
     }
   }
 
@@ -238,57 +313,62 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     compute_launcher.add_region_requirement(
         RegionRequirement(lp_A, 0, READ_ONLY, EXCLUSIVE, lr_A));
     compute_launcher.add_field(0, FID_VAL);
-    compute_launcher.add_region_requirement(
-        RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
-    compute_launcher.add_field(1, FID_VAL);
+    //compute_launcher.add_region_requirement(
+      //  RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
+    //compute_launcher.add_field(1, FID_VAL);
     FutureMap exec_f = runtime->execute_index_space(ctx, compute_launcher);
-    if (mode == ATTACH) {
-      //Release and unmap the attached physicalregion
-      ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
-      release_launcher.add_field(FID_VAL);
-      runtime->issue_release(ctx, release_launcher);
-      runtime->unmap_region(ctx, pr_A);
-      runtime->detach_file(ctx, pr_A);
-    }
     exec_f.wait_all_results();
   } else if (mode == ATTACH) {
-    int nslots = 32;
-    LogicalRegion* lr_arr =  (LogicalRegion*) calloc(nslots, sizeof(LogicalRegion));
-    Rect<1> rect_I(Point<1>(0), Point<1>(nsize * nslots * nsize - 1));
+    unsigned nslots = 8;
+    std::queue<Future> future_vec;
+    Rect<1> rect_I(Point<1>(0), Point<1>(nsize * nsize - 1));
     IndexSpace is_I = runtime->create_index_space(ctx,
 	                          Domain::from_rect<1>(rect_I));
     FieldSpace fs_I = runtime->create_field_space(ctx);
     {
       FieldAllocator allocator =
         runtime->create_field_allocator(ctx, fs_I);
-      allocator.allocate_field(sizeof(double),FID_VAL);
-    }
-    for (int i = 0; i < nslots; i++) {
-      lr_arr[i] = runtime->create_logical_region(ctx, is_I, fs_I);
+      allocator.allocate_field(sizeof(ElementType),FID_VAL);
     }
 
     for (int i = 0; i < nregions; i++) {
+      while (future_vec.size() >= nslots) {
+        future_vec.front().get_void_result();
+        future_vec.pop();
+      }
       CopyLauncher copy_launcher;
       LogicalRegion lr_sub = runtime->get_logical_subregion_by_color(ctx, lp_A, i);
+      IndexSpace is_mid = runtime->get_index_subspace(ctx, ip_A, i);
+      LogicalRegion lr_mid = runtime->create_logical_region(ctx, is_mid, fs_A);
       copy_launcher.add_copy_requirements(
           RegionRequirement(lr_sub, READ_ONLY, EXCLUSIVE, lr_A),
-          RegionRequirement(lr_arr[i % nslots], WRITE_DISCARD, EXCLUSIVE, lr_arr[i % nslots]));
+          RegionRequirement(lr_mid, WRITE_DISCARD, EXCLUSIVE, lr_mid));
       copy_launcher.add_src_field(0, FID_VAL);
       copy_launcher.add_dst_field(0, FID_VAL);
       runtime->issue_copy_operation(ctx, copy_launcher);
-      TaskLauncher task_launcher(COMPUTE_TASK_ID, TaskArgument(&nsize, sizeof(nsize)));
+      TaskLauncher task_launcher(COMPUTE_TASK_ID, TaskArgument(&i, sizeof(i)));
       task_launcher.add_region_requirement(
-          RegionRequirement(lr_arr[i], READ_ONLY, EXCLUSIVE, lr_arr[i]));
+          RegionRequirement(lr_mid, READ_ONLY, EXCLUSIVE, lr_mid));
       task_launcher.add_field(0, FID_VAL);
-      Future future = runtime->execute_task(ctx, task_launcher);
-      if (i == nregions - 1)
-        future.get_void_result();
+      //task_launcher.add_region_requirement(
+        //  RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
+      //task_launcher.add_field(1, FID_VAL);
+      future_vec.push(runtime->execute_task(ctx, task_launcher));
+      runtime->destroy_logical_region(ctx, lr_mid);
+    }
+    while (!future_vec.empty()) {
+      future_vec.front().get_void_result();
+      future_vec.pop();
     }
 
-    for (int i = 0; i < nslots; i++) {
-      runtime->destroy_logical_region(ctx, lr_arr[i]);
-    }
-    free(lr_arr);
+    //Release and unmap the attached physicalregion
+    /*ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+    release_launcher.add_field(FID_VAL);
+    runtime->issue_release(ctx, release_launcher);
+    runtime->remap_region(ctx, pr_A);
+    runtime->detach_file(ctx, pr_A);*/
+    runtime->destroy_field_space(ctx, fs_I);
+    runtime->destroy_index_space(ctx, is_I);
   } else {
     assert(mode == READFILE);
     IndexLauncher compute_launcher(COMPUTE_FROM_FILE_TASK_ID, launch_domain,
@@ -348,7 +428,8 @@ void top_level_task(const Task *task,
   printf("Partitioning data into %d sub-regions...\n", nregions);
   printf("TestMode = %d\n", mode);
   for (int i = 0; i < 3; i++)
-    for(nregions = 16; nregions < 256; nregions *= 2)
+    for(nregions = 16; nregions < 1024; nregions *= 2)
+      if (i == 1 && nregions == 128)
       main_task(ctx, runtime, nsize, nregions, (TestMode)i);
 }
 
@@ -356,36 +437,37 @@ void compute_task(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
                   Context ctx, HighLevelRuntime *runtime)
 {
-  assert(regions.size() == 2);
-  assert(task->regions.size() == 2);
+  assert(regions.size() == 1);
+  assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
-  assert(task->regions[1].privilege_fields.size() == 1);
-  assert(task->arglen == sizeof(int));
-  int nsize = *((int*)task->args);
+  //assert(task->regions[1].privilege_fields.size() == 1);
 
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
-  FieldID fid_B = *(task->regions[1].privilege_fields.begin());
+  //FieldID fid_B = *(task->regions[1].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, double> acc_A =
-    regions[0].get_field_accessor(fid_A).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_B =
-    regions[1].get_field_accessor(fid_B).typeify<double>();
+  RegionAccessor<AccessorType::Generic, ElementType> acc_A =
+    regions[0].get_field_accessor(fid_A).typeify<ElementType>();
+  //RegionAccessor<AccessorType::Generic, ElementType> acc_B =
+    //regions[1].get_field_accessor(fid_B).typeify<ElementType>();
 
   Domain dom_A = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
-  assert(nsize * nsize == dom_A.get_rect<1>().dim_size(0));
   Point<1> lo_A = dom_A.get_rect<1>().lo;
   int offset = lo_A.x[0];
-  double sum = 0;
+  int nnsize = dom_A.get_rect<1>().dim_size(0);
+  int nsize = (int) round(sqrt(nnsize));
+  ElementType sum = 0;
   int times = 0;
   for (times = 0; times * times < nsize; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
-      double x = acc_A.read(ptr_t(offset + k * nsize + i));
-      double y = acc_B.read(ptr_t(i));
+      ElementType x = acc_A.read(ptr_t(offset + k * nsize + i));
+      ElementType y = acc_A.read(ptr_t(offset + i));
       sum += x * y;
     }
-  assert(fabs(sum/times - 0.01 * 0.88 * nsize * nsize) < 1e-6);
+  // int idx = *((int*)task->args);
+  // printf("idx = %d\n", idx);
+  // assert(fabs(sum/times - 0.01 * 0.01 * nsize * nsize) < 1e-6);
 }
 
 void compute_from_file_task(const Task *task,
@@ -403,10 +485,10 @@ void compute_from_file_task(const Task *task,
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
   FieldID fid_B = *(task->regions[1].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, double> acc_A =
-    regions[0].get_field_accessor(fid_A).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_B =
-    regions[1].get_field_accessor(fid_B).typeify<double>();
+  RegionAccessor<AccessorType::Generic, ElementType> acc_A =
+    regions[0].get_field_accessor(fid_A).typeify<ElementType>();
+  RegionAccessor<AccessorType::Generic, ElementType> acc_B =
+    regions[1].get_field_accessor(fid_B).typeify<ElementType>();
 
   Domain dom_A = runtime->get_index_space_domain(context,
       task->regions[0].region.get_index_space());
@@ -415,7 +497,7 @@ void compute_from_file_task(const Task *task,
   int nnsize = dom_A.get_rect<1>().dim_size(0);
   int nsize = (int)round(sqrt(nnsize));
 
-  double* arr_A = (double*) calloc(nsize * nsize, sizeof(double));
+  ElementType* arr_A = (ElementType*) calloc(nsize * nsize, sizeof(ElementType));
   aio_context_t ctx;
   struct iocb cb;
   struct iocb *cbs[1];
@@ -427,7 +509,7 @@ void compute_from_file_task(const Task *task,
   cb.aio_lio_opcode = IOCB_CMD_PREAD;
   cb.aio_fildes = fd;
   cb.aio_buf = (uint64_t)(arr_A);
-  cb.aio_nbytes = nsize * nsize * sizeof(double);
+  cb.aio_nbytes = nsize * nsize * sizeof(ElementType);
   cb.aio_offset = cb.aio_nbytes * index;
   // printf("aio_offset = %lld, aio_nbytes = %llu\n", cb.aio_offset, cb.aio_nbytes);
   cbs[0] = &cb;
@@ -442,17 +524,17 @@ void compute_from_file_task(const Task *task,
   assert(events[0].res == (int64_t) cb.aio_nbytes);
   io_destroy(ctx);
 
-  double sum = 0;
+  ElementType sum = 0;
   int times = 0;
   for (times = 0; times * times < nsize; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
-      double x = arr_A[k * nsize + i];
+      ElementType x = arr_A[k * nsize + i];
       acc_A.read(ptr_t(offset + k * nsize + i));
-      double y = acc_B.read(ptr_t(i));
+      ElementType y = acc_B.read(ptr_t(i));
       sum += x * y;
     }
-  assert(fabs(sum/times - 0.01 * 0.88 * nsize * nsize) < 1e-6);
+  //assert(fabs(sum/times - 0.01 * 0.88 * nsize * nsize) < 1e-4);
   free(arr_A);
 }
 
@@ -462,8 +544,11 @@ int main(int argc, char **argv)
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<compute_task>(COMPUTE_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<compute_from_file_task>(COMPUTE_FROM_FILE_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
+
+  // Register custom mappers
+  HighLevelRuntime::set_registration_callback(update_mappers);
   return HighLevelRuntime::start(argc, argv);
 }
