@@ -1168,6 +1168,9 @@ end
 function type_check.stat_if(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
@@ -1185,6 +1188,9 @@ end
 function type_check.stat_elseif(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.Elseif {
@@ -1198,6 +1204,9 @@ end
 function type_check.stat_while(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.While {
@@ -1301,6 +1310,9 @@ end
 function type_check.stat_repeat(cx, node)
   local until_cond = type_check.expr(cx, node.until_cond)
   local until_cond_type = std.check_read(cx, until_cond)
+  if not std.validate_implicit_cast(until_cond_type, bool) then
+    log.error(node.until_cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(until_cond_type))
+  end
 
   local cx = cx:new_local_scope()
   return ast.typed.stat.Repeat {
