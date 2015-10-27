@@ -293,7 +293,8 @@ function std.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
-local function find_field_privilege(privileges, region_type, field_path, field_type)
+local function find_field_privilege(privileges, coherence_modes,
+                                    region_type, field_path, field_type)
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
@@ -306,39 +307,54 @@ local function find_field_privilege(privileges, region_type, field_path, field_t
     end
   end
 
+  local coherence_mode = "exclusive"
+  if coherence_modes[region_type] then
+    for prefix, coherence in coherence_modes[region_type]:items() do
+      if field_path:starts_with(prefix) then
+        coherence_mode = coherence
+      end
+    end
+  end
+
   -- FIXME: Fow now, render write privileges as
   -- read-write. Otherwise, write would get rendered as
   -- write-discard, which would not be correct without explicit
   -- user annotation.
   if field_privilege == "writes" then
-    return "reads_writes"
+    field_privilege = "reads_writes"
   end
 
   if std.is_reduction_op(field_privilege) then
     local op = std.get_reduction_op(field_privilege)
     if not (std.reduction_op_ids[op] and std.reduction_op_ids[op][field_type]) then
-      log.warn("Warning: Unsupported privilege " .. tostring(field_privilege) .. " " .. tostring(field_type) .. " on field " .. tostring(field_path) .. " falling back to reads writes")
-      return "reads_writes"
+      -- You could upgrade to reads_writes here, but this would never
+      -- have made it past the parser anyway.
+      assert(false)
     end
   end
 
-  return field_privilege
+  return field_privilege, coherence_mode
 end
 
-function std.find_task_privileges(region_type, privileges)
+function std.find_task_privileges(region_type, privileges, coherence_modes)
+  assert(std.is_region(region_type) and privileges and data.is_map(coherence_modes))
   local grouped_privileges = terralib.newlist()
+  local grouped_coherence_modes = terralib.newlist()
   local grouped_field_paths = terralib.newlist()
   local grouped_field_types = terralib.newlist()
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type.fspace_type)
+  local field_paths, field_types = std.flatten_struct_fields(
+    region_type.fspace_type)
 
-  local privilege_index = {}
+  local privilege_index = data.newmap()
   local privilege_next_index = 1
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
-    local privilege = find_field_privilege(privileges, region_type, field_path, field_type)
+    local privilege, coherence = find_field_privilege(
+      privileges, coherence_modes, region_type, field_path, field_type)
+    local privilege_coherence = data.newtuple(privilege, coherence)
     if privilege ~= "none" then
-      local index = privilege_index[privilege]
+      local index = privilege_index[privilege_coherence]
       if not index then
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
@@ -346,10 +362,11 @@ function std.find_task_privileges(region_type, privileges)
         -- Reduction privileges cannot be grouped, because the Legion
         -- runtime does not know how to handle multi-field reductions.
         if not std.is_reduction_op(privilege) then
-          privilege_index[privilege] = index
+          privilege_index[privilege_coherence] = index
         end
 
         grouped_privileges:insert(privilege)
+        grouped_coherence_modes:insert(coherence)
         grouped_field_paths:insert(terralib.newlist())
         grouped_field_types:insert(terralib.newlist())
       end
@@ -361,11 +378,13 @@ function std.find_task_privileges(region_type, privileges)
 
   if #grouped_privileges == 0 then
     grouped_privileges:insert("none")
+    grouped_coherence_modes:insert("exclusive")
     grouped_field_paths:insert(terralib.newlist())
     grouped_field_types:insert(terralib.newlist())
   end
 
-  return grouped_privileges, grouped_field_paths, grouped_field_types
+  return grouped_privileges, grouped_field_paths, grouped_field_types,
+    grouped_coherence_modes
 end
 
 function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
@@ -391,6 +410,19 @@ function std.privilege_mode(privilege)
   if std.is_reduction_op(privilege) then
     mode = c.REDUCE
   end
+  assert(mode)
+  return mode
+end
+
+local coherence_modes = {
+  exclusive       = c.EXCLUSIVE,
+  atomic          = c.ATOMIC,
+  simultaneous    = c.SIMULTANEOUS,
+  relaxed         = c.RELAXED,
+}
+
+function std.coherence_mode(coherence)
+  local mode = coherence_modes[coherence]
   assert(mode)
   return mode
 end
@@ -2141,6 +2173,16 @@ end
 function task:getprivileges()
   assert(rawget(self, "privileges") ~= nil)
   return self.privileges
+end
+
+function task:set_coherence_modes(t)
+  assert(rawget(self, "coherence_modes") == nil)
+  self.coherence_modes = t
+end
+
+function task:get_coherence_modes()
+  assert(rawget(self, "coherence_modes") ~= nil)
+  return self.coherence_modes
 end
 
 function task:set_param_constraints(t)

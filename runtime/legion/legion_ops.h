@@ -1849,7 +1849,7 @@ namespace LegionRuntime {
     protected:
       void compute_parent_index(void);
     public:
-      InstanceRef reference;
+      PhysicalRegion region;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;

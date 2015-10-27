@@ -248,6 +248,10 @@ function data.newmap()
   return setmetatable({ __keys_by_hash = {}, __values_by_hash = {} }, data.map)
 end
 
+function data.is_map(x)
+  return getmetatable(x) == data.map
+end
+
 function data.map:__index(k)
   return self.__values_by_hash[data.hash(k)] or data.map[k]
 end
