@@ -475,6 +475,10 @@ function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
 end
 
+function std.is_phase_barrier(t)
+  return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
+end
+
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
 end
@@ -1952,6 +1956,16 @@ std.future = terralib.memoize(function(result_type)
 
   return st
 end)
+
+do
+  local st = terralib.types.newstruct("phase_barrier")
+  std.phase_barrier = st
+  st.entries = terralib.newlist({
+      { "impl", c.legion_phase_barrier_t },
+  })
+
+  st.is_phase_barrier = true
+end
 
 do
   local function field_name(field)

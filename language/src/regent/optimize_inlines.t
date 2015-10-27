@@ -242,6 +242,14 @@ function analyze_usage.expr_cross_product(cx, node)
     node.args:map(function(arg) return analyze_usage.expr(cx, arg) end))
 end
 
+function analyze_usage.expr_phase_barrier(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
+function analyze_usage.expr_advance(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
 function analyze_usage.expr_unary(cx, node)
   return analyze_usage.expr(cx, node.rhs)
 end
@@ -337,6 +345,12 @@ function analyze_usage.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return analyze_usage.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_usage.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_usage.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_usage.expr_unary(cx, node)

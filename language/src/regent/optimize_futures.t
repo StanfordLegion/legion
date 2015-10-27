@@ -154,6 +154,12 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return nil
+
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
 
@@ -546,6 +552,20 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_phase_barrier(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_advance(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+  }
+end
+
 function optimize_futures.expr_unary(cx, node)
   local rhs = optimize_futures.expr(cx, node.rhs)
   local rhs_type = std.as_read(rhs.expr_type)
@@ -653,6 +673,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return optimize_futures.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return optimize_futures.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)

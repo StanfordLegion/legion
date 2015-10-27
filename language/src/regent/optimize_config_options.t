@@ -99,6 +99,14 @@ function analyze_leaf.expr_static_cast(cx, node)
   return analyze_leaf.expr(cx, node.value)
 end
 
+function analyze_leaf.expr_phase_barrier(cx, node)
+  return analyze_leaf.expr(cx, node.value)
+end
+
+function analyze_leaf.expr_advance(cx, node)
+  return analyze_leaf.expr(cx, node.value)
+end
+
 function analyze_leaf.expr_unary(cx, node)
   return analyze_leaf.expr(cx, node.rhs)
 end
@@ -193,6 +201,12 @@ function analyze_leaf.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return false
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_leaf.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_leaf.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_leaf.expr_unary(cx, node)
@@ -448,6 +462,14 @@ function analyze_inner.expr_cross_product(cx, node)
     node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
+function analyze_inner.expr_phase_barrier(cx, node)
+  return analyze_inner.expr(cx, node.value)
+end
+
+function analyze_inner.expr_advance(cx, node)
+  return analyze_inner.expr(cx, node.value)
+end
+
 function analyze_inner.expr_unary(cx, node)
   return analyze_inner.expr(cx, node.rhs)
 end
@@ -541,6 +563,12 @@ function analyze_inner.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return analyze_inner.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_inner.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_inner.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_inner.expr_unary(cx, node)

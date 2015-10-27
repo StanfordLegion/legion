@@ -106,6 +106,14 @@ function analyze_region_divergence.expr_static_cast(cx, node)
   analyze_region_divergence.expr(cx, node.value)
 end
 
+function analyze_region_divergence.expr_phase_barrier(cx, node)
+  analyze_region_divergence.expr(cx, node.value)
+end
+
+function analyze_region_divergence.expr_advance(cx, node)
+  analyze_region_divergence.expr(cx, node.value)
+end
+
 function analyze_region_divergence.expr_unary(cx, node)
   analyze_region_divergence.expr(cx, node.rhs)
 end
@@ -200,6 +208,12 @@ function analyze_region_divergence.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_region_divergence.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_region_divergence.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_region_divergence.expr_unary(cx, node)

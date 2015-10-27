@@ -359,6 +359,12 @@ ast.unspecialized.coherence_kind:leaf("Simultaneous")
 ast.unspecialized.coherence_kind:leaf("Relaxed")
 ast.unspecialized:leaf("Coherence", {"coherence_modes", "regions"})
 
+ast.unspecialized:leaf("ConditionVariable", {"name"})
+ast.unspecialized:inner("condition_kind", {})
+ast.unspecialized.condition_kind:leaf("Arrives")
+ast.unspecialized.condition_kind:leaf("Awaits")
+ast.unspecialized:leaf("Condition", {"conditions", "variables"})
+
 ast.unspecialized:inner("expr", {"options"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
@@ -385,6 +391,8 @@ ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
 ast.unspecialized.expr:leaf("Partition", {"disjointness_expr",
                                           "region_type_expr", "coloring"})
 ast.unspecialized.expr:leaf("CrossProduct", {"arg_type_exprs"})
+ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
+ast.unspecialized.expr:leaf("Advance", {"value"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
 ast.unspecialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.unspecialized.expr:leaf("Deref", {"value"})
@@ -411,7 +419,7 @@ ast.unspecialized.stat:leaf("Expr", {"expr"})
 
 ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
                                      "privileges", "coherence_modes",
-                                     "constraints", "body"})
+                                     "conditions", "constraints", "body"})
 ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
                                        "constraints"})
@@ -445,6 +453,12 @@ ast.specialized.coherence_kind:leaf("Simultaneous")
 ast.specialized.coherence_kind:leaf("Relaxed")
 ast.specialized:leaf("Coherence", {"coherence_modes", "regions"})
 
+ast.specialized:leaf("ConditionVariable", {"symbol"})
+ast.specialized:inner("condition_kind", {})
+ast.specialized.condition_kind:leaf("Arrives")
+ast.specialized.condition_kind:leaf("Awaits")
+ast.specialized:leaf("Condition", {"conditions", "variables"})
+
 ast.specialized:inner("expr", {"options"})
 ast.specialized.expr:leaf("ID", {"value"})
 ast.specialized.expr:leaf("FieldAccess", {"value", "field_name"})
@@ -473,6 +487,8 @@ ast.specialized.expr:leaf("Region", {"ispace", "ispace_symbol", "fspace_type",
 ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                         "expr_type"})
 ast.specialized.expr:leaf("CrossProduct", {"args", "expr_type"})
+ast.specialized.expr:leaf("PhaseBarrier", {"value"})
+ast.specialized.expr:leaf("Advance", {"value"})
 ast.specialized.expr:leaf("Function", {"value"})
 ast.specialized.expr:leaf("Unary", {"op", "rhs"})
 ast.specialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
@@ -501,7 +517,8 @@ ast.specialized.stat:leaf("Expr", {"expr"})
 
 ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
                                    "privileges", "coherence_modes",
-                                   "constraints", "body", "prototype"})
+                                   "conditions", "constraints", "body",
+                                   "prototype"})
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
 ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
 
@@ -535,6 +552,8 @@ ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
 ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
+ast.typed.expr:leaf("PhaseBarrier", {"value"})
+ast.typed.expr:leaf("Advance", {"value"})
 ast.typed.expr:leaf("Constant", {"value"})
 ast.typed.expr:leaf("Function", {"value"})
 ast.typed.expr:leaf("Unary", {"op", "rhs"})

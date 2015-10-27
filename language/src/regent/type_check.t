@@ -905,6 +905,36 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_phase_barrier(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.validate_implicit_cast(value_type, int) then
+    log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.PhaseBarrier {
+    value = value,
+    expr_type = std.phase_barrier,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_advance(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.validate_implicit_cast(value_type, std.phase_barrier) then
+    log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.Advance {
+    value = value,
+    expr_type = std.phase_barrier,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 local function unary_op_type(op)
   return function(cx, rhs_type)
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -1103,6 +1133,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.PhaseBarrier) then
+    return type_check.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.specialized.expr.Advance) then
+    return type_check.expr_advance(cx, node)
 
   elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)

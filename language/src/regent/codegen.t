@@ -2633,6 +2633,44 @@ function codegen.expr_cross_product(cx, node)
     expr_type)
 end
 
+function codegen.expr_phase_barrier(cx, node)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = c.legion_phase_barrier_create(
+            [cx.runtime], [cx.context], [value.value]),
+        })),
+    expr_type)
+end
+
+function codegen.expr_advance(cx, node)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = c.legion_phase_barrier_advance(
+            [cx.runtime], [cx.context], [value.value].impl),
+        })),
+    expr_type)
+end
+
 local lift_unary_op_to_futures = terralib.memoize(
   function (op, rhs_type, expr_type)
     assert(terralib.types.istype(rhs_type) and
@@ -3035,6 +3073,12 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return codegen.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return codegen.expr_advance(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return codegen.expr_unary(cx, node)

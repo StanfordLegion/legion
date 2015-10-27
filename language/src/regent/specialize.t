@@ -631,6 +631,22 @@ function specialize.expr_cross_product(cx, node)
   }
 end
 
+function specialize.expr_phase_barrier(cx, node)
+  return ast.specialized.expr.PhaseBarrier {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_advance(cx, node)
+  return ast.specialized.expr.Advance {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_unary(cx, node)
   return ast.specialized.expr.Unary {
     op = node.op,
@@ -724,6 +740,12 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
+    return specialize.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Advance) then
+    return specialize.expr_advance(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)
@@ -1060,6 +1082,19 @@ function specialize.regions(cx, node)
     function(region) return specialize.region_root(cx, region) end)
 end
 
+function specialize.condition_variable(cx, node)
+  local symbol = cx.env:lookup(node, node.name)
+  return ast.specialized.ConditionVariable {
+    symbol = symbol,
+    span = node.span,
+  }
+end
+
+function specialize.condition_variables(cx, node)
+  return node:map(
+    function(variable) return specialize.condition_variable(cx, variable) end)
+end
+
 function specialize.privilege_kind(cx, node)
   if node:is(ast.unspecialized.privilege_kind.Reads) then
     return ast.specialized.privilege_kind.Reads(node)
@@ -1122,6 +1157,34 @@ function specialize.coherence_modes(cx, node)
     function(coherence) return specialize.coherence(cx, coherence) end)
 end
 
+function specialize.condition_kind(cx, node)
+  if node:is(ast.unspecialized.condition_kind.Arrives) then
+    return ast.specialized.condition_kind.Arrives(node)
+  elseif node:is(ast.unspecialized.condition_kind.Awaits) then
+    return ast.specialized.condition_kind.Awaits(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.condition_kinds(cx, node)
+  return node:map(
+    function(condition) return specialize.condition_kind(cx, condition) end)
+end
+
+function specialize.condition(cx, node)
+  return ast.specialized.Condition {
+    conditions = specialize.condition_kinds(cx, node.conditions),
+    variables = specialize.condition_variables(cx, node.variables),
+    span = node.span,
+  }
+end
+
+function specialize.conditions(cx, node)
+  return node:map(
+    function(condition) return specialize.condition(cx, condition) end)
+end
+
 function specialize.constraint_kind(cx, node)
   if node:is(ast.unspecialized.constraint_kind.Subregion) then
     return ast.specialized.constraint_kind.Subregion(node)
@@ -1178,6 +1241,7 @@ function specialize.stat_task(cx, node)
   local return_type = node.return_type_expr(cx.env:env())
   local privileges = specialize.privileges(cx, node.privileges)
   local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
+  local conditions = specialize.conditions(cx, node.conditions)
   local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
@@ -1187,6 +1251,7 @@ function specialize.stat_task(cx, node)
     return_type = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     prototype = proto,

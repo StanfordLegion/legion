@@ -497,6 +497,26 @@ function parser.expr_simple(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("phase_barrier") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.PhaseBarrier {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("advance") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Advance {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:matches("{") then
     return p:expr_ctor()
 
@@ -1025,6 +1045,23 @@ function parser.region_bare(p)
   }
 end
 
+function parser.condition_variable(p)
+  local start = ast.save(p)
+  local name = p:expect(p.name).value
+  return ast.unspecialized.ConditionVariable {
+    name = name,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.condition_variables(p)
+  local variables = terralib.newlist()
+  repeat
+    variables:insert(p:condition_variable())
+  until not p:nextif(",")
+  return variables
+end
+
 function parser.is_privilege_kind(p)
   return p:matches("reads") or p:matches("writes") or p:matches("reduces")
 end
@@ -1124,6 +1161,47 @@ function parser.privilege_and_coherence(p)
   return privilege, coherence
 end
 
+function parser.is_condition_kind(p)
+  return p:matches("arrives") or p:matches("awaits")
+end
+
+function parser.condition_kind(p)
+  local start = ast.save(p)
+  if p:nextif("arrives") then
+    return ast.unspecialized.condition_kind.Arrives {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("awaits") then
+    return ast.unspecialized.condition_kind.Awaits {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected condition")
+  end
+end
+
+function parser.condition_kinds(p)
+  local conditions = terralib.newlist()
+  while not p:matches("(") do
+    conditions:insert(p:condition_kind())
+  end
+  return conditions
+end
+
+function parser.condition(p)
+  local start = ast.save(p)
+  local conditions = p:condition_kinds()
+  p:expect("(")
+  local variables = p:condition_variables()
+  p:expect(")")
+
+  return ast.unspecialized.Condition {
+    conditions = conditions,
+    variables = variables,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.constraint_kind(p)
   local start = ast.save(p)
   if p:nextif("<=") then
@@ -1152,9 +1230,10 @@ function parser.constraint(p)
   }
 end
 
-function parser.stat_task_privileges_and_constraints(p)
+function parser.stat_task_effects(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
+  local conditions = terralib.newlist()
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
@@ -1162,13 +1241,15 @@ function parser.stat_task_privileges_and_constraints(p)
         local privilege, coherence = p:privilege_and_coherence()
         privileges:insert(privilege)
         coherence_modes:insert(coherence)
+      elseif p:is_condition_kind() then
+        conditions:insert(p:condition())
       else
         constraints:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, constraints
+  return privileges, coherence_modes, conditions, constraints
 end
 
 function parser.stat_task(p, options)
@@ -1177,8 +1258,8 @@ function parser.stat_task(p, options)
   local name = p:expect(p.name).value
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
-  local privileges, coherence_modes, constraints =
-    p:stat_task_privileges_and_constraints()
+  local privileges, coherence_modes, conditions, constraints =
+    p:stat_task_effects()
   local body = p:block()
   p:expect("end")
 
@@ -1188,6 +1269,7 @@ function parser.stat_task(p, options)
     return_type_expr = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     options = options,
