@@ -31,9 +31,8 @@ enum TaskIDs {
 };
 
 enum FieldIDs {
-  FID_VAL,
-  FID_DERIV,
-  FID_CP
+  FID_X,
+  FID_Y,
 };
 
 void top_level_task(const Task *task,
@@ -51,14 +50,31 @@ void top_level_task(const Task *task,
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs_A);
-    allocator.allocate_field(sizeof(double),FID_VAL);
+    allocator.allocate_field(sizeof(double),FID_X);
+    allocator.allocate_field(sizeof(double),FID_Y);
   }
   LogicalRegion lr_A = runtime->create_logical_region(ctx, is_A, fs_A);
+
+  // create an instance of Y
+  PhysicalRegion pr_Y = runtime->map_region(ctx,
+					    RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A)
+					    .add_field(FID_Y));
+  pr_Y.wait_until_valid();
+  runtime->unmap_region(ctx, pr_Y);
+
   PhysicalRegion pr_A;
   std::vector<FieldID> field_vec;
-  field_vec.push_back(FID_VAL);
-  pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_CREATE);
-  runtime->detach_file(ctx, pr_A);
+  field_vec.push_back(FID_X);
+  for(int reps = 0; reps < 2; reps++) {
+    pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_CREATE);
+    
+    CopyLauncher clr;
+    clr.add_copy_requirements(RegionRequirement(lr_A, READ_ONLY, EXCLUSIVE, lr_A).add_field(FID_Y),
+			      RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A).add_field(FID_X));
+    runtime->issue_copy_operation(ctx, clr);
+
+    runtime->detach_file(ctx, pr_A);
+  }
   runtime->destroy_logical_region(ctx, lr_A);
   runtime->destroy_field_space(ctx, fs_A);
   runtime->destroy_index_space(ctx, is_A);

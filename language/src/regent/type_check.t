@@ -1770,6 +1770,7 @@ function type_check.stat_task(cx, node)
 
   type_check.coherence_modes(cx, node.coherence_modes)
   local coherence_modes = cx.coherence_modes
+  prototype:set_coherence_modes(coherence_modes)
 
   local constraints = type_check.constraints(cx, node.constraints)
   std.add_constraints(cx, constraints)

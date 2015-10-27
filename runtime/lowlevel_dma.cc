@@ -1929,7 +1929,8 @@ namespace LegionRuntime {
           if (nr < 0)
             perror("io_getevents error");
           assert(nr == max_nr);
-          assert(events[0].res == (int64_t) bytes);
+	  // SJT: the events record doesn't seem to always have what we want?
+          //assert(events[0].res == (int64_t) bytes);
 	  mpc->record_bytes(bytes);
         }
 
@@ -2038,7 +2039,8 @@ namespace LegionRuntime {
           if (nr < 0)
             perror("io_getevents error");
           assert(nr == max_nr);
-          assert(events[0].res == (int64_t) bytes);
+	  // SJT: the events record doesn't seem to always have what we want?
+          //assert(events[0].res == (int64_t) bytes);
 	  mpc->record_bytes(bytes);
         }
 

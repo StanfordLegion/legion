@@ -1738,9 +1738,11 @@ end
 
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
                                     index, region_args_setup)
-  local privileges, privilege_field_paths, privilege_field_types =
-    std.find_task_privileges(param_type, task:getprivileges())
+  local privileges, privilege_field_paths, privilege_field_types, coherences =
+    std.find_task_privileges(param_type, task:getprivileges(),
+                             task:get_coherence_modes())
   local privilege_modes = privileges:map(std.privilege_mode)
+  local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
@@ -1753,6 +1755,7 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
+    local coherence_mode = coherence_modes[i]
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -1794,7 +1797,7 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
       requirement_args:insert(privilege_mode)
     end
     requirement_args:insertall(
-      {c.EXCLUSIVE, `([parent_region].impl), 0, false})
+      {coherence_mode, `([parent_region].impl), 0, false})
 
     region_args_setup:insert(
       quote
@@ -1815,9 +1818,11 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
                                        partition, launcher, index,
                                        region_args_setup)
   assert(index)
-  local privileges, privilege_field_paths, privilege_field_types =
-    std.find_task_privileges(param_type, task:getprivileges())
+  local privileges, privilege_field_paths, privilege_field_types, coherences =
+    std.find_task_privileges(param_type, task:getprivileges(),
+                             task:get_coherence_modes())
   local privilege_modes = privileges:map(std.privilege_mode)
+  local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
@@ -1825,6 +1830,7 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
+    local coherence_mode = coherence_modes[i]
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -1855,7 +1861,7 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
       requirement_args:insert(privilege_mode)
     end
     requirement_args:insertall(
-      {c.EXCLUSIVE, `([parent_region].impl), 0, false})
+      {coherence_mode, `([parent_region].impl), 0, false})
 
     region_args_setup:insert(
       quote
@@ -4315,7 +4321,8 @@ function codegen.stat_task(cx, node)
       end
 
       local privileges, privilege_field_paths, privilege_field_types =
-        std.find_task_privileges(region_type, task:getprivileges())
+        std.find_task_privileges(region_type, task:getprivileges(),
+                                 task:get_coherence_modes())
 
       local privileges_by_field_path = std.group_task_privileges_by_field_path(
         privileges, privilege_field_paths)
