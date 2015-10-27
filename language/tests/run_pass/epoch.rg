@@ -19,10 +19,6 @@ import "regent"
 
 local c = regentlib.c
 
-function raw(t)
-  return terra(x : t) return x.__ptr end
-end
-
 task g(s : region(int), z : int)
 where reads(s), writes(s) do
   for y in s do
@@ -39,9 +35,9 @@ task k() : int
   var y2 = new(ptr(int, s))
 
   var rc = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, s))](y0))
-  c.legion_coloring_add_point(rc, 1, [raw(ptr(int, s))](y1))
-  c.legion_coloring_add_point(rc, 2, [raw(ptr(int, s))](y2))
+  c.legion_coloring_add_point(rc, 0, __raw(y0))
+  c.legion_coloring_add_point(rc, 1, __raw(y1))
+  c.legion_coloring_add_point(rc, 2, __raw(y2))
   var p = partition(disjoint, s, rc)
   c.legion_coloring_destroy(rc)
 

@@ -21,10 +21,6 @@ import "regent"
 
 local c = regentlib.c
 
-function raw(t)
-  return terra(x : t) return x.__ptr end
-end
-
 function raw_to_ptr(t)
   return terra(x : int, y : int)
     return [t]{ __ptr = c.legion_ptr_t { value = x }, __index = y }
@@ -36,7 +32,7 @@ task main()
   var x = new(ptr(int, r))
 
   var colors0 = c.legion_coloring_create()
-  c.legion_coloring_add_point(colors0, 0, [raw(ptr(int, r))](x))
+  c.legion_coloring_add_point(colors0, 0, __raw(x))
   c.legion_coloring_ensure_color(colors0, 1)
   var part0 = partition(disjoint, r, colors0)
   c.legion_coloring_destroy(colors0)
@@ -45,7 +41,7 @@ task main()
   var r1 = part0[1]
 
   -- Tag the pointer x with the wrong region index.
-  var i = [raw(ptr(int, r))](x).value
+  var i = (__raw(x)).value
   var x01 = [raw_to_ptr(ptr(int, r0, r1))](i, 2)
 
   @x01 = 5
