@@ -2075,6 +2075,13 @@ std.simultaneous = "simultaneous"
 std.relaxed = "relaxed"
 
 -- #####################################
+-- ## Conditions
+-- #################
+
+std.arrives = "arrives"
+std.awaits = "awaits"
+
+-- #####################################
 -- ## Constraints
 -- #################
 
@@ -2197,6 +2204,16 @@ end
 function task:get_coherence_modes()
   assert(rawget(self, "coherence_modes") ~= nil)
   return self.coherence_modes
+end
+
+function task:set_conditions(t)
+  assert(rawget(self, "conditions") == nil and t)
+  self.conditions = t
+end
+
+function task:get_conditions()
+  assert(rawget(self, "conditions") ~= nil)
+  return self.conditions
 end
 
 function task:set_param_constraints(t)

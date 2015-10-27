@@ -1698,22 +1698,42 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
   return task_args_setup
 end
 
-function expr_call_setup_future_arg(cx, task, arg, arg_type, param_type,
-                                    launcher, index, future_args_setup)
+function expr_call_setup_future_arg(cx, task, arg, launcher, index, args_setup)
   local add_future = c.legion_task_launcher_add_future
   if index then
     add_future = c.legion_index_launcher_add_future
   end
 
-  future_args_setup:insert(quote
+  args_setup:insert(quote
     add_future(launcher, [arg].__result)
   end)
+end
 
-  return future_args_setup
+function expr_call_setup_phase_barrier_arg(cx, task, arg, condition, launcher, index, args_setup)
+  local add_barrier
+  if condition == std.arrives then
+    if index then
+      add_barrier = c.legion_index_launcher_add_arrival_barrier
+    else
+      add_barrier = c.legion_task_launcher_add_arrival_barrier
+    end
+  elseif condition == std.awaits then
+    if index then
+      add_barrier = c.legion_index_launcher_add_wait_barrier
+    else
+      add_barrier = c.legion_task_launcher_add_wait_barrier
+    end
+  else
+    assert(false)
+  end
+
+  args_setup:insert(quote
+    add_barrier(launcher, [arg].impl)
+  end)
 end
 
 function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
-                                    index, ispace_args_setup)
+                                    index, args_setup)
   local parent_ispace =
     cx:ispace(cx:ispace(arg_type).root_ispace_type).index_space
 
@@ -1730,14 +1750,14 @@ function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
       launcher, `([cx:ispace(arg_type).index_space].impl),
       c.ALL_MEMORY, `([parent_ispace].impl), false})
 
-  ispace_args_setup:insert(
+  args_setup:insert(
     quote
       var [requirement] = [add_requirement]([requirement_args])
     end)
 end
 
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
-                                    index, region_args_setup)
+                                    index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences =
     std.find_task_privileges(param_type, task:getprivileges(),
                              task:get_coherence_modes())
@@ -1799,7 +1819,7 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
     requirement_args:insertall(
       {coherence_mode, `([parent_region].impl), 0, false})
 
-    region_args_setup:insert(
+    args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
         [field_paths:map(
@@ -1816,7 +1836,7 @@ end
 
 function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
                                        partition, launcher, index,
-                                       region_args_setup)
+                                       args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences =
     std.find_task_privileges(param_type, task:getprivileges(),
@@ -1863,7 +1883,7 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
     requirement_args:insertall(
       {coherence_mode, `([parent_region].impl), 0, false})
 
-    region_args_setup:insert(
+    args_setup:insert(
       quote
       var [requirement] =
         [add_requirement]([requirement_args])
@@ -1921,36 +1941,47 @@ function codegen.expr_call(cx, node)
     local launcher = terralib.newsymbol("launcher")
 
     -- Pass futures.
-    local future_args_setup = terralib.newlist()
+    local args_setup = terralib.newlist()
     for i, arg_type in ipairs(arg_types) do
       if std.is_future(arg_type) then
         local arg_value = arg_values[i]
-        local param_type = param_types[i]
         expr_call_setup_future_arg(
-          cx, fn.value, arg_value, arg_type, param_type,
-          launcher, false, future_args_setup)
+          cx, fn.value, arg_value,
+          launcher, false, args_setup)
+      end
+    end
+
+    -- Pass phase barriers.
+    local conditions = fn.value:get_conditions()
+    for condition, args_enabled in pairs(conditions) do
+      for i, arg_type in ipairs(arg_types) do
+        if args_enabled[i] then
+          assert(std.is_phase_barrier(arg_type))
+          local arg_value = arg_values[i]
+          expr_call_setup_phase_barrier_arg(
+            cx, fn.value, arg_value, condition,
+            launcher, false, args_setup)
+        end
       end
     end
 
     -- Pass index spaces through index requirements.
-    local ispace_args_setup = terralib.newlist()
     for i, arg_type in ipairs(arg_types) do
       if std.is_ispace(arg_type) then
         local param_type = param_types[i]
 
         expr_call_setup_ispace_arg(
-          cx, fn.value, arg_type, param_type, launcher, false, ispace_args_setup)
+          cx, fn.value, arg_type, param_type, launcher, false, args_setup)
       end
     end
 
     -- Pass regions through region requirements.
-    local region_args_setup = terralib.newlist()
     for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
       local arg_type = arg_types[i]
       local param_type = param_types[i]
 
       expr_call_setup_region_arg(
-        cx, fn.value, arg_type, param_type, launcher, false, region_args_setup)
+        cx, fn.value, arg_type, param_type, launcher, false, args_setup)
     end
 
     local future
@@ -1967,9 +1998,7 @@ function codegen.expr_call(cx, node)
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:gettaskid()], t_args,
         c.legion_predicate_true(), 0, 0)
-      [future_args_setup]
-      [ispace_args_setup]
-      [region_args_setup]
+      [args_setup]
     end
 
     local launcher_execute
@@ -2736,6 +2765,7 @@ local lift_unary_op_to_futures = terralib.memoize(
         node.return_type,
         false))
     task:setprivileges(node.privileges)
+    task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
     task:set_region_universe({})
@@ -2825,6 +2855,7 @@ local lift_binary_op_to_futures = terralib.memoize(
         node.return_type,
         false))
     task:setprivileges(node.privileges)
+    task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
     task:set_region_universe({})
@@ -3691,26 +3722,24 @@ function codegen.stat_index_launch(cx, node)
   local launcher = terralib.newsymbol("launcher")
 
   -- Pass futures.
-  local future_args_setup = terralib.newlist()
+  local args_setup = terralib.newlist()
   for i, arg_type in ipairs(arg_types) do
     if std.is_future(arg_type) then
       local arg_value = arg_values[i]
       local param_type = param_types[i]
       expr_call_setup_future_arg(
-        cx, fn.value, arg_value, arg_type, param_type,
-        launcher, true, future_args_setup)
+        cx, fn.value, arg_value, launcher, true, args_setup)
     end
   end
 
   -- Pass index spaces through index requirements.
-  local ispace_args_setup = terralib.newlist()
   for i, arg_type in ipairs(arg_types) do
     if std.is_ispace(arg_type) then
       local param_type = param_types[i]
 
       if not node.args_provably.variant[i] then
         expr_call_setup_ispace_arg(
-          cx, fn.value, arg_type, param_type, launcher, true, ispace_args_setup)
+          cx, fn.value, arg_type, param_type, launcher, true, args_setup)
       else
         assert(false) -- FIXME: Implement index partitions
 
@@ -3724,20 +3753,19 @@ function codegen.stat_index_launch(cx, node)
   end
 
   -- Pass regions through region requirements.
-  local region_args_setup = terralib.newlist()
   for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
     if not node.args_provably.variant[i] then
       expr_call_setup_region_arg(
-        cx, fn.value, arg_type, param_type, launcher, true, region_args_setup)
+        cx, fn.value, arg_type, param_type, launcher, true, args_setup)
     else
       local partition = args_partitions[i]
       assert(partition)
       expr_call_setup_partition_arg(
         cx, fn.value, arg_type, param_type, partition.value, launcher, true,
-        region_args_setup)
+        args_setup)
     end
   end
 
@@ -3785,9 +3813,7 @@ function codegen.stat_index_launch(cx, node)
         }),
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
-    [future_args_setup]
-    [ispace_args_setup]
-    [region_args_setup]
+    [args_setup]
   end
 
   local execute_fn = c.legion_index_launcher_execute

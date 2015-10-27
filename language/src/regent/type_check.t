@@ -1666,6 +1666,20 @@ function type_check.regions(cx, node)
     function(region) return type_check.region_root(cx, region) end)
 end
 
+function type_check.condition_variable(cx, node)
+  local symbol = node.symbol
+  local var_type = symbol.type
+  if not std.is_phase_barrier(var_type) then
+    log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(var_type))
+  end
+  return symbol
+end
+
+function type_check.condition_variables(cx, node)
+  return node:map(
+    function(region) return type_check.condition_variable(cx, region) end)
+end
+
 function type_check.privilege_kind(cx, node)
   if node:is(ast.specialized.privilege_kind.Reads) then
     return std.reads
@@ -1768,6 +1782,51 @@ function type_check.coherence_modes(cx, node)
   end
 end
 
+function type_check.condition_kind(cx, node)
+  if node:is(ast.specialized.condition_kind.Arrives) then
+    return std.arrives
+  elseif node:is(ast.specialized.condition_kind.Awaits) then
+    return std.awaits
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.condition_kinds(cx, node)
+  return node:map(
+    function(condition) return type_check.condition_kind(cx, condition) end)
+end
+
+function type_check.condition(cx, node, params, result)
+  local conditions = type_check.condition_kinds(cx, node.conditions)
+  local variables = type_check.condition_variables(cx, node.variables)
+
+  for _, symbol in ipairs(variables) do
+    for _, condition in ipairs(conditions) do
+      local i = params[symbol]
+      assert(i)
+      result[condition][i] = symbol
+    end
+  end
+end
+
+function type_check.conditions(cx, node, params)
+  local param_index_by_symbol = {}
+  for i, param in ipairs(params) do
+    param_index_by_symbol[param.symbol] = i
+  end
+
+  local result = {}
+  result[std.arrives] = {}
+  result[std.awaits] = {}
+
+  node:map(
+    function(condition)
+      return type_check.condition(cx, condition, param_index_by_symbol, result)
+    end)
+  return result
+end
+
 function type_check.constraint_kind(cx, node)
   if node:is(ast.specialized.constraint_kind.Subregion) then
     return "<="
@@ -1820,6 +1879,9 @@ function type_check.stat_task(cx, node)
   type_check.coherence_modes(cx, node.coherence_modes)
   local coherence_modes = cx.coherence_modes
   prototype:set_coherence_modes(coherence_modes)
+
+  local conditions = type_check.conditions(cx, node.conditions, params)
+  prototype:set_conditions(conditions)
 
   local constraints = type_check.constraints(cx, node.constraints)
   std.add_constraints(cx, constraints)
