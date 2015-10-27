@@ -9498,29 +9498,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      // Need to be sure we are going to get a valid reference
-      if (!region.is_valid())
-        region.wait_until_valid();
-      reference = region.impl->get_reference();
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
       requirement.copy_without_mapping_info(region.impl->get_requirement());
       initialize_privilege_path(privilege_path, requirement);
-      // Check that this is actually a file
-      PhysicalManager *manager = reference.get_manager();
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!manager->is_reduction_manager()); 
-#endif
-      InstanceManager *inst_manager = manager->as_instance_manager(); 
-      if (!inst_manager->is_attached_file())
-      {
-        log_run.error("Illegal detach operation on a physical region which "
-                      "was not attached!");
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_ILLEGAL_DETACH_OPERATION);
-      }
+      // Delay getting a reference until trigger_execution().  This means we
+      //  have to keep region
+      this->region = region;
     }
 
     //--------------------------------------------------------------------------
@@ -9535,7 +9519,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
-      reference = InstanceRef();
+      region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
@@ -9604,6 +9588,24 @@ namespace LegionRuntime {
     bool DetachOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
+      // Now we can get the reference we need for the detach operation
+      InstanceRef reference = region.impl->get_reference();
+      // Check that this is actually a file
+      PhysicalManager *manager = reference.get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!manager->is_reduction_manager()); 
+#endif
+      InstanceManager *inst_manager = manager->as_instance_manager(); 
+      if (!inst_manager->is_attached_file())
+      {
+        log_run.error("Illegal detach operation on a physical region which "
+                      "was not attached!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_DETACH_OPERATION);
+      }
+
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       if (!requirement.premapped)
