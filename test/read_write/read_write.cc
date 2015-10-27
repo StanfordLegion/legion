@@ -194,8 +194,7 @@ void top_level_task(const Task *task,
 
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_VAL);
-  pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_READ_WRITE);
-  runtime->remap_region(ctx, pr_A);
+  pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_CREATE);
   pr_A.wait_until_valid();
 
   // Start Computation
