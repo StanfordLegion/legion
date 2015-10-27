@@ -666,6 +666,8 @@ function type_check.expr_raw_value(cx, node)
     expr_type = std.c.legion_logical_partition_t
   elseif std.is_cross_product(value_type) then
     expr_type = std.c.legion_terra_index_cross_product_t
+  elseif std.is_bounded_type(value_type) then
+    expr_type = value_type.index_type.impl_type
   else
     log.error(node, "raw expected an ispace, region, partition, or cross product, got " .. tostring(value_type))
   end

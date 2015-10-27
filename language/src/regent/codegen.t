@@ -2216,6 +2216,8 @@ function codegen.expr_raw_value(cx, node)
     result = `([value.value].impl)
   elseif std.is_cross_product(value_type) then
     result = `([value.value].product)
+  elseif std.is_bounded_type(value_type) then
+    result = `([value.value].__ptr)
   else
     assert(false)
   end
