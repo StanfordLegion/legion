@@ -377,8 +377,9 @@ function type_check.expr_call(cx, node)
       if valid then
         fn_type = result_type
       else
-        local func_name = string.gsub(fn.value.name, "^std[.]", "regentlib.")
-        log.error(node, "no applicable overloaded function " .. tostring(func_name) ..
+        local fn_name = fn.value.name or tostring(fn.value)
+        fn_name = string.gsub(fn_name, "^std[.]", "regentlib.")
+        log.error(node, "no applicable overloaded function " .. tostring(fn_name) ..
                   " for arguments " .. arg_types:mkstring(", "))
       end
     elseif std.is_task(fn.value) then
