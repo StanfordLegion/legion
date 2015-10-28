@@ -41,7 +41,7 @@ task main()
   var r1 = part0[1]
 
   -- Tag the pointer x with the wrong region index.
-  var i = (__raw(x)).value
+  var i = __raw(x).value
   var x01 = [raw_to_ptr(ptr(int, r0, r1))](i, 2)
 
   @x01 = 5

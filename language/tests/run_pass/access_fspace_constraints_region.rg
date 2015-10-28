@@ -39,10 +39,10 @@ end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
-  var tc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](tc, 0)
+  var tc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(tc, 0)
   var u = partition(disjoint, t, tc)
-  [c.legion_coloring_destroy](tc)
+  c.legion_coloring_destroy(tc)
   var v = u[0]
   var y = new(ptr(int, v))
   @y = 7

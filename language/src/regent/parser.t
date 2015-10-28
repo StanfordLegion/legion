@@ -113,199 +113,6 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
-  else
-    p:error("unexpected token in expression")
-  end
-end
-
-function parser.field(p)
-  local start = ast.save(p)
-  if p:matches(p.name) and p:lookahead("=") then
-    local name = p:next(p.name).value
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = function(env) return name end,
-      value = value,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
-  elseif p:nextif("[") then
-    local name_expr = p:luaexpr()
-    p:expect("]")
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = name_expr,
-      value = value,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
-  else
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorListField {
-      value = value,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-  end
-end
-
-function parser.sep(p)
-  return p:nextif(",") or p:nextif(";")
-end
-
-function parser.expr_ctor(p)
-  local start = ast.save(p)
-  local fields = terralib.newlist()
-  p:expect("{")
-  repeat
-    if p:matches("}") then break end
-    local field = p:field()
-    fields:insert(field)
-  until not p:sep()
-  p:expect("}")
-
-  return ast.unspecialized.expr.Ctor {
-    fields = fields,
-    options = ast.default_options(),
-    span = ast.span(start, p),
-  }
-end
-
-function parser.fnargs(p)
-  if p:nextif("(") then
-    local args
-    if not p:matches(")") then
-      args = p:expr_list()
-    else
-      args = terralib.newlist()
-    end
-    p:expect(")")
-    return args
-
-  elseif p:matches("{") then
-    local arg = p:expr_ctor()
-    return terralib.newlist({arg})
-
-  elseif p:matches(p.string) then
-    local arg = p:expr_simple()
-    return terralib.newlist({arg})
-
-  else
-    p:error("unexpected token in fnargs expression")
-  end
-end
-
-function parser.expr_primary(p)
-  local start = ast.save(p)
-  local expr = p:expr_prefix()
-
-  while true do
-    if p:nextif(".") then
-      local field_names = terralib.newlist()
-      if p:nextif("partition") then
-        field_names:insert("partition")
-      elseif p:nextif("product") then
-        field_names:insert("product")
-      elseif p:nextif("{") then
-        repeat
-          if p:matches("}") then break end
-          local field_name = p:next(p.name).value
-          field_names:insert(field_name)
-        until not p:sep()
-        p:expect("}")
-      else
-        field_names:insert(p:next(p.name).value)
-      end
-      expr = ast.unspecialized.expr.FieldAccess {
-        value = expr,
-        field_names = field_names,
-        options = ast.default_options(),
-        span = ast.span(start, p),
-      }
-
-    elseif p:nextif("[") then
-      local index = p:expr()
-      p:expect("]")
-      expr = ast.unspecialized.expr.IndexAccess {
-        value = expr,
-        index = index,
-        options = ast.default_options(),
-        span = ast.span(start, p),
-      }
-
-    elseif p:nextif(":") then
-      local method_name = p:next(p.name).value
-      local args = p:fnargs()
-      expr = ast.unspecialized.expr.MethodCall {
-        value = expr,
-        method_name = method_name,
-        args = args,
-        options = ast.default_options(),
-        span = ast.span(start, p),
-      }
-
-    elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
-      local args = p:fnargs()
-      expr = ast.unspecialized.expr.Call {
-        fn = expr,
-        args = args,
-        options = ast.default_options(),
-        span = ast.span(start, p),
-      }
-
-    else
-      break
-    end
-  end
-
-  return expr
-end
-
-function parser.expr_simple(p)
-  local options = p:options(true, false)
-  if options:is(ast.unspecialized.expr) then
-    return options
-  end
-
-  local start = ast.save(p)
-  if p:matches(p.number) then
-    local token = p:next(p.number)
-    return ast.unspecialized.expr.Constant {
-      value = token.value,
-      expr_type = token.valuetype,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
-  elseif p:matches(p.string) then
-    local token = p:next(p.string)
-    return ast.unspecialized.expr.Constant {
-      value = token.value,
-      expr_type = rawstring,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
-  elseif p:nextif("true") then
-    return ast.unspecialized.expr.Constant {
-      value = true,
-      expr_type = bool,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
-  elseif p:nextif("false") then
-    return ast.unspecialized.expr.Constant {
-      value = false,
-      expr_type = bool,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
-
   elseif p:nextif("max") then
     p:expect("(")
     local lhs = p:expr()
@@ -513,6 +320,199 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.expr.Advance {
       value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  else
+    p:error("unexpected token in expression")
+  end
+end
+
+function parser.field(p)
+  local start = ast.save(p)
+  if p:matches(p.name) and p:lookahead("=") then
+    local name = p:next(p.name).value
+    p:expect("=")
+    local value = p:expr()
+    return ast.unspecialized.expr.CtorRecField {
+      name_expr = function(env) return name end,
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("[") then
+    local name_expr = p:luaexpr()
+    p:expect("]")
+    p:expect("=")
+    local value = p:expr()
+    return ast.unspecialized.expr.CtorRecField {
+      name_expr = name_expr,
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  else
+    local value = p:expr()
+    return ast.unspecialized.expr.CtorListField {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+  end
+end
+
+function parser.sep(p)
+  return p:nextif(",") or p:nextif(";")
+end
+
+function parser.expr_ctor(p)
+  local start = ast.save(p)
+  local fields = terralib.newlist()
+  p:expect("{")
+  repeat
+    if p:matches("}") then break end
+    local field = p:field()
+    fields:insert(field)
+  until not p:sep()
+  p:expect("}")
+
+  return ast.unspecialized.expr.Ctor {
+    fields = fields,
+    options = ast.default_options(),
+    span = ast.span(start, p),
+  }
+end
+
+function parser.fnargs(p)
+  if p:nextif("(") then
+    local args
+    if not p:matches(")") then
+      args = p:expr_list()
+    else
+      args = terralib.newlist()
+    end
+    p:expect(")")
+    return args
+
+  elseif p:matches("{") then
+    local arg = p:expr_ctor()
+    return terralib.newlist({arg})
+
+  elseif p:matches(p.string) then
+    local arg = p:expr_simple()
+    return terralib.newlist({arg})
+
+  else
+    p:error("unexpected token in fnargs expression")
+  end
+end
+
+function parser.expr_primary(p)
+  local start = ast.save(p)
+  local expr = p:expr_prefix()
+
+  while true do
+    if p:nextif(".") then
+      local field_names = terralib.newlist()
+      if p:nextif("partition") then
+        field_names:insert("partition")
+      elseif p:nextif("product") then
+        field_names:insert("product")
+      elseif p:nextif("{") then
+        repeat
+          if p:matches("}") then break end
+          local field_name = p:next(p.name).value
+          field_names:insert(field_name)
+        until not p:sep()
+        p:expect("}")
+      else
+        field_names:insert(p:next(p.name).value)
+      end
+      expr = ast.unspecialized.expr.FieldAccess {
+        value = expr,
+        field_names = field_names,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+
+    elseif p:nextif("[") then
+      local index = p:expr()
+      p:expect("]")
+      expr = ast.unspecialized.expr.IndexAccess {
+        value = expr,
+        index = index,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+
+    elseif p:nextif(":") then
+      local method_name = p:next(p.name).value
+      local args = p:fnargs()
+      expr = ast.unspecialized.expr.MethodCall {
+        value = expr,
+        method_name = method_name,
+        args = args,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+
+    elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
+      local args = p:fnargs()
+      expr = ast.unspecialized.expr.Call {
+        fn = expr,
+        args = args,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+
+    else
+      break
+    end
+  end
+
+  return expr
+end
+
+function parser.expr_simple(p)
+  local options = p:options(true, false)
+  if options:is(ast.unspecialized.expr) then
+    return options
+  end
+
+  local start = ast.save(p)
+  if p:matches(p.number) then
+    local token = p:next(p.number)
+    return ast.unspecialized.expr.Constant {
+      value = token.value,
+      expr_type = token.valuetype,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:matches(p.string) then
+    local token = p:next(p.string)
+    return ast.unspecialized.expr.Constant {
+      value = token.value,
+      expr_type = rawstring,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("true") then
+    return ast.unspecialized.expr.Constant {
+      value = true,
+      expr_type = bool,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("false") then
+    return ast.unspecialized.expr.Constant {
+      value = false,
+      expr_type = bool,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
