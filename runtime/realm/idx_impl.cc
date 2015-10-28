@@ -1050,7 +1050,7 @@ namespace Realm {
 
       // if the rhs's range is larger than ours, die - we can't fit the result
       int abs_start = other.first_element;
-      int abs_end = other.first_element + num_elements;
+      int abs_end = other.first_element + other.num_elements;
       assert(abs_start >= first_element);
       assert(abs_end <= (first_element + num_elements));
 
@@ -1171,7 +1171,7 @@ namespace Realm {
 	    } else
 	      *bits = 0;
 	  }
-	  } else {
+	} else {
           // TODO: implement this
           assert(0);
 	}
@@ -1191,7 +1191,7 @@ namespace Realm {
       // determine the range of bits we're going to cover - trim to both masks
       int abs_start = std::max(first_element, other.first_element);
       int abs_end = std::min(first_element + num_elements,
-			     other.first_element + num_elements);
+			     other.first_element + other.num_elements);
       // no overlap case is simple
       if(abs_start >= abs_end)
 	return *this;
