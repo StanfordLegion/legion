@@ -31,7 +31,6 @@ function context:new_local_scope(must_epoch)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
-    coherence_modes = self.coherence_modes,
     constraints = self.constraints,
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
@@ -46,7 +45,6 @@ function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
-    coherence_modes = data.newmap(),
     constraints = {},
     region_universe = {},
     expected_return_type = {expected_return_type},
@@ -1733,11 +1731,11 @@ function type_check.coherence_kinds(cx, node)
     function(coherence) return type_check.coherence_kind(cx, coherence) end)
 end
 
-local function check_coherence_conflict_field(cx, node, region, field,
-                                              coherence, other_field)
+local function check_coherence_conflict_field(node, region, field,
+                                              coherence, other_field, result)
   local region_type = region.type
   if field:starts_with(other_field) or other_field:starts_with(field) then
-    local other_coherence = cx.coherence_modes[region_type][other_field]
+    local other_coherence = result[region_type][other_field]
     assert(other_coherence)
     if other_coherence ~= coherence then
       log.error(
@@ -1749,14 +1747,15 @@ local function check_coherence_conflict_field(cx, node, region, field,
   end
 end
 
-local function check_coherence_conflict(cx, node, region, field, coherence)
+local function check_coherence_conflict(node, region, field, coherence, result)
   local region_type = region.type
-  for _, other_field in cx.coherence_modes[region_type]:keys() do
-    check_coherence_conflict_field(cx, node, region, field, coherence, other_field)
+  for _, other_field in result[region_type]:keys() do
+    check_coherence_conflict_field(
+      node, region, field, coherence, other_field, result)
   end
 end
 
-function type_check.coherence(cx, node)
+function type_check.coherence(cx, node, result)
   local coherence_modes = type_check.coherence_kinds(cx, node.coherence_modes)
   local region_fields = type_check.regions(cx, node.regions)
 
@@ -1765,23 +1764,25 @@ function type_check.coherence(cx, node)
       local region = region_field.region
       local region_type = region.type
       assert(std.is_region(region_type))
-      if not cx.coherence_modes[region_type] then
-        cx.coherence_modes[region_type] = data.newmap()
+      if not result[region_type] then
+        result[region_type] = data.newmap()
       end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
-        check_coherence_conflict(cx, node, region, field, coherence)
-        cx.coherence_modes[region_type][field] = coherence
+        check_coherence_conflict(node, region, field, coherence, result)
+        result[region_type][field] = coherence
       end
     end
   end
 end
 
 function type_check.coherence_modes(cx, node)
+  local result = data.newmap()
   for _, coherence in ipairs(node) do
-    type_check.coherence(cx, coherence)
+    type_check.coherence(cx, coherence, result)
   end
+  return result
 end
 
 function type_check.condition_kind(cx, node)
@@ -1878,8 +1879,7 @@ function type_check.stat_task(cx, node)
   end
   prototype:setprivileges(privileges)
 
-  type_check.coherence_modes(cx, node.coherence_modes)
-  local coherence_modes = cx.coherence_modes
+  local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
   prototype:set_coherence_modes(coherence_modes)
 
   local conditions = type_check.conditions(cx, node.conditions, params)
