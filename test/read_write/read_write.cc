@@ -314,11 +314,14 @@ int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "top_level_task");
   HighLevelRuntime::register_legion_task<read_only_task>(READ_ONLY_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf task*/), "read_only_task");
   HighLevelRuntime::register_legion_task<read_write_task>(READ_WRITE_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf task*/), "read_write_task");
 
   // Register custom mappers
   HighLevelRuntime::set_registration_callback(update_mappers);
