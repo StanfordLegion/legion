@@ -3728,9 +3728,22 @@ function codegen.stat_index_launch(cx, node)
   for i, arg_type in ipairs(arg_types) do
     if std.is_future(arg_type) then
       local arg_value = arg_values[i]
-      local param_type = param_types[i]
       expr_call_setup_future_arg(
         cx, fn.value, arg_value, launcher, true, args_setup)
+    end
+  end
+
+  -- Pass phase barriers.
+  local conditions = fn.value:get_conditions()
+  for condition, args_enabled in pairs(conditions) do
+    for i, arg_type in ipairs(arg_types) do
+      if args_enabled[i] then
+        assert(std.is_phase_barrier(arg_type))
+        local arg_value = arg_values[i]
+        expr_call_setup_phase_barrier_arg(
+          cx, fn.value, arg_value, condition,
+          launcher, true, args_setup)
+      end
     end
   end
 

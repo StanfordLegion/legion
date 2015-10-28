@@ -221,6 +221,12 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Advance) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.Unary) then
     return get_num_accessed_fields(node.rhs)
 
@@ -233,7 +239,7 @@ local function get_num_accessed_fields(node)
     return 1
 
   else
-    assert(false, "unreachable")
+    assert(false, "unexpected node type " .. tostring(node.node_type))
   end
 end
 
