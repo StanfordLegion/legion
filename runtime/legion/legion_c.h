@@ -1722,6 +1722,19 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_region_requirement()
+   */
+  unsigned
+  legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
    * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
    */
   void

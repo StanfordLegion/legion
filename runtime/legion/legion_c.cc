@@ -1888,6 +1888,26 @@ legion_copy_launcher_add_dst_region_requirement_logical_region(
   return idx;
 }
 
+unsigned
+legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, redop, prop, parent, tag, verified));
+  return idx;
+}
+
 void
 legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher_,
                                    unsigned idx,
