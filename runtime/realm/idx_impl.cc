@@ -1597,8 +1597,9 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     IndexSpaceImpl *r_impl = get_runtime()->get_index_space_impl(args.is);
 
-    assert(r_impl->valid_mask);
-    const char *mask_data = (const char *)(r_impl->valid_mask->get_raw());
+    const ElementMask *mask = r_impl->valid_mask;
+    assert(mask);
+    const char *mask_data = (const char *)(mask->get_raw());
     assert(mask_data);
 
     size_t mask_len = r_impl->valid_mask->raw_size();
@@ -1607,6 +1608,10 @@ namespace Realm {
     unsigned block_id = 0;
     while(mask_len >= (1 << 11)) {
       ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+					 mask->first_element,
+					 mask->num_elements,
+					 mask->first_enabled_elmt,
+					 mask->last_enabled_elmt,
 					 mask_data,
 					 1 << 11,
 					 PAYLOAD_KEEP);
@@ -1616,6 +1621,10 @@ namespace Realm {
     }
     if(mask_len) {
       ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+					 mask->first_element,
+					 mask->num_elements,
+					 mask->first_enabled_elmt,
+					 mask->last_enabled_elmt,
 					 mask_data,
 					 mask_len,
 					 PAYLOAD_KEEP);
@@ -1645,17 +1654,35 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     IndexSpaceImpl *r_impl = get_runtime()->get_index_space_impl(args.is);
 
-    assert(r_impl->valid_mask);
-    // removing const on purpose here...
-    char *mask_data = (char *)(r_impl->valid_mask->get_raw());
-    assert(mask_data);
-    assert((args.block_id << 11) < r_impl->valid_mask->raw_size());
-
-    memcpy(mask_data + (args.block_id << 11), data, datalen);
-
     GenEventImpl *to_trigger = 0;
     {
       AutoHSLLock a(r_impl->valid_mask_mutex);
+      log_meta.info() << "received valid mask data for " << args.is << ", " << datalen << " bytes (" << r_impl->valid_mask_count << " blocks expected)";
+
+      ElementMask *mask = r_impl->valid_mask;
+      assert(mask);
+
+      // make sure parameters match
+      if((mask->first_element != args.first_element) ||
+	 (mask->num_elements != args.num_elements) ||
+	 (mask->first_enabled_elmt != args.first_enabled_elmt) ||
+	 (mask->last_enabled_elmt != args.last_enabled_elmt)) {
+	log_meta.info() << "resizing valid mask for " << args.is << " (first=" << args.first_element << " num=" << args.num_elements << ")";
+
+	mask->first_element = args.first_element;
+	mask->num_elements = args.num_elements;
+	mask->first_enabled_elmt = args.first_enabled_elmt;
+	mask->last_enabled_elmt = args.last_enabled_elmt;
+	free(mask->raw_data);
+	size_t bytes_needed = ElementMaskImpl::bytes_needed(args.first_element, args.num_elements);
+	mask->raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+	r_impl->valid_mask_count = (mask->raw_size() + 2047) >> 11;
+      }
+
+      assert((args.block_id << 11) < mask->raw_size());
+
+      memcpy(mask->raw_data + (args.block_id << 11), data, datalen);
+
       //printf("got piece of valid mask data for region " IDFMT " (%d expected)\n",
       //       args.region.id, r_impl->valid_mask_count);
       r_impl->valid_mask_count--;
@@ -1675,6 +1702,10 @@ namespace Realm {
 
   /*static*/ void ValidMaskDataMessage::send_request(gasnet_node_t target,
 						     IndexSpace is, unsigned block_id,
+						     int first_element,
+						     int num_elements,
+						     int first_enabled_elmt,
+						     int last_enabled_elmt,
 						     const void *data,
 						     size_t datalen,
 						     int payload_mode)
@@ -1683,6 +1714,10 @@ namespace Realm {
 
     args.is = is;
     args.block_id = block_id;
+    args.first_element = first_element;
+    args.num_elements = num_elements;
+    args.first_enabled_elmt = first_enabled_elmt;
+    args.last_enabled_elmt = last_enabled_elmt;
     Message::request(target, args, data, datalen, payload_mode);
   }
   

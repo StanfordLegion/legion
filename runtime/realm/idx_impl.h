@@ -128,6 +128,10 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
 	IndexSpace is;
 	unsigned block_id;
+	int first_element;
+	int num_elements;
+	int first_enabled_elmt;
+	int last_enabled_elmt;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -137,6 +141,8 @@ namespace Realm {
 				         handle_request> Message;
       
       static void send_request(gasnet_node_t target, IndexSpace is, unsigned block_id,
+			       int first_element, int num_elements,
+			       int first_enabled_elmt, int last_enabled_elmt,
 			       const void *data, size_t datalen, int payload_mode);
     };
 
