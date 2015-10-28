@@ -28,6 +28,13 @@ task k2(x : phase_barrier)
 where awaits(x) do
 end
 
+task k3(x : phase_barrier)
+end
+
+terra g(x : phase_barrier) : phase_barrier
+  return x
+end
+
 task main()
   var n = 2
   var z = phase_barrier(1)
@@ -44,6 +51,14 @@ task main()
     -- Sanity check this is actually working by launching a single
     -- task too. If it fails, the test will hang.
     k2(z)
+  end
+
+  var a = phase_barrier(1)
+  __demand(__parallel)
+  for i = 0, n do
+    -- This is opaque to the compiler, but that's ok because we're not
+    -- actually using the barrier as an arrival or wait.
+    k3(g(a))
   end
 end
 regentlib.start(main)

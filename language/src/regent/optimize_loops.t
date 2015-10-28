@@ -564,9 +564,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     end
 
     if std.is_phase_barrier(arg_type) then
+      -- Phase barriers must be invariant, or must not be used as an arrival/wait.
       if not arg_invariant then
-        log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
-        return node
+        for _, variables in pairs(task:get_conditions()) do
+          if variables[i] then
+            log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
+            return node
+          end
+        end
       end
     end
 
