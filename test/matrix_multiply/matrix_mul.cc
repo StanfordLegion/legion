@@ -75,6 +75,8 @@ enum TestMode {
   INIT
 };
 
+int global_fd = 0;
+
 class PipelineMapper : public DefaultMapper {
 public:
   PipelineMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
@@ -89,9 +91,13 @@ public:
     assert(sys_mem.size() == 1);
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
+    scheduler_cpu_proc = Processor::NO_PROC;
     for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
       if (it->kind() == Processor::LOC_PROC) {
-        cpu_procs.push_back(*it);
+        if (scheduler_cpu_proc == Processor::NO_PROC)
+          scheduler_cpu_proc = *it;
+        else
+          worker_cpu_procs.push_back(*it);
       }
     }
   }
@@ -104,9 +110,12 @@ public:
     task->profile_task = false;
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
-    if (task->task_id == COMPUTE_TASK_ID) {
+    if (task->task_id == TOP_LEVEL_TASK_ID) {
+      task->target_proc = scheduler_cpu_proc;
+    }
+    if (task->task_id == COMPUTE_TASK_ID || task->task_id == COMPUTE_FROM_FILE_TASK_ID) {
       int idx = *((int*)task->args);
-      task->target_proc = cpu_procs[idx % cpu_procs.size()];
+      task->target_proc = worker_cpu_procs[idx % worker_cpu_procs.size()];
     }
   }
 
@@ -133,7 +142,8 @@ public:
   }
 public:
   std::vector<Memory> sys_mem;
-  std::vector<Processor> cpu_procs;
+  std::vector<Processor> worker_cpu_procs;
+  Processor scheduler_cpu_proc;
 };
 
 static void update_mappers(Machine machine, HighLevelRuntime *rt,
@@ -174,7 +184,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     RegionAccessor<AccessorType::Generic, ElementType> acc =
       pr_A.get_field_accessor(FID_VAL).typeify<ElementType>();
     for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
-      acc.write(DomainPoint::from_point<1>(pir.p), 0.01);
+      acc.write(DomainPoint::from_point<1>(pir.p), 1);
     }
 
     LogicalRegion lr_C = runtime->create_logical_region(ctx, is_A, fs_A);
@@ -212,7 +222,6 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
   LogicalRegion lr_B = runtime->create_logical_region(ctx, is_B, fs_B);
 
   PhysicalRegion pr_A;
-  int global_fd = 0;
   if (mode == ATTACH) {
     std::vector<FieldID> field_vec;
     field_vec.push_back(FID_VAL);
@@ -240,6 +249,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
       acc.write(DomainPoint::from_point<1>(pir.p), 1);
     }
+    runtime->unmap_region(ctx, pr_A);
   }
 
   // Initialize lr_B
@@ -254,30 +264,18 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     for (GenericPointInRectIterator<1> pir(rect_B); pir; pir++) {
       acc.write(DomainPoint::from_point<1>(pir.p), 1);
     }
+    runtime->unmap_region(ctx, pr_B);
   }
 
   // Start Computation
   struct timespec ts_start, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
-  // Make our color_domain based on the number of subregions
-  // that we want to create.
   Rect<1> color_bounds(Point<1>(0),Point<1>(nregions-1));
   Domain color_domain = Domain::from_rect<1>(color_bounds);
 
-  // In this example we need to create two partitions: one disjoint
-  // partition for describing the output values that are going to
-  // be computed by each sub-task that we launch and a second
-  // aliased partition which will describe the input values needed
-  // for performing each task.  Note that for the second partition
-  // each subregion will be a superset of its corresponding region
-  // in the first partition, but will also require two 'ghost' cells
-  // on each side.  The need for these ghost cells means that the
-  // subregions in the second partition will be aliased.
   IndexPartition ip_A, ip_B;
   {
     DomainColoring coloring_A, coloring_B;
-    // Iterate over all the colors and compute the entry
-    // for both partitions for each color.
     for (int color = 0; color < nregions; color++)
     {
       Rect<1> subrect_A(Point<1>(color * nsize * nsize), Point<1>((color + 1) * nsize * nsize - 1));
@@ -285,59 +283,66 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
       coloring_A[color] = Domain::from_rect<1>(subrect_A);
       coloring_B[color] = Domain::from_rect<1>(subrect_B);
     }
-    // Once we've computed both of our colorings then we can
-    // create our partitions.  Note that we tell the runtime
-    // that one is disjoint will the second one is not.
     ip_A = runtime->create_index_partition(ctx, is_A, color_domain,
                                            coloring_A, true/*disjoint*/);
     ip_B = runtime->create_index_partition(ctx, is_B, color_domain,
                                            coloring_B, false);
   }
 
-  // Once we've created our index partitions, we can get the
-  // corresponding logical partitions for the stencil_lr
-  // logical region.
   LogicalPartition lp_A =
     runtime->get_logical_partition(ctx, lr_A, ip_A);
-  LogicalPartition lp_B =
-    runtime->get_logical_partition(ctx, lr_B, ip_B);
+  //LogicalPartition lp_B =
+    //runtime->get_logical_partition(ctx, lr_B, ip_B);
 
   // Our launch domain will again be isomorphic to our coloring domain.
-  Domain launch_domain = color_domain;
-  ArgumentMap arg_map;
+  //Domain launch_domain = color_domain;
+  //ArgumentMap arg_map;
 
   if (mode == NONE) {
-    // First initialize the 'FID_VAL' field with some data
+    unsigned nslots = 128;
+    std::queue<Future> future_vec;
+    for (int i = 0; i < nregions; i++) {
+      while (future_vec.size() >= nslots) {
+        future_vec.front().get_void_result();
+        future_vec.pop();
+      }
+      LogicalRegion lr_sub = runtime->get_logical_subregion_by_color(ctx, lp_A, i);
+      TaskLauncher task_launcher(COMPUTE_TASK_ID, TaskArgument(&i, sizeof(i)));
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_sub, READ_ONLY, EXCLUSIVE, lr_A));
+      task_launcher.add_field(0, FID_VAL);
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
+      task_launcher.add_field(1, FID_VAL);
+      future_vec.push(runtime->execute_task(ctx, task_launcher));
+    }
+    while (!future_vec.empty()) {
+      future_vec.front().get_void_result();
+      future_vec.pop();
+    }
+#ifdef ORIGINAL_INDXE_LAUNCH
     IndexLauncher compute_launcher(COMPUTE_TASK_ID, launch_domain,
                                 TaskArgument(&nsize, sizeof(nsize)), arg_map);
     compute_launcher.add_region_requirement(
         RegionRequirement(lp_A, 0, READ_ONLY, EXCLUSIVE, lr_A));
     compute_launcher.add_field(0, FID_VAL);
-    //compute_launcher.add_region_requirement(
-      //  RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
-    //compute_launcher.add_field(1, FID_VAL);
+    compute_launcher.add_region_requirement(
+        RegionRequirement(lp_B, 0, READ_ONLY, EXCLUSIVE, lr_B));
+    compute_launcher.add_field(1, FID_VAL);
     FutureMap exec_f = runtime->execute_index_space(ctx, compute_launcher);
     exec_f.wait_all_results();
+#endif
   } else if (mode == ATTACH) {
-    unsigned nslots = 8;
+    unsigned nslots = 128;
     std::queue<Future> future_vec;
-    Rect<1> rect_I(Point<1>(0), Point<1>(nsize * nsize - 1));
-    IndexSpace is_I = runtime->create_index_space(ctx,
-	                          Domain::from_rect<1>(rect_I));
-    FieldSpace fs_I = runtime->create_field_space(ctx);
-    {
-      FieldAllocator allocator =
-        runtime->create_field_allocator(ctx, fs_I);
-      allocator.allocate_field(sizeof(ElementType),FID_VAL);
-    }
 
     for (int i = 0; i < nregions; i++) {
       while (future_vec.size() >= nslots) {
         future_vec.front().get_void_result();
         future_vec.pop();
       }
-      CopyLauncher copy_launcher;
       LogicalRegion lr_sub = runtime->get_logical_subregion_by_color(ctx, lp_A, i);
+      CopyLauncher copy_launcher;
       IndexSpace is_mid = runtime->get_index_subspace(ctx, ip_A, i);
       LogicalRegion lr_mid = runtime->create_logical_region(ctx, is_mid, fs_A);
       copy_launcher.add_copy_requirements(
@@ -350,9 +355,9 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
       task_launcher.add_region_requirement(
           RegionRequirement(lr_mid, READ_ONLY, EXCLUSIVE, lr_mid));
       task_launcher.add_field(0, FID_VAL);
-      //task_launcher.add_region_requirement(
-        //  RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
-      //task_launcher.add_field(1, FID_VAL);
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
+      task_launcher.add_field(1, FID_VAL);
       future_vec.push(runtime->execute_task(ctx, task_launcher));
       runtime->destroy_logical_region(ctx, lr_mid);
     }
@@ -367,10 +372,33 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     runtime->issue_release(ctx, release_launcher);
     runtime->remap_region(ctx, pr_A);
     runtime->detach_file(ctx, pr_A);*/
-    runtime->destroy_field_space(ctx, fs_I);
-    runtime->destroy_index_space(ctx, is_I);
   } else {
     assert(mode == READFILE);
+    unsigned nslots = 128;
+    std::queue<Future> future_vec;
+    for (int i = 0; i < nregions; i++) {
+      while (future_vec.size() >= nslots) {
+        future_vec.front().get_void_result();
+        future_vec.pop();
+      }
+      IndexSpace is_mid = runtime->get_index_subspace(ctx, ip_A, i);
+      LogicalRegion lr_mid = runtime->create_logical_region(ctx, is_mid, fs_A);
+      TaskLauncher task_launcher(COMPUTE_FROM_FILE_TASK_ID, TaskArgument(&i, sizeof(i)));
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_mid, READ_WRITE, EXCLUSIVE, lr_mid));
+      task_launcher.add_field(0, FID_VAL);
+      task_launcher.add_region_requirement(
+          RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
+      task_launcher.add_field(1, FID_VAL);
+      future_vec.push(runtime->execute_task(ctx, task_launcher));
+      runtime->destroy_logical_region(ctx, lr_mid);
+    }
+    while (!future_vec.empty()) {
+      future_vec.front().get_void_result();
+      future_vec.pop();
+    }
+
+#ifdef ORIGINAL_INDXE_LAUNCH
     IndexLauncher compute_launcher(COMPUTE_FROM_FILE_TASK_ID, launch_domain,
                                    TaskArgument(&global_fd, sizeof(int)), arg_map);
     compute_launcher.add_region_requirement(
@@ -382,6 +410,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     FutureMap exec_f = runtime->execute_index_space(ctx, compute_launcher);
     close(global_fd);
     exec_f.wait_all_results();
+#endif
   }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
@@ -427,9 +456,9 @@ void top_level_task(const Task *task,
   printf("Running matrix multiplication with nsize = %d...\n", nsize);
   printf("Partitioning data into %d sub-regions...\n", nregions);
   printf("TestMode = %d\n", mode);
-  for (int i = 0; i < 3; i++)
-    for(nregions = 16; nregions < 1024; nregions *= 2)
-      if (i == 1 && nregions == 128)
+  for(nregions = 16; nregions < 1024 * 1024; nregions *= 2)
+    for (int i = 0; i < 3; i++)
+      if (nregions >= 1024 && nregions < 1024 * 1024)
       main_task(ctx, runtime, nsize, nregions, (TestMode)i);
 }
 
@@ -437,18 +466,18 @@ void compute_task(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
                   Context ctx, HighLevelRuntime *runtime)
 {
-  assert(regions.size() == 1);
-  assert(task->regions.size() == 1);
+  assert(regions.size() == 2);
+  assert(task->regions.size() == 2);
   assert(task->regions[0].privilege_fields.size() == 1);
-  //assert(task->regions[1].privilege_fields.size() == 1);
+  assert(task->regions[1].privilege_fields.size() == 1);
 
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
-  //FieldID fid_B = *(task->regions[1].privilege_fields.begin());
+  FieldID fid_B = *(task->regions[1].privilege_fields.begin());
 
   RegionAccessor<AccessorType::Generic, ElementType> acc_A =
     regions[0].get_field_accessor(fid_A).typeify<ElementType>();
-  //RegionAccessor<AccessorType::Generic, ElementType> acc_B =
-    //regions[1].get_field_accessor(fid_B).typeify<ElementType>();
+  RegionAccessor<AccessorType::Generic, ElementType> acc_B =
+    regions[1].get_field_accessor(fid_B).typeify<ElementType>();
 
   Domain dom_A = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
@@ -458,11 +487,11 @@ void compute_task(const Task *task,
   int nsize = (int) round(sqrt(nnsize));
   ElementType sum = 0;
   int times = 0;
-  for (times = 0; times * times < nsize; times++)
+  for (times = 0; times < 10; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       ElementType x = acc_A.read(ptr_t(offset + k * nsize + i));
-      ElementType y = acc_A.read(ptr_t(offset + i));
+      ElementType y = acc_B.read(ptr_t(i));
       sum += x * y;
     }
   // int idx = *((int*)task->args);
@@ -477,10 +506,10 @@ void compute_from_file_task(const Task *task,
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
   assert(task->regions[0].privilege_fields.size() == 1);
-  assert(task->regions[0].privilege_fields.size() == 1);
+  assert(task->regions[1].privilege_fields.size() == 1);
   assert(task->arglen == sizeof(int));
-  int fd = *((int*)task->args);
-  int index = task->index_point.point_data[0];
+  int64_t index = *((int*)task->args);
+  // int index = task->index_point.point_data[0];
 
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
   FieldID fid_B = *(task->regions[1].privilege_fields.begin());
@@ -507,7 +536,7 @@ void compute_from_file_task(const Task *task,
   assert(ret >= 0);
   memset(&cb, 0, sizeof(cb));
   cb.aio_lio_opcode = IOCB_CMD_PREAD;
-  cb.aio_fildes = fd;
+  cb.aio_fildes = global_fd;
   cb.aio_buf = (uint64_t)(arr_A);
   cb.aio_nbytes = nsize * nsize * sizeof(ElementType);
   cb.aio_offset = cb.aio_nbytes * index;
@@ -526,7 +555,7 @@ void compute_from_file_task(const Task *task,
 
   ElementType sum = 0;
   int times = 0;
-  for (times = 0; times * times < nsize; times++)
+  for (times = 0; times < 10; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       ElementType x = arr_A[k * nsize + i];
@@ -546,7 +575,7 @@ int main(int argc, char **argv)
   HighLevelRuntime::register_legion_task<compute_task>(COMPUTE_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<compute_from_file_task>(COMPUTE_FROM_FILE_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/);
 
   // Register custom mappers
   HighLevelRuntime::set_registration_callback(update_mappers);
