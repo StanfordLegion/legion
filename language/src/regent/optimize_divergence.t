@@ -50,6 +50,15 @@ end
 
 local analyze_region_divergence = {}
 
+function analyze_region_divergence.expr_region_root(cx, node)
+  analyze_region_divergence.expr(cx, node.region)
+end
+
+function analyze_region_divergence.expr_condition(cx, node)
+  node.values:map(
+    function(value) analyze_region_divergence.expr(cx, value) end)
+end
+
 function analyze_region_divergence.expr_field_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
@@ -112,6 +121,15 @@ end
 
 function analyze_region_divergence.expr_advance(cx, node)
   analyze_region_divergence.expr(cx, node.value)
+end
+
+function analyze_region_divergence.expr_copy(cx, node)
+  analyze_region_divergence.expr_region_root(cx, node.src)
+  analyze_region_divergence.expr_region_root(cx, node.dst)
+  node.conditions:map(
+    function(condition)
+      analyze_region_divergence.expr_condition(cx, condition)
+  end)
 end
 
 function analyze_region_divergence.expr_unary(cx, node)
@@ -214,6 +232,9 @@ function analyze_region_divergence.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return analyze_region_divergence.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_region_divergence.expr_copy(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_region_divergence.expr_unary(cx, node)

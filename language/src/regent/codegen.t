@@ -1414,6 +1414,17 @@ function codegen.expr_internal(cx, node)
   return node.value
 end
 
+function codegen.expr_region_root(cx, node)
+  return codegen.expr(cx, node.region)
+end
+
+function codegen.expr_condition(cx, node)
+  return node.values:map(
+    function(value)
+      return codegen.expr(cx, value):read(cx, std.as_read(value.expr_type))
+  end)
+end
+
 function codegen.expr_id(cx, node)
   if std.is_rawref(node.expr_type) then
     return values.rawref(
@@ -2702,6 +2713,89 @@ function codegen.expr_advance(cx, node)
     expr_type)
 end
 
+function codegen.expr_copy(cx, node)
+  local src_type = std.as_read(node.src.expr_type)
+  local src = codegen.expr_region_root(cx, node.src):read(cx, src_type)
+  local dst_type = std.as_read(node.dst.expr_type)
+  local dst = codegen.expr_region_root(cx, node.dst):read(cx, dst_type)
+  local conditions = node.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
+
+  local launcher = terralib.newsymbol("launcher")
+
+  local actions = terralib.newlist()
+  actions:insert(src.actions)
+  actions:insert(dst.actions)
+  conditions:map(
+    function(condition)
+      actions:insertall(
+        condition:map(function(value) return value.actions end))
+    end)
+  actions:insert(
+    quote
+      [emit_debuginfo(node)]
+      var [launcher] = c.legion_copy_launcher_create(
+        c.legion_predicate_true(), 0, 0)
+    end)
+
+  local add_src_region =
+    c.legion_copy_launcher_add_src_region_requirement_logical_region
+  local add_dst_region =
+    c.legion_copy_launcher_add_dst_region_requirement_logical_region
+  if node.op then
+    add_dst_region =
+      c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
+  end
+
+  assert(cx:has_region(src_type))
+  assert(cx:has_region(dst_type))
+  local src_parent =
+    cx:region(cx:region(src_type).root_region_type).logical_region
+  local dst_parent =
+    cx:region(cx:region(dst_type).root_region_type).logical_region
+
+  local src_fields = std.flatten_struct_fields(src_type.fspace_type)
+  local dst_fields = std.flatten_struct_fields(dst_type.fspace_type)
+  for i, src_field in ipairs(node.src.fields) do
+    local dst_field = node.dst.fields[i]
+    local src_copy_fields = data.filter(function(field) return field:starts_with(src_field) end, src_fields)
+    local dst_copy_fields = data.filter(function(field) return field:starts_with(dst_field) end, dst_fields)
+    assert(#src_copy_fields == #dst_copy_fields)
+
+    for j, src_copy_field in ipairs(src_copy_fields) do
+      local dst_copy_field = dst_copy_fields[j]
+      local src_field_id = cx:region(src_type):field_id(src_copy_field)
+      local dst_field_id = cx:region(dst_type):field_id(dst_copy_field)
+      local dst_field_type = cx:region(dst_type):field_type(dst_copy_field)
+
+      local dst_mode = c.READ_WRITE
+      if node.op then
+        dst_mode = std.reduction_op_ids[node.op][dst_field_type]
+      end
+
+      actions:insert(quote
+        var src_i = add_src_region(
+          [launcher], [src.value].impl, c.READ_ONLY, c.EXCLUSIVE,
+          [src_parent].impl, 0, false)
+        c.legion_copy_launcher_add_src_field(
+          [launcher], src_i, src_field_id, true)
+        var dst_i = add_dst_region(
+          [launcher], [dst.value].impl, dst_mode, c.EXCLUSIVE,
+          [dst_parent].impl, 0, false)
+        c.legion_copy_launcher_add_dst_field(
+          [launcher], dst_i, dst_field_id, true)
+      end)
+    end
+  end
+  actions:insert(quote
+    c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
+
+  return values.value(expr.just(actions, quote end), terralib.types.unit)
+end
+
 local lift_unary_op_to_futures = terralib.memoize(
   function (op, rhs_type, expr_type)
     assert(terralib.types.istype(rhs_type) and
@@ -3112,6 +3206,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return codegen.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return codegen.expr_copy(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return codegen.expr_unary(cx, node)

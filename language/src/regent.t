@@ -62,6 +62,7 @@ local language = {
     "arrives",
     "awaits",
     "atomic",
+    "copy",
     "cross_product",
     "disjoint", -- reserved for future use
     "dynamic_cast",

@@ -99,14 +99,6 @@ function analyze_leaf.expr_static_cast(cx, node)
   return analyze_leaf.expr(cx, node.value)
 end
 
-function analyze_leaf.expr_phase_barrier(cx, node)
-  return analyze_leaf.expr(cx, node.value)
-end
-
-function analyze_leaf.expr_advance(cx, node)
-  return analyze_leaf.expr(cx, node.value)
-end
-
 function analyze_leaf.expr_unary(cx, node)
   return analyze_leaf.expr(cx, node.rhs)
 end
@@ -203,10 +195,13 @@ function analyze_leaf.expr(cx, node)
     return false
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
-    return analyze_leaf.expr_phase_barrier(cx, node)
+    return false
 
   elseif node:is(ast.typed.expr.Advance) then
-    return analyze_leaf.expr_advance(cx, node)
+    return false
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return false
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_leaf.expr_unary(cx, node)
@@ -387,6 +382,15 @@ end
 
 local analyze_inner = {}
 
+function analyze_inner.expr_region_root(cx, node)
+  return analyze_inner.expr(cx, node.region)
+end
+
+function analyze_inner.expr_condition(cx, node)
+  return data.all(
+    node.values:map(function(value) return analyze_inner.expr(cx, value) end))
+end
+
 function analyze_inner.expr_field_access(cx, node)
   return
     not std.is_bounded_type(std.as_read(node.value.expr_type)) and
@@ -468,6 +472,16 @@ end
 
 function analyze_inner.expr_advance(cx, node)
   return analyze_inner.expr(cx, node.value)
+end
+
+function analyze_inner.expr_copy(cx, node)
+  return analyze_inner.expr_region_root(cx, node.src) and
+    analyze_inner.expr_region_root(cx, node.dst) and
+    data.all(
+      node.conditions:map(
+        function(condition)
+          return analyze_inner.expr_condition(cx, condition)
+        end))
 end
 
 function analyze_inner.expr_unary(cx, node)
@@ -569,6 +583,12 @@ function analyze_inner.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return analyze_inner.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_inner.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_inner.expr_copy(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_inner.expr_unary(cx, node)

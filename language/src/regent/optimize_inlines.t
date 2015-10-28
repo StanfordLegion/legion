@@ -152,6 +152,16 @@ end
 
 local analyze_usage = {}
 
+function analyze_usage.expr_region_root(cx, node)
+  return analyze_usage.expr(cx, node.region)
+end
+
+function analyze_usage.expr_condition(cx, node)
+  return data.reduce(
+    usage_meet,
+    node.values:map(function(value) return analyze_usage.expr(cx, value) end))
+end
+
 function analyze_usage.expr_field_access(cx, node)
   return analyze_usage.expr(cx, node.value)
 end
@@ -248,6 +258,18 @@ end
 
 function analyze_usage.expr_advance(cx, node)
   return analyze_usage.expr(cx, node.value)
+end
+
+function analyze_usage.expr_copy(cx, node)
+  return usage_meet(
+    analyze_usage.expr_region_root(cx, node.src),
+    analyze_usage.expr_region_root(cx, node.dst),
+    data.reduce(
+      usage_meet,
+      node.conditions:map(
+        function(condition)
+          return analyze_usage.expr_condition(cx, condition)
+        end)))
 end
 
 function analyze_usage.expr_unary(cx, node)
@@ -351,6 +373,9 @@ function analyze_usage.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return analyze_usage.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_usage.expr_copy(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_usage.expr_unary(cx, node)
