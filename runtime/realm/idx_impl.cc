@@ -1222,8 +1222,9 @@ namespace Realm {
 
 	// if we get here, we got to the end of the 1's
 	int extra2 = __builtin_ctzll(bits);
-	rel_pos = (idx << 6) + extra2;
-	assert(rel_pos <= mask.num_elements);
+	// if we run off the end, that's bad, but don't get confused by a few extra bits in the last word
+	assert((idx << 6) <= mask.num_elements);
+	rel_pos = std::min((idx << 6) + extra2, mask.num_elements);
 	pos = mask.first_element + rel_pos;
 	length = pos - position;
 	return true;
