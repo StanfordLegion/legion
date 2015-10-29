@@ -31,7 +31,6 @@ function context:new_local_scope(must_epoch)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
-    coherence_modes = self.coherence_modes,
     constraints = self.constraints,
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
@@ -46,7 +45,6 @@ function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
-    coherence_modes = data.newmap(),
     constraints = {},
     region_universe = {},
     expected_return_type = {expected_return_type},
@@ -79,6 +77,278 @@ end
 function context:set_return_type(t)
   assert(self.expected_return_type)
   self.expected_return_type[1] = t
+end
+
+function type_check.region_field(cx, node, region, prefix_path, value_type)
+  local field_path = prefix_path .. data.newtuple(node.field_name)
+  local field_type = std.get_field(value_type, node.field_name)
+  if not field_type then
+    log.error(node, "no field '" .. node.field_name ..
+                "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
+  end
+
+  return type_check.region_fields(
+    cx, node.fields, region, field_path, field_type)
+end
+
+function type_check.region_fields(cx, node, region, prefix_path, value_type)
+  if not node then
+    return terralib.newlist({prefix_path})
+  end
+  local result = terralib.newlist()
+  for _, field in ipairs(node) do
+    result:insertall(
+      type_check.region_field(cx, field, region, prefix_path, value_type))
+  end
+  return result
+end
+
+function type_check.region_bare(cx, node)
+  local region = node.symbol
+  local region_type = region.type
+  if not std.is_region(region_type) then
+    log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
+  end
+  return region
+end
+
+function type_check.region_root(cx, node)
+  local region = type_check.region_bare(cx, node)
+  local region_type = region.type
+  local value_type = region_type.fspace_type
+  return {
+    region = region,
+    fields = type_check.region_fields(
+      cx, node.fields, region, data.newtuple(), value_type),
+  }
+end
+
+function type_check.expr_region_root(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  if not std.is_region(region_type) then
+    log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
+  end
+  local value_type = region_type.fspace_type
+  return ast.typed.expr.RegionRoot {
+    region = region,
+    fields = type_check.region_fields(
+      cx, node.fields, region, data.newtuple(), value_type),
+    expr_type = region_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.regions(cx, node)
+  return node:map(
+    function(region) return type_check.region_root(cx, region) end)
+end
+
+function type_check.condition_variable(cx, node)
+  local symbol = node.symbol
+  local var_type = symbol.type
+  if not std.is_phase_barrier(var_type) then
+    log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(var_type))
+  end
+  return symbol
+end
+
+function type_check.condition_variables(cx, node)
+  return node:map(
+    function(region) return type_check.condition_variable(cx, region) end)
+end
+
+function type_check.privilege_kind(cx, node)
+  if node:is(ast.specialized.privilege_kind.Reads) then
+    return std.reads
+  elseif node:is(ast.specialized.privilege_kind.Writes) then
+    return std.writes
+  elseif node:is(ast.specialized.privilege_kind.Reduces) then
+    return std.reduces(node.op)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.privilege_kinds(cx, node)
+  return node:map(
+    function(privilege) return type_check.privilege_kind(cx, privilege) end)
+end
+
+function type_check.privilege(cx, node)
+  local privileges = type_check.privilege_kinds(cx, node.privileges)
+  local region_fields = type_check.regions(cx, node.regions)
+  return privileges:map(
+    function(privilege) return std.privilege(privilege, region_fields) end)
+end
+
+function type_check.privileges(cx, node)
+  local result = terralib.newlist()
+  for _, privilege in ipairs(node) do
+    result:insertall(type_check.privilege(cx, privilege))
+  end
+  return result
+end
+
+function type_check.coherence_kind(cx, node)
+  if node:is(ast.specialized.coherence_kind.Exclusive) then
+    return std.exclusive
+  elseif node:is(ast.specialized.coherence_kind.Atomic) then
+    return std.atomic
+  elseif node:is(ast.specialized.coherence_kind.Simultaneous) then
+    return std.simultaneous
+  elseif node:is(ast.specialized.coherence_kind.Relaxed) then
+    return std.relaxed
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.coherence_kinds(cx, node)
+  return node:map(
+    function(coherence) return type_check.coherence_kind(cx, coherence) end)
+end
+
+local function check_coherence_conflict_field(node, region, field,
+                                              coherence, other_field, result)
+  local region_type = region.type
+  if field:starts_with(other_field) or other_field:starts_with(field) then
+    local other_coherence = result[region_type][other_field]
+    assert(other_coherence)
+    if other_coherence ~= coherence then
+      log.error(
+        node, "conflicting coherence modes: " .. other_coherence .. "(" ..
+          (data.newtuple(region) .. other_field):mkstring(".") .. ")" ..
+          " and " .. coherence .. "(" ..
+          (data.newtuple(region) .. field):mkstring(".") .. ")")
+    end
+  end
+end
+
+local function check_coherence_conflict(node, region, field, coherence, result)
+  local region_type = region.type
+  for _, other_field in result[region_type]:keys() do
+    check_coherence_conflict_field(
+      node, region, field, coherence, other_field, result)
+  end
+end
+
+function type_check.coherence(cx, node, result)
+  local coherence_modes = type_check.coherence_kinds(cx, node.coherence_modes)
+  local region_fields = type_check.regions(cx, node.regions)
+
+  for _, coherence in ipairs(coherence_modes) do
+    for _, region_field in ipairs(region_fields) do
+      local region = region_field.region
+      local region_type = region.type
+      assert(std.is_region(region_type))
+      if not result[region_type] then
+        result[region_type] = data.newmap()
+      end
+
+      local fields = region_field.fields
+      for _, field in ipairs(fields) do
+        check_coherence_conflict(node, region, field, coherence, result)
+        result[region_type][field] = coherence
+      end
+    end
+  end
+end
+
+function type_check.coherence_modes(cx, node)
+  local result = data.newmap()
+  for _, coherence in ipairs(node) do
+    type_check.coherence(cx, coherence, result)
+  end
+  return result
+end
+
+function type_check.condition_kind(cx, node)
+  if node:is(ast.specialized.condition_kind.Arrives) then
+    return std.arrives
+  elseif node:is(ast.specialized.condition_kind.Awaits) then
+    return std.awaits
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.condition_kinds(cx, node)
+  return node:map(
+    function(condition) return type_check.condition_kind(cx, condition) end)
+end
+
+function type_check.condition(cx, node, params, result)
+  local conditions = type_check.condition_kinds(cx, node.conditions)
+  local variables = type_check.condition_variables(cx, node.variables)
+
+  for _, symbol in ipairs(variables) do
+    for _, condition in ipairs(conditions) do
+      local i = params[symbol]
+      assert(i)
+      result[condition][i] = symbol
+    end
+  end
+end
+
+function type_check.expr_condition(cx, node)
+  local conditions = type_check.condition_kinds(cx, node.conditions)
+  local values = node.values:map(
+    function(value) return type_check.expr(cx, value) end)
+  local value_types = values:map(
+    function(value) return std.check_read(cx, value) end)
+  for _, value_type in ipairs(value_types) do
+    if not std.is_phase_barrier(value_type) then
+      log.error(node, "type mismatch: expected " ..
+                  tostring(std.phase_barrier) .. " but got " ..
+                  tostring(value_type))
+    end
+  end
+
+  return ast.typed.expr.Condition {
+    conditions = conditions,
+    values = values,
+  }
+end
+
+function type_check.conditions(cx, node, params)
+  local param_index_by_symbol = {}
+  for i, param in ipairs(params) do
+    param_index_by_symbol[param.symbol] = i
+  end
+
+  local result = {}
+  result[std.arrives] = {}
+  result[std.awaits] = {}
+
+  node:map(
+    function(condition)
+      return type_check.condition(cx, condition, param_index_by_symbol, result)
+    end)
+  return result
+end
+
+function type_check.constraint_kind(cx, node)
+  if node:is(ast.specialized.constraint_kind.Subregion) then
+    return "<="
+  elseif node:is(ast.specialized.constraint_kind.Disjointness) then
+    return "*"
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.constraint(cx, node)
+  local lhs = type_check.region_bare(cx, node.lhs)
+  local op = type_check.constraint_kind(cx, node.op)
+  local rhs = type_check.region_bare(cx, node.rhs)
+  return std.constraint(lhs, rhs, op)
+end
+
+function type_check.constraints(cx, node)
+  return node:map(
+    function(constraint) return type_check.constraint(cx, constraint) end)
 end
 
 function type_check.expr_id(cx, node)
@@ -377,8 +647,9 @@ function type_check.expr_call(cx, node)
       if valid then
         fn_type = result_type
       else
-        local func_name = string.gsub(fn.value.name, "^std[.]", "regentlib.")
-        log.error(node, "no applicable overloaded function " .. tostring(func_name) ..
+        local fn_name = fn.value.name or tostring(fn.value)
+        fn_name = string.gsub(fn_name, "^std[.]", "regentlib.")
+        log.error(node, "no applicable overloaded function " .. tostring(fn_name) ..
                   " for arguments " .. arg_types:mkstring(", "))
       end
     elseif std.is_task(fn.value) then
@@ -665,6 +936,8 @@ function type_check.expr_raw_value(cx, node)
     expr_type = std.c.legion_logical_partition_t
   elseif std.is_cross_product(value_type) then
     expr_type = std.c.legion_terra_index_cross_product_t
+  elseif std.is_bounded_type(value_type) then
+    expr_type = value_type.index_type.impl_type
   else
     log.error(node, "raw expected an ispace, region, partition, or cross product, got " .. tostring(value_type))
   end
@@ -905,6 +1178,74 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_phase_barrier(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.validate_implicit_cast(value_type, int) then
+    log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.PhaseBarrier {
+    value = value,
+    expr_type = std.phase_barrier,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_advance(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.validate_implicit_cast(value_type, std.phase_barrier) then
+    log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.Advance {
+    value = value,
+    expr_type = std.phase_barrier,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_copy(cx, node)
+  local src = type_check.expr_region_root(cx, node.src)
+  local src_type = std.check_read(cx, src)
+  local dst = type_check.expr_region_root(cx, node.dst)
+  local dst_type = std.check_read(cx, dst)
+  local conditions = node.conditions:map(
+    function(condition) return type_check.expr_condition(cx, condition) end)
+  local expr_type = terralib.types.unit
+
+  if #src.fields ~= #dst.fields then
+    log.error(node, "mismatch in number of fields between " .. tostring(#src.fields) ..
+                " and " .. tostring(#dst.fields))
+  end
+
+  for i, src_field in ipairs(src.fields) do
+    local dst_field = dst.fields[i]
+    local src_type = std.get_field_path(src_type.fspace_type, src_field)
+    local dst_type = std.get_field_path(dst_type.fspace_type, dst_field)
+    if not std.type_eq(src_type, dst_type) then
+      log.error(node, "type mismatch between " .. tostring(src_type) ..
+                  " and " .. tostring(dst_type))
+    end
+  end
+
+  print(src.fields:mkstring(" "))
+  print(dst.fields:mkstring(" "))
+
+  return ast.typed.expr.Copy {
+    src = src,
+    dst = dst,
+    op = node.op,
+    conditions = conditions,
+    expr_type = terralib.types.unit,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 local function unary_op_type(op)
   return function(cx, rhs_type)
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -1104,6 +1445,15 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
 
+  elseif node:is(ast.specialized.expr.PhaseBarrier) then
+    return type_check.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.specialized.expr.Advance) then
+    return type_check.expr_advance(cx, node)
+
+  elseif node:is(ast.specialized.expr.Copy) then
+    return type_check.expr_copy(cx, node)
+
   elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)
 
@@ -1132,6 +1482,9 @@ end
 function type_check.stat_if(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
@@ -1149,6 +1502,9 @@ end
 function type_check.stat_elseif(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.Elseif {
@@ -1162,6 +1518,9 @@ end
 function type_check.stat_while(cx, node)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
+  if not std.validate_implicit_cast(cond_type, bool) then
+    log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
+  end
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.While {
@@ -1265,6 +1624,9 @@ end
 function type_check.stat_repeat(cx, node)
   local until_cond = type_check.expr(cx, node.until_cond)
   local until_cond_type = std.check_read(cx, until_cond)
+  if not std.validate_implicit_cast(until_cond_type, bool) then
+    log.error(node.until_cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(until_cond_type))
+  end
 
   local cx = cx:new_local_scope()
   return ast.typed.stat.Repeat {
@@ -1568,179 +1930,6 @@ function type_check.stat_task_param(cx, node)
   }
 end
 
-function type_check.region_field(cx, node, region, prefix_path, value_type)
-  local field_path = prefix_path .. data.newtuple(node.field_name)
-  local field_type = std.get_field(value_type, node.field_name)
-  if not field_type then
-    log.error(node, "no field '" .. node.field_name ..
-                "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
-  end
-
-  return type_check.region_fields(
-    cx, node.fields, region, field_path, field_type)
-end
-
-function type_check.region_fields(cx, node, region, prefix_path, value_type)
-  if not node then
-    return terralib.newlist({prefix_path})
-  end
-  local result = terralib.newlist()
-  for _, field in ipairs(node) do
-    result:insertall(
-      type_check.region_field(cx, field, region, prefix_path, value_type))
-  end
-  return result
-end
-
-function type_check.region_bare(cx, node)
-  local region = node.symbol
-  local region_type = region.type
-  if not std.is_region(region_type) then
-    log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
-  end
-  return region
-end
-
-function type_check.region_root(cx, node)
-  local region = type_check.region_bare(cx, node)
-  local region_type = region.type
-  local value_type = region_type.fspace_type
-  return {
-    region = region,
-    fields = type_check.region_fields(
-      cx, node.fields, region, data.newtuple(), value_type),
-  }
-end
-
-function type_check.regions(cx, node)
-  return node:map(
-    function(region) return type_check.region_root(cx, region) end)
-end
-
-function type_check.privilege_kind(cx, node)
-  if node:is(ast.specialized.privilege_kind.Reads) then
-    return std.reads
-  elseif node:is(ast.specialized.privilege_kind.Writes) then
-    return std.writes
-  elseif node:is(ast.specialized.privilege_kind.Reduces) then
-    return std.reduces(node.op)
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
-end
-
-function type_check.privilege_kinds(cx, node)
-  return node:map(
-    function(privilege) return type_check.privilege_kind(cx, privilege) end)
-end
-
-function type_check.privilege(cx, node)
-  local privileges = type_check.privilege_kinds(cx, node.privileges)
-  local region_fields = type_check.regions(cx, node.regions)
-  return privileges:map(
-    function(privilege) return std.privilege(privilege, region_fields) end)
-end
-
-function type_check.privileges(cx, node)
-  local result = terralib.newlist()
-  for _, privilege in ipairs(node) do
-    result:insertall(type_check.privilege(cx, privilege))
-  end
-  return result
-end
-
-function type_check.coherence_kind(cx, node)
-  if node:is(ast.specialized.coherence_kind.Exclusive) then
-    return std.exclusive
-  elseif node:is(ast.specialized.coherence_kind.Atomic) then
-    return std.atomic
-  elseif node:is(ast.specialized.coherence_kind.Simultaneous) then
-    return std.simultaneous
-  elseif node:is(ast.specialized.coherence_kind.Relaxed) then
-    return std.relaxed
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
-end
-
-function type_check.coherence_kinds(cx, node)
-  return node:map(
-    function(coherence) return type_check.coherence_kind(cx, coherence) end)
-end
-
-local function check_coherence_conflict_field(cx, node, region, field,
-                                              coherence, other_field)
-  local region_type = region.type
-  if field:starts_with(other_field) or other_field:starts_with(field) then
-    local other_coherence = cx.coherence_modes[region_type][other_field]
-    assert(other_coherence)
-    if other_coherence ~= coherence then
-      log.error(
-        node, "conflicting coherence modes: " .. other_coherence .. "(" ..
-          (data.newtuple(region) .. other_field):mkstring(".") .. ")" ..
-          " and " .. coherence .. "(" ..
-          (data.newtuple(region) .. field):mkstring(".") .. ")")
-    end
-  end
-end
-
-local function check_coherence_conflict(cx, node, region, field, coherence)
-  local region_type = region.type
-  for _, other_field in cx.coherence_modes[region_type]:keys() do
-    check_coherence_conflict_field(cx, node, region, field, coherence, other_field)
-  end
-end
-
-function type_check.coherence(cx, node)
-  local coherence_modes = type_check.coherence_kinds(cx, node.coherence_modes)
-  local region_fields = type_check.regions(cx, node.regions)
-
-  for _, coherence in ipairs(coherence_modes) do
-    for _, region_field in ipairs(region_fields) do
-      local region = region_field.region
-      local region_type = region.type
-      assert(std.is_region(region_type))
-      if not cx.coherence_modes[region_type] then
-        cx.coherence_modes[region_type] = data.newmap()
-      end
-
-      local fields = region_field.fields
-      for _, field in ipairs(fields) do
-        check_coherence_conflict(cx, node, region, field, coherence)
-        cx.coherence_modes[region_type][field] = coherence
-      end
-    end
-  end
-end
-
-function type_check.coherence_modes(cx, node)
-  for _, coherence in ipairs(node) do
-    type_check.coherence(cx, coherence)
-  end
-end
-
-function type_check.constraint_kind(cx, node)
-  if node:is(ast.specialized.constraint_kind.Subregion) then
-    return "<="
-  elseif node:is(ast.specialized.constraint_kind.Disjointness) then
-    return "*"
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
-end
-
-function type_check.constraint(cx, node)
-  local lhs = type_check.region_bare(cx, node.lhs)
-  local op = type_check.constraint_kind(cx, node.op)
-  local rhs = type_check.region_bare(cx, node.rhs)
-  return std.constraint(lhs, rhs, op)
-end
-
-function type_check.constraints(cx, node)
-  return node:map(
-    function(constraint) return type_check.constraint(cx, constraint) end)
-end
-
 function type_check.stat_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
@@ -1768,9 +1957,11 @@ function type_check.stat_task(cx, node)
   end
   prototype:setprivileges(privileges)
 
-  type_check.coherence_modes(cx, node.coherence_modes)
-  local coherence_modes = cx.coherence_modes
+  local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
   prototype:set_coherence_modes(coherence_modes)
+
+  local conditions = type_check.conditions(cx, node.conditions, params)
+  prototype:set_conditions(conditions)
 
   local constraints = type_check.constraints(cx, node.constraints)
   std.add_constraints(cx, constraints)

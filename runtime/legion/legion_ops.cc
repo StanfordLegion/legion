@@ -9549,6 +9549,7 @@ namespace LegionRuntime {
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
       requirement.copy_without_mapping_info(region.impl->get_requirement());
+      requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
       // Delay getting a reference until trigger_execution().  This means we
       //  have to keep region

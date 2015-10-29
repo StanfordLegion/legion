@@ -40,7 +40,7 @@ GEN_GPU_SRC	:=		# .cu files
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
-INC_FLAGS += -I$(TERRA_DIR)/release/include/terra
+INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 LD_FLAGS +=
 
 CC_FLAGS += -fPIC

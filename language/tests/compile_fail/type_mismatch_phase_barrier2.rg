@@ -12,25 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+-- fails-with:
+-- type_mismatch_phase_barrier2.rg:22: type mismatch: expected phase_barrier but got int32
+-- task f(x : int) where arrives(x) do
+-- ^
 
-local std = require("regent/std")
+import "regent"
 
-local builtins = {}
-
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
-
-builtins.index_type = std.index_type
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.phase_barrier = std.phase_barrier
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
-
-return builtins
+task f(x : int) where arrives(x) do
+end

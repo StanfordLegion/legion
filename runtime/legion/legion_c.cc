@@ -1192,6 +1192,45 @@ legion_predicate_false(void)
   return CObjectWrapper::wrap_const(&Predicate::FALSE_PRED);
 }
 
+// -----------------------------------------------------------------------
+// Phase Barrier Operations
+// -----------------------------------------------------------------------
+
+legion_phase_barrier_t
+legion_phase_barrier_create(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            unsigned arrivals)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  PhaseBarrier *result =
+    new PhaseBarrier(runtime->create_phase_barrier(ctx, arrivals));
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_phase_barrier_destroy(legion_phase_barrier_t handle_)
+{
+  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_phase_barrier_t
+legion_phase_barrier_advance(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             legion_phase_barrier_t handle_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+
+  PhaseBarrier *result =
+    new PhaseBarrier(runtime->advance_phase_barrier(ctx, *handle));
+  return CObjectWrapper::wrap(result);
+}
+
 //------------------------------------------------------------------------
 // Future Operations
 //------------------------------------------------------------------------
@@ -1463,6 +1502,26 @@ legion_task_launcher_add_future(legion_task_launcher_t launcher_,
   launcher->add_future(*future);
 }
 
+void
+legion_task_launcher_add_wait_barrier(legion_task_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -1642,6 +1701,26 @@ legion_index_launcher_add_future(legion_index_launcher_t launcher_,
   launcher->add_future(*future);
 }
 
+void
+legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
+}
+
 // -----------------------------------------------------------------------
 // Inline Mapping Operations
 // -----------------------------------------------------------------------
@@ -1809,6 +1888,26 @@ legion_copy_launcher_add_dst_region_requirement_logical_region(
   return idx;
 }
 
+unsigned
+legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, redop, prop, parent, tag, verified));
+  return idx;
+}
+
 void
 legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher_,
                                    unsigned idx,
@@ -1829,6 +1928,26 @@ legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher_,
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_dst_field(idx, fid, inst);
+}
+
+void
+legion_copy_launcher_add_wait_barrier(legion_copy_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
 }
 
 // -----------------------------------------------------------------------

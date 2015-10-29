@@ -14622,7 +14622,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         LegionSpy::log_physical_instance(manager->get_instance().id,
             manager->memory.id, handle.index_space.id,
-            handle.field_space.id, handle.tree_id);
+            handle.field_space.id, handle.tree_id, blocking_factor);
         for (std::set<FieldID>::const_iterator it = fields.begin();
              it != fields.end(); ++it)
           LegionSpy::log_instance_field(manager->get_instance().id, *it);

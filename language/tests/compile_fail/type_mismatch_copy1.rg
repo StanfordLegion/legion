@@ -12,25 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+-- fails-with:
+-- type_mismatch_copy1.rg:24: type mismatch: expected a region but got int32
+--   copy(x, y)
+--        ^
 
-local std = require("regent/std")
+import "regent"
 
-local builtins = {}
-
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
-
-builtins.index_type = std.index_type
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.phase_barrier = std.phase_barrier
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
-
-return builtins
+task f(x : int, y : region(int))
+where reads writes(y) do
+  copy(x, y)
+end
+f:compile()

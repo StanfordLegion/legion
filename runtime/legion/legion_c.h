@@ -51,6 +51,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
+  NEW_OPAQUE_TYPE(legion_phase_barrier_t);
   NEW_OPAQUE_TYPE(legion_future_t);
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
@@ -1186,6 +1187,38 @@ extern "C" {
   legion_predicate_false(void);
 
   // -----------------------------------------------------------------------
+  // Phase Barrier Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_phase_barrier()
+   */
+  legion_phase_barrier_t
+  legion_phase_barrier_create(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              unsigned arrivals);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::PhaseBarrier::~PhaseBarrier()
+   */
+  void
+  legion_phase_barrier_destroy(legion_phase_barrier_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
+   */
+  legion_phase_barrier_t
+  legion_phase_barrier_advance(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_phase_barrier_t handle);
+
+  // -----------------------------------------------------------------------
   // Future Operations
   // -----------------------------------------------------------------------
 
@@ -1407,6 +1440,20 @@ extern "C" {
                                   legion_future_t future);
 
   /**
+   * @see LegionRuntime::HighLevel::TaskLauncher::add_wait_barrier()
+   */
+  void
+  legion_task_launcher_add_wait_barrier(legion_task_launcher_t launcher,
+                                        legion_phase_barrier_t bar);
+
+  /**
+   * @see LegionRuntime::HighLevel::TaskLauncher::add_arrival_barrier()
+   */
+  void
+  legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher,
+                                           legion_phase_barrier_t bar);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see LegionRuntime::HighLevel::IndexLauncher::IndexLauncher()
@@ -1533,6 +1580,20 @@ extern "C" {
   void
   legion_index_launcher_add_future(legion_index_launcher_t launcher,
                                    legion_future_t future);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexLauncher::add_wait_barrier()
+   */
+  void
+  legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher,
+                                         legion_phase_barrier_t bar);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexLauncher::add_arrival_barrier()
+   */
+  void
+  legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
+                                            legion_phase_barrier_t bar);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
@@ -1661,6 +1722,19 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_region_requirement()
+   */
+  unsigned
+  legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
    * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
    */
   void
@@ -1677,6 +1751,20 @@ extern "C" {
                                      unsigned idx,
                                      legion_field_id_t fid,
                                      bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_wait_barrier()
+   */
+  void
+  legion_copy_launcher_add_wait_barrier(legion_copy_launcher_t launcher,
+                                        legion_phase_barrier_t bar);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_arrival_barrier()
+   */
+  void
+  legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
+                                           legion_phase_barrier_t bar);
 
   // -----------------------------------------------------------------------
   // Must Epoch Operations

@@ -12,25 +12,31 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+-- fails-with:
+-- optimize_loops12.rg:39: loop optimization failed: argument 1 is not provably invariant
+--     f(g(x))
+--     ^
 
-local std = require("regent/std")
+import "regent"
 
-local builtins = {}
+-- This tests the various loop optimizations supported by the
+-- compiler.
 
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
+local c = regentlib.c
 
-builtins.index_type = std.index_type
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.phase_barrier = std.phase_barrier
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
+task f(x : phase_barrier)
+where arrives(x) do
+end
 
-return builtins
+terra g(x : phase_barrier) : phase_barrier
+  return x
+end
+
+task h(n : int, x : phase_barrier)
+  -- not optimized: argument is not invariant
+  __demand(__parallel)
+  for i = 0, n do
+    f(g(x))
+  end
+end
+h:compile()

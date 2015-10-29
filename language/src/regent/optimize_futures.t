@@ -154,6 +154,15 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return nil
+
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
 
@@ -380,6 +389,23 @@ function promote(node)
   return node
 end
 
+function optimize_futures.expr_region_root(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
+function optimize_futures.expr_condition(cx, node)
+  local values = node.values:map(
+    function(value)
+      return concretize(optimize_futures.expr(cx, node.region))
+    end)
+  return node {
+    values = values,
+  }
+end
+
 function optimize_futures.expr_id(cx, node)
   if cx:is_future(node.value) then
     if std.is_rawref(node.expr_type) then
@@ -546,6 +572,34 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_phase_barrier(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_advance(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_copy(cx, node)
+  local src = concretize(optimize_futures.expr_region_root(cx, node.src))
+  local dst = concretize(optimize_futures.expr_region_root(cx, node.dst))
+  local conditions = node.conditions:map(
+    function(condition)
+      return concretize(optimize_futures.expr_condition(cx, condition))
+    end)
+  return node {
+    src = src,
+    dst = dst,
+    conditions = conditions,
+  }
+end
+
 function optimize_futures.expr_unary(cx, node)
   local rhs = optimize_futures.expr(cx, node.rhs)
   local rhs_type = std.as_read(rhs.expr_type)
@@ -653,6 +707,15 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return optimize_futures.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return optimize_futures.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return optimize_futures.expr_copy(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)

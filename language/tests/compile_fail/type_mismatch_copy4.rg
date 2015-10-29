@@ -12,25 +12,36 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+-- fails-with:
+-- type_mismatch_copy4.rg:45: mismatch in number of fields between 3 and 4
+--   copy(x.k.{e.{a, b}, f.a}, y.{g, l.{c, d, e.a}})
+--      ^
 
-local std = require("regent/std")
+import "regent"
 
-local builtins = {}
+struct p1 {
+  a : int,
+  b : int,
+}
 
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
+struct p2 {
+  c : int,
+  d : int,
+  e : p1,
+  f : p1,
+}
 
-builtins.index_type = std.index_type
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.phase_barrier = std.phase_barrier
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
+struct p3 {
+  g : int,
+  h : int,
+  i : p1,
+  j : p1,
+  k : p2,
+  l : p2,
+}
 
-return builtins
+task f(x : region(p3), y : region(p3))
+where reads writes(x, y) do
+  copy(x.k.{e.{a, b}, f.a}, y.{g, l.{c, d, e.a}})
+end
+f:compile()

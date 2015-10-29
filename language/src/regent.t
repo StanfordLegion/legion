@@ -58,7 +58,11 @@ local language = {
     "__unroll",
     "__vectorize",
     "aliased", -- reserved for future use
+    "advance",
+    "arrives",
+    "awaits",
     "atomic",
+    "copy",
     "cross_product",
     "disjoint", -- reserved for future use
     "dynamic_cast",
@@ -72,6 +76,7 @@ local language = {
     "new",
     "null",
     "partition",
+    "phase_barrier",
     "product",
     "ptr", -- reserved for future use
     "reads",
