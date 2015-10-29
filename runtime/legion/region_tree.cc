@@ -3510,16 +3510,6 @@ namespace LegionRuntime {
       const Domain &right_dom = right_node->get_domain_blocking();
       if (left_dom.get_dim() != right_dom.get_dim())
         return false;
-      else if (left_dom.get_dim() == 0)
-      {
-#ifdef OVERZEALOUS_COMPATIBILITY_CHECK
-        const LowLevel::ElementMask &left_mask = 
-          left_dom.get_index_space().get_valid_mask();
-        const LowLevel::ElementMask &right_mask = 
-          right_dom.get_index_space().get_valid_mask();
-        return (left_mask.get_num_elmts() == right_mask.get_num_elmts());
-#endif
-      }
       return true;
     }
 
