@@ -308,15 +308,7 @@ function analyze_is_loop_invariant.expr_method_call(cx, node)
 end
 
 function analyze_is_loop_invariant.expr_call(cx, node)
-  if not analyze_is_loop_invariant.expr(cx, node.fn) then
-    return false
-  end
-  for _, arg in ipairs(node.args) do
-    if not analyze_is_loop_invariant.expr(cx, arg) then
-      return false
-    end
-  end
-  return true
+  return false
 end
 
 function analyze_is_loop_invariant.expr_cast(cx, node)
@@ -553,6 +545,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
 
     local arg_type = std.as_read(arg.expr_type)
     mapping[arg_type] = param_types[i]
+    -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
         (std.is_partition(std.as_read(arg.value.expr_type)) or
@@ -570,6 +563,19 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       end
     end
 
+    if std.is_phase_barrier(arg_type) then
+      -- Phase barriers must be invariant, or must not be used as an arrival/wait.
+      if not arg_invariant then
+        for _, variables in pairs(task:get_conditions()) do
+          if variables[i] then
+            log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
+            return node
+          end
+        end
+      end
+    end
+
+    -- Tests for non-interference.
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(

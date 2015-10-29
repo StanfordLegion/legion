@@ -1679,21 +1679,22 @@ class CopyOp(object):
 
     def print_base_node(self, printer, logical):
         label = 'Copy Across '+str(self.uid)+'\\n '+\
-                ('' if logical else 'Inst:\ '+hex(self.instances[0].iid)+'@'+\
-                hex(self.instances[0].memory.uid)+'\ '+\
-                '\ \=\=\>\ '+hex(self.instances[1].iid)+'@'+\
-                hex(self.instances[1].memory.uid)+'\\n')+\
+                ('' if logical else 'Inst:\ '+\
+                self.instances[0].dot_instance()+\
+                '\ \=\=\>\ '+self.instances[1].dot_instance()+'\\n'+\
                 'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
-                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n'+\
+                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n')+\
                 'Src Req:\ '+self.reqs[0].to_summary_string()+\
                 ('\\n' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')\\n')+\
                 'Dst Req:\ '+self.reqs[1].to_summary_string()+\
                 ('' if self.reqs[1].region_node.name == None
                         else '\\n('+self.reqs[1].region_node.name+')')
+        color = 'darkgoldenrod3'
+        size = 14
 
         printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=darkgoldenrod3,fontsize=14,fontcolor=black,'+\
+                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
@@ -2770,23 +2771,27 @@ class Copy(object):
     def print_physical_node(self, printer):
         self.mask = self.field_mask_string()
         label = 'Copy '+str(self.uid)+'\\n'+\
-                'Inst:\ '+hex(self.src_inst.iid)+'@'+\
-                hex(self.src_inst.memory.uid)+'\ '+\
-                '\ \=\=\>\ '+hex(self.dst_inst.iid)+'@'+\
-                hex(self.dst_inst.memory.uid)+'\\n'+\
+                'Inst:\ '+self.src_inst.dot_instance()+\
+                '\ \=\=\>\ '+self.dst_inst.dot_instance()+'\\n'+\
                 'Field: \{'+self.mask+'\}\ '+'\ \=\=\>\ \{'+self.mask+'\}\\n'+\
                 'Req:\ \{index:'+hex(self.region.index_node.uid)+\
                 ',field:'+hex(self.region.field_node.uid)+',tree:'+\
                 str(self.region.tid)+'\}'+\
                 ('' if self.region.name == None else '\\n('+self.region.name+')')
         color = 'darkgoldenrod1'
-
+        size = 14
         if self.redop <> 0:
             label += '\\nReduction\ Op:\ '+str(self.redop)
-            color = 'crimson'
+            color = 'tomato'
+        else:
+            max_blocking = max(self.src_inst.blocking, self.dst_inst.blocking)
+            min_blocking = min(self.src_inst.blocking, self.dst_inst.blocking)
+            if max_blocking > 1 and min_blocking == 1:
+                color = 'red'
+                size = 16
 
         printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor='+color+',fontsize=14,fontcolor=black,'+\
+                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
@@ -2806,11 +2811,12 @@ class Copy(object):
                 edge_label='copy '+hex(self.uid)+' (fields: '+self.mask+')')
 
 class PhysicalInstance(object):
-    def __init__(self, state, iid, ver, memory, region):
+    def __init__(self, state, iid, ver, memory, region, blocking):
         self.state = state
         self.iid = iid
         self.memory = memory
         self.region = region
+        self.blocking = blocking
         self.op_users = dict()
         memory.add_physical_instance(self)
         self.node_name = "physical_inst_"+str(iid)+"_"+str(ver)
@@ -2833,12 +2839,16 @@ class PhysicalInstance(object):
     def add_field(self, fid):
         self.fields.append(fid)
 
+    def dot_instance(self):
+        return hex(self.iid)+'@'+hex(self.memory.uid)+'\ ('+str(self.blocking)+')'
+
     def print_igraph_node(self, printer):
         if self.region.name <> None:
             label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
         else:
             label = hex(self.iid)+'@'+hex(self.memory.uid)
         label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
+        label = label+'\\nblocking factor: '+str(self.blocking)
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
                 'shape=oval,penwidth=0,margin=0];')
@@ -2885,6 +2895,9 @@ class ReductionInstance(object):
 
     def add_field(self, fid):
         self.fields.append(fid)
+
+    def dot_instance(self):
+        return hex(self.iid)+'@'+hex(self.memory.uid)
 
     def print_igraph_node(self, printer):
         if self.region.name <> None:
@@ -3605,7 +3618,10 @@ class ConnectedComponent(object):
             m.print_igraph_edges(printer)
         copy_groups = {}
         for c in self.copies.itervalues():
-            inst_pair = (c.src_inst.node_name, c.dst_inst.node_name)
+            if isinstance(c, Copy):
+                inst_pair = (c.src_inst.node_name, c.dst_inst.node_name)
+            else:
+                inst_pair = (c.instances[0].node_name, c.instances[1].node_name)
             if not inst_pair in copy_groups:
                 copy_groups[inst_pair] = []
             copy_groups[inst_pair].append(c)
@@ -4107,7 +4123,7 @@ class State(object):
                 return True
         return False
 
-    def add_physical_instance(self, iid, mem, index, field, tree):
+    def add_physical_instance(self, iid, mem, index, field, tree, blocking):
         #if iid in self.instances:
         #    return True
         if mem not in self.memories:
@@ -4120,7 +4136,7 @@ class State(object):
             return False
         region = self.get_index_node(True, index).get_instance(tree)
         ver = 0 if iid not in self.instances else len(self.instances[iid])
-        inst = PhysicalInstance(self, iid, ver, self.memories[mem], region)
+        inst = PhysicalInstance(self, iid, ver, self.memories[mem], region, blocking)
         if iid in self.instances:
             self.instances[iid].append(inst)
         else:

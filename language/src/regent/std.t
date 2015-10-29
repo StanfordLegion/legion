@@ -475,6 +475,10 @@ function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
 end
 
+function std.is_phase_barrier(t)
+  return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
+end
+
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
 end
@@ -1954,6 +1958,16 @@ std.future = terralib.memoize(function(result_type)
 end)
 
 do
+  local st = terralib.types.newstruct("phase_barrier")
+  std.phase_barrier = st
+  st.entries = terralib.newlist({
+      { "impl", c.legion_phase_barrier_t },
+  })
+
+  st.is_phase_barrier = true
+end
+
+do
   local function field_name(field)
     local field_name = field["field"] or field[1]
     if terralib.issymbol(field_name) then
@@ -2059,6 +2073,13 @@ std.exclusive = "exclusive"
 std.atomic = "atomic"
 std.simultaneous = "simultaneous"
 std.relaxed = "relaxed"
+
+-- #####################################
+-- ## Conditions
+-- #################
+
+std.arrives = "arrives"
+std.awaits = "awaits"
 
 -- #####################################
 -- ## Constraints
@@ -2183,6 +2204,16 @@ end
 function task:get_coherence_modes()
   assert(rawget(self, "coherence_modes") ~= nil)
   return self.coherence_modes
+end
+
+function task:set_conditions(t)
+  assert(rawget(self, "conditions") == nil and t)
+  self.conditions = t
+end
+
+function task:get_conditions()
+  assert(rawget(self, "conditions") ~= nil)
+  return self.conditions
 end
 
 function task:set_param_constraints(t)

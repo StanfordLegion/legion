@@ -13,16 +13,19 @@
  * limitations under the License.
  */
 
+#include "realm/realm_config.h"
 #include "lowlevel_dma.h"
 #include "accessor.h"
 #include "realm/threads.h"
 #include <errno.h>
-#include <aio.h>
 // included for file memory data transfer
 #include <unistd.h>
+#ifdef REALM_USE_KERNEL_AIO
 #include <linux/aio_abi.h>
 #include <sys/syscall.h>
-
+#else
+#include <aio.h>
+#endif
 
 #include <queue>
 
@@ -61,6 +64,7 @@ namespace LegionRuntime {
     typedef Realm::CoreReservationParameters CoreReservationParameters;
 
     Logger::Category log_dma("dma");
+    Logger::Category log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
     extern Event find_enclosing_termination_event(void);
@@ -1745,6 +1749,379 @@ namespace LegionRuntime {
       bool fold;
     };
 
+    class AsyncFileIOContext {
+    public:
+      AsyncFileIOContext(int _max_depth);
+      ~AsyncFileIOContext(void);
+
+      void enqueue_write(int fd, size_t offset, size_t bytes, const void *buffer);
+      void enqueue_read(int fd, size_t offset, size_t bytes, void *buffer);
+      void enqueue_fence(DmaRequest *req);
+
+      bool empty(void);
+      void make_progress(void);
+
+      class AIOOperation {
+      public:
+	virtual ~AIOOperation(void) {}
+	virtual void launch(void) = 0;
+	virtual bool check_completion(void) = 0;
+	bool completed;
+      };
+
+      int max_depth;
+      std::deque<AIOOperation *> launched_operations, pending_operations;
+      GASNetHSL mutex;
+#ifdef REALM_USE_KERNEL_AIO
+      aio_context_t aio_ctx;
+#endif
+    };
+
+    static AsyncFileIOContext *aio_context = 0;
+
+#ifdef REALM_USE_KERNEL_AIO
+    inline int io_setup(unsigned nr, aio_context_t *ctxp)
+    {
+      return syscall(__NR_io_setup, nr, ctxp);
+    }
+
+    inline int io_destroy(aio_context_t ctx)
+    {
+      return syscall(__NR_io_destroy, ctx);
+    }
+
+    inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
+    {
+      return syscall(__NR_io_submit, ctx, nr, iocbpp);
+    }
+
+    inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
+                            struct io_event *events, struct timespec *timeout)
+    {
+      return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
+    }
+
+    class KernelAIOWrite : public AsyncFileIOContext::AIOOperation {
+    public:
+      KernelAIOWrite(aio_context_t aio_ctx,
+                     int fd, size_t offset, size_t bytes,
+		     const void *buffer);
+      virtual void launch(void);
+      virtual bool check_completion(void);
+
+    public:
+      aio_context_t ctx;
+      struct iocb cb;
+    };
+
+    KernelAIOWrite::KernelAIOWrite(aio_context_t aio_ctx,
+				   int fd, size_t offset, size_t bytes,
+				   const void *buffer)
+    {
+      completed = false;
+      ctx = aio_ctx;
+      memset(&cb, 0, sizeof(cb));
+      cb.aio_data = (uint64_t)this;
+      cb.aio_fildes = fd;
+      cb.aio_lio_opcode = IOCB_CMD_PWRITE;
+      cb.aio_buf = (uint64_t)buffer;
+      cb.aio_offset = offset;
+      cb.aio_nbytes = bytes;
+    }
+
+    void KernelAIOWrite::launch(void)
+    {
+      struct iocb *cbs[1];
+      cbs[0] = &cb;
+      log_aio.debug("write issued: op=%p cb=%p", this, &cb);
+      int ret = io_submit(ctx, 1, cbs);
+      assert(ret == 1);
+    }
+
+    bool KernelAIOWrite::check_completion(void)
+    {
+      return completed;
+    }
+
+    class KernelAIORead : public AsyncFileIOContext::AIOOperation {
+    public:
+      KernelAIORead(aio_context_t aio_ctx,
+                     int fd, size_t offset, size_t bytes,
+		     void *buffer);
+      virtual void launch(void);
+      virtual bool check_completion(void);
+
+    public:
+      aio_context_t ctx;
+      struct iocb cb;
+    };
+
+    KernelAIORead::KernelAIORead(aio_context_t aio_ctx,
+				 int fd, size_t offset, size_t bytes,
+				 void *buffer)
+    {
+      completed = false;
+      ctx = aio_ctx;
+      memset(&cb, 0, sizeof(cb));
+      cb.aio_data = (uint64_t)this;
+      cb.aio_fildes = fd;
+      cb.aio_lio_opcode = IOCB_CMD_PREAD;
+      cb.aio_buf = (uint64_t)buffer;
+      cb.aio_offset = offset;
+      cb.aio_nbytes = bytes;
+    }
+
+    void KernelAIORead::launch(void)
+    {
+      struct iocb *cbs[1];
+      cbs[0] = &cb;
+      log_aio.debug("read issued: op=%p cb=%p", this, &cb);
+      int ret = io_submit(ctx, 1, cbs);
+      assert(ret == 1);
+    }
+
+    bool KernelAIORead::check_completion(void)
+    {
+      return completed;
+    }
+#else
+    class PosixAIOWrite : public AsyncFileIOContext::AIOOperation {
+    public:
+      PosixAIOWrite(int fd, size_t offset, size_t bytes,
+		    const void *buffer);
+      virtual void launch(void);
+      virtual bool check_completion(void);
+
+    public:
+      struct aiocb cb;
+    };
+
+    PosixAIOWrite::PosixAIOWrite(int fd, size_t offset, size_t bytes,
+				 const void *buffer)
+    {
+      completed = false;
+      memset(&cb, 0, sizeof(cb));
+      cb.aio_fildes = fd;
+      cb.aio_buf = (void *)buffer;
+      cb.aio_offset = offset;
+      cb.aio_nbytes = bytes;
+    }
+
+    void PosixAIOWrite::launch(void)
+    {
+      log_aio.debug("write issued: op=%p cb=%p", this, &cb);
+      int ret = aio_write(&cb);
+      assert(ret == 0);
+    }
+
+    bool PosixAIOWrite::check_completion(void)
+    {
+      int ret = aio_error(&cb);
+      if(ret == EINPROGRESS) return false;
+      log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
+      assert(ret == 0);
+      return true;
+    }
+
+    class PosixAIORead : public AsyncFileIOContext::AIOOperation {
+    public:
+      PosixAIORead(int fd, size_t offset, size_t bytes,
+		   void *buffer);
+      virtual void launch(void);
+      virtual bool check_completion(void);
+
+    public:
+      struct aiocb cb;
+    };
+
+    PosixAIORead::PosixAIORead(int fd, size_t offset, size_t bytes,
+			       void *buffer)
+    {
+      completed = false;
+      memset(&cb, 0, sizeof(cb));
+      cb.aio_fildes = fd;
+      cb.aio_buf = buffer;
+      cb.aio_offset = offset;
+      cb.aio_nbytes = bytes;
+    }
+
+    void PosixAIORead::launch(void)
+    {
+      log_aio.debug("read issued: op=%p cb=%p", this, &cb);
+      int ret = aio_read(&cb);
+      assert(ret == 0);
+    }
+
+    bool PosixAIORead::check_completion(void)
+    {
+      int ret = aio_error(&cb);
+      if(ret == EINPROGRESS) return false;
+      log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
+      assert(ret == 0);
+      return true;
+    }
+#endif
+
+    class AIOFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      AIOFence(Realm::Operation *_op) : Realm::Operation::AsyncWorkItem(_op) {}
+      void request_cancellation(void) {}
+    };
+
+    class AIOFenceOp : public AsyncFileIOContext::AIOOperation {
+    public:
+      AIOFenceOp(DmaRequest *_req);
+      virtual void launch(void);
+      virtual bool check_completion(void);
+
+    public:
+      DmaRequest *req;
+      AIOFence *f;
+    };
+
+    AIOFenceOp::AIOFenceOp(DmaRequest *_req)
+    {
+      completed = false;
+      req = _req;
+      f = new AIOFence(req);
+      req->add_async_work_item(f);
+    }
+
+    void AIOFenceOp::launch(void)
+    {
+      log_aio.debug("fence launched: op=%p req=%p", this, req);
+      completed = true;
+    }
+
+    bool AIOFenceOp::check_completion(void)
+    {
+      assert(completed);
+      log_aio.debug("fence completed: op=%p req=%p", this, req);
+      f->mark_finished();
+      return true;
+    }
+
+    AsyncFileIOContext::AsyncFileIOContext(int _max_depth)
+      : max_depth(_max_depth)
+    {
+#ifdef REALM_USE_KERNEL_AIO
+      aio_ctx = 0;
+      int ret = io_setup(max_depth, &aio_ctx);
+      assert(ret == 0);
+#endif
+    }
+
+    AsyncFileIOContext::~AsyncFileIOContext(void)
+    {
+      assert(pending_operations.empty());
+      assert(launched_operations.empty());
+#ifdef REALM_USE_KERNEL_AIO
+      int ret = io_destroy(aio_ctx);
+      assert(ret == 0);
+#endif
+    }
+
+    void AsyncFileIOContext::enqueue_write(int fd, size_t offset, 
+					   size_t bytes, const void *buffer)
+    {
+#ifdef REALM_USE_KERNEL_AIO
+      KernelAIOWrite *op = new KernelAIOWrite(aio_ctx,
+					      fd, offset, bytes, buffer);
+#else
+      PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer);
+#endif
+      {
+	AutoHSLLock al(mutex);
+	if(launched_operations.size() < (size_t)max_depth) {
+	  op->launch();
+	  launched_operations.push_back(op);
+	} else {
+	  pending_operations.push_back(op);
+	}
+      }
+    }
+
+    void AsyncFileIOContext::enqueue_read(int fd, size_t offset, 
+					  size_t bytes, void *buffer)
+    {
+#ifdef REALM_USE_KERNEL_AIO
+      KernelAIORead *op = new KernelAIORead(aio_ctx,
+					    fd, offset, bytes, buffer);
+#else
+      PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer);
+#endif
+      {
+	AutoHSLLock al(mutex);
+	if(launched_operations.size() < (size_t)max_depth) {
+	  op->launch();
+	  launched_operations.push_back(op);
+	} else {
+	  pending_operations.push_back(op);
+	}
+      }
+    }
+
+    void AsyncFileIOContext::enqueue_fence(DmaRequest *req)
+    {
+      AIOFenceOp *op = new AIOFenceOp(req);
+      {
+	AutoHSLLock al(mutex);
+	if(launched_operations.size() < (size_t)max_depth) {
+	  op->launch();
+	  launched_operations.push_back(op);
+	} else {
+	  pending_operations.push_back(op);
+	}
+      }
+    }
+
+    bool AsyncFileIOContext::empty(void)
+    {
+      AutoHSLLock al(mutex);
+      return launched_operations.empty();
+    }
+
+    void AsyncFileIOContext::make_progress(void)
+    {
+      AutoHSLLock al(mutex);
+
+      // first, reap as many events as we can - oldest first
+#ifdef REALM_USE_KERNEL_AIO
+      while(true) {
+	struct io_event events[8];
+	struct timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 0;  // no delay
+	int ret = io_getevents(aio_ctx, 1, 8, events, &ts);
+	if(ret == 0) break;
+	log_aio.debug("io_getevents returned %d events", ret);
+	for(int i = 0; i < ret; i++) {
+	  AIOOperation *op = (AIOOperation *)(events[i].data);
+	  log_aio.debug("io_getevents: event[%d] = %p", i, op);
+	  op->completed = true;
+	}
+      }
+#endif
+
+      // now actually mark events completed in oldest-first order
+      while(!launched_operations.empty()) {
+	AIOOperation *op = launched_operations.front();
+	if(!op->check_completion()) break;
+	log_aio.debug("aio op completed: op=%p", op);
+	delete op;
+	launched_operations.pop_front();
+      }
+
+      // finally, if there are any pending ops, and room for them, launch them
+      while((launched_operations.size() < (size_t)max_depth) &&
+	    !pending_operations.empty()) {
+	AIOOperation *op = pending_operations.front();
+	pending_operations.pop_front();
+	op->launch();
+	launched_operations.push_back(op);
+      }
+    }
+
     // MemPairCopier from disk memory to cpu memory
     class DisktoCPUMemPairCopier : public MemPairCopier {
     public:
@@ -1769,15 +2146,8 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
-        aiocb cb;
-        memset(&cb, 0, sizeof(cb));
-        cb.aio_nbytes = bytes;
-        cb.aio_fildes = fd;
-        cb.aio_offset = src_offset;
-        cb.aio_buf = dst_base + dst_offset;
-        assert(aio_read(&cb) != -1);
-        while (aio_error(&cb) == EINPROGRESS) {}
-        assert((size_t)aio_return(&cb) == bytes);
+	aio_context->enqueue_read(fd, src_offset, bytes,
+				  dst_base + dst_offset);
 	record_bytes(bytes);
       }
 
@@ -1790,6 +2160,13 @@ namespace LegionRuntime {
           dst_offset += dst_stride;
         }
       }
+
+      void flush(DmaRequest *req)
+      {
+	aio_context->enqueue_fence(req);
+	MemPairCopier::flush(req);
+      }
+
     protected:
       char *dst_base;
       int fd; // file descriptor
@@ -1819,15 +2196,8 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
-        aiocb cb;
-        memset(&cb, 0, sizeof(cb));
-        cb.aio_nbytes = bytes;
-        cb.aio_fildes = fd;
-        cb.aio_offset = dst_offset;
-        cb.aio_buf = src_base + src_offset;
-        assert(aio_write(&cb) != -1);
-        while (aio_error(&cb) == EINPROGRESS) {}
-        assert((size_t)aio_return(&cb) == bytes);
+	aio_context->enqueue_write(fd, dst_offset, bytes,
+				   src_base + src_offset);
 	record_bytes(bytes);
       }
 
@@ -1840,31 +2210,17 @@ namespace LegionRuntime {
           dst_offset += dst_stride;
         }
       }
+
+      void flush(DmaRequest *req)
+      {
+	aio_context->enqueue_fence(req);
+	MemPairCopier::flush(req);
+      }
+
     protected:
       char *src_base;
       int fd; // file descriptor
     };
-
-    inline int io_setup(unsigned nr, aio_context_t *ctxp)
-    {
-      return syscall(__NR_io_setup, nr, ctxp);
-    }
-
-    inline int io_destroy(aio_context_t ctx)
-    {
-      return syscall(__NR_io_destroy, ctx);
-    }
-
-    inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
-    {
-      return syscall(__NR_io_submit, ctx, nr, iocbpp);
-    }
-
-    inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
-                            struct io_event *events, struct timespec *timeout)
-    {
-      return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
-    }
 
     class FilefromCPUMemPairCopier : public MemPairCopier {
     public:
@@ -1876,12 +2232,7 @@ namespace LegionRuntime {
                         RegionInstance dst_inst, OASVec &oas_vec,
 			FilefromCPUMemPairCopier *_mpc)
         {
-          ctx = 0;
-          int ret = io_setup(max_nr, &ctx);
-          assert(ret >= 0);
-          memset(&cb, 0, sizeof(cb));
-          cb.aio_lio_opcode = IOCB_CMD_PWRITE;
-          cb.aio_fildes = _fd;
+	  fd = _fd;
           inst_copier = new SpanBasedInstPairCopier<FileWriteCopier>(this, src_inst, dst_inst, oas_vec);
           src_base = _base;
 	  mpc = _mpc;
@@ -1890,7 +2241,6 @@ namespace LegionRuntime {
         ~FileWriteCopier(void)
         {
           delete inst_copier;
-          io_destroy(ctx);
         }
 
         virtual void copy_field(int src_index, int dst_index, int elem_count,
@@ -1917,20 +2267,8 @@ namespace LegionRuntime {
 
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
         {
-          cb.aio_buf = (uint64_t)(src_base + src_offset);
-          cb.aio_offset = dst_offset;
-          cb.aio_nbytes = bytes;
-          cbs[0] = &cb;
-          int ret = io_submit(ctx, max_nr, cbs);
-          if (ret < 0) {
-            perror("io_submit error");
-          }
-          int nr = io_getevents(ctx, max_nr, max_nr, events, NULL);
-          if (nr < 0)
-            perror("io_getevents error");
-          assert(nr == max_nr);
-	  // SJT: the events record doesn't seem to always have what we want?
-          //assert(events[0].res == (int64_t) bytes);
+	  aio_context->enqueue_write(fd, dst_offset, bytes,
+				     src_base + src_offset);
 	  mpc->record_bytes(bytes);
         }
 
@@ -1945,11 +2283,8 @@ namespace LegionRuntime {
         }
 
       protected:
-        aio_context_t ctx;
-        struct iocb cb;
-        struct iocb *cbs[max_nr];
+	int fd;
         char *src_base;
-        struct io_event events[max_nr];
         InstPairCopier* inst_copier;
 	FilefromCPUMemPairCopier *mpc;
       };
@@ -1972,6 +2307,12 @@ namespace LegionRuntime {
         return new FileWriteCopier(fd, src_base, src_inst, dst_inst, oas_vec, this);
       }
 
+      void flush(DmaRequest *req)
+      {
+	aio_context->enqueue_fence(req);
+	MemPairCopier::flush(req);
+      }
+
     protected:
       char *src_base;
       FileMemory *dst_mem;
@@ -1986,12 +2327,7 @@ namespace LegionRuntime {
     	FileReadCopier(int _fd, char* _base, RegionInstance src_inst,
                        RegionInstance dst_inst, OASVec &oas_vec, FiletoCPUMemPairCopier *_mpc)
         {
-          ctx = 0;
-          int ret = io_setup(max_nr, &ctx);
-          assert(ret >= 0);
-          memset(&cb, 0, sizeof(cb));
-          cb.aio_lio_opcode = IOCB_CMD_PREAD;
-          cb.aio_fildes = _fd;
+          fd = _fd;
           inst_copier = new SpanBasedInstPairCopier<FileReadCopier>(this, src_inst, dst_inst, oas_vec);
           dst_base = _base;
 	  mpc = _mpc;
@@ -2000,7 +2336,6 @@ namespace LegionRuntime {
         ~FileReadCopier(void)
         {
           delete inst_copier;
-          io_destroy(ctx);
         }
 
         virtual void copy_field(int src_index, int dst_index, int elem_count,
@@ -2027,20 +2362,8 @@ namespace LegionRuntime {
 
         void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
         {
-          cb.aio_buf = (uint64_t)(dst_base + dst_offset);
-          cb.aio_offset = src_offset;
-          cb.aio_nbytes = bytes;
-          cbs[0] = &cb;
-          int ret = io_submit(ctx, max_nr, cbs);
-          if (ret < 0) {
-            perror("io_submit error");
-          }
-          int nr = io_getevents(ctx, max_nr, max_nr, events, NULL);
-          if (nr < 0)
-            perror("io_getevents error");
-          assert(nr == max_nr);
-	  // SJT: the events record doesn't seem to always have what we want?
-          //assert(events[0].res == (int64_t) bytes);
+	  aio_context->enqueue_read(fd, src_offset, bytes,
+				    dst_base + dst_offset);
 	  mpc->record_bytes(bytes);
         }
 
@@ -2055,11 +2378,8 @@ namespace LegionRuntime {
         }
 
       protected:
-        aio_context_t ctx;
-        struct iocb cb;
-        struct iocb *cbs[max_nr];
+	int fd;
         char *dst_base;
-        struct io_event events[max_nr];
         InstPairCopier* inst_copier;
 	FiletoCPUMemPairCopier *mpc;
       };
@@ -2081,6 +2401,13 @@ namespace LegionRuntime {
         int fd = src_mem->get_file_des(index);
         return new FileReadCopier(fd, dst_base, src_inst, dst_inst, oas_vec, this);
       }
+
+      void flush(DmaRequest *req)
+      {
+	aio_context->enqueue_fence(req);
+	MemPairCopier::flush(req);
+      }
+
     protected:
       char *dst_base;
       FileMemory *src_mem;
@@ -3816,8 +4143,11 @@ namespace LegionRuntime {
       log_dma.info("dma worker thread created");
 
       while(!shutdown_flag) {
+	aio_context->make_progress();
+	bool aio_idle = aio_context->empty();
+
 	// get a request, sleeping as necessary
-	DmaRequest *r = dequeue_request(true);
+	DmaRequest *r = dequeue_request(aio_idle);
 
 	if(r) {
           r->mark_started();
@@ -3848,6 +4178,7 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
+      aio_context = new AsyncFileIOContext(256);
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }
@@ -3857,6 +4188,8 @@ namespace LegionRuntime {
       dma_queue->shutdown_queue();
       delete dma_queue;
       dma_queue = 0;
+      delete aio_context;
+      aio_context = 0;
     }
 
   };
