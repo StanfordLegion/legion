@@ -5008,8 +5008,12 @@ namespace LegionRuntime {
 	  while(++it != right_set.end())
 	  {
 	    maskp = &(it->get_index_space().get_valid_mask());
-	    first_elmt = std::min(first_elmt, maskp->first_enabled());
-	    last_elmt = std::min(last_elmt, maskp->last_enabled());
+	    int new_first = maskp->first_enabled();
+	    int new_last = maskp->last_enabled();
+	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	      first_elmt = new_first;
+	    if ((new_last != -1) && (last_elmt < new_last))
+	      last_elmt = new_last;
 	  }
 	  // If there are no elements, right is trivially dominated
 	  if ((first_elmt > last_elmt) || (last_elmt == -1))

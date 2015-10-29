@@ -1055,7 +1055,7 @@ namespace Realm {
 	  uint64_t v = impl->bits[i];
 	  if(v != 0) {
 	    int ofs = __builtin_ctzl(v);
-	    first_enabled_elmt = (i << 6) + ofs;
+	    first_enabled_elmt = first_element + (i << 6) + ofs;
 	    //printf("FOUNDFIRST: %lx %d %d %d\n", v, i, ofs, first_enabled_elmt);
 	    break;
 	  }
@@ -1068,7 +1068,7 @@ namespace Realm {
 	    uint64_t v = impl->bits[i];
 	    if(v != 0) {
 	      int ofs = __builtin_clzl(v);
-	      last_enabled_elmt = (i << 6) + (63 - ofs);
+	      last_enabled_elmt = first_element + (i << 6) + (63 - ofs);
 	      //printf("FOUNDLAST: %lx %d %d %d\n", v, i, ofs, last_enabled_elmt);
 	      break;
 	    }
@@ -1082,6 +1082,10 @@ namespace Realm {
 
     ElementMask& ElementMask::operator|=(const ElementMask &other)
     {
+      // an empty rhs is trivial
+      if(other.first_enabled_elmt == -1)
+	return *this;
+
       // support bitwise operations between ElementMasks with different sizes/starts,
       //  but only if the bits line up conveniently
       assert((first_element & 63) == (other.first_element & 63));
@@ -1232,6 +1236,10 @@ namespace Realm {
 
     ElementMask& ElementMask::operator-=(const ElementMask &other)
     {
+      // an empty rhs is trivial
+      if(other.first_enabled_elmt == -1)
+	return *this;
+
       // support bitwise operations between ElementMasks with different sizes/starts,
       //  but only if the bits line up conveniently
       assert((first_element & 63) == (other.first_element & 63));
