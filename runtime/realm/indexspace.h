@@ -115,6 +115,8 @@ namespace Realm {
 			       bool do_enabled2 = true);
 
     public:
+      void recalc_first_last_enabled(void);
+
       friend class Enumerator;
       int first_element;
       int num_elements;

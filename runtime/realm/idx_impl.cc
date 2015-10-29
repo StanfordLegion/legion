@@ -1042,6 +1042,44 @@ namespace Realm {
       return result;
     }
 
+    void ElementMask::recalc_first_last_enabled(void)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+
+	int count = num_elements >> 6;
+
+	// find first word that isn't 0
+	first_enabled_elmt = -1;
+	for(int i = 0; i < count; i++) {
+	  uint64_t v = impl->bits[i];
+	  if(v != 0) {
+	    int ofs = __builtin_ctzl(v);
+	    first_enabled_elmt = (i << 6) + ofs;
+	    //printf("FOUNDFIRST: %lx %d %d %d\n", v, i, ofs, first_enabled_elmt);
+	    break;
+	  }
+	}
+
+	// find last word that isn't 0 - no search if the first search failed
+	last_enabled_elmt = -1;
+	if(first_enabled_elmt >= 0)  {
+	  for(int i = count - 1; i >= 0; i--) {
+	    uint64_t v = impl->bits[i];
+	    if(v != 0) {
+	      int ofs = __builtin_clzl(v);
+	      last_enabled_elmt = (i << 6) + (63 - ofs);
+	      //printf("FOUNDLAST: %lx %d %d %d\n", v, i, ofs, last_enabled_elmt);
+	      break;
+	    }
+	  }
+	}
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+    }
+
     ElementMask& ElementMask::operator|=(const ElementMask &other)
     {
       // support bitwise operations between ElementMasks with different sizes/starts,
@@ -1049,8 +1087,12 @@ namespace Realm {
       assert((first_element & 63) == (other.first_element & 63));
 
       // if the rhs's range is larger than ours, die - we can't fit the result
-      int abs_start = other.first_element;
-      int abs_end = other.first_element + other.num_elements;
+      int abs_start = ((other.first_enabled_elmt >= 0) ?
+		         other.first_enabled_elmt :
+		         other.first_element);
+      int abs_end = ((other.last_enabled_elmt >= 0) ?
+		       (other.last_enabled_elmt + 1) :
+		       (other.first_element + other.num_elements));
       assert(abs_start >= first_element);
       assert(abs_end <= (first_element + num_elements));
 
@@ -1101,6 +1143,9 @@ namespace Realm {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
@@ -1179,6 +1224,9 @@ namespace Realm {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
@@ -1239,6 +1287,9 @@ namespace Realm {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
