@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
+#include "realm/realm_config.h"
 #include "lowlevel_impl.h"
 #include "lowlevel.h"
-#include <aio.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -78,40 +78,16 @@ namespace Realm {
 
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-      aiocb cb;
-      memset(&cb, 0, sizeof(cb));
-      cb.aio_nbytes = size;
-      cb.aio_fildes = fd;
-      cb.aio_offset = offset;
-      cb.aio_buf = dst;
-      int ret = aio_read(&cb);
-      assert(ret == 0);
-      while(true) {
-	ret = aio_error(&cb);
-	if(ret == 0) break; // completed
-	assert(ret == EINPROGRESS); // only other choice we expect to see
-      }
-      ssize_t count = aio_return(&cb);
-      assert(count == (ssize_t)size);
+      // this is a blocking operation
+      ssize_t amt = pread(fd, dst, size, offset);
+      assert(amt == (ssize_t)size);
     }
 
     void DiskMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-      aiocb cb;
-      memset(&cb, 0, sizeof(cb));
-      cb.aio_nbytes = size;
-      cb.aio_fildes = fd;
-      cb.aio_offset = offset;
-      cb.aio_buf = (void *)src;
-      int ret = aio_write(&cb);
-      assert(ret == 0);
-      while(true) {
-	ret = aio_error(&cb);
-	if(ret == 0) break; // completed
-	assert(ret == EINPROGRESS); // only other choice we expect to see
-      }
-      ssize_t count = aio_return(&cb);
-      assert(count == (ssize_t)size);
+      // this is a blocking operation
+      ssize_t amt = pwrite(fd, src, size, offset);
+      assert(amt == (ssize_t)size);
     }
 
     void DiskMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
@@ -177,22 +153,27 @@ namespace Realm {
                    block_size, element_size, field_sizes, redopid,
                    list_size, reqs, parent_inst);
       int fd;
+#ifdef REALM_USE_KERNEL_AIO
+      int direct_flag = O_DIRECT;
+#else
+      int direct_flag = 0;
+#endif
       switch (file_mode) {
         case LEGION_FILE_READ_ONLY:
         {
-          fd = open(file_name, O_RDONLY | O_DIRECT, 00777);
+          fd = open(file_name, O_RDONLY | direct_flag, 00777);
           assert(fd != -1);
           break;
         }
         case LEGION_FILE_READ_WRITE:
         {
-          fd = open(file_name, O_RDWR, 00777);
+          fd = open(file_name, O_RDWR | direct_flag, 00777);
           assert(fd != -1);
           break;
         }
         case LEGION_FILE_CREATE:
         {
-          fd = open(file_name, O_CREAT | O_RDWR | O_DIRECT, 00777);
+          fd = open(file_name, O_CREAT | O_RDWR | direct_flag, 00777);
           assert(fd != -1);
           // resize the file to what we want
           size_t field_size = 0;
