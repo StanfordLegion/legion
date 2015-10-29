@@ -13,22 +13,20 @@
  * limitations under the License.
  */
 
-// meta-header for Realm - includes all the individual pieces
+// configuration settings that control how Realm is built
+// this is expected to become an auto-generated file at some point
 
-#ifndef REALM_H
-#define REALM_H
+#ifndef REALM_CONFIG_H
+#define REALM_CONFIG_H
 
-#include "realm/realm_config.h"
+// if set, uses ucontext.h for user level thread switching, otherwise falls
+//  back to POSIX threads
+#define REALM_USE_USER_THREADS
 
-#include "realm/profiling.h"
-#include "realm/redop.h"
-#include "realm/event.h"
-#include "realm/reservation.h"
-#include "realm/processor.h"
-#include "realm/memory.h"
-#include "realm/instance.h"
-#include "realm/machine.h"
-#include "realm/runtime.h"
-#include "realm/indexspace.h"
+// if set, uses Linux's kernel-level io_submit interface, otherwise uses
+//  POSIX AIO for async file I/O
+#ifdef __linux__
+#define REALM_USE_KERNEL_AIO
+#endif
 
-#endif // ifndef REALM_H
+#endif
