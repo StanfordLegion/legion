@@ -439,6 +439,7 @@ namespace LegionRuntime {
       LegionTrace *local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
+      tracing = false;
       begin_dependence_analysis();
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();

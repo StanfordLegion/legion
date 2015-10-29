@@ -582,12 +582,12 @@ namespace LegionRuntime {
 #endif
       // Make a dependence tracker
       dependence_tracker.mapping = new MappingDependenceTracker();
-      // See if we have any fence dependences
-      parent_ctx->register_fence_dependence(this);
       // Register ourselves with our trace if there is one
       // This will also add any necessary dependences
       if (trace != NULL)
         trace->register_operation(this, gen);
+      // See if we have any fence dependences
+      parent_ctx->register_fence_dependence(this);
     }
 
     //--------------------------------------------------------------------------
