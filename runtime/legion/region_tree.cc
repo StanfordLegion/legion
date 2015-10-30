@@ -9946,9 +9946,9 @@ namespace LegionRuntime {
         if (!!non_dominated_mask)
         {
           perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                          true/*record*/, false/*has skip*/, false/*track dom*/>(
-                              user, state.prev_epoch_users, non_dominated_mask, 
-                              open_below, arrived/*validates*/ && !projecting);
+                        true/*record*/, false/*has skip*/, false/*track dom*/>(
+                          user, state.prev_epoch_users, non_dominated_mask, 
+                          open_below, arrived/*validates*/ && !projecting);
         }
       }
       const bool is_write = IS_WRITE(user.usage); // only writes
