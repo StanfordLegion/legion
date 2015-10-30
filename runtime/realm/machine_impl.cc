@@ -122,6 +122,7 @@ namespace Realm {
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
+	    log_annc.debug() << "adding proc " << p << " (kind = " << kind << ")";
 	    if(remote) {
 	      RemoteProcessor *proc = new RemoteProcessor(p, kind);
 	      get_runtime()->nodes[ID(p).node()].processors[ID(p).index()] = proc;
@@ -137,6 +138,8 @@ namespace Realm {
             Memory::Kind kind = (Memory::Kind)(*cur++);
 	    unsigned size = *cur++;
 	    void *regbase = (void *)(*cur++);
+	    log_annc.debug() << "adding memory " << m << " (kind = " << kind
+			     << ", size = " << size << ", regbase = " << regbase << ")";
 	    if(remote) {
 	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
 	      get_runtime()->nodes[ID(m).node()].memories[ID(m).index_h()] = mem;
@@ -151,6 +154,8 @@ namespace Realm {
 	    pma.m = ID((ID::IDType)*cur++).convert<Memory>();
 	    pma.bandwidth = *cur++;
 	    pma.latency = *cur++;
+	    log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+			     << " (bw = " << pma.bandwidth << ", latency = " << pma.latency << ")";
 
 	    proc_mem_affinities.push_back(pma);
 	  }
@@ -163,6 +168,8 @@ namespace Realm {
 	    mma.m2 = ID((ID::IDType)*cur++).convert<Memory>();
 	    mma.bandwidth = *cur++;
 	    mma.latency = *cur++;
+	    log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
+			     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
 
 	    mem_mem_affinities.push_back(mma);
 	  }
@@ -176,6 +183,8 @@ namespace Realm {
 
     void MachineImpl::get_all_memories(std::set<Memory>& mset) const
     {
+      // TODO: consider using a reader/writer lock here instead
+      AutoHSLLock al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -185,6 +194,8 @@ namespace Realm {
 
     void MachineImpl::get_all_processors(std::set<Processor>& pset) const
     {
+      // TODO: consider using a reader/writer lock here instead
+      AutoHSLLock al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -195,6 +206,8 @@ namespace Realm {
     // Return the set of memories visible from a processor
     void MachineImpl::get_visible_memories(Processor p, std::set<Memory>& mset) const
     {
+      // TODO: consider using a reader/writer lock here instead
+      AutoHSLLock al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -206,12 +219,14 @@ namespace Realm {
     // Return the set of memories visible from a memory
     void MachineImpl::get_visible_memories(Memory m, std::set<Memory>& mset) const
     {
+      // TODO: consider using a reader/writer lock here instead
+      AutoHSLLock al(mutex);
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
 	if((*it).m1 == m)
 	  mset.insert((*it).m2);
-
+	
 	if((*it).m2 == m)
 	  mset.insert((*it).m1);
       }
@@ -220,6 +235,8 @@ namespace Realm {
     // Return the set of processors which can all see a given memory
     void MachineImpl::get_shared_processors(Memory m, std::set<Processor>& pset) const
     {
+      // TODO: consider using a reader/writer lock here instead
+      AutoHSLLock al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -234,13 +251,17 @@ namespace Realm {
     {
       int count = 0;
 
-      for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
-	  it != proc_mem_affinities.end();
-	  it++) {
-	if(restrict_proc.exists() && ((*it).p != restrict_proc)) continue;
-	if(restrict_memory.exists() && ((*it).m != restrict_memory)) continue;
-	result.push_back(*it);
-	count++;
+      {
+	// TODO: consider using a reader/writer lock here instead
+	AutoHSLLock al(mutex);
+	for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
+	    it != proc_mem_affinities.end();
+	    it++) {
+	  if(restrict_proc.exists() && ((*it).p != restrict_proc)) continue;
+	  if(restrict_memory.exists() && ((*it).m != restrict_memory)) continue;
+	  result.push_back(*it);
+	  count++;
+	}
       }
 
       return count;
@@ -264,20 +285,35 @@ namespace Realm {
 
       int count = 0;
 
-      for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
-	  it != mem_mem_affinities.end();
-	  it++) {
-	if(restrict_mem1.exists() && 
-	   ((*it).m1 != restrict_mem1)) continue;
-	if(restrict_mem2.exists() && 
-	   ((*it).m2 != restrict_mem2)) continue;
-	result.push_back(*it);
-	count++;
+      {
+	// TODO: consider using a reader/writer lock here instead
+	AutoHSLLock al(mutex);
+	for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
+	    it != mem_mem_affinities.end();
+	    it++) {
+	  if(restrict_mem1.exists() && 
+	     ((*it).m1 != restrict_mem1)) continue;
+	  if(restrict_mem2.exists() && 
+	     ((*it).m2 != restrict_mem2)) continue;
+	  result.push_back(*it);
+	  count++;
+	}
       }
 
       return count;
     }
 
+    void MachineImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
+    {
+      AutoHSLLock al(mutex);
+      proc_mem_affinities.push_back(pma);
+    }
+
+    void MachineImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
+    {
+      AutoHSLLock al(mutex);
+      mem_mem_affinities.push_back(mma);
+    }
 
   ////////////////////////////////////////////////////////////////////////
   //

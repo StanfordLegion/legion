@@ -35,16 +35,12 @@ where reads(s), writes(s) do
   return 0
 end
 
-function raw(t)
-  return terra(x : t) return x.__ptr end
-end
-
 task g() : int
   var r = region(ispace(ptr, 5), int)
   var rc = [c.legion_coloring_create]();
   var x = new(ptr(int, r))
-  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x))
-  c.legion_coloring_add_point(rc, 1, [raw(ptr(int, r))](x))
+  c.legion_coloring_add_point(rc, 0, __raw(x))
+  c.legion_coloring_add_point(rc, 1, __raw(x))
   var p = partition(aliased, r, rc)
   var r0 = p[0]
   var r1 = p[1]

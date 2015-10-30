@@ -14,9 +14,6 @@
  */
 
 #include "lowlevel_dma.h"
-#ifdef USE_CUDA
-#include "lowlevel_gpu.h"
-#endif
 #include "accessor.h"
 #include "realm/threads.h"
 #include <errno.h>
@@ -65,15 +62,8 @@ namespace LegionRuntime {
 
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
-    struct OffsetsAndSize {
-      off_t src_offset, dst_offset;
-      int size;
-    };
-    typedef std::vector<OffsetsAndSize> OASVec;
     typedef std::map<InstPair, OASVec> OASByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
-
-    class MemPairCopier;
 
     class DmaRequest;
 
@@ -101,53 +91,42 @@ namespace LegionRuntime {
       std::vector<Thread *> worker_threads;
     };
 
-    class DmaRequest : public Realm::Operation {
-    public:
-      DmaRequest(int _priority, Event _after_copy) 
-	: Operation(_after_copy, Realm::ProfilingRequestSet()),
-          state(STATE_INIT), priority(_priority) {} 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DmaRequest
+  //
 
-      DmaRequest(int _priority, Event _after_copy,
-                 const Realm::ProfilingRequestSet &reqs)
-        : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
-          priority(_priority) {} 
+    DmaRequest::DmaRequest(int _priority, Event _after_copy) 
+      : Operation(_after_copy, Realm::ProfilingRequestSet()),
+	state(STATE_INIT), priority(_priority)
+    {
+    }
 
-      virtual ~DmaRequest(void) {}
+    DmaRequest::DmaRequest(int _priority, Event _after_copy,
+			   const Realm::ProfilingRequestSet &reqs)
+      : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
+	priority(_priority)
+    {
+    }
 
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
+    DmaRequest::~DmaRequest(void)
+    {
+    }
 
-      virtual bool handler_safe(void) = 0;
 
-      virtual void perform_dma(void) = 0;
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DmaRequest::Waiter
+  //
 
-      enum State {
-	STATE_INIT,
-	STATE_METADATA_FETCH,
-	STATE_BEFORE_EVENT,
-	STATE_INST_LOCK,
-	STATE_READY,
-	STATE_QUEUED,
-	STATE_DONE
-      };
+    DmaRequest::Waiter::Waiter(void)
+    {
+    }
 
-      State state;
-      int priority;
+    DmaRequest::Waiter::~Waiter(void)
+    {
+    }
 
-      class Waiter : public EventWaiter {
-      public:
-        Waiter(void) { }
-        virtual ~Waiter(void) { }
-      public:
-	Reservation current_lock;
-	DmaRequestQueue *queue;
-	DmaRequest *req;
-
-	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
-
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
-      };
-    };
 
     // dma requests come in two flavors:
     // 1) CopyRequests, which are per memory pair, and
@@ -381,10 +360,6 @@ namespace LegionRuntime {
 
       oas_by_inst = new OASByInst;
 
-#ifdef USE_CUDA
-      int priority = 0;
-#endif
-
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
@@ -392,7 +367,6 @@ namespace LegionRuntime {
 	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
 
-#ifdef USE_CUDA
         // If either one of the instances is in GPU memory increase priority
         if (priority == 0)
         {
@@ -406,7 +380,6 @@ namespace LegionRuntime {
               priority = 1;
           }
         }
-#endif
 
 	OASVec& oasvec = (*oas_by_inst)[ip];
 
@@ -1048,32 +1021,8 @@ namespace LegionRuntime {
 
     }; // namespace RangeExecutors
 
-    class InstPairCopier {
-    public:
-      InstPairCopier(void) { }
-      virtual ~InstPairCopier(void) { }
-    public:
-      virtual void copy_field(int src_index, int dst_index, int elem_count,
-                              unsigned offset_index) = 0;
-
-      virtual void copy_all_fields(int src_index, int dst_index, int elem_count) = 0;
-
-      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-				   int src_stride, int dst_stride, int lines)
-      {
-	// default implementation is just to iterate over lines
-	for(int i = 0; i < lines; i++) {
-	  copy_all_fields(src_index, dst_index, count_per_line);
-	  src_index += src_stride;
-	  dst_index += dst_stride;
-	}
-      }
-
-      virtual void flush(void) = 0;
-    };
-
     // helper function to figure out which field we're in
-    static void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
+    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 				 size_t size, off_t& field_start, int& field_size)
     {
       off_t start = 0;
@@ -1092,406 +1041,6 @@ namespace LegionRuntime {
       }
       assert(0);
     }
-
-    static inline int min(int a, int b) { return (a < b) ? a : b; }
-
-    template <typename T>
-    class SpanBasedInstPairCopier : public InstPairCopier {
-    public:
-      // instead of the accessro, we'll grab the implementation pointers
-      //  and do address calculation ourselves
-      SpanBasedInstPairCopier(T *_span_copier, 
-                              RegionInstance _src_inst, 
-                              RegionInstance _dst_inst,
-                              OASVec &_oas_vec)
-	: span_copier(_span_copier), 
-	  src_inst(get_runtime()->get_instance_impl(_src_inst)), 
-          dst_inst(get_runtime()->get_instance_impl(_dst_inst)), oas_vec(_oas_vec)
-      {
-	assert(src_inst->metadata.is_valid());
-	assert(dst_inst->metadata.is_valid());
-
-        // Precompute our field offset information
-        src_start.resize(oas_vec.size());
-        dst_start.resize(oas_vec.size());
-        src_size.resize(oas_vec.size());
-        dst_size.resize(oas_vec.size());
-	partial_field.resize(oas_vec.size());
-        for (unsigned idx = 0; idx < oas_vec.size(); idx++)
-        {
-          find_field_start(src_inst->metadata.field_sizes, oas_vec[idx].src_offset,
-                            oas_vec[idx].size, src_start[idx], src_size[idx]);
-          find_field_start(dst_inst->metadata.field_sizes, oas_vec[idx].dst_offset,
-                            oas_vec[idx].size, dst_start[idx], dst_size[idx]);
-
-	  // mark an OASVec entry as being "partial" if src and/or dst don't fill the whole instance field
-	  partial_field[idx] = ((src_start[idx] != oas_vec[idx].src_offset) ||
-				(src_size[idx] != oas_vec[idx].size) ||
-				(dst_start[idx] != oas_vec[idx].dst_offset) ||
-				(dst_size[idx] != oas_vec[idx].size));
-        }
-      }
-
-      virtual ~SpanBasedInstPairCopier(void) { }
-
-      virtual void copy_field(int src_index, int dst_index, int elem_count,
-                              unsigned offset_index)
-      {
-        off_t src_offset = oas_vec[offset_index].src_offset;
-        off_t dst_offset = oas_vec[offset_index].dst_offset;
-        int bytes = oas_vec[offset_index].size;
-
-	assert(src_inst->metadata.is_valid());
-	assert(dst_inst->metadata.is_valid());
-
-	off_t src_field_start, dst_field_start;
-	int src_field_size, dst_field_size;
-
-	//find_field_start(src_inst->metadata.field_sizes, src_offset, bytes, src_field_start, src_field_size);
-	//find_field_start(dst_inst->metadata.field_sizes, dst_offset, bytes, dst_field_start, dst_field_size);
-        src_field_start = src_start[offset_index];
-        dst_field_start = dst_start[offset_index];
-        src_field_size = src_size[offset_index];
-        dst_field_size = dst_size[offset_index];
-
-	// if both source and dest fill up an entire field, we might be able to copy whole ranges at the same time
-	if((src_field_start == src_offset) && (src_field_size == bytes) &&
-	   (dst_field_start == dst_offset) && (dst_field_size == bytes)) {
-	  // let's see how many we can copy
-	  int done = 0;
-	  while(done < elem_count) {
-	    int src_in_this_block = src_inst->metadata.block_size - ((src_index + done) % src_inst->metadata.block_size);
-	    int dst_in_this_block = dst_inst->metadata.block_size - ((dst_index + done) % dst_inst->metadata.block_size);
-	    int todo = min(elem_count - done, min(src_in_this_block, dst_in_this_block));
-
-	    //printf("copying range of %d elements (%d, %d, %d)\n", todo, src_index, dst_index, done);
-
-	    off_t src_start = calc_mem_loc(src_inst->metadata.alloc_offset + (src_offset - src_field_start),
-					   src_field_start, src_field_size, src_inst->metadata.elmt_size,
-					   src_inst->metadata.block_size, src_index + done);
-	    off_t dst_start = calc_mem_loc(dst_inst->metadata.alloc_offset + (dst_offset - dst_field_start),
-					   dst_field_start, dst_field_size, dst_inst->metadata.elmt_size,
-					   dst_inst->metadata.block_size, dst_index + done);
-
-	    // sanity check that the range we calculated really is contiguous
-	    assert(calc_mem_loc(src_inst->metadata.alloc_offset + (src_offset - src_field_start),
-				src_field_start, src_field_size, src_inst->metadata.elmt_size,
-				src_inst->metadata.block_size, src_index + done + todo - 1) == 
-		   (src_start + (todo - 1) * bytes));
-	    assert(calc_mem_loc(dst_inst->metadata.alloc_offset + (dst_offset - dst_field_start),
-				dst_field_start, dst_field_size, dst_inst->metadata.elmt_size,
-				dst_inst->metadata.block_size, dst_index + done + todo - 1) == 
-		   (dst_start + (todo - 1) * bytes));
-
-#ifdef NEW2D_DEBUG
-	    printf("ZZZ: %zd %zd %d\n", src_start, dst_start, bytes * todo);
-#endif
-	    span_copier->copy_span(src_start, dst_start, bytes * todo);
-	    //src_mem->get_bytes(src_start, buffer, bytes * todo);
-	    //dst_mem->put_bytes(dst_start, buffer, bytes * todo);
-
-	    done += todo;
-	  }
-	} else {
-	  // fallback - calculate each address separately
-	  for(int i = 0; i < elem_count; i++) {
-	    off_t src_start = calc_mem_loc(src_inst->metadata.alloc_offset + (src_offset - src_field_start),
-					   src_field_start, src_field_size, src_inst->metadata.elmt_size,
-					   src_inst->metadata.block_size, src_index + i);
-	    off_t dst_start = calc_mem_loc(dst_inst->metadata.alloc_offset + (dst_offset - dst_field_start),
-					   dst_field_start, dst_field_size, dst_inst->metadata.elmt_size,
-					   dst_inst->metadata.block_size, dst_index + i);
-
-#ifdef NEW2D_DEBUG
-	    printf("ZZZ: %zd %zd %d\n", src_start, dst_start, bytes);
-#endif
-	    span_copier->copy_span(src_start, dst_start, bytes);
-	    //src_mem->get_bytes(src_start, buffer, bytes);
-	    //dst_mem->put_bytes(dst_start, buffer, bytes);
-	  }
-	}
-      }
-
-      virtual void copy_all_fields(int src_index, int dst_index, int elem_count)
-      {
-	// first check - if the span we're copying straddles a block boundary
-	//  go back to old way - block size of 1 is ok only if both are
-	assert(src_inst->metadata.is_valid());
-	assert(dst_inst->metadata.is_valid());
-
-	size_t src_bsize = src_inst->metadata.block_size;
-	size_t dst_bsize = dst_inst->metadata.block_size;
-
-	if(((src_bsize == 1) != (dst_bsize == 1)) ||
-	   ((src_bsize > 1) && ((src_index / src_bsize) != ((src_index + elem_count - 1) / src_bsize))) ||
-	   ((dst_bsize > 1) && ((dst_index / dst_bsize) != ((dst_index + elem_count - 1) / dst_bsize)))) {
-	  printf("copy straddles block boundaries - falling back\n");
-	  for(unsigned i = 0; i < oas_vec.size(); i++)
-	    copy_field(src_index, dst_index, elem_count, i);
-	  return;
-	}
-
-	// start with the first field, grabbing as many at a time as we can
-
-	unsigned field_idx = 0;
-
-	while(field_idx < oas_vec.size()) {
-	  // get information about the first field
-	  unsigned src_offset = oas_vec[field_idx].src_offset;
-	  unsigned dst_offset = oas_vec[field_idx].dst_offset;
-	  unsigned bytes = oas_vec[field_idx].size;
-
-	  // if src and/or dst aren't a full field, fall back to the old way for this field
-	  int src_field_start = src_start[field_idx];
-	  int src_field_size = src_size[field_idx];
-	  int dst_field_start = dst_start[field_idx];
-	  int dst_field_size = dst_size[field_idx];
-
-	  if(partial_field[field_idx]) {
-	    printf("not a full field - falling back\n");
-	    copy_field(src_index, dst_index, elem_count, field_idx);
-	    field_idx++;
-	    continue;
-	  }
-
-	  // see if we can tack on more fields
-	  unsigned field_idx2 = field_idx + 1;
-	  int src_fstride = 0;
-	  int dst_fstride = 0;
-	  unsigned total_bytes = bytes;
-	  unsigned total_lines = 1;
-	  while(field_idx2 < oas_vec.size()) {
-	    // TODO: for now, don't merge fields here because it can result in too-large copies
-	    break;
-
-	    // is this a partial field?  if so, stop
-	    if(partial_field[field_idx2])
-	      break;
-
-	    off_t src_offset2 = oas_vec[field_idx2].src_offset;
-	    off_t dst_offset2 = oas_vec[field_idx2].dst_offset;
-
-	    // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
-	    if(src_bsize == 1) {
-	      // for AOS, we need this field's offset to be the next byte
-	      if((src_offset2 != (src_offset + total_bytes)) ||
-		 (dst_offset2 != (dst_offset + total_bytes)))
-		break;
-
-	      // if tests pass, add this field's size to our total and keep going
-	      total_bytes += oas_vec[field_idx2].size;
-	    } else {
-	      // in SOA, we need the field's strides to match, but non-contiguous is ok
-	      // first stride will be ok by construction
-	      int src_fstride2 = src_offset2 - src_offset;
-	      int dst_fstride2 = dst_offset2 - dst_offset;
-	      if(src_fstride == 0) src_fstride = src_fstride2;
-	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
-	      if((src_fstride2 != (int)(field_idx2 - field_idx) * src_fstride) ||
-		 (dst_fstride2 != (int)(field_idx2 - field_idx) * dst_fstride))
-		break;
-
-	      // if tests pass, we have another line
-	      total_lines++;
-	    }
-
-	    field_idx2++;
-	  }
-
-	  // now we can copy something
-	  off_t src_start = calc_mem_loc(src_inst->metadata.alloc_offset + (src_offset - src_field_start),
-					 src_field_start, src_field_size, src_inst->metadata.elmt_size,
-					 src_inst->metadata.block_size, src_index);
-	  off_t dst_start = calc_mem_loc(dst_inst->metadata.alloc_offset + (dst_offset - dst_field_start),
-					 dst_field_start, dst_field_size, dst_inst->metadata.elmt_size,
-					 dst_inst->metadata.block_size, dst_index);
-
-	  // AOS merging doesn't work if we don't end up with the full element
-	  if((src_bsize == 1) && 
-	     ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size)) &&
-	     (elem_count > 1)) {
-	    printf("help: AOS tried to merge subset of fields with multiple elements - not contiguous!\n");
-	    assert(0);
-	  }
-
-#ifdef NEW2D_DEBUG
-	  printf("AAA: %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
-		 src_index, dst_index, elem_count, field_idx, field_idx2-1,
-		 src_start, dst_start, elem_count * total_bytes,
-		 src_fstride * src_bsize,
-		 dst_fstride * dst_bsize,
-		 total_lines);
-#endif
-	  span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
-				 src_fstride * src_bsize,
-				 dst_fstride * dst_bsize,
-				 total_lines);
-
-	  // continue with the first field we couldn't take for this pass
-	  field_idx = field_idx2;
-	}
-      }
-
-      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-				   int src_stride, int dst_stride, int lines)
-      {
-	// first check - if the span we're copying straddles a block boundary
-	//  go back to old way - block size of 1 is ok only if both are
-	assert(src_inst->metadata.is_valid());
-	assert(dst_inst->metadata.is_valid());
-
-	size_t src_bsize = src_inst->metadata.block_size;
-	size_t dst_bsize = dst_inst->metadata.block_size;
-
-	int src_last = src_index + (count_per_line - 1) + (lines - 1) * src_stride;
-	int dst_last = dst_index + (count_per_line - 1) + (lines - 1) * dst_stride;
-
-	if(((src_bsize == 1) != (dst_bsize == 1)) ||
-	   ((src_bsize > 1) && ((src_index / src_bsize) != (src_last / src_bsize))) ||
-	   ((dst_bsize > 1) && ((dst_index / dst_bsize) != (dst_last / dst_bsize)))) {
-	  printf("copy straddles block boundaries - falling back\n");
-	  for(unsigned i = 0; i < oas_vec.size(); i++)
-	    for(int l = 0; l < lines; l++)
-	      copy_field(src_index + l * src_stride, 
-			 dst_index + l * dst_stride, count_per_line, i);
-	  return;
-	}
-
-	// start with the first field, grabbing as many at a time as we can
-
-	unsigned field_idx = 0;
-
-	while(field_idx < oas_vec.size()) {
-	  // get information about the first field
-	  unsigned src_offset = oas_vec[field_idx].src_offset;
-	  unsigned dst_offset = oas_vec[field_idx].dst_offset;
-	  unsigned bytes = oas_vec[field_idx].size;
-
-	  // if src and/or dst aren't a full field, fall back to the old way for this field
-	  int src_field_start = src_start[field_idx];
-	  int src_field_size = src_size[field_idx];
-	  int dst_field_start = dst_start[field_idx];
-	  int dst_field_size = dst_size[field_idx];
-
-	  if(partial_field[field_idx]) {
-	    printf("not a full field - falling back\n");
-	    copy_field(src_index, dst_index, count_per_line, field_idx);
-	    field_idx++;
-	    continue;
-	  }
-
-	  // see if we can tack on more fields
-	  unsigned field_idx2 = field_idx + 1;
-	  int src_fstride = 0;
-	  int dst_fstride = 0;
-	  unsigned total_bytes = bytes;
-	  unsigned total_lines = 1;
-	  while(field_idx2 < oas_vec.size()) {
-	    // is this a partial field?  if so, stop
-	    if(partial_field[field_idx2])
-	      break;
-
-	    unsigned src_offset2 = oas_vec[field_idx2].src_offset;
-	    unsigned dst_offset2 = oas_vec[field_idx2].dst_offset;
-
-	    // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
-	    if(src_bsize == 1) {
-	      // for AOS, we need this field's offset to be the next byte
-	      if((src_offset2 != (src_offset + total_bytes)) ||
-		 (dst_offset2 != (dst_offset + total_bytes)))
-		break;
-
-	      // if tests pass, add this field's size to our total and keep going
-	      total_bytes += oas_vec[field_idx2].size;
-	    } else {
-	      // in SOA, we need the field's strides to match, but non-contiguous is ok
-	      // first stride will be ok by construction
-	      int src_fstride2 = src_offset2 - src_offset;
-	      int dst_fstride2 = dst_offset2 - dst_offset;
-	      if(src_fstride == 0) src_fstride = src_fstride2;
-	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
-	      if((src_fstride2 != (int)(field_idx2 - field_idx) * src_fstride) ||
-		 (dst_fstride2 != (int)(field_idx2 - field_idx) * dst_fstride))
-		break;
-
-	      // if tests pass, we have another line
-	      total_lines++;
-	    }
-
-	    field_idx2++;
-	  }
-
-	  // now we can copy something
-	  off_t src_start = calc_mem_loc(src_inst->metadata.alloc_offset + (src_offset - src_field_start),
-					 src_field_start, src_field_size, src_inst->metadata.elmt_size,
-					 src_inst->metadata.block_size, src_index);
-	  off_t dst_start = calc_mem_loc(dst_inst->metadata.alloc_offset + (dst_offset - dst_field_start),
-					 dst_field_start, dst_field_size, dst_inst->metadata.elmt_size,
-					 dst_inst->metadata.block_size, dst_index);
-
-	  // AOS merging doesn't work if we don't end up with the full element
-	  if((src_bsize == 1) && 
-	     ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size)) &&
-	     (count_per_line > 1)) {
-	    printf("help: AOS tried to merge subset of fields with multiple elements - not contiguous!\n");
-	    assert(0);
-	  }
-
-#ifdef NEW2D_DEBUG
-	  printf("BBB: %d %d %d, %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
-		 src_index, dst_index, count_per_line,
-		 src_stride, dst_stride, lines,
-		 field_idx, field_idx2-1,
-		 src_start, dst_start, count_per_line * total_bytes,
-		 src_fstride * src_bsize,
-		 dst_fstride * dst_bsize,
-		 lines * total_lines);
-#endif
-
-	  // since we're already 2D, we need line strides to match up
-	  if(total_lines > 1) {
-	    if(0) {
-	    } else {
-	      // no?  punt on the field merging
-	      total_lines = 1;
-	      //printf("CCC: eliminating field merging\n");
-	      field_idx2 = field_idx + 1;
-	    }
-	  }
-
-#ifdef NEW2D_DEBUG
-	  printf("DDD: %d %d %d, %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
-		 src_index, dst_index, count_per_line,
-		 src_stride, dst_stride, lines,
-		 field_idx, field_idx2-1,
-		 src_start, dst_start, count_per_line * total_bytes,
-		 src_stride * bytes,
-		 dst_stride * bytes,
-		 lines);
-#endif
-	  span_copier->copy_span(src_start, dst_start, count_per_line * total_bytes,
-				 src_stride * bytes,
-				 dst_stride * bytes,
-				 lines);
-
-	  // continue with the first field we couldn't take for this pass
-	  field_idx = field_idx2;
-	}
-      }
-
-      virtual void flush(void) {}
-
-    protected:
-      T *span_copier;
-      RegionInstanceImpl *src_inst;
-      RegionInstanceImpl *dst_inst;
-      OASVec &oas_vec;
-      std::vector<off_t> src_start;
-      std::vector<off_t> dst_start;
-      std::vector<int> src_size;
-      std::vector<int> dst_size;
-      std::vector<bool> partial_field;
-    };
 
     class RemoteWriteInstPairCopier : public InstPairCopier {
     public:
@@ -1532,44 +1081,56 @@ namespace LegionRuntime {
       OASVec &oas_vec;
     };
 
-    class MemPairCopier {
-    public:
-      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
-					  ReductionOpID redop_id = 0,
-					  bool fold = false);
-      MemPairCopier(void) 
-        : total_reqs(0), total_bytes(0)
-      { 
-      }
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemPairCopier
+  //
 
-      virtual ~MemPairCopier(void) { }
+    MemPairCopier::MemPairCopier(void) 
+      : total_reqs(0), total_bytes(0)
+    { 
+    }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec) = 0;
+    MemPairCopier::~MemPairCopier(void)
+    {
+    }
 
-      // default behavior of flush is just to report bytes (maybe)
-      virtual void flush(DmaRequest *req)
-      {
+    // default behavior of flush is just to report bytes (maybe)
+    void MemPairCopier::flush(DmaRequest *req)
+    {
 #ifdef EVENT_GRAPH_TRACE
-        report_bytes(after_copy);
+      log_event_graph.debug("Copy Size: (" IDFMT ",%d) %ld",
+			    after_copy.id, after_copy.gen, total_bytes);
+      report_bytes(after_copy);
 #endif
-      }
-    public:
-      void record_bytes(size_t bytes)
-      {
-        total_reqs++;
-        total_bytes += bytes;
-      }
-#ifdef EVENT_GRAPH_TRACE
-      void report_bytes(Event after_copy)
-      {
-        log_event_graph.debug("Copy Size: (" IDFMT ",%d) %ld",
-                              after_copy.id, after_copy.gen, total_bytes);
-      }
-#endif
-    protected:
-      size_t total_reqs, total_bytes;
-    };
+    }
+
+    void MemPairCopier::record_bytes(size_t bytes)
+    {
+      total_reqs++;
+      total_bytes += bytes;
+    }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemPairCopierFactory
+  //
+
+    MemPairCopierFactory::MemPairCopierFactory(const std::string& _name)
+      : name(_name)
+    {
+    }
+
+    MemPairCopierFactory::~MemPairCopierFactory(void)
+    {
+    }
+
+    const std::string& MemPairCopierFactory::get_name(void) const
+    {
+      return name;
+    }
+
 
     class BufferedMemPairCopier : public MemPairCopier {
     public:
@@ -1862,183 +1423,6 @@ namespace LegionRuntime {
 
     protected:
       std::set<Event> events;
-    };
-#endif
-
-#ifdef USE_CUDA     
-    class GPUtoFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
-	: gpu(_gpu)
-      {
-	MemoryImpl *src_impl = get_runtime()->get_memory_impl(_src_mem);
-	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
-	assert(src_base);
-      }
-
-      virtual ~GPUtoFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
-                                                          dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu write of %zd bytes\n", bytes);
-	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_to_fb_2d(dst_offset, src_base + src_offset,
-                           dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_to_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      const char *src_base;
-      GPUProcessor *gpu;
-    };
-
-    class GPUfromFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
-	: gpu(_gpu)
-      {
-	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(_dst_mem);
-	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
-	assert(dst_base);
-      }
-
-      virtual ~GPUfromFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu read of %zd bytes\n", bytes);
-	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_from_fb_2d(dst_base + dst_offset, src_offset,
-                             dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_from_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      char *dst_base;
-      GPUProcessor *gpu;
-    };
-     
-    class GPUinFBMemPairCopier : public MemPairCopier {
-    public:
-      GPUinFBMemPairCopier(GPUProcessor *_gpu)
-	: gpu(_gpu)
-      {
-      }
-
-      virtual ~GPUinFBMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
-                                                            dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-	//printf("gpu write of %zd bytes\n", bytes);
-	gpu->copy_within_fb(dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        gpu->copy_within_fb_2d(dst_offset, src_offset,
-                               dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          gpu->fence_within_fb(req);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      GPUProcessor *gpu;
-    };
-
-    class GPUPeerMemPairCopier : public MemPairCopier {
-    public:
-      GPUPeerMemPairCopier(GPUProcessor *_src, GPUProcessor *_dst)
-        : src(_src), dst(_dst)
-      {
-      }
-
-      virtual ~GPUPeerMemPairCopier(void) { }
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec)
-      {
-        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
-                                                              dst_inst, oas_vec);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
-      {
-        src->copy_to_peer(dst, dst_offset, src_offset, bytes);
-        record_bytes(bytes);
-      }
-
-      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-                     off_t src_stride, off_t dst_stride, size_t lines)
-      {
-        src->copy_to_peer_2d(dst, dst_offset, src_offset,
-                             dst_stride, src_stride, bytes, lines);
-        record_bytes(bytes * lines);
-      }
-
-      virtual void flush(DmaRequest *req)
-      {
-        if(total_reqs > 0)
-          src->fence_to_peer(req, dst);
-        MemPairCopier::flush(req);
-      }
-
-    protected:
-      GPUProcessor *src, *dst;
     };
 #endif
      
@@ -2453,10 +1837,79 @@ namespace LegionRuntime {
       int fd; // file descriptor
     };
      
+    // most of the smarts from MemPairCopier::create_copier are now captured in the various factories
+
+    class MemcpyMemPairCopierFactory : public MemPairCopierFactory {
+    public:
+      MemcpyMemPairCopierFactory(void)
+	: MemPairCopierFactory("memcpy")
+      {}
+
+      virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
+				    ReductionOpID redop_id, bool fold)
+      {
+	// non-reduction copies between anything SYSMEM and/or ZC
+	//  (TODO: really should be anything with a direct CPU pointer, but GPUFBMemory
+	//  returns non-null for that right now...)
+	if(redop_id != 0)
+	  return false;
+
+	MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+	MemoryImpl::MemoryKind src_kind = src_impl->kind;
+	
+	if((src_kind != MemoryImpl::MKIND_SYSMEM) &&
+	   (src_kind != MemoryImpl::MKIND_ZEROCOPY))
+	  return false;
+
+	MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+	MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+	
+	if((dst_kind != MemoryImpl::MKIND_SYSMEM) &&
+	   (dst_kind != MemoryImpl::MKIND_ZEROCOPY))
+	  return false;
+
+	return true;
+      }
+
+      virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
+					   ReductionOpID redop_id, bool fold)
+      {
+	return new MemcpyMemPairCopier(src_mem, dst_mem);
+      }
+    };
+
+
+    void create_builtin_dma_channels(Realm::RuntimeImpl *r)
+    {
+      r->add_dma_channel(new MemcpyMemPairCopierFactory);
+    }
+
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem,
 						ReductionOpID redop_id /*= 0*/,
 						bool fold /*= false*/)
     {
+      // try to use new DMA channels first
+      const std::vector<MemPairCopierFactory *>& channels = get_runtime()->get_dma_channels();
+      for(std::vector<MemPairCopierFactory *>::const_iterator it = channels.begin();
+	  it != channels.end();
+	  it++) {
+	if((*it)->can_perform_copy(src_mem, dst_mem, redop_id, fold)) {
+	  // impls and kinds are just for logging now
+	  MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+	  MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+
+	  MemoryImpl::MemoryKind src_kind = src_impl->kind;
+	  MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
+
+	  log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d) = %s",
+		       src_mem.id, src_kind, dst_mem.id, dst_kind, (*it)->get_name().c_str());
+	  return (*it)->create_copier(src_mem, dst_mem, redop_id, fold);
+	}
+      }
+
+      // old style - various options in here are being turned into assert(0)'s as they are 
+      //  replaced by DMA channel-provided copiers
+
       MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
       MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
 
@@ -2469,7 +1922,8 @@ namespace LegionRuntime {
 	// can we perform simple memcpy's?
 	if(((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
 	   ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-	  return new MemcpyMemPairCopier(src_mem, dst_mem);
+	  assert(0);
+	  //return new MemcpyMemPairCopier(src_mem, dst_mem);
 	}
 
         // can we perform transfer between disk and cpu memory
@@ -2487,38 +1941,10 @@ namespace LegionRuntime {
           return new DisktoCPUMemPairCopier(fd, dst_mem);
         }
 
-#ifdef USE_CUDA
-	// copy to a framebuffer
-	if(((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
-	   (dst_kind == MemoryImpl::MKIND_GPUFB)) {
-	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	  return new GPUtoFBMemPairCopier(src_mem, dst_gpu);
+	// GPU FB-related copies should be handled by module-provided dma channels now
+	if((src_kind == MemoryImpl::MKIND_GPUFB) || (dst_kind == MemoryImpl::MKIND_GPUFB)) {
+	  assert(0);
 	}
-
-	// copy from a framebuffer
-	if((src_kind == MemoryImpl::MKIND_GPUFB) &&
-	   ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
-	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	  return new GPUfromFBMemPairCopier(src_gpu, dst_mem);
-	}
-
-	// copy within a framebuffer
-	if((src_kind == MemoryImpl::MKIND_GPUFB) &&
-	   (dst_kind == MemoryImpl::MKIND_GPUFB)) {
-	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	  if (src_gpu == dst_gpu)
-	    return new GPUinFBMemPairCopier(src_gpu);
-	  else if (src_gpu->can_access_peer(dst_gpu))
-	    return new GPUPeerMemPairCopier(src_gpu, dst_gpu);
-	  else
-	    {
-	      fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
-	      assert(false);
-	      return NULL;
-	    }
-	}
-#endif
 
 	// try as many things as we can think of
 	if((dst_kind == MemoryImpl::MKIND_REMOTE) ||
@@ -2819,19 +2245,21 @@ namespace LegionRuntime {
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
 
+      mpc->flush(this);
+
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         const InstPair &pair = oas_by_inst->begin()->first; 
 
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
         usage.target = pair.second.get_location();
+        usage.size = mpc->get_total_bytes();
         measurements.add_measurement(usage);
       }
 
       // if(after_copy.exists())
       // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
 
-      mpc->flush(this);
       delete mpc;
 
 #ifdef EVEN_MORE_DEAD_DMA_CODE
@@ -3527,6 +2955,7 @@ namespace LegionRuntime {
 
       // we have the same jumble of memory type and layout permutations here - again we'll
       //  solve a few of them point-wise and then try to unify later
+      size_t total_bytes = 0;
       if(domain.get_dim() == 0) {
 	// index space
 	IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -3725,6 +3154,8 @@ namespace LegionRuntime {
 	    assert(0);
 	  }
 	}
+        // TODO: we don't track the size of reduction on unstructred index spaces
+        total_bytes = 0;
       } else {
 	MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, redop_id, red_fold);
 
@@ -3736,6 +3167,7 @@ namespace LegionRuntime {
 	}
 
 	mpc->flush(this);
+        total_bytes = mpc->get_total_bytes();
 
 	// if an instance lock was taken, release it after copy completes
 	if(inst_lock_needed)
@@ -3760,6 +3192,7 @@ namespace LegionRuntime {
         // Not precise, but close enough for now
         usage.source = srcs[0].inst.get_location();
         usage.target = dst.inst.get_location();
+        usage.size = total_bytes;
         measurements.add_measurement(usage);
       }
     }
@@ -4396,12 +3829,10 @@ namespace Realm {
 #endif
 
 	  int priority = 0;
-#ifdef USE_CUDA
 	  if (get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GPUFB)
 	    priority = 1;
 	  else if (get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GPUFB)
 	    priority = 1;
-#endif
 
 	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
 					   wait_on, ev, priority, requests);

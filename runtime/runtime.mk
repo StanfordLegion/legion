@@ -37,6 +37,16 @@ else
 GASNET ?= $(LG_RT_DIR)/gasnet/release
 endif
 
+# generate libraries for Legion and Realm
+SLIB_LEGION     := liblegion.a
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+SLIB_REALM      := librealm.a
+LEGION_LIBS     := -L. -llegion -lrealm
+else
+SLIB_SHAREDLLR  := libsharedllr.a
+LEGION_LIBS     := -L. -llegion -lsharedllr
+endif
+
 # Handle some of the common machines we frequent
 
 # machine architecture (generally "native" unless cross-compiling)
@@ -79,8 +89,8 @@ CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
-LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
 GCC=CC
@@ -92,25 +102,34 @@ CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
 GPU_ARCH=k20
-LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
 ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/legion -I$(LG_RT_DIR)/mappers
 ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -lrt -lpthread
+LEGION_LD_FLAGS	+= -lrt -lpthread
 else
-LD_FLAGS	+= -lpthread
+LEGION_LD_FLAGS	+= -lpthread
+endif
+
+ifeq ($(strip $(USE_HWLOC)),1)
+  ifndef HWLOC 
+    $(error HWLOC variable is not defined, aborting build)
+  endif
+  CC_FLAGS        += -DREALM_USE_HWLOC
+  INC_FLAGS   += -I$(HWLOC)/include
+  LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
 USE_LIBDL = 1
 ifeq ($(strip $(USE_LIBDL)),1)
 #CC_FLAGS += -rdynamic
-LD_FLAGS += -ldl -rdynamic
+LEGION_LD_FLAGS += -ldl -rdynamic
 endif
 
 # Falgs for running in the general low-level runtime
@@ -136,9 +155,9 @@ else
 NVCC_FLAGS	+= -O2
 endif
 ifneq ($(shell uname -s),Darwin)
-LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 else
-LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
@@ -166,9 +185,9 @@ ifeq ($(strip $(USE_GASNET)),1)
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
   ifneq ($(shell uname -s),Darwin)
-    LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   else
-    LD_FLAGS	+= -L$(GASNET)/lib -lm
+    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lm
   endif 
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
@@ -178,34 +197,34 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),ibv)
     INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_IBV
-    LD_FLAGS	+= -lgasnet-ibv-par -libverbs
+    LEGION_LD_FLAGS	+= -lgasnet-ibv-par -libverbs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),gemini)
     INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
-    LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),aries)
     INC_FLAGS   += -I$(GASNET)/include/aries-conduit
     CC_FLAGS    += -DGASNET_CONDUIT_ARIES
-    LD_FLAGS    += -lgasnet-aries-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_MPI
-    LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
+    LEGION_LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),udp)
     INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_UDP
-    LD_FLAGS	+= -lgasnet-udp-par -lamudp
+    LEGION_LD_FLAGS	+= -lgasnet-udp-par -lamudp
   endif
 
 endif
@@ -214,7 +233,7 @@ endif
 USE_HDF ?= 0
 ifeq ($(strip $(USE_HDF)), 1)
   CC_FLAGS      += -DUSE_HDF
-  LD_FLAGS      += -lhdf5
+  LEGION_LD_FLAGS      += -lhdf5
 endif
 
 SKIP_MACHINES= titan% daint%
@@ -226,7 +245,7 @@ ifeq ($(strip $(USE_MPI)),1)
     CXX		:= mpicxx
     GCC		:= $(CXX)
     F90         := mpif90
-    LD_FLAGS	+= -L$(MPI)/lib -lmpi
+    LEGION_LD_FLAGS	+= -L$(MPI)/lib -lmpi
     LAPACK_LIBS ?= -lblas
   endif
 endif
@@ -257,14 +276,9 @@ ASM_SRC		?=
 
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
-LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc
-ifeq ($(strip $(USE_CUDA)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_gpu.cc
-endif
-ifeq ($(strip $(USE_GASNET)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
-endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
+	           $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
@@ -276,41 +290,53 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc \
 		   $(LG_RT_DIR)/realm/inst_impl.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
-		   $(LG_RT_DIR)/realm/runtime_impl.cc
+                   $(LG_RT_DIR)/lowlevel.cc \
+                   $(LG_RT_DIR)/lowlevel_disk.cc
+ifeq ($(strip $(USE_CUDA)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
+		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
+endif
+ifeq ($(strip $(USE_GASNET)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
+endif
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc 
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
+	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
-MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc \
-		   $(LG_RT_DIR)/shim_mapper.cc \
-		   $(LG_RT_DIR)/mapping_utilities.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
+		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
+		   $(LG_RT_DIR)/mappers/mapping_utilities.cc
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifeq ($(strip $(ALT_MAPPERS)),1)
-MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
 
-HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
-		    $(LG_RT_DIR)/legion_c.cc \
-		    $(LG_RT_DIR)/legion_ops.cc \
-		    $(LG_RT_DIR)/legion_tasks.cc \
-		    $(LG_RT_DIR)/legion_trace.cc \
-		    $(LG_RT_DIR)/legion_spy.cc \
-		    $(LG_RT_DIR)/legion_profiling.cc \
-		    $(LG_RT_DIR)/region_tree.cc \
-		    $(LG_RT_DIR)/runtime.cc \
-		    $(LG_RT_DIR)/garbage_collection.cc
+HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
+		    $(LG_RT_DIR)/legion/legion_c.cc \
+		    $(LG_RT_DIR)/legion/legion_ops.cc \
+		    $(LG_RT_DIR)/legion/legion_tasks.cc \
+		    $(LG_RT_DIR)/legion/legion_trace.cc \
+		    $(LG_RT_DIR)/legion/legion_spy.cc \
+		    $(LG_RT_DIR)/legion/legion_profiling.cc \
+		    $(LG_RT_DIR)/legion/legion_instances.cc \
+		    $(LG_RT_DIR)/legion/legion_views.cc \
+		    $(LG_RT_DIR)/legion/legion_analysis.cc \
+		    $(LG_RT_DIR)/legion/region_tree.cc \
+		    $(LG_RT_DIR)/legion/runtime.cc \
+		    $(LG_RT_DIR)/legion/garbage_collection.cc
 
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh
-RM	:= rm -f
+RM	:= rm
 LS	:= ls
 MKDIR	:= mkdir
 MV	:= mv
@@ -342,39 +368,52 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
-ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
-
 ifndef NO_BUILD_RULES
 .PHONY: all
 all: $(OUTFILE)
 
 # If we're using the general low-level runtime we have to link with nvcc
-$(OUTFILE) : $(ALL_OBJS)
+$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
+	$(GCC) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+
+$(SLIB_LEGION) : $(HIGH_RUNTIME_OBJS) $(MAPPER_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+$(SLIB_REALM) : $(LOW_RUNTIME_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+else
+$(SLIB_SHAREDLLR) : $(LOW_RUNTIME_OBJS)
+	rm -f $@
+	$(AR) rc $@ $^
+endif
 
 $(GEN_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(ASM_OBJS) : %.o : %.S
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(LOW_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(HIGH_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(MAPPER_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(GEN_GPU_OBJS) : %.o : %.cu
-	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 $(GPU_RUNTIME_OBJS): %.o : %.cu
-	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 clean:
-	@$(RM) -rf $(ALL_OBJS) $(OUTFILE)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+
 endif
 

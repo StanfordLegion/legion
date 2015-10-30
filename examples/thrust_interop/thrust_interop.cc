@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <cmath>
 #include "legion.h"
 #include "thrust_shim.h"
 using namespace LegionRuntime::HighLevel;
@@ -47,6 +48,7 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024; 
   int num_subregions = 4;
+  int random_seed = 12345;
   // See if we have any command line arguments to parse
   // Note we now have a new command line parameter which specifies
   // how many subregions we should make.
@@ -58,6 +60,8 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-b"))
         num_subregions = atoi(command_args.argv[++i]);
+      if (!strcmp(command_args.argv[i],"-seed"))
+        random_seed = atoi(command_args.argv[++i]);
     }
   }
   printf("Running daxpy for %d elements...\n", num_elements);
@@ -263,7 +267,9 @@ void top_level_task(const Task *task,
   init_launcher.region_requirements[0].add_field(FID_Y);
   runtime->execute_index_space(ctx, init_launcher);
 
+  srand48(random_seed);
   const double alpha = drand48();
+
   // We launch the subtasks for performing the daxpy computation
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
@@ -390,10 +396,15 @@ void check_task(const Task *task,
     double y = acc_y.read(DomainPoint::from_point<1>(pir.p));
     double expected = alpha * x + y; 
     double received = acc_z.read(DomainPoint::from_point<1>(pir.p));
-    // Probably shouldn't check for floating point equivalence but
-    // the order of operations are the same should they should
-    // be bitwise equal.
-    if (expected != received)
+    // Checks for floating point "equality" should be fuzzy, and if
+    // you're not going to explicitly check for NANs, you need to write
+    // the check "backwards" (i.e. check for it being ok, and put the
+    // error case handling in the else block).
+    if (fabs(expected - received) < 1e-10)
+    {
+      // ok
+    }
+    else
     {
       printf("Diff[%d] %.8g * %.8g + %.8g = %.8g != %.8g\n", pir.p[0], x, alpha, y, expected, received);
       all_passed = false;

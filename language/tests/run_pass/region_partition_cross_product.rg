@@ -16,10 +16,6 @@ import "regent"
 
 local c = regentlib.c
 
-function raw(t)
-  return terra(x : t) return x.__ptr end
-end
-
 task assert_disjoint(r : region(int), s : region(int))
 where reads(r, s), r * s do
 end
@@ -32,18 +28,18 @@ task main()
   var x3 = new(ptr(int, r))
 
   var colors0 = c.legion_coloring_create()
-  c.legion_coloring_add_point(colors0, 0, [raw(ptr(int, r))](x0))
-  c.legion_coloring_add_point(colors0, 0, [raw(ptr(int, r))](x1))
-  c.legion_coloring_add_point(colors0, 1, [raw(ptr(int, r))](x2))
-  c.legion_coloring_add_point(colors0, 1, [raw(ptr(int, r))](x3))
+  c.legion_coloring_add_point(colors0, 0, __raw(x0))
+  c.legion_coloring_add_point(colors0, 0, __raw(x1))
+  c.legion_coloring_add_point(colors0, 1, __raw(x2))
+  c.legion_coloring_add_point(colors0, 1, __raw(x3))
   var part0 = partition(disjoint, r, colors0)
   c.legion_coloring_destroy(colors0)
 
   var colors1 = c.legion_coloring_create()
-  c.legion_coloring_add_point(colors1, 0, [raw(ptr(int, r))](x0))
-  c.legion_coloring_add_point(colors1, 1, [raw(ptr(int, r))](x1))
-  c.legion_coloring_add_point(colors1, 0, [raw(ptr(int, r))](x2))
-  c.legion_coloring_add_point(colors1, 1, [raw(ptr(int, r))](x3))
+  c.legion_coloring_add_point(colors1, 0, __raw(x0))
+  c.legion_coloring_add_point(colors1, 1, __raw(x1))
+  c.legion_coloring_add_point(colors1, 0, __raw(x2))
+  c.legion_coloring_add_point(colors1, 1, __raw(x3))
   var part1 = partition(disjoint, r, colors1)
   c.legion_coloring_destroy(colors1)
 

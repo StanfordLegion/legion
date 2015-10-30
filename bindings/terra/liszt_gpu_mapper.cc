@@ -28,7 +28,7 @@ using namespace LegionRuntime::HighLevel;
 /// Mapper
 ///
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+static LegionRuntime::Logger::Category log_mapper("mapper");
 
 class LzGpuMapper : public DefaultMapper
 {

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+  <head>
+    <style>
+      rect.bordered {
+        stroke: #000000;
+        stroke-width:0.5px;
+      }
+
+      text.mono {
+        font-size: 12pt;
+        font-family: Consolas, courier;
+        fill: #000;
+      }
+
+      text.mono-white {
+        font-size: 12pt;
+        font-family: Consolas, courier;
+        fill: #fff;
+      }
+
+      text.radio-label {
+        font-size: 12pt;
+        font-family: Consolas, courier;
+        fill: #000;
+        margin-left: 5pt;
+        margin-right: 10pt;
+      }
+
+      text.menu {
+        font-size: 14pt;
+        font-family: Consolas, courier;
+        font-weight: bold;
+        fill: #000;
+      }
+
+      text.desc {
+        font-size: 10pt;
+        font-family: Consolas, courier;
+        fill: #000;
+      }
+
+      text.axis-memory {
+        fill: #000;
+      }
+
+      div.options {
+        margin-top: 5pt;
+        margin-left: 5pt;
+      }
+
+      polygon.tooltip {
+        fill: white;
+        stroke: black;
+        stroke-width: 0.5pt;
+      }
+    </style>
+    <script src="http://code.jquery.com/jquery-1.11.3.min.js"></script>
+    <script src="http://d3js.org/d3.v3.js"></script>
+  </head>
+  <body>
+    <div id="options" class="options">
+      <input type="radio" name="type" value="1" checked="checked">
+        <text class="radio-label">total time</text>
+      </input>
+      <input type="radio" name="type" value="2">
+        <text class="radio-label">average time</text>
+      </input>
+      <input type="radio" name="type" value="3">
+        <text class="radio-label">count</text>
+      </input>
+      <input type="radio" name="type" value="4">
+        <text class="radio-label">bandwidth</text>
+      </input>
+    </div>
+    <div id="chart"></div>
+
+    <script type="text/javascript">
+      var memories = %s;
+      var margin = { top: 250, right: 0, bottom: 70, left: 300 },
+          gridSize = 80,
+          legendElementWidth = gridSize,
+          width = Math.max(gridSize * memories.length, legendElementWidth) + margin.left,
+          height = gridSize * memories.length + margin.bottom,
+          colors = ["#ffffd3","#c7e9b4","#1d91c0","#253494","#081d58"];
+      function load(type, unit) {
+        d3.tsv(%s,
+          function(d) {
+            var value;
+            if (type == 0) value = d.total;
+            else if (type == 1) value = d.average;
+            else if (type == 2) value = d.count;
+            else if (type == 3) value = d.bandwidth;
+            return {
+              source: d.source,
+              target: d.target,
+              value: value,
+              total: d.total,
+              average: d.average,
+              count: d.count,
+              bandwidth: d.bandwidth
+            };
+          },
+          function(error, data) {
+            var idxRange = d3.range(colors.length);
+            var mean = d3.mean(data, function (d) { return d.value; })
+            var max = d3.max(data, function (d) { return d.value; })
+            var idxScale = d3.scale.quantile()
+                .domain([0, mean, max])
+                .range(idxRange);
+            var colorScale = d3.scale.quantile()
+                .domain([0, mean, max])
+                .range(colors);
+
+            var svg = d3.select("#chart").append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            var sourceLabels = svg.selectAll(".sourceLabel")
+                .data(memories)
+                .enter().append("text")
+                  .text(function (d) { return d; })
+                  .attr("x", 0)
+                  .attr("y", function (d, i) { return i * gridSize; })
+                  .style("text-anchor", "end")
+                  .attr("transform", "translate(-6," + gridSize / 1.5 + ")")
+                  .attr("class", "memoryLabel mono axis axis-memory");
+
+            var targetLabels = svg.selectAll(".targetLabel")
+                .data(memories)
+                .enter().append("text")
+                  .text(function(d) { return d; })
+                  .attr("transform", function(d, i) {
+                    return "translate(" + (i * gridSize) + ", 0)rotate(-45)" +
+                      "translate(" + (gridSize / 2) + ", 6)";
+                  })
+                  .style("text-anchor", "start")
+                  .attr("class", "memoryLabel mono axis axis-memory");
+
+            var heatMap = svg.selectAll(".data")
+                .data(data)
+                .enter().append("rect")
+                .attr("x", function(d) { return d.target * gridSize; })
+                .attr("y", function(d) { return d.source * gridSize; })
+                .attr("class", "data bordered")
+                .attr("width", gridSize)
+                .attr("height", gridSize)
+                .style("fill", colors[0])
+                .on("mouseover", function(d, i) {
+                    var detailView = svg.append("g").attr("id", "tooltip-" + i);
+                    var width = gridSize * 7 / 2
+                    var height = gridSize * 3 / 2
+                    var tooltipWidth = 20;
+                    var x = d.target * gridSize + 40;
+                    var y = d.source * gridSize + 150;
+                    var x1 = x - width / 2;
+                    var y1 = y - height / 2;
+                    var x2 = x + width / 2;
+                    var y2 = y - height / 2;
+                    var x3 = x + width / 2;
+                    var y3 = y + height / 2 - 10;
+                    var x4 = x - width / 2;
+                    var y4 = y + height / 2 - 10;
+                    var x5 = x;
+                    var y5 = y - height / 2 - 30;
+                    var x6 = x - tooltipWidth / 2;
+                    var y6 = y1;
+                    var x7 = x + tooltipWidth / 2;
+                    var y7 = y1;
+                    detailView.append("polygon")
+                      .attr("points", x1+","+y1+" "+x6+","+y6+" "+
+                                      x5+","+y5+" "+x7+","+y7+" "+
+                                      x2+","+y2+" "+x3+","+y3+" "+x4+","+y4+" ")
+                      .attr("class", "tooltip");
+
+                    var detailText = detailView.append("text")
+                      .attr("class", "desc")
+                      .attr("y", d.source * gridSize + gridSize * 5 / 4);
+                    var desc = ["source: " + memories[d.source],
+                                "target: " + memories[d.target],
+                                "total: " + Math.round(d.total * 100) / 100 + "ms",
+                                "average: " + Math.round(d.average * 100) / 100 + "us",
+                                "count: " + d.count,
+                                "bandwidth: " + Math.round(d.bandwidth * 100) / 100 + "MB/s"];
+                    for (var j = 0; j < desc.length; ++j) {
+                      detailText.append("tspan")
+                        .attr("x", (d.target - 1) * gridSize + 10)
+                        .attr("dy", "15")
+                        .attr("text-anchor", "start")
+                        .text(desc[j]);
+                    }
+                })
+                .on("mouseout", function(d, i) {
+                    svg.select("#tooltip-" + i).remove();
+                });
+
+            heatMap.transition().duration(500)
+                .style("fill", function(d) {
+                    var idx = idxScale(d.value);
+                    var color = colorScale(d.value);
+                    return color;
+                });
+
+            svg.selectAll(".dataLabel")
+                .data(data)
+                .enter().append("text")
+                .attr("x", function(d) { return d.target * gridSize + gridSize / 2; })
+                .attr("y", function(d) { return d.source * gridSize + gridSize / 2 + 5; })
+                .style("text-anchor", "middle")
+                .style("pointer-events", "none")
+                .attr("class", function(d) {
+                    var idx = idxScale(d.value);
+                    if (idx >= 3) return "mono-white";
+                    else return "mono";
+                })
+                .text(function(d) {
+                    if (type < 3) return Math.round(d.value * 100) / 100;
+                    else return Math.round(d.value)
+                });
+
+            var legend = svg.selectAll(".legend")
+                .data([0].concat(colorScale.quantiles()), function(d) { return d; })
+                .enter().append("g")
+                .attr("class", "legend");
+
+            legend.append("rect")
+              .attr("x", function(d, i) { return legendElementWidth * i; })
+              .attr("y", height)
+              .attr("width", legendElementWidth)
+              .attr("height", gridSize / 2)
+              .style("fill", function(d, i) { return colors[i]; });
+
+            legend.append("text")
+              .attr("class", "mono")
+              .attr("text-anchor", "middle")
+              .text(function(d) {
+                  var legend = type < 3 ? Math.round(d * 100) / 100 : Math.round(d);
+                  return "≥" + legend + unit;
+              })
+              .attr("x", function(d, i) { return legendElementWidth * i + legendElementWidth / 2; })
+              .attr("y", height + margin.bottom);
+
+            svg.selectAll(".line").data([0])
+              .enter().append("line")
+              .attr("x1", 0)
+              .attr("y1", 0)
+              .attr("x2", 150)
+              .attr("y2", 0)
+              .style("stroke", "#222222")
+              .style("stroke-width", "0.3")
+              .attr("transform", "rotate(225)");
+
+            svg.selectAll(".sourceText").data([0])
+              .enter().append("text")
+              .attr("class", "menu")
+              .text("source memory")
+              .attr("x", 2)
+              .attr("y", 20)
+              .attr("transform", "translate(-100, -100)rotate(45)");
+
+            svg.selectAll(".targetText").data([0])
+              .enter().append("text")
+              .attr("class", "menu")
+              .text("target memory")
+              .attr("x", 2)
+              .attr("y", -20)
+              .attr("transform", "translate(-110, -90)rotate(45)");
+        });
+      }
+      $("#options input:radio").change(function() {
+        d3.selectAll("#chart svg").remove();
+        if ($(this).val() == 1) load(0, "ms");
+        else if($(this).val() == 2) load(1, "us");
+        else if($(this).val() == 3) load(2, "");
+        else if($(this).val() == 4) load(3, "MB/s");
+      })
+      load(0, "ms");
+    </script>
+  </body>
+</html>

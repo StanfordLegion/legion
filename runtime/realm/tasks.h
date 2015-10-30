@@ -37,16 +37,24 @@ namespace Realm {
 	   Processor::TaskFuncID _func_id,
 	   const void *_args, size_t _arglen,
            const ProfilingRequestSet &reqs,
+	   Event _before_event,
 	   Event _finish_event, int _priority);
 
       virtual ~Task(void);
+
+      virtual void mark_ready(void);
+      virtual void mark_started(void);
 
       void execute_on_processor(Processor p);
 
       Processor proc;
       Processor::TaskFuncID func_id;
       ByteArray args;
+      Event before_event;
       int priority;
+
+    protected:
+      virtual void mark_completed(void);
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one
@@ -198,6 +206,7 @@ namespace Realm {
 
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
+      std::set<Thread *> terminating_workers;
       std::map<Thread *, GASNetCondVar *> sleeping_threads;
       GASNetCondVar shutdown_condvar;
     };

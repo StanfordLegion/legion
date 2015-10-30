@@ -19,6 +19,8 @@ local ccircuit
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
+  local legion_dir = root_dir .. "../../runtime/legion"
+  local mapper_dir = root_dir .. "../../runtime/mappers"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -33,13 +35,15 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
                  circuit_cc .. " -o " .. circuit_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. circuit_cc)
     assert(false)
   end
   terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
+  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir, 
+                                             "-I", mapper_dir, "-I", legion_dir})
 end
 
 local c = regentlib.c
@@ -379,8 +383,8 @@ task init_pointers(rpn : region(node),
                    rgn : region(node),
                    rw : region(wire(rpn, rsn, rgn)))
 where
-  reads(rpn, rsn, rgn, rw.{in_ptr, out_ptr}),
-  writes(rw.{in_ptr, out_ptr})
+  reads(rpn, rsn, rgn),
+  reads writes(rw.{in_ptr, out_ptr})
 do
   for w in rw do
     w.in_ptr = dynamic_cast(ptr(node, rpn, rsn, rgn), w.in_ptr)
@@ -396,9 +400,8 @@ task calculate_new_currents(steps : uint,
                             rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
-        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap,
-            current, voltage}),
-  writes(rw.{current, voltage})
+        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
+  reads writes(rw.{current, voltage})
 do
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
@@ -661,9 +664,8 @@ task dense_calculate_new_currents(steps : uint,
                                   rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
-        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap,
-            current. voltage}),
-  writes(rw.{current, voltage})
+        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
+  reads writes(rw.{current, voltage})
 do
   var phy_rpn = __physical(rpn)
   var phy_rsn = __physical(rsn)
@@ -750,10 +752,8 @@ end
 task update_voltages(rpn : region(node),
                      rsn : region(node))
 where
-  reads(rpn.{node_voltage, charge, node_cap, leakage},
-        rsn.{node_voltage, charge, node_cap, leakage}),
-  writes(rpn.{node_voltage, charge},
-         rsn.{node_voltage, charge})
+  reads(rpn.{node_cap, leakage}, rsn.{node_cap, leakage}),
+  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge})
 do
   for node in rpn do
     var voltage : float = node.node_voltage + node.charge / node.node_cap

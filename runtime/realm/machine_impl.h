@@ -47,19 +47,23 @@ namespace Realm {
       void get_shared_processors(Memory m, std::set<Processor>& pset) const;
 
       int get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
-				Processor restrict_proc /*= Processor::NO_PROC*/,
-				Memory restrict_memory /*= Memory::NO_MEMORY*/) const;
+				Processor restrict_proc = Processor::NO_PROC,
+				Memory restrict_memory = Memory::NO_MEMORY) const;
 
       int get_mem_mem_affinity(std::vector<Machine::MemoryMemoryAffinity>& result,
-			       Memory restrict_mem1 /*= Memory::NO_MEMORY*/,
-			       Memory restrict_mem2 /*= Memory::NO_MEMORY*/) const;
+			       Memory restrict_mem1 = Memory::NO_MEMORY,
+			       Memory restrict_mem2 = Memory::NO_MEMORY) const;
       
       void parse_node_announce_data(int node_id,
 				    unsigned num_procs, unsigned num_memories,
 				    const void *args, size_t arglen,
 				    bool remote);
+
+      void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
+      void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
+
     protected:
-      GASNetHSL mutex;
+      mutable GASNetHSL mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
     };
