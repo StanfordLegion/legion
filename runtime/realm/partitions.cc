@@ -498,7 +498,7 @@ namespace Realm {
     int last_merged = merge_with;
     while(true) {
       merge_with = -1;
-      for(size_t i = 0; i < rects.size(); i++) {
+      for(int i = 0; i < (int)rects.size(); i++) {
 	if((i != last_merged) && can_merge(rects[i], rects[last_merged])) {
 	  merge_with = i;
 	  break;

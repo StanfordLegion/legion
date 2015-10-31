@@ -836,7 +836,7 @@ namespace Realm {
 	  s *= bounds.hi[i] - bounds.lo[i] + 1;
 	}
       }
-      assert(s == volume);
+      assert(s == (ptrdiff_t)volume);
     } else {
       offset = 0;
       for(int i = 0; i < N; i++) strides[i] = 0;
