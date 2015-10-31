@@ -23,6 +23,9 @@
 
 namespace Realm {
 
+  Logger log_uop_timing("uop_timing");
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class ZIndexSpace<N,T>
@@ -475,25 +478,47 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::add_rect(const ZRect<N,T>& r)
+  inline void DenseRectangleList<N,T>::add_rect(const ZRect<N,T>& _r)
   {
+    ZRect<N,T> r = _r;
+
     // scan through rectangles, looking for containment (really good),
     //   mergability (also good), or overlap (bad)
     int merge_with = -1;
-    for(size_t i = 0; i < rects.size(); i++) {
+    std::vector<int> absorbed;
+    int count = rects.size();
+    for(int i = 0; i < count; i++) {
       if(rects[i].contains(r)) return;
-      assert(!rects[i].overlaps(r));
+      if(rects[i].overlaps(r)) {
+        assert(N == 1);  // TODO: splitting for 2+-D
+        r = r.union_bbox(rects[i]);
+        absorbed.push_back(i);
+        continue;
+      }
       if((merge_with == -1) && can_merge(rects[i], r))
 	merge_with = i;
     }
 
     if(merge_with == -1) {
-      // no merge candidates, just add the new rectangle
-      rects.push_back(r);
+      if(absorbed.empty()) {
+        // no merge candidates and nothing absorbed, just add the new rectangle
+        rects.push_back(r);
+      } else {
+        // replace the first absorbed rectangle, delete the others (if any)
+        rects[absorbed[0]] = r;
+        for(size_t i = 1; i < absorbed.size(); i++) {
+          if(absorbed[i] < (count - 1))
+            std::swap(rects[absorbed[i]], rects[count - 1]);
+          count--;
+        }
+        rects.resize(count);
+      }
       return;
     }
 
+#ifdef DEBUG_PARTITIONING
     std::cout << "merge: " << rects[merge_with] << " and " << r << std::endl;
+#endif
     rects[merge_with] = rects[merge_with].union_bbox(r);
 
     // this may trigger a cascade merge, so look again
@@ -513,7 +538,9 @@ namespace Realm {
       if(merge_with > last_merged)
 	std::swap(merge_with, last_merged);
 
+#ifdef DEBUG_PARTITIONING
       std::cout << "merge: " << rects[merge_with] << " and " << rects[last_merged] << std::endl;
+#endif
       rects[merge_with] = rects[merge_with].union_bbox(rects[last_merged]);
 
       // can delete last merged
@@ -689,6 +716,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
+#ifdef DEBUG_PARTITIONING
     std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
     for(size_t i = 0; i < this->entries.size(); i++)
       std::cout << "  [" << i
@@ -696,6 +724,7 @@ namespace Realm {
 		<< " sparsity=" << this->entries[i].sparsity
 		<< " bitmap=" << this->entries[i].bitmap
 		<< std::endl;
+#endif
   }
 
 
@@ -809,6 +838,8 @@ namespace Realm {
   template <int N, typename T, typename FT>
   void ByFieldMicroOp<N,T,FT>::execute(void)
   {
+    TimeStamp ts("ByFieldMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
     std::map<FT, CoverageCounter<N,T> *> values_present;
 
     populate_bitmasks(values_present);
@@ -818,16 +849,19 @@ namespace Realm {
 	it != values_present.end();
 	it++)
       std::cout << "  " << it->first << " = " << it->second->get_count() << std::endl;
+#endif
 
     std::map<FT, DenseRectangleList<N,T> *> rect_map;
 
     populate_bitmasks(rect_map);
 
+#ifdef DEBUG_PARTITIONING
     std::cout << values_present.size() << " values present in instance " << inst << std::endl;
     for(typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
 	it != rect_map.end();
 	it++)
       std::cout << "  " << it->first << " = " << it->second->rects.size() << " rectangles" << std::endl;
+#endif
 
     // iterate over sparsity outputs and contribute to all (even if we didn't have any
     //  points found for it)
@@ -904,15 +938,18 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::execute(void)
   {
+    TimeStamp ts("ImageMicroOp::execute", true, &log_uop_timing);
     std::map<int, DenseRectangleList<N,T> *> rect_map;
 
     populate_bitmasks(rect_map);
 
+#ifdef DEBUG_PARTITIONING
     std::cout << rect_map.size() << " non-empty images present in instance " << inst << std::endl;
     for(typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
 	it != rect_map.end();
 	it++)
       std::cout << "  " << sources[it->first] << " = " << it->second->rects.size() << " rectangles" << std::endl;
+#endif
 
     // iterate over sparsity outputs and contribute to all (even if we didn't have any
     //  points found for it)
@@ -984,15 +1021,18 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::execute(void)
   {
+    TimeStamp ts("PreimageMicroOp::execute", true, &log_uop_timing);
     std::map<int, DenseRectangleList<N,T> *> rect_map;
 
     populate_bitmasks(rect_map);
 
+#ifdef DEBUG_PARTITIONING
     std::cout << rect_map.size() << " non-empty preimages present in instance " << inst << std::endl;
     for(typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it = rect_map.begin();
 	it != rect_map.end();
 	it++)
       std::cout << "  " << targets[it->first] << " = " << it->second->rects.size() << " rectangles" << std::endl;
+#endif
 
     // iterate over sparsity outputs and contribute to all (even if we didn't have any
     //  points found for it)
@@ -1068,10 +1108,13 @@ namespace Realm {
   template <int N, typename T>
   void UnionMicroOp<N,T>::execute(void)
   {
+    TimeStamp ts("UnionMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
     std::cout << "calc union: " << inputs[0];
     for(size_t i = 1; i < inputs.size(); i++)
       std::cout << " + " << inputs[i];
     std::cout << std::endl;
+#endif
     DenseRectangleList<N,T> drl;
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
@@ -1140,10 +1183,13 @@ namespace Realm {
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::execute(void)
   {
+    TimeStamp ts("IntersectionMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
     std::cout << "calc intersection: " << inputs[0];
     for(size_t i = 1; i < inputs.size(); i++)
       std::cout << " & " << inputs[i];
     std::cout << std::endl;
+#endif
     DenseRectangleList<N,T> drl;
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
@@ -1233,7 +1279,9 @@ namespace Realm {
       //  overlap chops it into pieces
       bool fully_covered = false;
       for(ZIndexSpaceIterator<N,T> it(rhs); it.valid; it.step()) {
+#ifdef DEBUG_PARTITIONING
 	std::cout << "check " << r << " -= " << it.rect << std::endl;
+#endif
 	if(it.rect.contains(r)) {
 	  fully_covered = true;
 	  break;
@@ -1252,7 +1300,9 @@ namespace Realm {
 	}
       }
       if(!fully_covered) {
+#ifdef DEBUG_PARTITIONING
 	std::cout << "difference += " << r << std::endl;
+#endif
 	bitmask.add_rect(r);
       }
     }
@@ -1261,7 +1311,10 @@ namespace Realm {
   template <int N, typename T>
   void DifferenceMicroOp<N,T>::execute(void)
   {
+    TimeStamp ts("DifferenceMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
     std::cout << "calc difference: " << lhs << " - " << rhs << std::endl;
+#endif
     DenseRectangleList<N,T> drl;
     populate_bitmask(drl);
     if(sparsity_output.exists()) {

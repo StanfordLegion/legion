@@ -1589,9 +1589,13 @@ void top_level_task(const void *args, size_t arglen, Processor p)
   }
   assert(sysmems.size() > 0);
 
-  Event e = testcfg->initialize_data(sysmems, procs);
-  // wait for all initialization to be done
-  e.wait();
+  {
+    Realm::TimeStamp ts("initialization", true, &log_app);
+  
+    Event e = testcfg->initialize_data(sysmems, procs);
+    // wait for all initialization to be done
+    e.wait();
+  }
 
   // now actual partitioning work
   {
@@ -1604,6 +1608,7 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 
   if(!skip_check) {
     log_app.print() << "checking correctness of partitioning";
+    Realm::TimeStamp ts("verification", true, &log_app);
     errors += testcfg->check_partitioning();
   }
 
