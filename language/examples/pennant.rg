@@ -1973,6 +1973,25 @@ terra read_config()
        end
      end)]
 
+  -- Allow command-line overrides of any file input setting
+  [config_fields_input:map(function(field)
+       if field.is_linked_field then
+         return quote end
+       else
+         if field.linked_field then
+           return quote end
+         else
+           return quote
+	     var argval = get_optional_arg([ "-" .. field.field])
+	     if argval ~= nil then
+	       c.sscanf(&(argval[0]), [get_type_specifier(field.type, true)],
+                        [explode_array(field.type, `(&(conf.[field.field])))])
+	     end
+           end
+         end
+       end
+     end)]
+
   -- Configure and run mesh generator.
   var meshtype : fixed_string
   if [extract(fixed_string)](items, nitems, "meshtype", &meshtype) < 1 then
@@ -2004,9 +2023,23 @@ terra read_config()
        end
      end)]
 
+  -- report mesh size in bytes
+  do
+    var zone_size = terralib.sizeof(zone)
+    var point_size = terralib.sizeof(point)
+    var side_size = [ terralib.sizeof(side(wild,wild,wild,wild)) ]
+    c.printf("Mesh memory usage:\n")
+    c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
+    c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
+    c.printf("  Sides  : %9lld * %4d bytes = %11lld bytes\n", conf.ns, side_size, conf.ns * side_size)
+    var total = ((conf.nz * zone_size) + (conf.np * point_size) + (conf.ns * side_size))
+    c.printf("  Total                             %11lld bytes\n", total)
+  end
+
   return conf
 end
 end
+read_config:compile()
 
 --
 -- Mesh Generator
