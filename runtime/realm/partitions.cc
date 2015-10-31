@@ -28,10 +28,11 @@ namespace Realm {
   // class ZIndexSpace<N,T>
 
   template <int N, typename T>
-  inline Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
-							std::vector<ZIndexSpace<N,T> >& subspaces,
-							const ProfilingRequestSet &reqs,
-							Event wait_on /*= Event::NO_EVENT*/) const
+  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
+						 std::vector<ZIndexSpace<N,T> >& subspaces,
+						 const ProfilingRequestSet &reqs,
+						 Event wait_on /*= Event::NO_EVENT*/) const
   {
     // no support for deferring yet
     assert(wait_on.has_triggered());
@@ -61,11 +62,12 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline Event ZIndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
-							   const std::vector<int>& weights,
-							   std::vector<ZIndexSpace<N,T> >& subspaces,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/) const
+  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
+						    const std::vector<int>& weights,
+						    std::vector<ZIndexSpace<N,T> >& subspaces,
+						    const ProfilingRequestSet &reqs,
+						    Event wait_on /*= Event::NO_EVENT*/) const
   {
     // no support for deferring yet
     assert(wait_on.has_triggered());
@@ -104,11 +106,11 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename FT>
-  inline Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
-							   const std::vector<FT>& colors,
-							   std::vector<ZIndexSpace<N,T> >& subspaces,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/) const
+  Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+						    const std::vector<FT>& colors,
+						    std::vector<ZIndexSpace<N,T> >& subspaces,
+						    const ProfilingRequestSet &reqs,
+						    Event wait_on /*= Event::NO_EVENT*/) const
   {
     // no support for deferring yet
     assert(wait_on.has_triggered());
@@ -142,7 +144,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  inline Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+  Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 							   const std::vector<ZIndexSpace<N2,T2> >& sources,
 							   std::vector<ZIndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
