@@ -366,7 +366,7 @@ public:
 
       // left/right faces first
       for(int fx = xsplit[bx]; fx <= xsplit[bx + 1]; fx++) {
-	int ftype;
+	int ftype = BC_INTERIOR;
 	bool reversed = false;
 	if(fx == xsplit[bx]) {
 	  // low boundary
@@ -389,8 +389,7 @@ public:
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
-	} else
-	  ftype = BC_INTERIOR;
+	}
 
 	for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
 	  for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++) {
@@ -403,7 +402,7 @@ public:
 
       // down/up faces next
       for(int fy = ysplit[by]; fy <= ysplit[by + 1]; fy++) {
-	int ftype;
+	int ftype = BC_INTERIOR;
 	bool reversed = false;
 	if(fy == ysplit[by]) {
 	  // low boundary
@@ -426,8 +425,7 @@ public:
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
-	} else
-	  ftype = BC_INTERIOR;
+	}
 
 	for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
 	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
@@ -440,7 +438,7 @@ public:
 
       // back/front faces last
       for(int fz = zsplit[bz]; fz <= zsplit[bz + 1]; fz++) {
-	int ftype;
+	int ftype = BC_INTERIOR;
 	bool reversed = false;
 	if(fz == zsplit[bz]) {
 	  // low boundary
@@ -463,8 +461,7 @@ public:
 	    }
 	  else
 	    ftype = BC_BLOCK_BORDER;
-	} else
-	  ftype = BC_INTERIOR;
+	}
 
 	for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++)
 	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
