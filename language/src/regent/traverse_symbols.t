@@ -26,7 +26,7 @@ function traverse_symbols.block(defined, undefined, node)
 end
 
 function traverse_symbols.stat(defined, undefined, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     traverse_symbols.expr(defined, undefined, node.cond)
     traverse_symbols.block(defined, undefined, node.then_block)
     node.elseif_blocks:map(function(elseif_block)
@@ -34,12 +34,12 @@ function traverse_symbols.stat(defined, undefined, node)
     end)
     traverse_symbols.block(defined, undefined, node.else_block)
 
-  elseif node:is(ast.typed.StatElseif) or
-         node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.Elseif) or
+         node:is(ast.typed.stat.While) then
     traverse_symbols.expr(defined, undefined, node.cond)
     traverse_symbols.block(defined, undefined, node.block)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     node.values:map(function(value)
       traverse_symbols.expr(defined, undefined, value)
     end)
@@ -47,26 +47,26 @@ function traverse_symbols.stat(defined, undefined, node)
     defined_local:insert(node, node.symbol, true)
     traverse_symbols.block(defined_local, undefined, node.block)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     traverse_symbols.expr(defined, undefined, node.value)
     local defined_local = defined:new_local_scope()
     defined_local:insert(node, node.symbol, true)
     traverse_symbols.block(defined_local, undefined, node.block)
 
-  elseif node:is(ast.typed.StatForListVectorized) then
+  elseif node:is(ast.typed.stat.ForListVectorized) then
     traverse_symbols.expr(defined, undefined, node.value)
     local defined_local = defined:new_local_scope()
     defined_local:insert(node, node.symbol, true)
     traverse_symbols.block(defined_local, undefined, node.orig_block)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     traverse_symbols.block(defined, undefined, node.block)
     traverse_symbols.expr(defined, undefined, node.until_cond)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.Block) then
     traverse_symbols.block(defined, undefined, node.block)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     node.values:map(function(value)
       traverse_symbols.expr(defined, undefined, value)
     end)
@@ -74,19 +74,19 @@ function traverse_symbols.stat(defined, undefined, node)
       defined:insert(node, symbol, true)
     end)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     traverse_symbols.expr(defined, undefined, node.value)
     node.symbols:map(function(symbol)
       defined:insert(node, symbol, true)
     end)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     traverse_symbols.expr(defined, undefined, node.value)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
 
-  elseif node:is(ast.typed.StatAssignment) or
-         node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Assignment) or
+         node:is(ast.typed.stat.Reduce) then
     node.lhs:map(function(lh)
       traverse_symbols.expr(defined, undefined, lh)
     end)
@@ -94,7 +94,7 @@ function traverse_symbols.stat(defined, undefined, node)
       traverse_symbols.expr(defined, undefined, rh)
     end)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     traverse_symbols.expr(defined, undefined, node.expr)
 
   else
@@ -103,56 +103,56 @@ function traverse_symbols.stat(defined, undefined, node)
 end
 
 function traverse_symbols.expr(defined, undefined, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     if not defined:safe_lookup(node.value) then
       undefined[node.value] = true
     end
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     -- we have to extract the symbols from the generated Terra code
     local defined_local = defined:new_local_scope()
     local code = codegen(node)
     local actions = code.actions
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     local defined_local = defined:new_local_scope()
     local code = codegen(node)
     local actions = code.actions
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
     traverse_symbols.expr(defined, undefined, node.index)
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     traverse_symbols.expr(defined, undefined, node.rhs)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     traverse_symbols.expr(defined, undefined, node.lhs)
     traverse_symbols.expr(defined, undefined, node.rhs)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     node.fields:map(function(field)
       traverse_symbols.expr(defined, undefined, field)
     end)
 
-  elseif node:is(ast.typed.ExprCtorRecField) or
-         node:is(ast.typed.ExprCtorListField) then
+  elseif node:is(ast.typed.expr.CtorRecField) or
+         node:is(ast.typed.expr.CtorListField) then
     traverse_symbols.expr(defined, undefined, node.value)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     traverse_symbols.expr(defined, undefined, node.fn)
     node.args:map(function(arg)
       traverse_symbols.expr(defined, undefined, arg)
     end)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     traverse_symbols.expr(defined, undefined, node.arg)
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     traverse_symbols.expr(defined, undefined, node.value)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     local defined_local = defined:new_local_scope()
     local code = codegen(node)
     local actions = code.actions

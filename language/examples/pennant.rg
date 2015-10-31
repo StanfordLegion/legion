@@ -307,8 +307,7 @@ function _t1() end -- seems like I need this to break up the statements
 task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)))
 where
-  reads(rs.{mapsp1, mapsp2}),
-  writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2})
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)
@@ -626,8 +625,8 @@ task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     use_foreign : bool, enable : bool)
 where
-  reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
-  writes(rpp.pmaswt),
+  reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
+  reads writes(rpp.pmaswt),
   reduces+(rpg.pmaswt)
 do
   if not enable then return end
@@ -1031,8 +1030,8 @@ task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point)
                      rs : region(side(rz, rpp, rpg, rs)),
                      use_foreign : bool, enable : bool)
 where
-  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
-  writes(rpp.pf),
+  reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
+  reads writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
   if not enable then return end
@@ -1062,8 +1061,8 @@ end
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx, has_bcy}),
-  writes(rp.{pu0, pf})
+  reads(rp.{has_bcx, has_bcy}),
+  reads writes(rp.{pu0, pf})
 do
   if not enable then return end
 
@@ -1388,8 +1387,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rs_all_p : partition(disjoint, rs_all),
               conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var alfa = conf.alfa
@@ -1645,8 +1643,7 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rs_all_p : partition(disjoint, rs_all),
                 conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var einit = conf.einit
@@ -1976,6 +1973,25 @@ terra read_config()
        end
      end)]
 
+  -- Allow command-line overrides of any file input setting
+  [config_fields_input:map(function(field)
+       if field.is_linked_field then
+         return quote end
+       else
+         if field.linked_field then
+           return quote end
+         else
+           return quote
+	     var argval = get_optional_arg([ "-" .. field.field])
+	     if argval ~= nil then
+	       c.sscanf(&(argval[0]), [get_type_specifier(field.type, true)],
+                        [explode_array(field.type, `(&(conf.[field.field])))])
+	     end
+           end
+         end
+       end
+     end)]
+
   -- Configure and run mesh generator.
   var meshtype : fixed_string
   if [extract(fixed_string)](items, nitems, "meshtype", &meshtype) < 1 then
@@ -2007,9 +2023,23 @@ terra read_config()
        end
      end)]
 
+  -- report mesh size in bytes
+  do
+    var zone_size = terralib.sizeof(zone)
+    var point_size = terralib.sizeof(point)
+    var side_size = [ terralib.sizeof(side(wild,wild,wild,wild)) ]
+    c.printf("Mesh memory usage:\n")
+    c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
+    c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
+    c.printf("  Sides  : %9lld * %4d bytes = %11lld bytes\n", conf.ns, side_size, conf.ns * side_size)
+    var total = ((conf.nz * zone_size) + (conf.np * point_size) + (conf.ns * side_size))
+    c.printf("  Total                             %11lld bytes\n", total)
+  end
+
   return conf
 end
 end
+read_config:compile()
 
 --
 -- Mesh Generator

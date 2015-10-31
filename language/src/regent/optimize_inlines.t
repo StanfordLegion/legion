@@ -17,6 +17,7 @@
 -- Attempts to place map/unmap calls to avoid thrashing inlines.
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local context = {}
@@ -151,6 +152,16 @@ end
 
 local analyze_usage = {}
 
+function analyze_usage.expr_region_root(cx, node)
+  return analyze_usage.expr(cx, node.region)
+end
+
+function analyze_usage.expr_condition(cx, node)
+  return data.reduce(
+    usage_meet,
+    node.values:map(function(value) return analyze_usage.expr(cx, value) end))
+end
+
 function analyze_usage.expr_field_access(cx, node)
   return analyze_usage.expr(cx, node.value)
 end
@@ -236,9 +247,29 @@ function analyze_usage.expr_partition(cx, node)
 end
 
 function analyze_usage.expr_cross_product(cx, node)
-  return std.reduce(
+  return data.reduce(
     usage_meet,
     node.args:map(function(arg) return analyze_usage.expr(cx, arg) end))
+end
+
+function analyze_usage.expr_phase_barrier(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
+function analyze_usage.expr_advance(cx, node)
+  return analyze_usage.expr(cx, node.value)
+end
+
+function analyze_usage.expr_copy(cx, node)
+  return usage_meet(
+    analyze_usage.expr_region_root(cx, node.src),
+    analyze_usage.expr_region_root(cx, node.dst),
+    data.reduce(
+      usage_meet,
+      node.conditions:map(
+        function(condition)
+          return analyze_usage.expr_condition(cx, condition)
+        end)))
 end
 
 function analyze_usage.expr_unary(cx, node)
@@ -252,7 +283,7 @@ end
 
 function analyze_usage.expr_deref(cx, node)
   local ptr_type = std.as_read(node.value.expr_type)
-  return std.reduce(
+  return data.reduce(
     usage_meet,
     ptr_type:bounds():map(
       function(region) return uses(cx, region, inline) end),
@@ -268,88 +299,97 @@ function analyze_usage.expr_future_get_result(cx, node)
 end
 
 function analyze_usage.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return nil
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return nil
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return nil
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return analyze_usage.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return analyze_usage.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return analyze_usage.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_usage.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return analyze_usage.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return analyze_usage.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return analyze_usage.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return analyze_usage.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return nil
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return analyze_usage.expr_raw_value(cx, node)
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return analyze_usage.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return nil
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return nil
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return analyze_usage.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return analyze_usage.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return analyze_usage.expr_ispace(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return analyze_usage.expr_region(cx, node)
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return analyze_usage.expr_partition(cx, node)
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return analyze_usage.expr_cross_product(cx, node)
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_usage.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_usage.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_usage.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_usage.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_usage.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return analyze_usage.expr_deref(cx, node)
 
-  elseif node:is(ast.typed.ExprFuture) then
+  elseif node:is(ast.typed.expr.Future) then
     return analyze_usage.expr_future(cx, node)
 
-  elseif node:is(ast.typed.ExprFutureGetResult) then
+  elseif node:is(ast.typed.expr.FutureGetResult) then
     return analyze_usage.expr_future_get_result(cx, node)
 
   else
@@ -385,13 +425,17 @@ function map_regions(diff)
     for polarity, region_types in pairs(region_types_by_polarity) do
       if polarity == inline then
         result:insert(
-          ast.typed.StatMapRegions {
+          ast.typed.stat.MapRegions {
             region_types = region_types,
+            options = ast.default_options(),
+            span = ast.trivial_span(),
           })
       elseif polarity == remote then
         result:insert(
-          ast.typed.StatUnmapRegions {
-            region_types = region_types
+          ast.typed.stat.UnmapRegions {
+            region_types = region_types,
+            options = ast.default_options(),
+            span = ast.trivial_span(),
           })
       else
         assert(false)
@@ -453,8 +497,8 @@ function optimize_inlines.stat_if(cx, node)
     function(block) return optimize_inlines.stat_elseif(cx, block) end)
   local else_annotated = optimize_inlines.block(cx, node.else_block)
 
-  local initial_usage = std.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
-  local final_usage = std.reduce(
+  local initial_usage = data.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
+  local final_usage = data.reduce(
     usage_meet,
     elseif_annotated:map(annotated_out_usage),
     usage_meet(annotated_out_usage(then_annotated),
@@ -492,7 +536,7 @@ function optimize_inlines.stat_while(cx, node)
 end
 
 function optimize_inlines.stat_for_num(cx, node)
-  local values_usage = std.reduce(
+  local values_usage = data.reduce(
     usage_meet,
     node.values:map(function(value) return analyze_usage.expr(cx, value) end))
   local annotated_block = optimize_inlines.block(cx, node.block)
@@ -524,6 +568,14 @@ function optimize_inlines.stat_repeat(cx, node)
     loop_usage, loop_usage)
 end
 
+function optimize_inlines.stat_must_epoch(cx, node)
+  local block, block_in_usage, block_out_usage = unpack(
+    optimize_inlines.block(cx, node.block))
+  return annotate(
+    node { block = block },
+    block_in_usage, block_out_usage)
+end
+
 function optimize_inlines.stat_block(cx, node)
   local block, block_in_usage, block_out_usage = unpack(
     optimize_inlines.block(cx, node.block))
@@ -533,7 +585,7 @@ function optimize_inlines.stat_block(cx, node)
 end
 
 function optimize_inlines.stat_index_launch(cx, node)
-  local domain_usage = std.reduce(
+  local domain_usage = data.reduce(
     usage_meet,
     node.domain:map(function(value) return analyze_usage.expr(cx, value) end))
   local reduce_lhs_usage = (node.reduce_lhs and
@@ -566,10 +618,10 @@ function optimize_inlines.stat_break(cx, node)
 end
 
 function optimize_inlines.stat_assignment(cx, node)
-  local usage = std.reduce(
+  local usage = data.reduce(
     usage_meet,
     node.lhs:map(function(lh) return analyze_usage.expr(cx, lh) end))
-  usage = std.reduce(
+  usage = data.reduce(
     usage_meet,
     node.rhs:map(function(rh) return analyze_usage.expr(cx, rh) end),
     usage)
@@ -577,10 +629,10 @@ function optimize_inlines.stat_assignment(cx, node)
 end
 
 function optimize_inlines.stat_reduce(cx, node)
-  local usage = std.reduce(
+  local usage = data.reduce(
     usage_meet,
     node.lhs:map(function(lh) return analyze_usage.expr(cx, lh) end))
-  usage = std.reduce(
+  usage = data.reduce(
     usage_meet,
     node.rhs:map(function(rh) return analyze_usage.expr(cx, rh) end),
     usage)
@@ -593,46 +645,49 @@ function optimize_inlines.stat_expr(cx, node)
 end
 
 function optimize_inlines.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return optimize_inlines.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return optimize_inlines.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return optimize_inlines.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return optimize_inlines.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return optimize_inlines.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_inlines.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return optimize_inlines.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return optimize_inlines.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return optimize_inlines.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return optimize_inlines.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return optimize_inlines.stat_return(cx, node)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return optimize_inlines.stat_break(cx, node)
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return optimize_inlines.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return optimize_inlines.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return optimize_inlines.stat_expr(cx, node)
 
   else
@@ -664,7 +719,7 @@ function optimize_inlines.stat_task(cx, node)
 end
 
 function optimize_inlines.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return optimize_inlines.stat_task(cx, node)
 
   else

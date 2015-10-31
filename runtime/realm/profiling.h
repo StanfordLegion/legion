@@ -103,6 +103,7 @@ namespace Realm {
       static const ProfilingMeasurementID ID = PMID_OP_MEM_USAGE;
       Memory source;
       Memory target;
+      size_t size;
     };
 
     // Track the timeline of an instance

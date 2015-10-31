@@ -63,7 +63,7 @@ namespace Realm {
       void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
 
     protected:
-      GASNetHSL mutex;
+      mutable GASNetHSL mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
     };

@@ -172,10 +172,12 @@ namespace LegionRuntime {
                                              ATOMIC_DEPENDENCE/*default*/); 
           }
           // If the one that is not an atomic is a read, we're also ok
+          // We still need a simultaneous dependence if we don't have an
+          // actual dependence
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return check_for_promotion(u1, NO_DEPENDENCE);
+            return check_for_promotion(u1, SIMULTANEOUS_DEPENDENCE);
           }
           // Everything else is a dependence
           return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);

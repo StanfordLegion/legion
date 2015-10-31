@@ -383,8 +383,8 @@ task init_pointers(rpn : region(node),
                    rgn : region(node),
                    rw : region(wire(rpn, rsn, rgn)))
 where
-  reads(rpn, rsn, rgn, rw.{in_ptr, out_ptr}),
-  writes(rw.{in_ptr, out_ptr})
+  reads(rpn, rsn, rgn),
+  reads writes(rw.{in_ptr, out_ptr})
 do
   for w in rw do
     w.in_ptr = dynamic_cast(ptr(node, rpn, rsn, rgn), w.in_ptr)
@@ -400,9 +400,8 @@ task calculate_new_currents(steps : uint,
                             rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
-        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap,
-            current, voltage}),
-  writes(rw.{current, voltage})
+        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
+  reads writes(rw.{current, voltage})
 do
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
@@ -665,9 +664,8 @@ task dense_calculate_new_currents(steps : uint,
                                   rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
-        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap,
-            current. voltage}),
-  writes(rw.{current, voltage})
+        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
+  reads writes(rw.{current, voltage})
 do
   var phy_rpn = __physical(rpn)
   var phy_rsn = __physical(rsn)
@@ -754,10 +752,8 @@ end
 task update_voltages(rpn : region(node),
                      rsn : region(node))
 where
-  reads(rpn.{node_voltage, charge, node_cap, leakage},
-        rsn.{node_voltage, charge, node_cap, leakage}),
-  writes(rpn.{node_voltage, charge},
-         rsn.{node_voltage, charge})
+  reads(rpn.{node_cap, leakage}, rsn.{node_cap, leakage}),
+  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge})
 do
   for node in rpn do
     var voltage : float = node.node_voltage + node.charge / node.node_cap
@@ -841,6 +837,17 @@ task toplevel()
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
+
+  -- report mesh size in bytes
+  do
+    var node_size = [ terralib.sizeof(node) ]
+    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
+    c.printf("Circuit memory usage:\n")
+    c.printf("  Nodes : %9lld * %4d bytes = %11lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    c.printf("  Wires : %9lld * %4d bytes = %11lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
+    c.printf("  Total                            %11lld bytes\n", total)
+  end
 
   var colorings =
     load_circuit(__runtime(), __context(),

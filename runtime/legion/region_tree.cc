@@ -2009,9 +2009,10 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert(composite_view->get_parent() == NULL);
+      assert(composite_view->logical_node->is_region());
 #endif
-      RegionNode *child_node = get_node(req.region);
+      RegionNode *child_node = composite_view->logical_node->as_region_node();
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       child_node->register_virtual(ctx.get_id(), composite_view,
@@ -9945,9 +9946,9 @@ namespace LegionRuntime {
         if (!!non_dominated_mask)
         {
           perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                          true/*record*/, false/*has skip*/, false/*track dom*/>(
-                              user, state.prev_epoch_users, non_dominated_mask, 
-                              open_below, arrived/*validates*/ && !projecting);
+                        true/*record*/, false/*has skip*/, false/*track dom*/>(
+                          user, state.prev_epoch_users, non_dominated_mask, 
+                          open_below, arrived/*validates*/ && !projecting);
         }
       }
       const bool is_write = IS_WRITE(user.usage); // only writes
@@ -13088,8 +13089,14 @@ namespace LegionRuntime {
           postconditions[copy_post] = pre_set.set_mask;
         }
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-        IndexSpace copy_index_space =
-                        dst->logical_node->as_region_node()->row_source->handle;
+        IndexSpaceID index_space_id;
+        if (dst->logical_node->is_region())
+          index_space_id =
+            dst->logical_node->as_region_node()->row_source->handle.get_id();
+        else
+          index_space_id =
+            dst->logical_node->as_partition_node()->row_source->handle.get_id();
+
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = update_views.begin(); it != update_views.end(); it++)
         {
@@ -13103,7 +13110,7 @@ namespace LegionRuntime {
                 Processor::get_executing_processor(),
                 it->first->manager->get_instance(),
                 dst->manager->get_instance(),
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle,
                 manager_node->handle.tree_id,
                 copy_pre, copy_post, copy_fields, 0/*redop*/);
@@ -13119,7 +13126,7 @@ namespace LegionRuntime {
             LegionSpy::log_copy_operation(
                 it->first->manager->get_instance().id,
                 dst->manager->get_instance().id,
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle.id,
                 manager_node->handle.tree_id, copy_pre, copy_post,
                 0/*redop*/, field_set);
@@ -14615,7 +14622,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         LegionSpy::log_physical_instance(manager->get_instance().id,
             manager->memory.id, handle.index_space.id,
-            handle.field_space.id, handle.tree_id);
+            handle.field_space.id, handle.tree_id, blocking_factor);
         for (std::set<FieldID>::const_iterator it = fields.begin();
              it != fields.end(); ++it)
           LegionSpy::log_instance_field(manager->get_instance().id, *it);

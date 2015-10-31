@@ -52,10 +52,13 @@ function check_privilege_noninterference(cx, task, region_type,
 
   local privileges_by_field_path =
     std.group_task_privileges_by_field_path(
-      std.find_task_privileges(param_region_type, task:getprivileges()))
+      std.find_task_privileges(
+        param_region_type, task:getprivileges(), task:get_coherence_modes()))
   local other_privileges_by_field_path =
     std.group_task_privileges_by_field_path(
-      std.find_task_privileges(other_param_region_type, task:getprivileges()))
+      std.find_task_privileges(
+        other_param_region_type,
+        task:getprivileges(), task:get_coherence_modes()))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -100,7 +103,7 @@ function analyze_noninterference_self(cx, task, region_type,
   local param_region_type = mapping[region_type]
   assert(param_region_type)
   local privileges, privilege_field_paths = std.find_task_privileges(
-    param_region_type, task:getprivileges())
+    param_region_type, task:getprivileges(), task:get_coherence_modes())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     if not (
@@ -201,76 +204,76 @@ function analyze_is_side_effect_free.expr_binary(cx, node)
 end
 
 function analyze_is_side_effect_free.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return true
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return true
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return true
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return analyze_is_side_effect_free.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return analyze_is_side_effect_free.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return analyze_is_side_effect_free.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_is_side_effect_free.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return analyze_is_side_effect_free.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return analyze_is_side_effect_free.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return false
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return false
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return false
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return false
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return analyze_is_side_effect_free.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return true
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return true
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return analyze_is_side_effect_free.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return analyze_is_side_effect_free.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return false
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return false
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return false
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_is_side_effect_free.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_is_side_effect_free.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return false
 
   else
@@ -305,15 +308,7 @@ function analyze_is_loop_invariant.expr_method_call(cx, node)
 end
 
 function analyze_is_loop_invariant.expr_call(cx, node)
-  if not analyze_is_loop_invariant.expr(cx, node.fn) then
-    return false
-  end
-  for _, arg in ipairs(node.args) do
-    if not analyze_is_loop_invariant.expr(cx, arg) then
-      return false
-    end
-  end
-  return true
+  return false
 end
 
 function analyze_is_loop_invariant.expr_cast(cx, node)
@@ -354,73 +349,73 @@ function analyze_is_loop_invariant.expr_binary(cx, node)
 end
 
 function analyze_is_loop_invariant.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return analyze_is_loop_invariant.expr_id(cx, node)
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return true
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return true
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return false -- could be a ExprDeref
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return analyze_is_loop_invariant.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return analyze_is_loop_invariant.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_is_loop_invariant.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return analyze_is_loop_invariant.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return analyze_is_loop_invariant.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return true
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return true
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return true
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return true
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return analyze_is_loop_invariant.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return true
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return true
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return analyze_is_loop_invariant.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return analyze_is_loop_invariant.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return false
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return false
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_is_loop_invariant.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_is_loop_invariant.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return false
 
   else
@@ -435,13 +430,13 @@ function ignore(...) end
 function optimize_index_launch_loops.stat_for_num(cx, node)
   local log_pass = ignore
   local log_fail = ignore
-  if node.parallel == "demand" then
+  if node.options.parallel:is(ast.options.Demand) then
     log_pass = ignore -- log.warn
     log_fail = log.error
   end
 
   if node.values[3] and not (
-    node.values[3]:is(ast.typed.ExprConstant) and
+    node.values[3]:is(ast.typed.expr.Constant) and
     node.values[3].value == 1)
   then
     log_fail(node, "loop optimization failed: stride not equal to 1")
@@ -456,14 +451,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local body = node.block.stats[1]
   local call
   local reduce_lhs, reduce_op = false, false
-  if body:is(ast.typed.StatExpr) and
-    body.expr:is(ast.typed.ExprCall)
+  if body:is(ast.typed.stat.Expr) and
+    body.expr:is(ast.typed.expr.Call)
   then
     call = body.expr
-  elseif body:is(ast.typed.StatReduce) and
+  elseif body:is(ast.typed.stat.Reduce) and
     #body.lhs == 1 and
     #body.rhs == 1 and
-    body.rhs[1]:is(ast.typed.ExprCall)
+    body.rhs[1]:is(ast.typed.expr.Call)
   then
     call = body.rhs[1]
     reduce_lhs = body.lhs[1]
@@ -532,7 +527,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local loop_cx = cx:new_loop_scope(node.symbol)
   local param_types = task:gettype().parameters
   local args = call.args
-  local args_provably = ast.typed.StatIndexLaunchArgsProvably {
+  local args_provably = ast.IndexLaunchArgsProvably {
     invariant = terralib.newlist(),
     variant = terralib.newlist(),
   }
@@ -550,11 +545,12 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
 
     local arg_type = std.as_read(arg.expr_type)
     mapping[arg_type] = param_types[i]
+    -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
-      if arg:is(ast.typed.ExprIndexAccess) and
+      if arg:is(ast.typed.expr.IndexAccess) and
         (std.is_partition(std.as_read(arg.value.expr_type)) or
            std.is_cross_product(std.as_read(arg.value.expr_type))) and
-        arg.index:is(ast.typed.ExprID) and
+        arg.index:is(ast.typed.expr.ID) and
         arg.index.value == node.symbol
       then
         partition_type = std.as_read(arg.value.expr_type)
@@ -567,6 +563,19 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       end
     end
 
+    if std.is_phase_barrier(arg_type) then
+      -- Phase barriers must be invariant, or must not be used as an arrival/wait.
+      if not arg_invariant then
+        for _, variables in pairs(task:get_conditions()) do
+          if variables[i] then
+            log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
+            return node
+          end
+        end
+      end
+    end
+
+    -- Tests for non-interference.
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
@@ -597,13 +606,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   end
 
   log_pass("loop optimization succeeded")
-  return ast.typed.StatIndexLaunch {
+  return ast.typed.stat.IndexLaunch {
     symbol = node.symbol,
     domain = node.values,
     call = call,
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
+    options = node.options,
     span = node.span,
   }
 end
@@ -654,51 +664,58 @@ function optimize_loops.stat_repeat(cx, node)
   return node { block = optimize_loops.block(cx, node.block) }
 end
 
+function optimize_loops.stat_must_epoch(cx, node)
+  return node { block = optimize_loops.block(cx, node.block) }
+end
+
 function optimize_loops.stat_block(cx, node)
   return node { block = optimize_loops.block(cx, node.block) }
 end
 
 function optimize_loops.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return optimize_loops.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return optimize_loops.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return optimize_loops.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return optimize_loops.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatForListVectorized) then
+  elseif node:is(ast.typed.stat.ForListVectorized) then
     return optimize_loops.stat_for_list_vectorized(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return optimize_loops.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return optimize_loops.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return optimize_loops.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return node
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return node
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return node
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return node
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return node
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return node
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return node
 
   else
@@ -714,7 +731,7 @@ function optimize_loops.stat_task(cx, node)
 end
 
 function optimize_loops.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return optimize_loops.stat_task(cx, node)
 
   else

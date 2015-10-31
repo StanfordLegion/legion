@@ -156,6 +156,7 @@ namespace LegionRuntime {
       info.op_id = op_id;
       info.source = usage->source;
       info.target = usage->target;
+      info.size = usage->size;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -242,9 +243,10 @@ namespace LegionRuntime {
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
       {
-        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT 
+        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
                       " %llu %llu %llu %llu", it->op_id, it->source.id,
-                    it->target.id, it->create, it->ready, it->start, it->stop);
+                    it->target.id, it->size, it->create, it->ready, it->start,
+                    it->stop);
       }
       for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
             it != fill_infos.end(); it++)
