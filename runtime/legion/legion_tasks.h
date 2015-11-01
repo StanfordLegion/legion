@@ -534,6 +534,7 @@ namespace LegionRuntime {
                                                    inline_regions;
       // Context for this task
       RegionTreeContext context; 
+      unsigned initial_region_count;
     protected:
       // Track whether this task has finished executing
       int outstanding_children_count;

@@ -24,6 +24,7 @@
 -- (Currently the optimization returns false for idempotent.)
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 
@@ -50,7 +51,7 @@ end
 function analyze_leaf.expr_method_call(cx, node)
   return
     analyze_leaf.expr(cx, node.value) and
-    std.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
+    data.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
 end
 
 function analyze_leaf.expr_call(cx, node)
@@ -60,7 +61,7 @@ function analyze_leaf.expr_call(cx, node)
 
   return
     analyze_leaf.expr(cx, node.fn) and
-    std.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
+    data.all(node.args:map(function(arg) return analyze_leaf.expr(cx, arg) end))
 end
 
 function analyze_leaf.expr_cast(cx, node)
@@ -70,7 +71,7 @@ function analyze_leaf.expr_cast(cx, node)
 end
 
 function analyze_leaf.expr_ctor(cx, node)
-  return std.all(
+  return data.all(
     node.fields:map(function(field) return analyze_leaf.expr(cx, field.value) end))
 end
 
@@ -121,91 +122,100 @@ function analyze_leaf.expr_future_get_result(cx, node)
 end
 
 function analyze_leaf.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return true
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return true
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return true
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return analyze_leaf.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return analyze_leaf.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return analyze_leaf.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_leaf.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return analyze_leaf.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return analyze_leaf.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return false
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return analyze_leaf.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return analyze_leaf.expr_raw_physical(cx, node)
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return true
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return analyze_leaf.expr_raw_value(cx, node)
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return analyze_leaf.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return false
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return true
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return analyze_leaf.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return analyze_leaf.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return false
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return false
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return false
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return false
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return false
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return false
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return false
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return false
+
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_leaf.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_leaf.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return analyze_leaf.expr_deref(cx, node)
 
-  elseif node:is(ast.typed.ExprFuture) then
+  elseif node:is(ast.typed.expr.Future) then
     return analyze_leaf.expr_future(cx, node)
 
-  elseif node:is(ast.typed.ExprFutureGetResult) then
+  elseif node:is(ast.typed.expr.FutureGetResult) then
     return analyze_leaf.expr_future_get_result(cx, node)
 
   else
@@ -214,7 +224,7 @@ function analyze_leaf.expr(cx, node)
 end
 
 function analyze_leaf.block(cx, node)
-  return std.all(
+  return data.all(
     node.stats:map(function(stat) return analyze_leaf.stat(cx, stat) end))
 end
 
@@ -222,7 +232,7 @@ function analyze_leaf.stat_if(cx, node)
   return
     analyze_leaf.expr(cx, node.cond) and
     analyze_leaf.block(cx, node.then_block) and
-    std.all(
+    data.all(
       node.elseif_blocks:map(
         function(block) return analyze_leaf.stat_elseif(cx, block) end)) and
     analyze_leaf.block(cx, node.else_block)
@@ -242,7 +252,7 @@ end
 
 function analyze_leaf.stat_for_num(cx, node)
   return
-    std.all(
+    data.all(
       node.values:map(function(value) return analyze_leaf.expr(cx, value) end)) and
     analyze_leaf.block(cx, node.block)
 end
@@ -259,6 +269,11 @@ function analyze_leaf.stat_repeat(cx, node)
     analyze_leaf.expr(cx, node.until_cond)
 end
 
+function analyze_leaf.stat_must_epoch(cx, node)
+  return
+    analyze_leaf.block(cx, node.block)
+end
+
 function analyze_leaf.stat_block(cx, node)
   return analyze_leaf.block(cx, node.block)
 end
@@ -268,7 +283,7 @@ function analyze_leaf.stat_index_launch(cx, node)
 end
 
 function analyze_leaf.stat_var(cx, node)
-  return std.all(
+  return data.all(
     node.values:map(function(value) return analyze_leaf.expr(cx, value) end))
 end
 
@@ -290,17 +305,17 @@ end
 
 function analyze_leaf.stat_assignment(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_leaf.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_leaf.expr(cx, rh) end))
 end
 
 function analyze_leaf.stat_reduce(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_leaf.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_leaf.expr(cx, rh) end))
 end
 
@@ -309,52 +324,55 @@ function analyze_leaf.stat_expr(cx, node)
 end
 
 function analyze_leaf.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return analyze_leaf.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return analyze_leaf.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return analyze_leaf.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return analyze_leaf.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return analyze_leaf.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_leaf.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return analyze_leaf.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return analyze_leaf.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return analyze_leaf.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return analyze_leaf.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return analyze_leaf.stat_return(cx, node)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return analyze_leaf.stat_break(cx, node)
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return analyze_leaf.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return analyze_leaf.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return analyze_leaf.stat_expr(cx, node)
 
-  elseif node:is(ast.typed.StatMapRegions) then
+  elseif node:is(ast.typed.stat.MapRegions) then
     return false
 
-  elseif node:is(ast.typed.StatUnmapRegions) then
+  elseif node:is(ast.typed.stat.UnmapRegions) then
     return true
 
   else
@@ -363,6 +381,15 @@ function analyze_leaf.stat(cx, node)
 end
 
 local analyze_inner = {}
+
+function analyze_inner.expr_region_root(cx, node)
+  return analyze_inner.expr(cx, node.region)
+end
+
+function analyze_inner.expr_condition(cx, node)
+  return data.all(
+    node.values:map(function(value) return analyze_inner.expr(cx, value) end))
+end
 
 function analyze_inner.expr_field_access(cx, node)
   return
@@ -379,14 +406,14 @@ end
 function analyze_inner.expr_method_call(cx, node)
   return
     analyze_inner.expr(cx, node.value) and
-    std.all(
+    data.all(
       node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
 function analyze_inner.expr_call(cx, node)
   return
     analyze_leaf.expr(cx, node.fn) and
-    std.all(
+    data.all(
       node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
 end
 
@@ -397,7 +424,7 @@ function analyze_inner.expr_cast(cx, node)
 end
 
 function analyze_inner.expr_ctor(cx, node)
-  return std.all(
+  return data.all(
     node.fields:map(function(field) return analyze_inner.expr(cx, field.value) end))
 end
 
@@ -435,8 +462,26 @@ function analyze_inner.expr_partition(cx, node)
 end
 
 function analyze_inner.expr_cross_product(cx, node)
-  return std.all(
+  return data.all(
     node.args:map(function(arg) return analyze_inner.expr(cx, arg) end))
+end
+
+function analyze_inner.expr_phase_barrier(cx, node)
+  return analyze_inner.expr(cx, node.value)
+end
+
+function analyze_inner.expr_advance(cx, node)
+  return analyze_inner.expr(cx, node.value)
+end
+
+function analyze_inner.expr_copy(cx, node)
+  return analyze_inner.expr_region_root(cx, node.src) and
+    analyze_inner.expr_region_root(cx, node.dst) and
+    data.all(
+      node.conditions:map(
+        function(condition)
+          return analyze_inner.expr_condition(cx, condition)
+        end))
 end
 
 function analyze_inner.expr_unary(cx, node)
@@ -464,88 +509,100 @@ function analyze_inner.expr_future_get_result(cx, node)
 end
 
 function analyze_inner.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.expr.ID) then
     return true
 
-  elseif node:is(ast.typed.ExprConstant) then
+  elseif node:is(ast.typed.expr.Constant) then
     return true
 
-  elseif node:is(ast.typed.ExprFunction) then
+  elseif node:is(ast.typed.expr.Function) then
     return true
 
-  elseif node:is(ast.typed.ExprFieldAccess) then
+  elseif node:is(ast.typed.expr.FieldAccess) then
     return analyze_inner.expr_field_access(cx, node)
 
-  elseif node:is(ast.typed.ExprIndexAccess) then
+  elseif node:is(ast.typed.expr.IndexAccess) then
     return analyze_inner.expr_index_access(cx, node)
 
-  elseif node:is(ast.typed.ExprMethodCall) then
+  elseif node:is(ast.typed.expr.MethodCall) then
     return analyze_inner.expr_method_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCall) then
+  elseif node:is(ast.typed.expr.Call) then
     return analyze_inner.expr_call(cx, node)
 
-  elseif node:is(ast.typed.ExprCast) then
+  elseif node:is(ast.typed.expr.Cast) then
     return analyze_inner.expr_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprCtor) then
+  elseif node:is(ast.typed.expr.Ctor) then
     return analyze_inner.expr_ctor(cx, node)
 
-  elseif node:is(ast.typed.ExprRawContext) then
+  elseif node:is(ast.typed.expr.RawContext) then
     return true
 
-  elseif node:is(ast.typed.ExprRawFields) then
+  elseif node:is(ast.typed.expr.RawFields) then
     return analyze_inner.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.typed.ExprRawPhysical) then
+  elseif node:is(ast.typed.expr.RawPhysical) then
     return false
 
-  elseif node:is(ast.typed.ExprRawRuntime) then
+  elseif node:is(ast.typed.expr.RawRuntime) then
     return true
 
-  elseif node:is(ast.typed.ExprRawValue) then
+  elseif node:is(ast.typed.expr.RawValue) then
     return analyze_inner.expr_raw_value(cx, node)
 
-  elseif node:is(ast.typed.ExprIsnull) then
+  elseif node:is(ast.typed.expr.Isnull) then
     return analyze_inner.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.ExprNew) then
+  elseif node:is(ast.typed.expr.New) then
     return true
 
-  elseif node:is(ast.typed.ExprNull) then
+  elseif node:is(ast.typed.expr.Null) then
     return true
 
-  elseif node:is(ast.typed.ExprDynamicCast) then
+  elseif node:is(ast.typed.expr.DynamicCast) then
     return analyze_inner.expr_dynamic_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprStaticCast) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     return analyze_inner.expr_static_cast(cx, node)
 
-  elseif node:is(ast.typed.ExprIspace) then
+  elseif node:is(ast.typed.expr.Ispace) then
     return analyze_inner.expr_ispace(cx, node)
 
-  elseif node:is(ast.typed.ExprRegion) then
+  elseif node:is(ast.typed.expr.Region) then
     return analyze_inner.expr_region(cx, node)
 
-  elseif node:is(ast.typed.ExprPartition) then
+  elseif node:is(ast.typed.expr.Partition) then
     return analyze_inner.expr_partition(cx, node)
 
-  elseif node:is(ast.typed.ExprCrossProduct) then
+  elseif node:is(ast.typed.expr.CrossProduct) then
     return analyze_inner.expr_cross_product(cx, node)
 
-  elseif node:is(ast.typed.ExprUnary) then
+  elseif node:is(ast.typed.expr.PhaseBarrier) then
+    return analyze_inner.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.typed.expr.Advance) then
+    return analyze_inner.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_inner.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Copy) then
+    return analyze_inner.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Unary) then
     return analyze_inner.expr_unary(cx, node)
 
-  elseif node:is(ast.typed.ExprBinary) then
+  elseif node:is(ast.typed.expr.Binary) then
     return analyze_inner.expr_binary(cx, node)
 
-  elseif node:is(ast.typed.ExprDeref) then
+  elseif node:is(ast.typed.expr.Deref) then
     return analyze_inner.expr_deref(cx, node)
 
-  elseif node:is(ast.typed.ExprFuture) then
+  elseif node:is(ast.typed.expr.Future) then
     return analyze_inner.expr_future(cx, node)
 
-  elseif node:is(ast.typed.ExprFutureGetResult) then
+  elseif node:is(ast.typed.expr.FutureGetResult) then
     return analyze_inner.expr_future_get_result(cx, node)
 
   else
@@ -554,7 +611,7 @@ function analyze_inner.expr(cx, node)
 end
 
 function analyze_inner.block(cx, node)
-  return std.all(
+  return data.all(
     node.stats:map(function(stat) return analyze_inner.stat(cx, stat) end))
 end
 
@@ -562,7 +619,7 @@ function analyze_inner.stat_if(cx, node)
   return
     analyze_inner.expr(cx, node.cond) and
     analyze_inner.block(cx, node.then_block) and
-    std.all(
+    data.all(
       node.elseif_blocks:map(
         function(block) return analyze_inner.stat_elseif(cx, block) end)) and
     analyze_inner.block(cx, node.else_block)
@@ -582,7 +639,7 @@ end
 
 function analyze_inner.stat_for_num(cx, node)
   return
-    std.all(
+    data.all(
       node.values:map(function(value) return analyze_inner.expr(cx, value) end)) and
     analyze_inner.block(cx, node.block)
 end
@@ -599,19 +656,23 @@ function analyze_inner.stat_repeat(cx, node)
     analyze_inner.expr(cx, node.until_cond)
 end
 
+function analyze_inner.stat_must_epoch(cx, node)
+  return analyze_inner.block(cx, node.block)
+end
+
 function analyze_inner.stat_block(cx, node)
   return analyze_inner.block(cx, node.block)
 end
 
 function analyze_inner.stat_index_launch(cx, node)
   return
-    std.all(node.domain:map(function(value) return analyze_inner.expr(cx, value) end)) and
+    data.all(node.domain:map(function(value) return analyze_inner.expr(cx, value) end)) and
     analyze_inner.expr(cx, node.call) and
     (not node.reduce_lhs or analyze_inner.expr(cx, node.reduce_lhs))
 end
 
 function analyze_inner.stat_var(cx, node)
-  return std.all(
+  return data.all(
     node.values:map(function(value) return analyze_inner.expr(cx, value) end))
 end
 
@@ -633,17 +694,17 @@ end
 
 function analyze_inner.stat_assignment(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_inner.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_inner.expr(cx, rh) end))
 end
 
 function analyze_inner.stat_reduce(cx, node)
   return
-    std.all(
+    data.all(
       node.lhs:map(function(lh) return analyze_inner.expr(cx, lh) end)) and
-    std.all(
+    data.all(
       node.rhs:map(function(rh) return analyze_inner.expr(cx, rh) end))
 end
 
@@ -652,52 +713,55 @@ function analyze_inner.stat_expr(cx, node)
 end
 
 function analyze_inner.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
+  if node:is(ast.typed.stat.If) then
     return analyze_inner.stat_if(cx, node)
 
-  elseif node:is(ast.typed.StatWhile) then
+  elseif node:is(ast.typed.stat.While) then
     return analyze_inner.stat_while(cx, node)
 
-  elseif node:is(ast.typed.StatForNum) then
+  elseif node:is(ast.typed.stat.ForNum) then
     return analyze_inner.stat_for_num(cx, node)
 
-  elseif node:is(ast.typed.StatForList) then
+  elseif node:is(ast.typed.stat.ForList) then
     return analyze_inner.stat_for_list(cx, node)
 
-  elseif node:is(ast.typed.StatRepeat) then
+  elseif node:is(ast.typed.stat.Repeat) then
     return analyze_inner.stat_repeat(cx, node)
 
-  elseif node:is(ast.typed.StatBlock) then
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return analyze_inner.stat_must_epoch(cx, node)
+
+  elseif node:is(ast.typed.stat.Block) then
     return analyze_inner.stat_block(cx, node)
 
-  elseif node:is(ast.typed.StatIndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunch) then
     return analyze_inner.stat_index_launch(cx, node)
 
-  elseif node:is(ast.typed.StatVar) then
+  elseif node:is(ast.typed.stat.Var) then
     return analyze_inner.stat_var(cx, node)
 
-  elseif node:is(ast.typed.StatVarUnpack) then
+  elseif node:is(ast.typed.stat.VarUnpack) then
     return analyze_inner.stat_var_unpack(cx, node)
 
-  elseif node:is(ast.typed.StatReturn) then
+  elseif node:is(ast.typed.stat.Return) then
     return analyze_inner.stat_return(cx, node)
 
-  elseif node:is(ast.typed.StatBreak) then
+  elseif node:is(ast.typed.stat.Break) then
     return analyze_inner.stat_break(cx, node)
 
-  elseif node:is(ast.typed.StatAssignment) then
+  elseif node:is(ast.typed.stat.Assignment) then
     return analyze_inner.stat_assignment(cx, node)
 
-  elseif node:is(ast.typed.StatReduce) then
+  elseif node:is(ast.typed.stat.Reduce) then
     return analyze_inner.stat_reduce(cx, node)
 
-  elseif node:is(ast.typed.StatExpr) then
+  elseif node:is(ast.typed.stat.Expr) then
     return analyze_inner.stat_expr(cx, node)
 
-  elseif node:is(ast.typed.StatMapRegions) then
+  elseif node:is(ast.typed.stat.MapRegions) then
     return false
 
-  elseif node:is(ast.typed.StatUnmapRegions) then
+  elseif node:is(ast.typed.stat.UnmapRegions) then
     return true
 
   else
@@ -712,7 +776,7 @@ function optimize_config_options.stat_task(cx, node)
   local inner = not leaf and analyze_inner.block(cx, node.body)
 
   return node {
-    config_options = ast.typed.StatTaskConfigOptions {
+    config_options = ast.TaskConfigOptions {
       leaf = leaf,
       inner = inner,
       idempotent = false,
@@ -721,7 +785,7 @@ function optimize_config_options.stat_task(cx, node)
 end
 
 function optimize_config_options.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return optimize_config_options.stat_task(cx, node)
 
   else

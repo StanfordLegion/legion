@@ -117,6 +117,15 @@ else
 LEGION_LD_FLAGS	+= -lpthread
 endif
 
+ifeq ($(strip $(USE_HWLOC)),1)
+  ifndef HWLOC 
+    $(error HWLOC variable is not defined, aborting build)
+  endif
+  CC_FLAGS        += -DREALM_USE_HWLOC
+  INC_FLAGS   += -I$(HWLOC)/include
+  LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
+endif
+
 USE_LIBDL = 1
 ifeq ($(strip $(USE_LIBDL)),1)
 #CC_FLAGS += -rdynamic

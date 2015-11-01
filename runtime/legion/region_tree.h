@@ -434,9 +434,8 @@ namespace LegionRuntime {
                               AttachOp *attach_op,
                               VersionInfo &version_info);
       Event detach_file(RegionTreeContext ctx, 
-                        const RegionRequirement &req,
-                        DetachOp *detach_op,
-                        const InstanceRef &ref);
+                        const RegionRequirement &req, DetachOp *detach_op, 
+                        VersionInfo &version_info, const InstanceRef &ref);
     public:
       void send_back_logical_state(RegionTreeContext local_context,
                                    RegionTreeContext remote_context,
@@ -1663,6 +1662,8 @@ namespace LegionRuntime {
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
+      // Look for a view to remove from the set of valid views
+      void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               bool dirty, LogicalView *new_view);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
@@ -1964,6 +1965,8 @@ namespace LegionRuntime {
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
+      Event detach_file(ContextID ctx, DetachOp *detach_op, 
+                        VersionInfo &version_info, const InstanceRef &ref);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;

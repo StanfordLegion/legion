@@ -19,6 +19,15 @@
 #include "utilities.h"
 #include "default_mapper.h"
 
+#ifndef USE_LEGION_PARTAPI_SHIM
+#ifdef SHARED_LOWLEVEL
+#define USE_LEGION_PARTAPI_SHIM 0
+#else
+// General LLR can't handle new partion API yet. Use a shim instead.
+#define USE_LEGION_PARTAPI_SHIM 1
+#endif
+#endif
+
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::HighLevel::MappingUtilities;
@@ -451,6 +460,101 @@ legion_index_partition_create_domain_coloring(
   return CObjectWrapper::wrap(ip);
 }
 
+// Shim for Legion Dependent Partition API
+
+#if USE_LEGION_PARTAPI_SHIM
+class PartitionByFieldShim {
+public:
+  static TaskID register_task();
+  static IndexPartition launch(HighLevelRuntime *runtime,
+                               Context ctx,
+                               LogicalRegion handle,
+                               LogicalRegion parent,
+                               FieldID fid,
+                               const Domain &color_space,
+                               int color = AUTO_GENERATE_ID,
+                               bool allocable = false);
+  static IndexPartition task(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, HighLevelRuntime *runtime);
+private:
+  static const TaskID task_id = 539418; // a "unique" number
+  struct Args {
+    Domain color_space;
+    int color;
+    bool allocable;
+  };
+};
+
+Processor::TaskFuncID
+PartitionByFieldShim::register_task()
+{
+  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+    task_id, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionByFieldShim::task");
+}
+
+IndexPartition
+PartitionByFieldShim::launch(HighLevelRuntime *runtime,
+                             Context ctx,
+                             LogicalRegion handle,
+                             LogicalRegion parent,
+                             FieldID fid,
+                             const Domain &color_space,
+                             int color,
+                             bool allocable)
+{
+  Args args;
+  args.color_space = color_space;
+  args.color = color;
+  args.allocable = allocable;
+  TaskArgument targs(&args, sizeof(args));
+  TaskLauncher task(task_id, targs);
+  task.add_region_requirement(
+    RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent)
+    .add_field(fid));
+  Future f = runtime->execute_task(ctx, task);
+  return f.get_result<IndexPartition>();
+}
+
+IndexPartition
+PartitionByFieldShim::task(const Task *task,
+                           const std::vector<PhysicalRegion> &regions,
+                           Context ctx, HighLevelRuntime *runtime)
+{
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+
+  Coloring coloring;
+  assert(args.color_space.get_dim() == 1);
+  for(GenericPointInRectIterator<1> it(args.color_space.get_rect<1>());
+      it; ++it) {
+    coloring[it.p[0]];
+  }
+
+  Accessor::RegionAccessor<SOA, Color> accessor =
+    regions[0].get_accessor().typeify<Color>().convert<SOA>();
+  for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
+       it.has_next();) {
+    ptr_t p = it.next();
+    Color c = accessor.read(p);
+    if (coloring.count(c)) {
+      coloring[c].points.insert(p);
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, regions[0].get_logical_region().get_index_space(),
+      coloring, true, args.color);
+  return ip;
+}
+
+static TaskID force_shim_static_initialize =
+  PartitionByFieldShim::register_task();
+#endif
+
 legion_index_partition_t
 legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_context_t ctx_,
@@ -468,8 +572,14 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
   Domain color_space = CObjectWrapper::unwrap(color_space_);
 
   IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    PartitionByFieldShim::launch(runtime, ctx, handle, parent, fid, color_space,
+                                 color, allocable);
+#else
     runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
                                        color, allocable);
+#endif
+
   return CObjectWrapper::wrap(ip);
 }
 
@@ -1082,6 +1192,45 @@ legion_predicate_false(void)
   return CObjectWrapper::wrap_const(&Predicate::FALSE_PRED);
 }
 
+// -----------------------------------------------------------------------
+// Phase Barrier Operations
+// -----------------------------------------------------------------------
+
+legion_phase_barrier_t
+legion_phase_barrier_create(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            unsigned arrivals)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  PhaseBarrier *result =
+    new PhaseBarrier(runtime->create_phase_barrier(ctx, arrivals));
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_phase_barrier_destroy(legion_phase_barrier_t handle_)
+{
+  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_phase_barrier_t
+legion_phase_barrier_advance(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             legion_phase_barrier_t handle_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+
+  PhaseBarrier *result =
+    new PhaseBarrier(runtime->advance_phase_barrier(ctx, *handle));
+  return CObjectWrapper::wrap(result);
+}
+
 //------------------------------------------------------------------------
 // Future Operations
 //------------------------------------------------------------------------
@@ -1353,6 +1502,26 @@ legion_task_launcher_add_future(legion_task_launcher_t launcher_,
   launcher->add_future(*future);
 }
 
+void
+legion_task_launcher_add_wait_barrier(legion_task_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -1532,6 +1701,26 @@ legion_index_launcher_add_future(legion_index_launcher_t launcher_,
   launcher->add_future(*future);
 }
 
+void
+legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
+}
+
 // -----------------------------------------------------------------------
 // Inline Mapping Operations
 // -----------------------------------------------------------------------
@@ -1699,6 +1888,26 @@ legion_copy_launcher_add_dst_region_requirement_logical_region(
   return idx;
 }
 
+unsigned
+legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, redop, prop, parent, tag, verified));
+  return idx;
+}
+
 void
 legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher_,
                                    unsigned idx,
@@ -1719,6 +1928,92 @@ legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher_,
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_dst_field(idx, fid, inst);
+}
+
+void
+legion_copy_launcher_add_wait_barrier(legion_copy_launcher_t launcher_,
+                                      legion_phase_barrier_t bar_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(*bar);
+}
+
+void
+legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(*bar);
+}
+
+// -----------------------------------------------------------------------
+// Must Epoch Operations
+// -----------------------------------------------------------------------
+
+legion_must_epoch_launcher_t
+legion_must_epoch_launcher_create(
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  MustEpochLauncher *launcher = new MustEpochLauncher(id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_must_epoch_launcher_destroy(legion_must_epoch_launcher_t handle_)
+{
+  MustEpochLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_future_map_t
+legion_must_epoch_launcher_execute(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_must_epoch_launcher_t launcher_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  FutureMap f = runtime->execute_must_epoch(ctx, *launcher);
+  return CObjectWrapper::wrap(new FutureMap(f));
+}
+
+void
+legion_must_epoch_launcher_add_single_task(
+  legion_must_epoch_launcher_t launcher_,
+  legion_domain_point_t point_,
+  legion_task_launcher_t handle_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  {
+    TaskLauncher *handle = CObjectWrapper::unwrap(handle_);
+    launcher->add_single_task(point, *handle);
+  }
+
+  // Destroy handle.
+  legion_task_launcher_destroy(handle_);
+}
+
+void
+legion_must_epoch_launcher_add_index_task(
+  legion_must_epoch_launcher_t launcher_,
+  legion_index_launcher_t handle_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  {
+    IndexLauncher *handle = CObjectWrapper::unwrap(handle_);
+    launcher->add_index_task(*handle);
+  }
+
+  // Destroy handle.
+  legion_index_launcher_destroy(handle_);
 }
 
 // -----------------------------------------------------------------------

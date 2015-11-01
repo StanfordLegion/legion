@@ -172,10 +172,12 @@ namespace LegionRuntime {
                                              ATOMIC_DEPENDENCE/*default*/); 
           }
           // If the one that is not an atomic is a read, we're also ok
+          // We still need a simultaneous dependence if we don't have an
+          // actual dependence
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return check_for_promotion(u1, NO_DEPENDENCE);
+            return check_for_promotion(u1, SIMULTANEOUS_DEPENDENCE);
           }
           // Everything else is a dependence
           return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);
@@ -1204,8 +1206,8 @@ namespace LegionRuntime {
           last_index(_last_index), lock(Reservation::create_reservation()) { }
       virtual ~DynamicTableNodeBase(void) { lock.destroy_reservation(); }
     public:
-      int level;
-      IT first_index, last_index;
+      const int level;
+      const IT first_index, last_index;
       Reservation lock;
     };
 
@@ -8508,7 +8510,7 @@ namespace LegionRuntime {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
-            inner->elems[0] = parent;
+            inner->elems[0] = root;
             root = parent;
           }
         }
