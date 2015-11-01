@@ -29,8 +29,6 @@ if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 -- ## Legion Bindings
 -- #################
 
--- FIXME (Elliott): This appears to be tickling a memory corruption bug.
--- require('legionlib')
 terralib.linklibrary("liblegion_terra.so")
 local c = terralib.includecstring([[
 #include "legion_c.h"
