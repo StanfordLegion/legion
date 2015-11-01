@@ -2624,7 +2624,11 @@ namespace LegionRuntime {
         }
         if (!!unversioned)
         {
-          if (report)
+          // For now, we won't report unversioned warnings for 
+          // simultaneous or relaxed coherence as the runtime can't
+          // actually infer if there are other users that might
+          // be writing to the same region.
+          if (report && !IS_SIMULT(user.usage) && !IS_RELAXED(user.usage))
             owner->report_uninitialized_usage(user, unversioned);
           // Make version number 1 here for us to use
           if (node_info.field_versions == NULL)
