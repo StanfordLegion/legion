@@ -688,11 +688,11 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   then
     return (#param_type:partitions() == #arg_type:partitions()) and
       data.all(
-        data.zip(param_type:partitions(), arg_type:partitions()):map(
+        unpack(data.zip(param_type:partitions(), arg_type:partitions()):map(
           function(pair)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
-      end))
+      end)))
   else
     return false
   end

@@ -250,6 +250,27 @@ function ast.map_node_postorder(fn, node)
   return node
 end
 
+function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
+  if ast.is_node(node) then
+    local result = init
+    for _, child in pairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return reduce_fn(result, map_fn(node))
+  elseif terralib.islist(node) then
+    local result = init
+    for _, child in ipairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return result
+  end
+  return init
+end
+
 function ast.traverse_expr_postorder(fn, node)
   ast.traverse_node_postorder(
     function(child)
