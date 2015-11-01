@@ -8510,7 +8510,7 @@ namespace LegionRuntime {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
-            inner->elems[0] = parent;
+            inner->elems[0] = root;
             root = parent;
           }
         }
