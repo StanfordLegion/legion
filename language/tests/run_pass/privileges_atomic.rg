@@ -14,10 +14,7 @@
 
 import "regent"
 
--- FIXME: Currently failing in runtime crash.
-
--- runs-with:
--- []
+-- Tests for a runtime bug in atomic coherence around deferred unlocking.
 
 task f(s : region(int))
 where reads writes atomic(s) do
@@ -27,5 +24,4 @@ task main()
   var r = region(ispace(ptr, 5), int)
   f(r)
 end
-main:printpretty()
 regentlib.start(main)
