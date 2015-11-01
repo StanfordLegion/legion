@@ -9624,7 +9624,8 @@ namespace LegionRuntime {
 #endif
       }
       Event detach_event = 
-        runtime->forest->detach_file(physical_ctx, requirement, this,reference);
+        runtime->forest->detach_file(physical_ctx, requirement, this,
+                                     version_info, reference);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);

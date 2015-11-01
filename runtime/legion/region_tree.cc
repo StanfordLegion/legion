@@ -2626,6 +2626,7 @@ namespace LegionRuntime {
     Event RegionTreeForest::detach_file(RegionTreeContext ctx,
                                         const RegionRequirement &req,
                                         DetachOp *detach_op,
+                                        VersionInfo &version_info,
                                         const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
@@ -2633,14 +2634,9 @@ namespace LegionRuntime {
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *detach_node = get_node(req.region);
-      FieldMask detach_mask = 
-        detach_node->column_source->get_field_mask(req.privilege_fields);
-      MaterializedView *detach_view = ref.get_materialized_view();
-      UserEvent done_event = UserEvent::create_user_event();
-      detach_view->unmake_persistent(detach_op->get_parent(),
-                                     detach_op->find_parent_index(0),
-                                     runtime->address_space, done_event);
-      return done_event;
+      // Perform the detachment
+      return detach_node->detach_file(ctx.get_id(), detach_op, 
+                                      version_info, ref);
     }
 
     //--------------------------------------------------------------------------
@@ -13331,6 +13327,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::filter_valid_views(PhysicalState *state, 
+                                            LogicalView *to_filter)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        state->valid_views.find(to_filter);
+      if (finder != state->valid_views.end())
+        state->valid_views.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_reduction_views(PhysicalState *state,
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
@@ -15164,9 +15171,30 @@ namespace LegionRuntime {
                             version_info.get_upper_bound_node());
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(ctx, version_info);
-      update_valid_views(state, attach_mask, false/*dirty*/, view);
+      // We need to invalidate all other instances for these fields since
+      // we are now making this the only valid copy of the data
+      update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
       return InstanceRef(ready_event, view);
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionNode::detach_file(ContextID ctx, DetachOp *detach_op, 
+                                  VersionInfo &version_info, 
+                                  const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView *detach_view = ref.get_materialized_view();
+      // First remove this view from the set of valid views
+      PhysicalState *state = get_physical_state(ctx, version_info);
+      filter_valid_views(state, detach_view);
+      // Then remove it from the set of persistent views
+      UserEvent done_event = UserEvent::create_user_event();
+      detach_view->unmake_persistent(detach_op->get_parent(),
+                                     detach_op->find_parent_index(0),
+                                     context->runtime->address_space, 
+                                     done_event);
+      return done_event;
     }
 
     //--------------------------------------------------------------------------
