@@ -302,7 +302,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
         @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr)) =
           random_element(piece_node_ptrs[n], conf.nodes_per_piece)
 
-        if (100 * drand48()) < conf.pct_wire_in_piece then
+        if ((100 * drand48()) < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
           @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) =
             random_element(piece_node_ptrs[n], conf.nodes_per_piece)
         else
@@ -837,6 +837,17 @@ task toplevel()
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
+
+  -- report mesh size in bytes
+  do
+    var node_size = [ terralib.sizeof(node) ]
+    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
+    c.printf("Circuit memory usage:\n")
+    c.printf("  Nodes : %9lld * %4d bytes = %11lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    c.printf("  Wires : %9lld * %4d bytes = %11lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
+    c.printf("  Total                            %11lld bytes\n", total)
+  end
 
   var colorings =
     load_circuit(__runtime(), __context(),
