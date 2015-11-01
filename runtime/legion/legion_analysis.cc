@@ -6646,7 +6646,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InstanceRef::update_atomic_locks(
-                 std::map<Reservation,bool> &atomic_locks, bool exclusive) const
+                 std::map<Reservation,bool> &atomic_locks, bool exclusive)
     //--------------------------------------------------------------------------
     {
       for (std::vector<Reservation>::const_iterator it = needed_locks.begin();
@@ -6659,6 +6659,8 @@ namespace LegionRuntime {
         else
           finder->second = finder->second || exclusive;
       }
+      // Once someone has asked for our locks we can let them go
+      needed_locks.clear();
     }
 
     //--------------------------------------------------------------------------

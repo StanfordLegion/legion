@@ -1200,7 +1200,9 @@ namespace LegionRuntime {
 #endif
         runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
-        // once the reference event is ready
+        // once the reference event is ready, we can also issue
+        // the unlock operations contingent upon the termination 
+        // event having triggered
         if (reference.has_required_locks())
         {
           std::map<Reservation,bool> required_locks;
@@ -1210,6 +1212,7 @@ namespace LegionRuntime {
                 required_locks.begin(); it != required_locks.end(); it++)
           {
             locked_event = it->first.acquire(0, it->second, locked_event);
+            it->first.release(termination_event);
           }
           locked_event.wait();
         }
@@ -1337,17 +1340,6 @@ namespace LegionRuntime {
         return;
       // Before unmapping, make sure any previous mappings have finished
       wait_until_valid();
-      // Unlock our lock now that we're done
-      if (reference.has_required_locks())
-      {
-        std::map<Reservation,bool> required_locks;
-        reference.update_atomic_locks(required_locks,true/*doesn't matter*/);
-        for (std::map<Reservation,bool>::const_iterator it = 
-              required_locks.begin(); it != required_locks.end(); it++)
-        {
-          it->first.release();
-        }
-      }
       mapped = false;
       valid = false;
       if (trigger_on_unmap)
