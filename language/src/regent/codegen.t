@@ -565,8 +565,17 @@ function value:get_index(cx, index, result_type)
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
   end
-  local result = expr.just(quote [actions] end,
-                           `([value_expr.value][ [index.value] ]))
+
+  local result
+  if std.is_list(value_type) then
+    result = expr.just(
+      quote [actions] end,
+      `([value_type:data(value_expr.value)][ [index.value] ]))
+  else
+    result = expr.just(
+      quote [actions] end,
+      `([value_expr.value][ [index.value] ]))
+  end
   return values.rawref(result, &result_type, data.newtuple())
 end
 
@@ -964,6 +973,7 @@ function ref:get_index(cx, index, result_type)
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
   end
+  assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
   return values.rawref(result, &result_type, data.newtuple())
 end
@@ -1393,6 +1403,8 @@ function rawref:get_index(cx, index, result_type)
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
   end
+  assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
+
   local result = expr.just(
     quote [actions] end,
     `([ref_expr.value][ [index.value] ]))
@@ -1624,6 +1636,16 @@ function codegen.expr_index_access(cx, node)
   elseif std.is_region(value_type) then
     local index = codegen.expr(cx, node.index):read(cx)
     return values.ref(index, node.expr_type.pointer_type)
+  elseif std.is_list(value_type) then
+    if not value_type:is_list_of_regions() then
+      local index = codegen.expr(cx, node.index):read(cx)
+      local value = values.value(
+        codegen.expr(cx, node.value):read(cx),
+        node.value.expr_type)
+      return value:get_index(cx, index, expr_type)
+    else
+      assert(false)
+    end
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, index, expr_type)
@@ -2675,6 +2697,29 @@ function codegen.expr_cross_product(cx, node)
     expr_type)
 end
 
+function codegen.expr_list_range(cx, node)
+  local start_type = std.as_read(node.start.expr_type)
+  local start = codegen.expr(cx, node.start):read(cx, start_type)
+  local stop_type = std.as_read(node.stop.expr_type)
+  local stop = codegen.expr(cx, node.stop):read(cx, stop_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local list = terralib.newsymbol("list")
+  local actions = quote
+    [start.actions];
+    [stop.actions];
+    [emit_debuginfo(node)];
+    var [list] = [expr_type:alloc(`([stop.value] - [start.value]))]
+    for i = [start.value], [stop.value] do
+      [expr_type:data(list)][i - [start.value] ] = i
+    end
+  end
+
+  return values.value(
+    expr.just(actions, list),
+    expr_type)
+end
+
 function codegen.expr_phase_barrier(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local value = codegen.expr(cx, node.value):read(cx, value_type)
@@ -3200,6 +3245,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListRange) then
+    return codegen.expr_list_range(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return codegen.expr_phase_barrier(cx, node)

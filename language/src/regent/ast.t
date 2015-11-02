@@ -250,6 +250,27 @@ function ast.map_node_postorder(fn, node)
   return node
 end
 
+function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
+  if ast.is_node(node) then
+    local result = init
+    for _, child in pairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return reduce_fn(result, map_fn(node))
+  elseif terralib.islist(node) then
+    local result = init
+    for _, child in ipairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return result
+  end
+  return init
+end
+
 function ast.traverse_expr_postorder(fn, node)
   ast.traverse_node_postorder(
     function(child)
@@ -391,6 +412,7 @@ ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
 ast.unspecialized.expr:leaf("Partition", {"disjointness_expr",
                                           "region_type_expr", "coloring"})
 ast.unspecialized.expr:leaf("CrossProduct", {"arg_type_exprs"})
+ast.unspecialized.expr:leaf("ListRange", {"start", "stop"})
 ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
@@ -490,6 +512,7 @@ ast.specialized.expr:leaf("Region", {"ispace", "ispace_symbol", "fspace_type",
 ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                         "expr_type"})
 ast.specialized.expr:leaf("CrossProduct", {"args", "expr_type"})
+ast.specialized.expr:leaf("ListRange", {"start", "stop"})
 ast.specialized.expr:leaf("PhaseBarrier", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
@@ -558,6 +581,7 @@ ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
 ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
+ast.typed.expr:leaf("ListRange", {"start", "stop"})
 ast.typed.expr:leaf("PhaseBarrier", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})

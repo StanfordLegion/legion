@@ -70,6 +70,7 @@ local language = {
     "index_type", -- reserved for future use
     "isnull",
     "ispace",
+    "list_range",
     "max",
     "min",
     "must_epoch",

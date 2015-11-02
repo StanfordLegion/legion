@@ -14,14 +14,13 @@
 
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
-
-task f(s : region(int))
-where reads writes atomic(s) do
+task f(r : regentlib.list(int))
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  f(r)
+  var x = list_range(3, 7)
+  -- f(x)
+  regentlib.assert(x[0] == 3, "test failed")
+  regentlib.assert(x[2] == 5, "test failed")
 end
 regentlib.start(main)

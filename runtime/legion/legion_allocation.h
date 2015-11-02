@@ -190,17 +190,17 @@ namespace LegionRuntime {
 
 #ifdef TRACE_ALLOCATION
     // forward declaration of runtime
-    class Runtime;
+    class Internal;
 
     // Implementations in runtime.cc
     struct LegionAllocation {
     public:
       static void trace_allocation(AllocationType a, size_t size, int elems=1);
       static void trace_free(AllocationType a, size_t size, int elems=1);
-      static Runtime* find_runtime(void);
-      static void trace_allocation(Runtime *&rt, AllocationType a, 
+      static Internal* find_runtime(void);
+      static void trace_allocation(Internal *&rt, AllocationType a, 
                                    size_t size, int elems=1);
-      static void trace_free(Runtime *&rt, AllocationType a, 
+      static void trace_free(Internal *&rt, AllocationType a, 
                              size_t size, int elems=1);
     };
 
@@ -262,7 +262,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      Runtime *rt = LegionAllocation::find_runtime(); 
+      Internal *rt = LegionAllocation::find_runtime(); 
       LegionAllocation::trace_free(rt, a, old_size);
       LegionAllocation::trace_allocation(rt, a, new_size);
 #endif
@@ -629,7 +629,7 @@ namespace LegionRuntime {
                                            { return !operator==(a); }
     public:
 #ifdef TRACE_ALLOCATION
-      Runtime *runtime;
+      Internal *runtime;
 #endif
     };
 

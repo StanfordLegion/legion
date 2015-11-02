@@ -57,7 +57,7 @@ namespace LegionRuntime {
         UserEvent ready;
       };  
     public:
-      RegionTreeForest(Runtime *rt);
+      RegionTreeForest(Internal *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
       ~RegionTreeForest(void);
     public:
@@ -601,7 +601,7 @@ namespace LegionRuntime {
       void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
                                          const void *&result, size_t &size);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
     protected:
       Reservation lookup_lock;
     private:
@@ -899,12 +899,12 @@ namespace LegionRuntime {
       };
       struct ChildRequestFunctor {
       public:
-        ChildRequestFunctor(Runtime *rt, Serializer &r, AddressSpaceID t)
+        ChildRequestFunctor(Internal *rt, Serializer &r, AddressSpaceID t)
           : runtime(rt), rez(r), target(t) { }
       public:
         void apply(AddressSpaceID next);
       private:
-        Runtime *const runtime;
+        Internal *const runtime;
         Serializer &rez;
         AddressSpaceID target;
       };
@@ -932,7 +932,7 @@ namespace LegionRuntime {
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(IndexSpace handle, Internal *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -1087,7 +1087,7 @@ namespace LegionRuntime {
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(IndexPartition handle, Internal *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -1205,7 +1205,7 @@ namespace LegionRuntime {
       struct SendFieldAllocationFunctor {
       public:
         SendFieldAllocationFunctor(FieldSpace h, FieldID f, size_t s,
-                                   unsigned i, Runtime *rt)
+                                   unsigned i, Internal *rt)
           : handle(h), field(f), size(s), index(i), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
@@ -1214,18 +1214,18 @@ namespace LegionRuntime {
         FieldID field;
         size_t size;
         unsigned index;
-        Runtime *runtime;
+        Internal *runtime;
       };
       struct SendFieldDestructionFunctor {
       public:
-        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Runtime *rt)
+        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Internal *rt)
           : handle(h), field(f), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
         FieldSpace handle;
         FieldID field;
-        Runtime *runtime;
+        Internal *runtime;
       };
       struct UpgradeFunctor {
       public:
@@ -1261,7 +1261,7 @@ namespace LegionRuntime {
       void* operator new(size_t count);
       void operator delete(void *ptr);
       AddressSpaceID get_owner_space(void) const; 
-      static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(FieldSpace handle, Internal *rt);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                                        const void *buffer, size_t size);
@@ -1421,7 +1421,7 @@ namespace LegionRuntime {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
-      static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
+      static AddressSpaceID get_owner_space(RegionTreeID tid, Internal *rt);
     public:
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
@@ -1848,7 +1848,7 @@ namespace LegionRuntime {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(LogicalRegion handle, Internal *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
@@ -2022,7 +2022,7 @@ namespace LegionRuntime {
       virtual PartitionNode* as_partition_node(void) const;
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalPartition handle, 
-                                            Runtime *runtime);
+                                            Internal *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;

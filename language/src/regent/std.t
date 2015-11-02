@@ -29,8 +29,6 @@ if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 -- ## Legion Bindings
 -- #################
 
--- FIXME (Elliott): This appears to be tickling a memory corruption bug.
--- require('legionlib')
 terralib.linklibrary("liblegion_terra.so")
 local c = terralib.includecstring([[
 #include "legion_c.h"
@@ -475,6 +473,10 @@ function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
 end
 
+function std.is_list(t)
+  return terralib.types.istype(t) and rawget(t, "is_list")
+end
+
 function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
@@ -555,6 +557,8 @@ function std.type_eq(a, b, mapping)
       end
     end
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -577,6 +581,8 @@ function std.type_maybe_eq(a, b, mapping)
     a.fspace == b.fspace
   then
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_maybe_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -613,6 +619,8 @@ local function add_type(symbols, type)
     for _, arg in ipairs(type.args) do
       add_region_symbol(symbols, arg)
     end
+  elseif std.is_list(type) then
+    add_type(symbols, type.element_type)
   elseif std.is_region(type) then
     -- FIXME: Would prefer to not get errors at all here.
     pcall(function() add_type(symbols, type.fspace_type) end)
@@ -688,11 +696,11 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   then
     return (#param_type:partitions() == #arg_type:partitions()) and
       data.all(
-        data.zip(param_type:partitions(), arg_type:partitions()):map(
+        unpack(data.zip(param_type:partitions(), arg_type:partitions()):map(
           function(pair)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
-      end))
+      end)))
   else
     return false
   end
@@ -1484,6 +1492,8 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
+  assert(not std.is_list(fspace_type),
+         "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
   st.entries = terralib.newlist({
@@ -1952,6 +1962,47 @@ std.future = terralib.memoize(function(result_type)
 
   function st.metamethods.__typename(st)
     return "future(" .. tostring(st.result_type) .. ")"
+  end
+
+  return st
+end)
+
+std.list = terralib.memoize(function(element_type)
+  if not terralib.types.istype(element_type) then
+    error("list expected a type as argument 1, got " .. tostring(element_type))
+  end
+
+  local st = terralib.types.newstruct("list")
+  st.entries = terralib.newlist({
+      { "__size", uint64 }, -- in elements
+      { "__data", &opaque },
+  })
+
+  st.is_list = true
+  st.element_type = element_type
+
+  function st:is_list_of_regions()
+    return std.is_region(self.element_type) or
+      (std.is_list(self.element_type) and
+         self.element_type:is_list_of_regions())
+  end
+
+  function st:alloc(size)
+    return `(
+      self {
+        __size = [size],
+        __data = c.malloc(terralib.sizeof([self.element_type]) * [size]),
+      })
+  end
+
+  -- FIXME: Make the compiler manage cleanups, including lists.
+
+  function st:data(value)
+    return `([&self.element_type]([value].__data))
+  end
+
+  function st.metamethods.__typename(st)
+    return "list(" .. tostring(st.result_type) .. ")"
   end
 
   return st

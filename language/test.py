@@ -25,7 +25,7 @@ class TestFailure(Exception):
         self.command = command
         self.output = output
 
-def run(filename, debug, verbose, flags):
+def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
             ([] if verbose else ['-level', '5']))
@@ -33,6 +33,7 @@ def run(filename, debug, verbose, flags):
         args,
         stdout = None if verbose else subprocess.PIPE,
         stderr = None if verbose else subprocess.STDOUT,
+        env = env,
         cwd = os.path.dirname(os.path.abspath(filename)))
     output, _ = proc.communicate()
     retcode = proc.wait()
@@ -51,13 +52,13 @@ def find_labeled_prefix(filename, label):
     match_text = '\n'.join([line.strip()[2:].strip() for line in match_lines])
     return match_text
 
-def test_compile_fail(filename, debug, verbose, flags):
+def test_compile_fail(filename, debug, verbose, flags, env):
     expected_failure = find_labeled_prefix(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
 
     try:
-        run(filename, debug, False, flags)
+        run(filename, debug, False, flags, env)
     except TestFailure as e:
         failure = '\n'.join(
             itertools.takewhile(
@@ -71,7 +72,7 @@ def test_compile_fail(filename, debug, verbose, flags):
     else:
         raise Exception('Expected failure, but test passed')
 
-def test_run_pass(filename, debug, verbose, flags):
+def test_run_pass(filename, debug, verbose, flags, env):
     runs_with = [[]]
     runs_with_text = find_labeled_prefix(filename, 'runs-with')
     if runs_with_text is not None:
@@ -79,7 +80,7 @@ def test_run_pass(filename, debug, verbose, flags):
 
     try:
         for params in runs_with:
-            run(filename, debug, verbose, flags + params)
+            run(filename, debug, verbose, flags + params, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -116,12 +117,15 @@ class Counter:
 
 tests = [
     # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
-    ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'],)),
+    ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'],
+                                          {'REALM_BACKTRACE': '1'})),
      (os.path.join('tests', 'compile_fail'),)),
-    ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],)),
-     (os.path.join('tests', 'run_pass'),
-      os.path.join('examples'),
-     )),
+    ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],
+                                  {'REALM_BACKTRACE': '1'})),
+     (os.path.join('tests', 'run_pass'),)),
+    ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],
+                                  {'REALM_BACKTRACE': '1'})),
+     (os.path.join('examples'),)),
 ]
 
 def run_all_tests(thread_count, debug, verbose):

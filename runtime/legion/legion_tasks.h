@@ -42,7 +42,7 @@ namespace LegionRuntime {
         SLICE_TASK_KIND,
       };
     public:
-      TaskOp(Runtime *rt);
+      TaskOp(Internal *rt);
       virtual ~TaskOp(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -207,7 +207,7 @@ namespace LegionRuntime {
       AllocManager *arg_manager;
     public:
       // Static methods
-      static void process_unpack_task(Runtime *rt,
+      static void process_unpack_task(Internal *rt,
                                       Deserializer &derez);
     public:
       static void pack_index_space_requirement(
@@ -299,7 +299,7 @@ namespace LegionRuntime {
         UserEvent profiling_done;
       };
     public:
-      SingleTask(Runtime *rt);
+      SingleTask(Internal *rt);
       virtual ~SingleTask(void);
     protected:
       void activate_single(void);
@@ -595,7 +595,7 @@ namespace LegionRuntime {
      */
     class MultiTask : public TaskOp {
     public:
-      MultiTask(Runtime *rt);
+      MultiTask(Internal *rt);
       virtual ~MultiTask(void);
     protected:
       void activate_multi(void);
@@ -680,7 +680,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INDIVIDUAL_TASK_ALLOC;
     public:
-      IndividualTask(Runtime *rt);
+      IndividualTask(Internal *rt);
       IndividualTask(const IndividualTask &rhs);
       virtual ~IndividualTask(void);
     public:
@@ -777,7 +777,7 @@ namespace LegionRuntime {
     protected:
       bool sent_remotely;
     protected:
-      friend class Runtime;
+      friend class Internal;
       // Special field for the top level task
       bool top_level_task;
     protected:
@@ -798,7 +798,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = POINT_TASK_ALLOC;
     public:
-      PointTask(Runtime *rt);
+      PointTask(Internal *rt);
       PointTask(const PointTask &rhs);
       virtual ~PointTask(void);
     public:
@@ -867,7 +867,7 @@ namespace LegionRuntime {
      */
     class WrapperTask : public SingleTask {
     public:
-      WrapperTask(Runtime *rt);
+      WrapperTask(Internal *rt);
       virtual ~WrapperTask(void);
     public:
       virtual void activate(void) = 0;
@@ -925,7 +925,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = REMOTE_TASK_ALLOC;
     public:
-      RemoteTask(Runtime *rt);
+      RemoteTask(Internal *rt);
       RemoteTask(const RemoteTask &rhs);
       virtual ~RemoteTask(void);
     public:
@@ -973,7 +973,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INLINE_TASK_ALLOC;
     public:
-      InlineTask(Runtime *rt);
+      InlineTask(Internal *rt);
       InlineTask(const InlineTask &rhs);
       virtual ~InlineTask(void);
     public:
@@ -1027,7 +1027,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
-      IndexTask(Runtime *rt);
+      IndexTask(Internal *rt);
       IndexTask(const IndexTask &rhs);
       virtual ~IndexTask(void);
     public:
@@ -1163,7 +1163,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
-      SliceTask(Runtime *rt);
+      SliceTask(Internal *rt);
       SliceTask(const SliceTask &rhs);
       virtual ~SliceTask(void);
     public:
@@ -1219,7 +1219,7 @@ namespace LegionRuntime {
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
     public:
-      static void handle_slice_return(Runtime *rt, Deserializer &derez);
+      static void handle_slice_return(Internal *rt, Deserializer &derez);
     protected:
       friend class IndexTask;
       bool reclaim; // used for reclaiming intermediate slices
