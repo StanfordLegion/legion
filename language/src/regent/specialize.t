@@ -221,6 +221,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListRange) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return 1
 
@@ -825,6 +828,15 @@ function specialize.expr_cross_product(cx, node)
   }
 end
 
+function specialize.expr_list_range(cx, node)
+  return ast.specialized.expr.ListRange {
+    start = specialize.expr(cx, node.start),
+    stop = specialize.expr(cx, node.stop),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_phase_barrier(cx, node)
   return ast.specialized.expr.PhaseBarrier {
     value = specialize.expr(cx, node.value),
@@ -945,6 +957,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListRange) then
+    return specialize.expr_list_range(cx, node)
 
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return specialize.expr_phase_barrier(cx, node)

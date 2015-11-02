@@ -154,6 +154,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListRange) then
+    return nil
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return nil
 
@@ -572,6 +575,15 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_list_range(cx, node)
+  local start = concretize(optimize_futures.expr(cx, node.start))
+  local stop = concretize(optimize_futures.expr(cx, node.stop))
+  return node {
+    start = start,
+    stop = stop,
+  }
+end
+
 function optimize_futures.expr_phase_barrier(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
@@ -707,6 +719,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListRange) then
+    return optimize_futures.expr_list_range(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return optimize_futures.expr_phase_barrier(cx, node)

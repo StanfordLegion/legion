@@ -551,6 +551,23 @@ function type_check.expr_index_access(cx, node)
       options = node.options,
       span = node.span,
     }
+  elseif std.is_list(value_type) then
+    if not std.validate_implicit_cast(index_type, int) then
+      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    end
+
+    if not value_type:is_list_of_regions() then
+      local expr_type = value_type.element_type
+      return ast.typed.expr.IndexAccess {
+        value = value,
+        index = index,
+        expr_type = expr_type,
+        options = node.options,
+        span = node.span,
+      }
+    else
+      assert(false)
+    end
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
     local function test()
@@ -1178,6 +1195,28 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_list_range(cx, node)
+  local start = type_check.expr(cx, node.start)
+  local start_type = std.check_read(cx, start)
+  local stop = type_check.expr(cx, node.stop)
+  local stop_type = std.check_read(cx, stop)
+  if not std.validate_implicit_cast(start_type, int) then
+    log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(start_type))
+  end
+  if not std.validate_implicit_cast(stop_type, int) then
+    log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(stop_type))
+  end
+  local expr_type = std.list(int)
+
+  return ast.typed.expr.ListRange {
+    start = start,
+    stop = stop,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_phase_barrier(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -1444,6 +1483,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListRange) then
+    return type_check.expr_list_range(cx, node)
 
   elseif node:is(ast.specialized.expr.PhaseBarrier) then
     return type_check.expr_phase_barrier(cx, node)
