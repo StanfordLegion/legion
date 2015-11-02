@@ -3611,10 +3611,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
                                              size_t field_size, FieldID fid,
-                                             bool local)
+                                             bool local, CustomSerdezID sd_id)
     //--------------------------------------------------------------------------
     {
-      return runtime->allocate_field(ctx, space, field_size, fid, local);
+      return runtime->allocate_field(ctx, space, field_size, fid, local, sd_id);
     }
 
     //--------------------------------------------------------------------------
@@ -3628,10 +3628,10 @@ namespace LegionRuntime {
     void Runtime::allocate_fields(Context ctx, FieldSpace space,
                                            const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         bool local)
+                                         bool local, CustomSerdezID _id)
     //--------------------------------------------------------------------------
     {
-      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local);
+      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local, _id);
     }
 
     //--------------------------------------------------------------------------

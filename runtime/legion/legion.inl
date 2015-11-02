@@ -476,11 +476,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline FieldID FieldAllocator::allocate_field(size_t field_size, 
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/)
+                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
+                                CustomSerdezID serdez_id /*=-1*/)
     //--------------------------------------------------------------------------
     {
       return runtime->allocate_field(parent, field_space, 
-                                 field_size, desired_fieldid, false/*local*/); 
+                                     field_size, desired_fieldid, 
+                                     false/*local*/, serdez_id); 
     }
 
     //--------------------------------------------------------------------------
@@ -492,21 +494,24 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline FieldID FieldAllocator::allocate_local_field(size_t field_size,
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/)
+                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
+                                CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       return runtime->allocate_field(parent, field_space,
-                                field_size, desired_fieldid, true/*local*/);
+                                     field_size, desired_fieldid, 
+                                     true/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------
     inline void FieldAllocator::allocate_fields(
         const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields)
+        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, false/*local*/);
+                               field_sizes, resulting_fields, 
+                               false/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -519,11 +524,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     inline void FieldAllocator::allocate_local_fields(
         const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields)
+        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, true/*local*/);
+                               field_sizes, resulting_fields, 
+                               true/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------

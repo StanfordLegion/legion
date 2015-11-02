@@ -10300,7 +10300,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FieldID Internal::allocate_field(Context ctx, FieldSpace space,
                                           size_t field_size, FieldID fid,
-                                          bool local)
+                                          bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10379,7 +10379,7 @@ namespace LegionRuntime {
     void Internal::allocate_fields(Context ctx, FieldSpace space,
                                         const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        bool local)
+                                        bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10417,7 +10417,7 @@ namespace LegionRuntime {
         ctx->add_local_fields(space, resulting_fields, sizes);
       else
       {
-        forest->allocate_fields(space, sizes, resulting_fields);
+        forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
         ctx->register_field_creations(space, resulting_fields);
       }
     }

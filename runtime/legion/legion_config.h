@@ -376,6 +376,7 @@ typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
 typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
 typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;
 typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
+typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
 typedef unsigned int legion_color_t;

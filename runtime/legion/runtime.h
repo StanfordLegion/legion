@@ -1333,11 +1333,13 @@ namespace LegionRuntime {
                                          const void *&result, size_t &size);
     public:
       FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, bool local);
+                             size_t field_size, FieldID fid, 
+                             bool local, CustomSerdezID serdez);
       void free_field(Context ctx, FieldSpace space, FieldID fid);
       void allocate_fields(Context ctx, FieldSpace space, 
                            const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, bool local);
+                           std::vector<FieldID> &resulting_fields, 
+                           bool local, CustomSerdezID serdez);
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     public:

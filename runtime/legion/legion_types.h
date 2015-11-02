@@ -514,6 +514,8 @@ namespace LegionRuntime {
     typedef LowLevel::Barrier Barrier;
     typedef ::legion_reduction_op_id_t ReductionOpID;
     typedef LowLevel::ReductionOpUntyped ReductionOp;
+    typedef ::legion_custom_serdez_id_t CustomSerdezID;
+    typedef LowLevel::CustomSerdezUntyped CustomSerdezOp;
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;

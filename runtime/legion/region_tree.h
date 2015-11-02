@@ -188,10 +188,12 @@ namespace LegionRuntime {
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, bool local);
+                          FieldID fid, bool local,
+                          CustomSerdezOp *op);
       void free_field(FieldSpace handle, FieldID fid, AddressSpaceID source);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
-                           const std::vector<FieldID> &resulting_fields);
+                           const std::vector<FieldID> &resulting_fields,
+                           CustomSerdezOp *op);
       void free_fields(FieldSpace handle, const std::set<FieldID> &to_free,
                        AddressSpaceID source);
       void allocate_field_index(FieldSpace handle, size_t field_size, 
