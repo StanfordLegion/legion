@@ -1689,6 +1689,7 @@ extern "C" {
 
   /**
    * @return Caller takes ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::issue_copy_operation()
    */
   void
