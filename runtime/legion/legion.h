@@ -4640,6 +4640,49 @@ namespace LegionRuntime {
                             MapperID mapper = 0, MappingTagID tag = 0);
     public:
       //------------------------------------------------------------------------
+      // Timing Operations 
+      //------------------------------------------------------------------------
+      /**
+       * Issue an operation into the stream to record the current time in
+       * seconds. The resulting future should be interpreted as a 'double'
+       * that represents the absolute time when this measurement was taken.
+       * The operation can be given an optional future which will not be 
+       * interpreted, but will be used as a precondition to ensure that the 
+       * measurement will not be taken until the precondition is complete.
+       */
+      Future get_current_time(Context ctx, Future precondition = Future());
+
+      /**
+       * Issue an operation into the stream to record the current time in 
+       * microseconds. The resulting future should be interpreted as a 
+       * 'long long' with no fractional microseconds. The operation can be
+       * givien an optional future precondition which will not be interpreted,
+       * but ill be used as a precondition to ensure that the measurement
+       * will not be taken until the precondition is complete.
+       */
+      Future get_current_time_in_microseconds(Context ctx, 
+                                              Future precondition = Future());
+
+      /**
+       * Issue an operation into the stream to record the current time in 
+       * nanoseconds. The resulting future should be interpreted as a 
+       * 'long long' with no fractional seconds. The operation can be
+       * givien an optional future precondition which will not be interpreted,
+       * but ill be used as a precondition to ensure that the measurement
+       * will not be taken until the precondition is complete.
+       */
+      Future get_current_time_in_nanoseconds(Context ctx,
+                                             Future precondition = Future());
+
+      /**
+       * Return the base time in nanoseconds on THIS node with which all 
+       * other aboslute timings can be compared. This value will not change 
+       * during the course of the lifetime of a Legion application and may 
+       * therefore be safely cached.
+       */
+      static long long get_zero_time(void);
+    public:
+      //------------------------------------------------------------------------
       // Miscellaneous Operations
       //------------------------------------------------------------------------
       /**

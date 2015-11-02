@@ -383,6 +383,7 @@ namespace LegionRuntime {
     class FillOp;
     class AttachOp;
     class DetachOp;
+    class TimingOp;
     class TaskOp;
 
     // legion_tasks.h
@@ -713,6 +714,7 @@ namespace LegionRuntime {
     friend class FillOp;                          \
     friend class AttachOp;                        \
     friend class DetachOp;                        \
+    friend class TimingOp;                        \
     friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \

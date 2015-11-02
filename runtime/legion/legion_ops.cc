@@ -9685,6 +9685,179 @@ namespace LegionRuntime {
         parent_req_index = unsigned(parent_index);
     }
 
+    ///////////////////////////////////////////////////////////// 
+    // Timing Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TimingOp::TimingOp(Internal *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TimingOp::TimingOp(const TimingOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TimingOp::~TimingOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TimingOp& TimingOp::operator=(const TimingOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Future TimingOp::initialize(SingleTask *ctx, const Future &pre)
+    //--------------------------------------------------------------------------
+    {
+      kind = ABSOLUTE_MEASUREMENT;
+      precondition = pre; 
+      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(true),
+                  runtime->address_space, runtime->address_space, this));
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future TimingOp::initialize_microseconds(SingleTask *ctx, const Future &pre)
+    //--------------------------------------------------------------------------
+    {
+      kind = MICROSECOND_MEASUREMENT;
+      precondition = pre;
+      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(true),
+                  runtime->address_space, runtime->address_space, this));
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future TimingOp::initialize_nanoseconds(SingleTask *ctx, const Future &pre)
+    //--------------------------------------------------------------------------
+    {
+      kind = NANOSECOND_MEASUREMENT;
+      precondition = pre;
+      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(true),
+                  runtime->address_space, runtime->address_space, this));
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      // Remove our references
+      precondition = Future();
+      result = Future();
+      runtime->free_timing_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TimingOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TIMING_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TimingOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return TIMING_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      if (precondition.impl != NULL)
+        precondition.impl->register_dependence(this);
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    bool TimingOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_mapping();
+      if ((precondition.impl != NULL) && 
+          !(precondition.impl->ready_event.has_triggered()))
+      {
+        Event wait_on = precondition.impl->get_ready_event();
+        DeferredExecuteArgs args;
+        args.hlr_id = HLR_DEFERRED_EXECUTE_ID;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_EXECUTE_ID,
+                                         this, wait_on);
+      }
+      else
+        deferred_execute();
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case ABSOLUTE_MEASUREMENT:
+          {
+            double value = Realm::Clock::current_time();
+            result.impl->set_result(&value, sizeof(value), false);
+            break;
+          }
+        case MICROSECOND_MEASUREMENT:
+          {
+            long long value = Realm::Clock::current_time_in_microseconds();
+            result.impl->set_result(&value, sizeof(value), false);
+            break;
+          }
+        case NANOSECOND_MEASUREMENT:
+          {
+            long long value = Realm::Clock::current_time_in_nanoseconds();
+            result.impl->set_result(&value, sizeof(value), false);
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      // Complete the future
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      result.impl->complete_future(); 
+      complete_operation();
+    }
+ 
   }; // namespace LegionRuntime
 }; // namespace HighLevel
 

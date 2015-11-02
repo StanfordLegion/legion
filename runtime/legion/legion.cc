@@ -3279,6 +3279,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::get_current_time(Context ctx, Future precondition)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_current_time(ctx, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::get_current_time_in_microseconds(Context ctx, Future pre)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_current_time_in_microseconds(ctx, pre);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::get_current_time_in_nanoseconds(Context ctx, Future pre)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_current_time_in_nanoseconds(ctx, pre);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ long long Runtime::get_zero_time(void)
+    //--------------------------------------------------------------------------
+    {
+      return Realm::Clock::get_zero_time();
+    }
+
+    //--------------------------------------------------------------------------
     Mapper* Runtime::get_mapper(Context ctx, MapperID id,
                                          Processor target)
     //--------------------------------------------------------------------------

@@ -3931,7 +3931,8 @@ namespace LegionRuntime {
         dependent_partition_op_lock(Reservation::create_reservation()),
         fill_op_lock(Reservation::create_reservation()),
         attach_op_lock(Reservation::create_reservation()),
-        detach_op_lock(Reservation::create_reservation())
+        detach_op_lock(Reservation::create_reservation()),
+        timing_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -4414,6 +4415,15 @@ namespace LegionRuntime {
       available_detach_ops.clear();
       detach_op_lock.destroy_reservation();
       detach_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<TimingOp*>::const_iterator it = 
+            available_timing_ops.begin(); it != 
+            available_timing_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_timing_ops.clear();
+      timing_op_lock.destroy_reservation();
+      timing_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -9774,7 +9784,7 @@ namespace LegionRuntime {
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task.error("Illegal Legion end trace call in leaf "
+        log_task.error("Illegal Legion complete frame call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -9910,6 +9920,105 @@ namespace LegionRuntime {
 #endif
       ProcessorManager *manager = proc_managers[proc];
       return manager->invoke_mapper_get_tunable_value(ctx, tid, mid, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Internal::get_current_time(Context ctx, const Future &precondition)
+    //--------------------------------------------------------------------------
+    {
+      TimingOp *timing_op = get_available_timing_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context get current time!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_run.debug("Getting current time in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+#endif
+      Future result = timing_op->initialize(ctx, precondition);
+#ifdef INORDER_EXECUTION
+      Event term_event = timing_op->get_completion_event();
+#endif
+      add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        Processor proc = ctx->get_executing_processor();
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future Internal::get_current_time_in_microseconds(Context ctx, 
+                                                      const Future &pre)
+    //--------------------------------------------------------------------------
+    {
+      TimingOp *timing_op = get_available_timing_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context get current "
+                      "time in microseconds!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_run.debug("Getting current time in microseconds in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+#endif
+      Future result = timing_op->initialize_microseconds(ctx, pre);
+#ifdef INORDER_EXECUTION
+      Event term_event = timing_op->get_completion_event();
+#endif
+      add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        Processor proc = ctx->get_executing_processor();
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future Internal::get_current_time_in_nanoseconds(Context ctx, 
+                                                     const Future &pre)
+    //--------------------------------------------------------------------------
+    {
+      TimingOp *timing_op = get_available_timing_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context get current time in nanoseconds!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_run.debug("Getting current time in nanoseconds in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+#endif
+      Future result = timing_op->initialize_nanoseconds(ctx, pre);
+#ifdef INORDER_EXECUTION
+      Event term_event = timing_op->get_completion_event();
+#endif
+      add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        Processor proc = ctx->get_executing_processor();
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -13654,6 +13763,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    TimingOp* Internal::get_available_timing_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<TimingOp*,
+                     &Internal::get_available_timing_op> 
+                       continuation(this, timing_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(timing_op_lock, available_timing_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -13923,6 +14049,14 @@ namespace LegionRuntime {
     {
       AutoLock d_lock(detach_op_lock);
       available_detach_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::free_timing_op(TimingOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(timing_op_lock);
+      available_timing_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------

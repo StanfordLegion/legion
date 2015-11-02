@@ -1285,6 +1285,10 @@ namespace LegionRuntime {
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
     public:
+      Future get_current_time(Context ctx, const Future &precondition);
+      Future get_current_time_in_microseconds(Context ctx, const Future &pre);
+      Future get_current_time_in_nanoseconds(Context ctx, const Future &pre);
+    public:
       Mapper* get_mapper(Context ctx, MapperID id, Processor target);
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
@@ -1770,6 +1774,8 @@ namespace LegionRuntime {
                                                   bool has_lock = false);
       DetachOp*             get_available_detach_op(bool need_cont,
                                                   bool has_lock = false);
+      TimingOp*             get_available_timing_op(bool need_cont,
+                                                  bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1800,6 +1806,7 @@ namespace LegionRuntime {
       void free_fill_op(FillOp *op);
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
+      void free_timing_op(TimingOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
                                               SingleTask *remote_parent_ctx); 
@@ -2006,6 +2013,7 @@ namespace LegionRuntime {
       Reservation fill_op_lock;
       Reservation attach_op_lock;
       Reservation detach_op_lock;
+      Reservation timing_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -2036,6 +2044,7 @@ namespace LegionRuntime {
       std::deque<FillOp*>               available_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
+      std::deque<TimingOp*>             available_timing_ops;
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

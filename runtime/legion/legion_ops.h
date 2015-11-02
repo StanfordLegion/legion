@@ -59,6 +59,7 @@ namespace LegionRuntime {
         FILL_OP_KIND,
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
+        TIMING_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
@@ -87,6 +88,7 @@ namespace LegionRuntime {
         "Fill",                     \
         "Attach",                   \
         "Detach",                   \
+        "Timing",                   \
         "Trace Capture",            \
         "Trace Complete",           \
         "Task",                     \
@@ -1845,6 +1847,43 @@ namespace LegionRuntime {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+    };
+
+    /**
+     * \class TimingOp
+     * Operation for performing timing measurements
+     */
+    class TimingOp : public Operation {
+    public:
+      enum MeasurementKind {
+        ABSOLUTE_MEASUREMENT,
+        MICROSECOND_MEASUREMENT,
+        NANOSECOND_MEASUREMENT,
+      };
+    public:
+      TimingOp(Internal *rt);
+      TimingOp(const TimingOp &rhs);
+      virtual ~TimingOp(void);
+    public:
+      TimingOp& operator=(const TimingOp &rhs);
+    public:
+      Future initialize(SingleTask *ctx, const Future &pre);
+      Future initialize_microseconds(SingleTask *ctx, const Future &pre);
+      Future initialize_nanoseconds(SingleTask *ctx, const Future &pre);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void deferred_execute(void);
+      virtual void trigger_complete(void);
+    protected:
+      MeasurementKind kind;
+      Future precondition;
+      Future result;
     };
 
   }; //namespace HighLevel
