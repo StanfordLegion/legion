@@ -9847,6 +9847,20 @@ namespace LegionRuntime {
     {
       if (!version_infos.empty())
       {
+        if (is_locally_mapped() && !runtime->is_local(target_proc))
+        {
+          std::set<Event> applied_conditions;
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          {
+            version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                runtime->address_space, applied_conditions);
+          }
+          if (!applied_conditions.empty())
+          {
+            Event applied_condition = Event::merge_events(applied_conditions);
+            applied_condition.wait();
+          }
+        }
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
           version_infos[idx].release();
         version_infos.clear();
@@ -10580,8 +10594,14 @@ namespace LegionRuntime {
       }
       if (is_remote())
       {
+        bool has_nonleaf_point = false;
+        for (unsigned idx = 0; idx < points.size(); ++idx)
+          has_nonleaf_point |= !points[idx]->is_leaf();
+
         // Only need to send something back if this wasn't mapped locally
-        if (!is_locally_mapped())
+        // wclee: also need to send back if there were some non-leaf point tasks
+        // because they haven't recorded themselves as mapped
+        if (!is_locally_mapped() || has_nonleaf_point)
         {
           Serializer rez;
           pack_remote_mapped(rez, applied_condition);
