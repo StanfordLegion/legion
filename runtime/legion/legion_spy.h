@@ -397,11 +397,13 @@ namespace LegionRuntime {
       // Logger calls for physical instances
       static inline void log_physical_instance(IDType inst_id, 
                          IDType mem_id, IDType index_handle, 
-                         unsigned field_handle, unsigned tree_id)
+                         unsigned field_handle, unsigned tree_id,
+                         size_t blocking_factor)
       {
-        log_spy.info("Physical Instance " IDFMT " " IDFMT " " 
-                            IDFMT " %u %u", 
-            inst_id, mem_id, index_handle, field_handle, tree_id);
+        log_spy.info("Physical Instance " IDFMT " " IDFMT " "
+            IDFMT " %u %u %lu",
+            inst_id, mem_id, index_handle, field_handle, tree_id,
+            blocking_factor);
       }
 
       static inline void log_physical_reduction(IDType inst_id, 

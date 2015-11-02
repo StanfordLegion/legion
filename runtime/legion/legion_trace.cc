@@ -214,29 +214,57 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(tracing);
-      assert(operations.back().first == source);
-      assert(operations.back().second == src_gen);
-      assert(!source->is_close_op());
+      if (!source->is_close_op())
+      {
+        assert(operations.back().first == source);
+        assert(operations.back().second == src_gen);
+      }
 #endif
       std::pair<Operation*,GenerationID> target_key(target, tar_gen);
       std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
         finder = op_map.find(target_key);
       // We only need to record it if it falls within our trace
       if (finder != op_map.end())
-        dependences.back().push_back(DependenceRecord(finder->second));
+      {
+        // Two cases here
+        if (!source->is_close_op())
+        {
+          // Normal case
+          dependences.back().push_back(DependenceRecord(finder->second));
+        }
+        else
+        {
+          // Otherwise this is a close op so record it special
+          // Don't record dependences on our creator
+          if (target_key != operations.back())
+          {
+            std::pair<Operation*,GenerationID> src_key(source, src_gen);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(close_dependences.find(src_key) != close_dependences.end());
+#endif
+            close_dependences[src_key].push_back(
+                DependenceRecord(finder->second));
+          }
+        }
+      }
       else if (target->is_close_op())
       {
-        // See if the target is a close operation on which 
-        // we need to check for transitive dependences
+        // They shouldn't both be close operations, if they are, then
+        // they should be going through the other path that tracks
+        // dependences based on specific region requirements
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!source->is_close_op());
+#endif
+        // First check to see if the close op is one of ours
         std::map<std::pair<Operation*,GenerationID>,
                 LegionVector<DependenceRecord>::aligned>::const_iterator
           close_finder = close_dependences.find(target_key);
         if (close_finder != close_dependences.end())
         {
           LegionVector<DependenceRecord>::aligned &target_deps = 
-                                                          dependences.back();
+                                                        dependences.back();
           const LegionVector<DependenceRecord>::aligned &close_deps = 
-                                                          close_finder->second;
+                                                        close_finder->second;
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 close_deps.begin(); it != close_deps.end(); it++)
           {
@@ -298,7 +326,7 @@ namespace LegionRuntime {
       }
       else if (target->is_close_op())
       {
-        // First check to see if the close ops is one of ours
+        // First check to see if the close op is one of ours
         std::map<std::pair<Operation*,GenerationID>,
                  LegionVector<DependenceRecord>::aligned>::const_iterator
           close_finder = close_dependences.find(target_key);
@@ -439,6 +467,7 @@ namespace LegionRuntime {
       LegionTrace *local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
+      tracing = false;
       begin_dependence_analysis();
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();

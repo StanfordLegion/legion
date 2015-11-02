@@ -25,7 +25,7 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     /**
-     * \class Logicalview 
+     * \class LogicalView 
      * This class is the abstract base class for representing
      * the logical view onto one or more physical instances
      * in memory.  Logical views are reference counted

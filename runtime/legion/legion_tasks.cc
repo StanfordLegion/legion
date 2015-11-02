@@ -2160,6 +2160,7 @@ namespace LegionRuntime {
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
+      initial_region_count = 0;
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
@@ -4642,17 +4643,20 @@ namespace LegionRuntime {
     void SingleTask::invalidate_region_tree_contexts(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+#ifdef DEBUG_HIGH_LEVEL
+      assert(initial_region_count <= regions.size());
+#endif
+      for (unsigned idx = 0; idx < initial_region_count; idx++)
       {
-        // Invalidate our contexts
-        if (virtual_mapped[idx])
-          runtime->forest->invalidate_current_context(enclosing_contexts[idx],
-                                                      regions[idx].region,
-                                                      true/*logical only*/);
-        else
-          runtime->forest->invalidate_current_context(context,
-                                                      regions[idx].region,
-                                                      false/*logical only*/);
+        runtime->forest->invalidate_current_context(context,
+                                                    regions[idx].region,
+                                                    false/*logical only*/);
+      }
+      for (unsigned idx = initial_region_count; idx < regions.size(); idx++)
+      {
+        runtime->forest->invalidate_current_context(enclosing_contexts[idx],
+                                                    regions[idx].region,
+                                                    true/*logical only*/);
       }
     }
 
@@ -4744,6 +4748,17 @@ namespace LegionRuntime {
               !(regions[idx].flags & NO_ACCESS_FLAG))
           {
             Memory inst_mem = physical_instances[idx].get_memory();
+            if (visible_memories.find(inst_mem) == visible_memories.end())
+            {
+              log_region.error("Illegal mapped region for region requirement "
+                               "%d of task %s (UID %lld)! Memory " IDFMT 
+                               " is not visible from processor " IDFMT "!",
+                               idx, this->variants->name, 
+                               this->get_unique_task_id(),
+                               inst_mem.id, target_proc.id);
+              assert(false);
+              exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+            }
             assert(visible_memories.find(inst_mem) != visible_memories.end());
           }
 #endif
@@ -4759,8 +4774,18 @@ namespace LegionRuntime {
                   additional_procs.begin(); it != additional_procs.end(); it++)
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(additional_visible_memories.find(*it) !=
-                      additional_visible_memories.end());
+              if (additional_visible_memories.find(*it) ==
+                  additional_visible_memories.end())
+              {
+                log_region.error("Illegal mapped region for region requirement "
+                                 "%d of task %s (UID %lld)! Memory " IDFMT 
+                                 " is not visible from processor " IDFMT "!",
+                                 idx, this->variants->name, 
+                                 this->get_unique_task_id(), it->id,
+                                 target_proc.id);
+                assert(false);
+                exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+              }
 #endif
               const std::set<Memory> &visible_mems = 
                               additional_visible_memories[*it];
@@ -4813,6 +4838,8 @@ namespace LegionRuntime {
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx])
           {
+            clone_requirements[idx].copy_without_mapping_info(regions[idx]);
+            localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegion::Impl>(regions[idx],
                     Event::NO_EVENT, false/*mapped*/,
@@ -4876,6 +4903,7 @@ namespace LegionRuntime {
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
+          initial_region_count = regions.size();
           // Have the mapper configure the properties of the context
           this->min_tasks_to_schedule = Internal::initial_tasks_to_schedule;
           this->min_frames_to_schedule = 0;

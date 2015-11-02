@@ -801,6 +801,14 @@ namespace LegionRuntime {
 #endif
         return ContextID(ctx);
       }
+      inline bool operator==(const RegionTreeContext &rhs) const
+      {
+        return (ctx == rhs.ctx);
+      }
+      inline bool operator!=(const RegionTreeContext &rhs) const
+      {
+        return (ctx != rhs.ctx);
+      }
     private:
       int ctx;
     };

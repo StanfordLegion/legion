@@ -28,6 +28,7 @@ builtins.region = std.region
 builtins.disjoint = std.disjoint
 builtins.aliased = std.aliased
 builtins.partition = std.partition
+builtins.phase_barrier = std.phase_barrier
 builtins.cross_product = std.cross_product
 builtins.ptr = std.ptr
 builtins.wild = std.wild

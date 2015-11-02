@@ -15,6 +15,7 @@
 -- Legion Standard Library
 
 local config = require("regent/config")
+local data = require("regent/data")
 local log = require("regent/log")
 local cudahelper
 
@@ -28,8 +29,6 @@ if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 -- ## Legion Bindings
 -- #################
 
--- FIXME (Elliott): This appears to be tickling a memory corruption bug.
--- require('legionlib')
 terralib.linklibrary("liblegion_terra.so")
 local c = terralib.includecstring([[
 #include "legion_c.h"
@@ -43,110 +42,6 @@ std.c = c
 -- #####################################
 -- ## Utilities
 -- #################
-
-function std.min(a, b)
-  if a < b then
-    return a
-  else
-    return b
-  end
-end
-
-function std.max(a, b)
-  if a > b then
-    return a
-  else
-    return b
-  end
-end
-
-function std.any(list)
-  for _, elt in ipairs(list) do
-    if elt then
-      return true
-    end
-  end
-  return false
-end
-
-function std.all(list)
-  for _, elt in ipairs(list) do
-    if not elt then
-      return false
-    end
-  end
-  return true
-end
-
-function std.range(start, stop) -- zero-based, exclusive (as in Python)
-  if stop == nil then
-    stop = start
-    start = 0
-  end
-  local result = terralib.newlist()
-  for i = start, stop - 1, 1 do
-    result:insert(i)
-  end
-  return result
-end
-
-function std.filter(fn, list)
-  local result = terralib.newlist()
-  for _, elt in ipairs(list) do
-    if fn(elt) then
-      result:insert(elt)
-    end
-  end
-  return result
-end
-
-function std.filteri(fn, list)
-  local result = terralib.newlist()
-  for i, elt in ipairs(list) do
-    if fn(elt) then
-      result:insert(i)
-    end
-  end
-  return result
-end
-
-function std.reduce(fn, list, init)
-  local result = init
-  for i, elt in ipairs(list) do
-    if i == 1 and result == nil then
-      result = elt
-    else
-      result = fn(result, elt)
-    end
-  end
-  return result
-end
-
-function std.zip(...)
-  local lists = terralib.newlist({...})
-  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end)) or 0
-  local result = terralib.newlist()
-  for i = 1, len do
-    result:insert(lists:map(function(list) return list[i] end))
-  end
-  return result
-end
-
-function std.dict(list)
-  local result = {}
-  for _, pair in ipairs(list) do
-    result[pair[1]] = pair[2]
-  end
-  return result
-end
-
-function std.hash(x)
-  if type(x) == "table" then
-    return x:hash()
-  else
-    return x
-  end
-end
 
 terra std.assert(x : bool, message : rawstring)
   if not x then
@@ -198,71 +93,15 @@ end
 -- ## Privilege Helpers
 -- #################
 
-std.tuple = {}
-setmetatable(std.tuple, { __index = terralib.list })
-std.tuple.__index = std.tuple
-
-function std.tuple.__eq(a, b)
-  if getmetatable(a) ~= std.tuple or getmetatable(b) ~= std.tuple then
-    return false
-  end
-  if #a ~= #b then
-    return false
-  end
-  for i, v in ipairs(a) do
-    if v ~= b[i] then
-      return false
-    end
-  end
-  return true
-end
-
-function std.tuple.__concat(a, b)
-  assert(std.is_tuple(a) and std.is_tuple(b))
-  local result = std.newtuple()
-  result:insertall(a)
-  result:insertall(b)
-  return result
-end
-
-function std.tuple:slice(start --[[ inclusive ]], stop --[[ inclusive ]])
-  local result = std.newtuple()
-  for i = start, stop do
-    result:insert(self[i])
-  end
-  return result
-end
-
-function std.tuple:starts_with(t)
-  assert(std.is_tuple(t))
-  return self:slice(1, std.min(#self, #t)) == t
-end
-
-function std.tuple:__tostring()
-  return "<" .. self:hash() .. ">"
-end
-
-function std.tuple:hash()
-  return self:mkstring(".")
-end
-
-function std.newtuple(...)
-  return setmetatable({...}, std.tuple)
-end
-
-function std.is_tuple(x)
-  return getmetatable(x) == std.tuple
-end
-
 function std.add_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and std.is_tuple(field_path))
+  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
   if not cx.privileges[privilege] then
-    cx.privileges[privilege] = {}
+    cx.privileges[privilege] = data.newmap()
   end
   if not cx.privileges[privilege][region] then
-    cx.privileges[privilege][region] = {}
+    cx.privileges[privilege][region] = data.newmap()
   end
-  cx.privileges[privilege][region][field_path:hash()] = true
+  cx.privileges[privilege][region][field_path] = true
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
@@ -309,18 +148,18 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
 end
 
 function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(type(privilege) == "string" and std.is_region(region) and std.is_tuple(field_path))
+  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
       return cx.privileges[privilege] and
         cx.privileges[privilege][region] and
-        cx.privileges[privilege][region][field_path:hash()]
+        cx.privileges[privilege][region][field_path]
     end)
 end
 
 function std.check_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and std.is_tuple(field_path))
+  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
     if std.search_privilege(cx, privilege, region, field_path:slice(1, i), {}) then
       return true
@@ -337,12 +176,12 @@ function std.check_privilege(cx, privilege, region, field_path)
 end
 
 function std.search_any_privilege(cx, region, field_path, visited)
-  assert(std.is_region(region) and std.is_tuple(field_path))
+  assert(std.is_region(region) and data.is_tuple(field_path))
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
-      for _, regions in pairs(cx.privileges) do
-        if regions[region] and regions[region][field_path:hash()] then
+      for _, regions in cx.privileges:items() do
+        if regions[region] and regions[region][field_path] then
           return true
         end
       end
@@ -351,7 +190,7 @@ function std.search_any_privilege(cx, region, field_path, visited)
 end
 
 function std.check_any_privilege(cx, region, field_path)
-  assert(std.is_region(region) and std.is_tuple(field_path))
+  assert(std.is_region(region) and data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
     if std.search_any_privilege(cx, region, field_path:slice(1, i), {}) then
       return true
@@ -452,7 +291,8 @@ function std.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
-local function find_field_privilege(privileges, region_type, field_path, field_type)
+local function find_field_privilege(privileges, coherence_modes,
+                                    region_type, field_path, field_type)
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
@@ -465,39 +305,54 @@ local function find_field_privilege(privileges, region_type, field_path, field_t
     end
   end
 
+  local coherence_mode = "exclusive"
+  if coherence_modes[region_type] then
+    for prefix, coherence in coherence_modes[region_type]:items() do
+      if field_path:starts_with(prefix) then
+        coherence_mode = coherence
+      end
+    end
+  end
+
   -- FIXME: Fow now, render write privileges as
   -- read-write. Otherwise, write would get rendered as
   -- write-discard, which would not be correct without explicit
   -- user annotation.
   if field_privilege == "writes" then
-    return "reads_writes"
+    field_privilege = "reads_writes"
   end
 
   if std.is_reduction_op(field_privilege) then
     local op = std.get_reduction_op(field_privilege)
     if not (std.reduction_op_ids[op] and std.reduction_op_ids[op][field_type]) then
-      log.warn("Warning: Unsupported privilege " .. tostring(field_privilege) .. " " .. tostring(field_type) .. " on field " .. tostring(field_path) .. " falling back to reads writes")
-      return "reads_writes"
+      -- You could upgrade to reads_writes here, but this would never
+      -- have made it past the parser anyway.
+      assert(false)
     end
   end
 
-  return field_privilege
+  return field_privilege, coherence_mode
 end
 
-function std.find_task_privileges(region_type, privileges)
+function std.find_task_privileges(region_type, privileges, coherence_modes)
+  assert(std.is_region(region_type) and privileges and data.is_map(coherence_modes))
   local grouped_privileges = terralib.newlist()
+  local grouped_coherence_modes = terralib.newlist()
   local grouped_field_paths = terralib.newlist()
   local grouped_field_types = terralib.newlist()
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type.fspace_type)
+  local field_paths, field_types = std.flatten_struct_fields(
+    region_type.fspace_type)
 
-  local privilege_index = {}
+  local privilege_index = data.newmap()
   local privilege_next_index = 1
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
-    local privilege = find_field_privilege(privileges, region_type, field_path, field_type)
+    local privilege, coherence = find_field_privilege(
+      privileges, coherence_modes, region_type, field_path, field_type)
+    local privilege_coherence = data.newtuple(privilege, coherence)
     if privilege ~= "none" then
-      local index = privilege_index[privilege]
+      local index = privilege_index[privilege_coherence]
       if not index then
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
@@ -505,10 +360,11 @@ function std.find_task_privileges(region_type, privileges)
         -- Reduction privileges cannot be grouped, because the Legion
         -- runtime does not know how to handle multi-field reductions.
         if not std.is_reduction_op(privilege) then
-          privilege_index[privilege] = index
+          privilege_index[privilege_coherence] = index
         end
 
         grouped_privileges:insert(privilege)
+        grouped_coherence_modes:insert(coherence)
         grouped_field_paths:insert(terralib.newlist())
         grouped_field_types:insert(terralib.newlist())
       end
@@ -520,11 +376,13 @@ function std.find_task_privileges(region_type, privileges)
 
   if #grouped_privileges == 0 then
     grouped_privileges:insert("none")
+    grouped_coherence_modes:insert("exclusive")
     grouped_field_paths:insert(terralib.newlist())
     grouped_field_types:insert(terralib.newlist())
   end
 
-  return grouped_privileges, grouped_field_paths, grouped_field_types
+  return grouped_privileges, grouped_field_paths, grouped_field_types,
+    grouped_coherence_modes
 end
 
 function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
@@ -550,6 +408,19 @@ function std.privilege_mode(privilege)
   if std.is_reduction_op(privilege) then
     mode = c.REDUCE
   end
+  assert(mode)
+  return mode
+end
+
+local coherence_modes = {
+  exclusive       = c.EXCLUSIVE,
+  atomic          = c.ATOMIC,
+  simultaneous    = c.SIMULTANEOUS,
+  relaxed         = c.RELAXED,
+}
+
+function std.coherence_mode(coherence)
+  local mode = coherence_modes[coherence]
   assert(mode)
   return mode
 end
@@ -600,6 +471,14 @@ end
 
 function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
+end
+
+function std.is_list(t)
+  return terralib.types.istype(t) and rawget(t, "is_list")
+end
+
+function std.is_phase_barrier(t)
+  return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
 
 function std.is_unpack_result(t)
@@ -678,6 +557,8 @@ function std.type_eq(a, b, mapping)
       end
     end
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -700,6 +581,8 @@ function std.type_maybe_eq(a, b, mapping)
     a.fspace == b.fspace
   then
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_maybe_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -736,6 +619,8 @@ local function add_type(symbols, type)
     for _, arg in ipairs(type.args) do
       add_region_symbol(symbols, arg)
     end
+  elseif std.is_list(type) then
+    add_type(symbols, type.element_type)
   elseif std.is_region(type) then
     -- FIXME: Would prefer to not get errors at all here.
     pcall(function() add_type(symbols, type.fspace_type) end)
@@ -810,12 +695,12 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
     std.is_cross_product(param_type) and std.is_cross_product(arg_type)
   then
     return (#param_type:partitions() == #arg_type:partitions()) and
-      std.all(
-        std.zip(param_type:partitions(), arg_type:partitions()):map(
+      data.all(
+        unpack(data.zip(param_type:partitions(), arg_type:partitions()):map(
           function(pair)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
-      end))
+      end)))
   else
     return false
   end
@@ -1089,7 +974,7 @@ function std.check_read(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege reads(" ..
-                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1107,7 +992,7 @@ function std.check_write(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege writes(" ..
-                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1129,7 +1014,7 @@ function std.check_reduce(cx, op, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
-                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1237,12 +1122,12 @@ function std.flatten_struct_fields(struct_type)
       field_paths:insertall(
         entry_field_paths:map(
           function(entry_field_path)
-            return std.newtuple(entry_name) .. entry_field_path
+            return data.newtuple(entry_name) .. entry_field_path
           end))
       field_types:insertall(entry_field_types)
     end
   else
-    field_paths:insert(std.newtuple())
+    field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
 
@@ -1251,12 +1136,12 @@ end
 
 function std.fn_param_regions(fn_type)
   local params = fn_type.parameters
-  return std.filter(std.is_region, params)
+  return data.filter(std.is_region, params)
 end
 
 function std.fn_param_regions_by_index(fn_type)
   local params = fn_type.parameters
-  return std.filteri(std.is_region, params)
+  return data.filteri(std.is_region, params)
 end
 
 -- #####################################
@@ -1607,6 +1492,8 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
+  assert(not std.is_list(fspace_type),
+         "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
   st.entries = terralib.newlist({
@@ -1708,6 +1595,10 @@ function std.region(ispace_symbol, fspace_type)
     return `([to] { impl = [expr].impl })
   end
 
+  function st:hash()
+    return self
+  end
+
   function st.metamethods.__typename(st)
     return "region(" .. tostring(st.fspace_type) .. ")"
   end
@@ -1775,6 +1666,10 @@ function std.partition(disjointness, region)
   function st:force_cast(from, to, expr)
     assert(std.is_partition(from) and std.is_partition(to))
     return `([to] { impl = [expr].impl })
+  end
+
+  function st:hash()
+    return self
   end
 
   function st.metamethods.__typename(st)
@@ -1889,6 +1784,10 @@ function std.cross_product(...)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
     -- FIXME: Potential for double (triple) evaluation here.
     return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
+  end
+
+  function st:hash()
+    return self
   end
 
   function st.metamethods.__typename(st)
@@ -2009,7 +1908,7 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   st.pointer_type = pointer_type
   st.refers_to_type = pointer_type.points_to_type
   st.bounds_symbols = pointer_type.bounds_symbols
-  st.field_path = std.newtuple(...)
+  st.field_path = data.newtuple(...)
 
   function st:bounds()
     return self.pointer_type:bounds()
@@ -2067,6 +1966,57 @@ std.future = terralib.memoize(function(result_type)
 
   return st
 end)
+
+std.list = terralib.memoize(function(element_type)
+  if not terralib.types.istype(element_type) then
+    error("list expected a type as argument 1, got " .. tostring(element_type))
+  end
+
+  local st = terralib.types.newstruct("list")
+  st.entries = terralib.newlist({
+      { "__size", uint64 }, -- in elements
+      { "__data", &opaque },
+  })
+
+  st.is_list = true
+  st.element_type = element_type
+
+  function st:is_list_of_regions()
+    return std.is_region(self.element_type) or
+      (std.is_list(self.element_type) and
+         self.element_type:is_list_of_regions())
+  end
+
+  function st:alloc(size)
+    return `(
+      self {
+        __size = [size],
+        __data = c.malloc(terralib.sizeof([self.element_type]) * [size]),
+      })
+  end
+
+  -- FIXME: Make the compiler manage cleanups, including lists.
+
+  function st:data(value)
+    return `([&self.element_type]([value].__data))
+  end
+
+  function st.metamethods.__typename(st)
+    return "list(" .. tostring(st.result_type) .. ")"
+  end
+
+  return st
+end)
+
+do
+  local st = terralib.types.newstruct("phase_barrier")
+  std.phase_barrier = st
+  st.entries = terralib.newlist({
+      { "impl", c.legion_phase_barrier_t },
+  })
+
+  st.is_phase_barrier = true
+end
 
 do
   local function field_name(field)
@@ -2148,7 +2098,7 @@ function std.privilege(privilege, regions_fields)
     local region, fields
     if terralib.issymbol(region_fields) then
       region = region_fields
-      fields = terralib.newlist({std.newtuple()})
+      fields = terralib.newlist({data.newtuple()})
     else
       region = region_fields.region
       fields = region_fields.fields
@@ -2165,6 +2115,22 @@ function std.privilege(privilege, regions_fields)
   end
   return privileges
 end
+
+-- #####################################
+-- ## Coherence Modes
+-- #################
+
+std.exclusive = "exclusive"
+std.atomic = "atomic"
+std.simultaneous = "simultaneous"
+std.relaxed = "relaxed"
+
+-- #####################################
+-- ## Conditions
+-- #################
+
+std.arrives = "arrives"
+std.awaits = "awaits"
 
 -- #####################################
 -- ## Constraints
@@ -2279,6 +2245,26 @@ end
 function task:getprivileges()
   assert(rawget(self, "privileges") ~= nil)
   return self.privileges
+end
+
+function task:set_coherence_modes(t)
+  assert(rawget(self, "coherence_modes") == nil)
+  self.coherence_modes = t
+end
+
+function task:get_coherence_modes()
+  assert(rawget(self, "coherence_modes") ~= nil)
+  return self.coherence_modes
+end
+
+function task:set_conditions(t)
+  assert(rawget(self, "conditions") == nil and t)
+  self.conditions = t
+end
+
+function task:get_conditions()
+  assert(rawget(self, "conditions") ~= nil)
+  return self.conditions
 end
 
 function task:set_param_constraints(t)

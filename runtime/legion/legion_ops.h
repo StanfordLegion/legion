@@ -1291,8 +1291,8 @@ namespace LegionRuntime {
       // The component slices for distribution
       std::set<SliceTask*>         slice_tasks;
       // The actual base operations
-      // Needs to be a set to ensure deduplication
-      std::set<SingleTask*>        single_tasks;
+      // Use a deque to keep everything in order
+      std::deque<SingleTask*>      single_tasks;
     protected:
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;
@@ -1310,6 +1310,7 @@ namespace LegionRuntime {
       std::vector<std::set<SingleTask*> > task_sets;
     protected:
       std::deque<DependenceRecord> dependences;
+      std::vector<unsigned> dependence_count;
       std::map<SingleTask*,std::deque<SingleTask*> > mapping_dependences;
     };
 
@@ -1340,7 +1341,9 @@ namespace LegionRuntime {
       bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
                          std::vector<bool> &indiv_triggered,
                          const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
+                         std::vector<bool> &index_triggered,
+                   const std::deque<MustEpochOp::DependenceRecord> &deps,
+                         const std::vector<unsigned> &dep_count);
       void trigger_individual(IndividualTask *task);
       void trigger_index(IndexTask *task);
     public:
@@ -1372,7 +1375,7 @@ namespace LegionRuntime {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::set<SingleTask*> &single_tasks,
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
           const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_deps);
       void map_task(SingleTask *task);
     public:
@@ -1836,7 +1839,7 @@ namespace LegionRuntime {
     protected:
       void compute_parent_index(void);
     public:
-      InstanceRef reference;
+      PhysicalRegion region;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;

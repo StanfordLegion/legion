@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+  <head>
+    <style>
+      text.locator {
+        font-size: 10pt;
+        font-family: Consolas, monospace;
+        fill: #000;
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+      }
+
+      text.desc {
+        font-size: 8pt;
+        font-family: Consolas, monospace;
+        fill: #000;
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+      }
+
+      text.processor {
+        font-size: 8pt;
+        font-family: Consolas, monospace;
+        fill: #000;
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+      }
+
+      text.help-box {
+        font-size: 20pt;
+        font-family: Consolas, monospace;
+        text-shadow: 0 2px 3px rgba(0,0,0,.8);
+        fill: #fff;
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+      }
+
+      div.scrollable {
+        overflow-x: scroll;
+        overflow-y: scroll;
+        margin-left: 400px;
+      }
+
+      div.fixed-left {
+        position: absolute;
+      }
+
+      rect.select-block {
+        fill: #000;
+        opacity: 0.1;
+      };
+
+      line.locator {
+        stroke: #000;
+        stroke-width: 0.5px;
+        opacity: 0.5;
+      };
+    </style>
+    <script src="http://code.jquery.com/jquery-1.11.3.min.js"></script>
+    <script src="http://d3js.org/d3.v3.js"></script>
+    <script type="text/javascript">
+      var profilingData = {
+        items: [],
+        visibility: [],
+        visibleLeft: 0,
+        visibleRight: 0
+      };
+
+      var browserName = (function(){
+          var ua= navigator.userAgent, tem,
+          M= ua.match(/(opera|chrome|safari|firefox|msie|trident(?=\/))\/?\s*(\d+)/i) || [];
+          if(/trident/i.test(M[1])){
+              tem=  /\brv[ :]+(\d+)/g.exec(ua) || [];
+              return 'IE '+(tem[1] || '');
+          }
+          if(M[1]=== 'Chrome'){
+              tem= ua.match(/\b(OPR|Edge)\/(\d+)/);
+              if(tem!= null) return tem.slice(1).join(' ').replace('OPR', 'Opera');
+          }
+          M= M[2]? [M[1], M[2]]: [navigator.appName, navigator.appVersion, '-?'];
+          if((tem= ua.match(/version\/(\d+)/i))!= null) M.splice(1, 1, tem[1]);
+          return M.join(' ');
+      })();
+      browserName = browserName.split(" ")[0].toLowerCase();
+
+      var zoom = 1.0;
+      var maxZoom = 1000.0
+      var margin_left = 400;
+      var margin_bottom = 50;
+      var width = $(window).width() - margin_left;
+      var height = $(window).height() - margin_bottom;
+      var start = 0;
+      var end = %d;
+      var max_level = %d;
+      var scale = width / (end - start);
+      var thickness = height / max_level;
+      var baseThickness = height / max_level;
+      height = max_level * thickness;
+
+      var helpToggle = false;
+      var helpMessages = {
+        safari: [
+          "Zoom-in (x-axis): Ctrl/⌘  [Shift]  +",
+          "Zoom-out (x-axis): Ctrl/⌘  [Shift]  -",
+          "Reset zoom (x-axis): Ctrl/⌘  0",
+          "Zoom-in (y-axis): Ctrl-Alt/Ctrl-⌘  +",
+          "Zoom-out (y-axis): Ctrl-Alt/Ctrl-⌘  -",
+          "Reset zoom (y-axis): Ctrl-Alt/Ctrl-⌘  0",
+        ],
+        chrome: [
+          "Zoom-in (x-axis): Ctrl  [Shift]  +",
+          "Zoom-out (x-axis): Ctrl  [Shift]  -",
+          "Reset zoom (x-axis): Ctrl  0",
+          "Zoom-in (y-axis): Ctrl-Alt  +",
+          "Zoom-out (y-axis): Ctrl-Alt  -",
+          "Reset zoom (y-axis): Ctrl-Alt  0",
+        ],
+        firefox: [
+          "Zoom-in (x-axis): Ctrl/⌘  [Shift]  +",
+          "Zoom-out (x-axis): Ctrl/⌘  [Shift]  -",
+          "Reset zoom (x-axis): Ctrl/⌘  0",
+          "Zoom-in (y-axis): Ctrl-Alt/Ctrl-⌘  +",
+          "Zoom-out (y-axis): Ctrl-Alt/Ctrl-⌘  -",
+          "Reset zoom (y-axis): Ctrl-Alt/Ctrl-⌘  0",
+        ]
+      };
+      var helpTitles = {
+        safari: "Keyboard Shortcuts (Safari)",
+        chrome: "Keyboard Shortcuts (Chrome)",
+        firefox: "Keyboard Shortcuts (Firefox)"
+      };
+
+      function drawLoaderIcon() {
+        var loaderSvg = d3.select("#loader-icon").select("svg");
+        var loaderGroup = loaderSvg.append("g")
+          .attr({
+              id: "loader-icon",
+          });
+        loaderGroup.append("path")
+          .attr({
+            opacity: 0.2,
+            fill: "#000",
+            d: "M20.201,5.169c-8.254,0-14.946,6.692-14.946,14.946c0,8.255,6.692,14.946,14.946,14.946s14.946-6.691,14.946-14.946C35.146,11.861,28.455,5.169,20.201,5.169z M20.201,31.749c-6.425,0-11.634-5.208-11.634-11.634c0-6.425,5.209-11.634,11.634-11.634c6.425,0,11.633,5.209,11.633,11.634C31.834,26.541,26.626,31.749,20.201,31.749z"
+          });
+        var path = loaderGroup.append("path")
+          .attr({
+            fill: "#000",
+            d: "M26.013,10.047l1.654-2.866c-2.198-1.272-4.743-2.012-7.466-2.012h0v3.312h0C22.32,8.481,24.301,9.057,26.013,10.047z"
+          });
+        path.append("animateTransform")
+          .attr({
+            attributeType: "xml",
+            attributeName: "transform",
+            type: "rotate",
+            from: "0 20 20",
+            to: "360 20 20",
+            dur: "0.5s",
+            repeatCount: "indefinite"
+          });
+      }
+      function showLoaderIcon() {
+        loaderSvg.select("g").attr("visibility", "visible");
+      }
+      function hideLoaderIcon() {
+        loaderSvg.select("g").attr("visibility", "hidden");
+      }
+
+      function getMouseOver(zoom) {
+        var paneWidth = $("#timeline").width() / zoom;
+        var left = paneWidth / 3;
+        var right = paneWidth * 2 / 3;
+        return function(d, i) {
+          var p = d3.mouse(this);
+          var x = parseFloat(p[0]);
+          var relativeX = (x - $("#timeline").scrollLeft() / zoom)
+          var anchor = relativeX < left ? "start" :
+                       relativeX < right ? "middle" : "end";
+          var descView = timelineSvg.append("g").attr("id", "desc");
+          descView.append("text")
+            .attr("x", x * zoom)
+            .attr("y", d.level * thickness - 5)
+            .attr("text-anchor", anchor)
+            .attr("class", "desc")
+            .text(unescape(escape(d.title)));
+        };
+      }
+      function drawTimeline(targetSvg, data, zoom, scale, thickness) {
+          var timeline = targetSvg.selectAll("rect")
+            .data(data, function(d) { return d.id; });
+          var mouseOver = getMouseOver(zoom);
+
+          timeline
+            .enter().append("rect")
+            .attr("id", function(d) { return "block-" + d.id; })
+            .attr("x", function(d) { return d.start * scale; })
+            .attr("y", function(d) { return d.level * thickness; })
+            //.style("stroke", "#000000")
+            //.style("stroke-width", "0.5px")
+            .style("fill", function(d) { return d.color; })
+            .attr("width", function(d) { return (d.end - d.start) * scale; })
+            .attr("height", thickness)
+            .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
+          timeline.on("mouseover", mouseOver);
+
+          timeline.exit().remove();
+      }
+
+      function drawProcessors(data) {
+        var svg = d3.select("#processors").append("svg")
+          .attr("width", margin_left)
+          .attr("height", height);
+        svg.selectAll(".processors")
+          .data(data)
+          .enter().append("text")
+          .attr("text-anchor", "start")
+          .attr("class", "processor")
+          .attr("x", 0)
+          .attr("y", function(d) { return d.level * thickness + thickness; })
+          .text(function(d) { return d.processor; });
+
+        var lines = timelineSvg
+          .append("g")
+          .attr("id", "lines");
+
+        lines.selectAll(".lines")
+          .data(data)
+          .enter().append("line")
+          .attr("x1", 0)
+          .attr("y1", function(d) { return d.level * thickness + thickness; })
+          .attr("x2", zoom * width)
+          .attr("y2", function(d) { return d.level * thickness + thickness; })
+          .style("stroke", "#000000")
+          .style("stroke-width", "1px");
+      }
+
+      function drawHelpBox() {
+        var paneWidth = $("#timeline").width();
+        var paneHeight = $("#timeline").height();
+        var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
+        var helpBoxWidth = Math.min(650, paneWidth - 100);
+        var helpBoxHeight = Math.min(350, paneHeight - 100);
+
+        var timelineWidth = timelineSvg.select("g#timeline").attr("width");
+        var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+        var scrollLeft = $("#timeline").scrollLeft();
+        var scrollTop = $(window).scrollTop();
+
+        var boxStartX = scrollLeft + (paneWidth - helpBoxWidth) / 2;
+        var boxStartY = scrollTop + (paneHeight - helpBoxHeight) / 2 / (thickness / baseThickness);
+
+        helpBoxGroup.append("rect")
+          .attr({
+              rx: 30,
+              ry: 30,
+              x: boxStartX,
+              y: boxStartY,
+              width: helpBoxWidth,
+              height: helpBoxHeight,
+              style: "fill: #222; opacity: 0.8;"
+          });
+        var helpText = helpBoxGroup.append("text")
+          .attr("class", "help-box")
+          .style("width", helpBoxWidth);
+        var helpTitle = helpTitles[browserName];
+        if (helpTitle === undefined) helpTitle = "Keyboard Shortcuts";
+        helpText.append("tspan")
+          .attr({ x: boxStartX + helpBoxWidth / 2, y: boxStartY + 50})
+          .attr("text-anchor", "middle")
+          .text(helpTitle);
+        var off = 30;
+        var helpMessage = helpMessages[browserName];
+        if (helpMessage === undefined) helpMessage = helpMessages["chrome"];
+        for (var i = 0; i < helpMessage.length; ++i) {
+          helpText.append("tspan")
+            .attr("text-anchor", "start")
+            .attr({ x: boxStartX + 30, dy: off + 40})
+            .text(helpMessage[i]);
+          off = 0;
+        }
+      }
+
+      function filterOnlyVisibleData(profilingData, zoom, scale) {
+        var windowStart = $("#timeline").scrollLeft();
+        var windowEnd = windowStart + $(window).width();
+        var filteredData = Array();
+        var items = profilingData.items;
+        var f = scale * zoom;
+        for (var i = 0; i < items.length; ++i) {
+          var d = items[i];
+          var start = d.start;
+          var end = d.end;
+          if ((end - start) * f >= 1.0 && end * f >= windowStart && start * f <= windowEnd)
+            filteredData.push(d);
+        }
+        return filteredData;
+      }
+
+      function adjustZoom(newZoom, scroll) {
+        var prevZoom = zoom;
+        zoom = Math.round(newZoom * 10) / 10;
+        var svg = d3.select("#timeline").select("svg");
+
+        svg.attr("width", zoom * width)
+           .attr("height", height);
+
+        svg.select("g#timeline")
+          .attr("transform", "scale(" + zoom + ", 1.0)");
+
+        svg.select("g#lines").selectAll("line")
+          .attr("x2", zoom * width);
+        svg.selectAll("#desc").remove();
+        svg.selectAll("g.locator").remove();
+
+        if (scroll) {
+          var paneWidth = $("#timeline").width();
+          var pos = ($("#timeline").scrollLeft() + paneWidth / 2) / prevZoom;
+          // this will trigger a scroll event which in turn redraws the timeline
+          $("#timeline").scrollLeft(pos * zoom - width / 2);
+        }
+      }
+
+      function adjustThickness(newThickness) {
+        thickness = newThickness;
+        height = thickness * max_level;
+        d3.select("#processors").select("svg").remove();
+        var svg = d3.select("#timeline").select("svg");
+        var timelineGroup = svg.select("g#timeline");
+        timelineGroup.selectAll("rect").remove();
+        var lines = timelineSvg.select("g#lines");
+        lines.remove();
+
+        svg.attr("width", zoom * width)
+           .attr("height", height);
+        var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+        drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+        drawProcessors(profilingData.processors);
+        svg.selectAll("#desc").remove();
+        svg.selectAll("g.locator").remove();
+      }
+
+      function init() {
+        if (document.addEventListener)
+          document.addEventListener("keypress", keypress, false);
+        else if (document.attachEvent)
+          document.attachEvent("onkeypress", keypress);
+      }
+
+      function suppressdefault(e) {
+        if (e.preventDefault) e.preventDefault();
+        if (e.stopPropagation) e.stopPropagation();
+      }
+
+      function keypress(e) {
+        if (!e) e = event;
+        if (!(e.ctrlKey || e.metaKey || e.altKey)) {
+          if (e.charCode == 63) {
+            helpToggle = !helpToggle;
+            if (helpToggle) {
+              var timelineSvg = d3.select("#timeline").select("svg");
+              timelineSvg.select("g#timeline").style("opacity", "0.1");
+              $("#timeline").css("overflow-x", "hidden");
+              timelineSvg.select("g#lines").style("opacity", "0.1");
+              timelineSvg.select("g.locator").style("opacity", "0.1");
+              drawHelpBox();
+            }
+            else {
+              var timelineSvg = d3.select("#timeline").select("svg");
+              timelineSvg.select("g.help-box").remove();
+              timelineSvg.select("g#timeline").style("opacity", "1.0");
+              $("#timeline").css("overflow-x", "scroll");
+              timelineSvg.select("g#lines").style("opacity", "1.0");
+              timelineSvg.select("g.locator").style("opacity", "1.0");
+            }
+          }
+          else return true;
+        }
+        if (helpToggle) {
+          suppressdefault(e);
+          return true;
+        }
+        if (e.charCode == 43 || e.charCode == 61) {
+          suppressdefault(e);
+          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
+            showLoaderIcon();
+            adjustThickness(thickness * 2);
+            hideLoaderIcon();
+          }
+          else {
+            var inc = e.shiftKey ? 4.0 : 0.2;
+            if (zoom + inc <= maxZoom) {
+              showLoaderIcon();
+              adjustZoom(zoom + inc, true);
+              hideLoaderIcon();
+            }
+          }
+          return false;
+        }
+        else if (e.charCode == 0 || e.charCode == 31 || e.charCode == 45 || e.charCode == 95) {
+          suppressdefault(e);
+          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
+            showLoaderIcon();
+            adjustThickness(thickness / 2);
+            hideLoaderIcon();
+          }
+          else {
+            var dec = e.shiftKey ? 4.0 : 0.2;
+            if (zoom - dec > 0) {
+              var width = $("#timeline").width();
+              var pos = ($("#timeline").scrollLeft() + width / 2) / zoom;
+              showLoaderIcon();
+              adjustZoom(zoom - dec, true);
+              hideLoaderIcon();
+            }
+          }
+          return false;
+        }
+        else if (e.charCode == 48) {
+          suppressdefault(e);
+          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
+            var height = $(window).height() - margin_bottom;
+            thickness = height / max_level;
+            showLoaderIcon();
+            adjustThickness(thickness);
+            hideLoaderIcon();
+          }
+          else {
+            showLoaderIcon();
+            adjustZoom(1.0, false);
+            if ($("#timeline").scrollLeft() != 0) {
+              $("#timeline").scrollLeft(0);
+            }
+            else {
+              var svg = d3.select("#timeline").select("svg");
+              var timelineGroup = svg.select("g#timeline");
+              var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+              drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+            }
+            hideLoaderIcon();
+          }
+          return false;
+        }
+        return true;
+      }
+    </script>
+  </head>
+  <body>
+    <div id="processors" class="fixed-left"></div>
+    <div id="timeline" class="scrollable"></div>
+    <div id="loader-icon" style="position: absolute; left: 50%%; top: 50%%;"></div>
+
+    <script type="text/javascript">
+      init();
+
+      var timelineSvg = d3.select("#timeline").append("svg")
+        .attr("width", zoom * width)
+        .attr("height", height);
+      var loaderSvg = d3.select("#loader-icon").append("svg")
+        .attr("width", "40px")
+        .attr("height", "40px");
+      drawLoaderIcon();
+
+      d3.tsv(%s,
+        function(d, i) {
+            return {
+              id: i,
+              level: d.level,
+              start: d.start,
+              end: d.end,
+              color: d.color,
+              title: d.title
+            };
+        },
+        function(data) {
+          var timelineGroup = timelineSvg.append("g")
+              .attr("id", "timeline")
+              .attr("transform", "scale(" + zoom +", 1.0)");
+
+          profilingData.items = data;
+          profilingData.visibleLeft = 0;
+          profilingData.visibleRight = data.length - 1;
+
+          var scrollLeft = $("#timeline").scrollLeft();
+          var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+          drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+          $("#timeline").scrollLeft(0);
+
+          var windowCenterY = $(window).height() / 2;
+          $(window).scroll(function() {
+              $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
+          });
+
+          var timer = null;
+          $("#timeline").scroll(function() {
+              showLoaderIcon();
+              if (timer !== null) {
+                clearTimeout(timer);
+              }
+              timer = setTimeout(function() {
+                var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+                drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+                hideLoaderIcon();
+              }, 100);
+          });
+          var isMouseDown = false;
+          var mouseX = 0;
+          timelineSvg.on("mousedown", function() {
+              if (!helpToggle) {
+                timelineSvg.select("g.locator").remove();
+                isMouseDown = true;
+                var p = d3.mouse(this);
+                timelineSvg.append("rect")
+                  .attr({
+                    x : p[0],
+                    y : 0,
+                    class : "select-block",
+                    width : 0,
+                    height : height
+                  });
+                mouseX = p[0];
+              }
+          });
+          timelineSvg.on("mousemove", function() {
+              if (isMouseDown) {
+                var p = d3.mouse(this);
+                var select_block = timelineSvg.select("rect.select-block");
+                if (p[0] >= mouseX) {
+                  select_block.attr("width", p[0] - mouseX);
+                  select_block.attr("x", mouseX);
+                }
+                else {
+                  select_block.attr("width", mouseX - p[0]);
+                  select_block.attr("x", p[0]);
+                }
+              }
+              else {
+                var p = d3.mouse(this);
+                var x = parseFloat(p[0]);
+                var scrollLeft = $("#timeline").scrollLeft();
+                var paneWidth = $("#timeline").width();
+                var currentTime = Math.floor(x / zoom / scale / 1000);
+                timelineSvg.select("g.locator").remove();
+                var locator = timelineSvg.append("g").attr("class", "locator");
+                if (helpToggle) locator.style("opacity", "0.1");
+                locator.append("line")
+                  .attr({
+                    x1: p[0],
+                    y1: 0,
+                    x2: p[0],
+                    y2: p[1] - thickness / 2
+                  })
+                  .style("stroke", "#000")
+                  .style("stroke-width", "1px")
+                  .style("opacity", "0.5");
+                locator.append("line")
+                  .attr({
+                    x1: p[0],
+                    y1: p[1] + thickness / 2,
+                    x2: p[0],
+                    y2: height
+                  })
+                  .style("stroke", "#000")
+                  .style("stroke-width", "1px")
+                  .style("opacity", "0.5");
+                var locatorText = locator.append("text");
+                var text = currentTime + " ms";
+                locatorText.attr("class", "locator").text(text)
+                if ((x - scrollLeft) < paneWidth - 100) {
+                  locatorText.attr({x: x + 2, y: $(window).scrollTop() + 10});
+                  locatorText.attr("anchor", "start");
+                }
+                else {
+                  locatorText.attr({x: x - 2 - text.length * 7, y: $(window).scrollTop() + 10});
+                  locatorText.attr("anchor", "end");
+                }
+              }
+          });
+          timelineSvg.on("mouseup", function() {
+              if (isMouseDown) {
+                var p = d3.mouse(this);
+                var select_block = timelineSvg.select("rect.select-block");
+                var prevZoom = zoom;
+                var selectWidth = parseInt(select_block.attr("width"));
+                var svgWidth = timelineSvg.attr("width");
+                if (selectWidth > 10 && svgWidth / selectWidth <= maxZoom) {
+                  var x = select_block.attr("x");
+                  showLoaderIcon();
+                  adjustZoom(svgWidth / selectWidth, false);
+                  $("#timeline").scrollLeft(x / prevZoom * zoom);
+                  hideLoaderIcon();
+                }
+                select_block.remove();
+                isMouseDown = false;
+                mouseX = 0;
+              }
+          });
+      });
+
+      d3.tsv(%s,
+          function(d) {
+            return {
+              level: d.level,
+              processor: d.processor
+            };
+          },
+          function(data) {
+            profilingData.processors = data;
+            drawProcessors(profilingData.processors);
+          }
+      );
+      hideLoaderIcon();
+    </script>
+  </body>
+</html>

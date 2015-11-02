@@ -1200,7 +1200,9 @@ namespace LegionRuntime {
 #endif
         runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
-        // once the reference event is ready
+        // once the reference event is ready, we can also issue
+        // the unlock operations contingent upon the termination 
+        // event having triggered
         if (reference.has_required_locks())
         {
           std::map<Reservation,bool> required_locks;
@@ -1210,6 +1212,7 @@ namespace LegionRuntime {
                 required_locks.begin(); it != required_locks.end(); it++)
           {
             locked_event = it->first.acquire(0, it->second, locked_event);
+            it->first.release(termination_event);
           }
           locked_event.wait();
         }
@@ -1337,17 +1340,6 @@ namespace LegionRuntime {
         return;
       // Before unmapping, make sure any previous mappings have finished
       wait_until_valid();
-      // Unlock our lock now that we're done
-      if (reference.has_required_locks())
-      {
-        std::map<Reservation,bool> required_locks;
-        reference.update_atomic_locks(required_locks,true/*doesn't matter*/);
-        for (std::map<Reservation,bool>::const_iterator it = 
-              required_locks.begin(); it != required_locks.end(); it++)
-        {
-          it->first.release();
-        }
-      }
       mapped = false;
       valid = false;
       if (trigger_on_unmap)
@@ -14789,13 +14781,8 @@ namespace LegionRuntime {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
-#ifdef LEGION_SPY
-        // No dynamic tests for legion spy because it doesn't know how
-        // to figure this kind of information out
-        dynamic_independence_tests = false;
-#else
+        // We always turn this on as the Legion Spy will now understand how to handle it.
         dynamic_independence_tests = true;
-#endif
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;

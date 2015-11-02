@@ -2385,12 +2385,8 @@ namespace LegionRuntime {
             legion_delete(*it);
         }
         persistent_views.clear();
-        has_persistent = false;
       }
-#ifdef DEBUG_HIGH_LEVEL
-      else
-        assert(!has_persistent);
-#endif
+      has_persistent = false;
     } 
 
     //--------------------------------------------------------------------------
@@ -2628,7 +2624,11 @@ namespace LegionRuntime {
         }
         if (!!unversioned)
         {
-          if (report)
+          // For now, we won't report unversioned warnings for 
+          // simultaneous or relaxed coherence as the runtime can't
+          // actually infer if there are other users that might
+          // be writing to the same region.
+          if (report && !IS_SIMULT(user.usage) && !IS_RELAXED(user.usage))
             owner->report_uninitialized_usage(user, unversioned);
           // Make version number 1 here for us to use
           if (node_info.field_versions == NULL)
@@ -4631,6 +4631,7 @@ namespace LegionRuntime {
       if (!is_owner())
       {
         add_base_valid_ref(REMOTE_DID_REF);
+        add_base_gc_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
       }
     }
@@ -5200,8 +5201,7 @@ namespace LegionRuntime {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      if (is_owner())
-        assert(currently_active); // should be monotonic
+      assert(currently_active); // should be monotonic
 #endif
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
@@ -5222,10 +5222,17 @@ namespace LegionRuntime {
       // Do nothing we only care about valid references
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      if (is_owner())
-        assert(currently_active);
+      assert(currently_active);
       currently_active = false;
 #endif
+      // When we are no longer valid, remove all valid references to version
+      // state objects on remote nodes. 
+      // No need to hold the lock since no one else should be accessing us
+      if (is_owner() && !remote_instances.empty())
+      {
+        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instances(functor);
+      }
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
@@ -5267,9 +5274,10 @@ namespace LegionRuntime {
       assert(currently_valid);
       currently_valid = false;
 #endif
-      // When we are no longer valid, remove all references to instance views
+      // When we are no longer valid, remove all valid references to version
+      // state objects on remote nodes. 
       // No need to hold the lock since no one else should be accessing us
-      if (is_owner())
+      if (is_owner() && !remote_instances.empty())
       {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this); 
@@ -6646,7 +6654,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InstanceRef::update_atomic_locks(
-                 std::map<Reservation,bool> &atomic_locks, bool exclusive) const
+                 std::map<Reservation,bool> &atomic_locks, bool exclusive)
     //--------------------------------------------------------------------------
     {
       for (std::vector<Reservation>::const_iterator it = needed_locks.begin();
@@ -6659,6 +6667,8 @@ namespace LegionRuntime {
         else
           finder->second = finder->second || exclusive;
       }
+      // Once someone has asked for our locks we can let them go
+      needed_locks.clear();
     }
 
     //--------------------------------------------------------------------------

@@ -162,7 +162,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args)
+function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -177,8 +177,8 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args)
 
   return quote
     var grid : RuntimeAPI.dim3, block : RuntimeAPI.dim3
-    var threadsPerBlock : uint = 256 -- hard-coded for the moment
-    var numBlocks : uint = ([count] + (threadsPerBlock - 1)) / threadsPerBlock
+    var threadsPerBlock : uint = T -- hard-coded for the moment
+    var numBlocks : uint = (([count] + (N - 1)) / N + (threadsPerBlock - 1)) / threadsPerBlock
     grid.x, grid.y, grid.z = numBlocks, 1, 1
     block.x, block.y, block.z = threadsPerBlock, 1, 1
     RuntimeAPI.cudaConfigureCall(grid, block, 0, nil)

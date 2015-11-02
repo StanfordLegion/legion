@@ -1146,7 +1146,7 @@ namespace LegionRuntime {
       ReductionView* get_reduction_view(void) const;
     public:
       void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
-                               bool exclusive) const;
+                               bool exclusive);
       Memory get_memory(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_accessor(void) const;
