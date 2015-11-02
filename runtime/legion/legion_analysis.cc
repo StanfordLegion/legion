@@ -4631,6 +4631,7 @@ namespace LegionRuntime {
       if (!is_owner())
       {
         add_base_valid_ref(REMOTE_DID_REF);
+        add_base_gc_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
       }
     }
@@ -5200,8 +5201,7 @@ namespace LegionRuntime {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      if (is_owner())
-        assert(currently_active); // should be monotonic
+      assert(currently_active); // should be monotonic
 #endif
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
@@ -5222,10 +5222,17 @@ namespace LegionRuntime {
       // Do nothing we only care about valid references
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      if (is_owner())
-        assert(currently_active);
+      assert(currently_active);
       currently_active = false;
 #endif
+      // When we are no longer valid, remove all valid references to version
+      // state objects on remote nodes. 
+      // No need to hold the lock since no one else should be accessing us
+      if (is_owner() && !remote_instances.empty())
+      {
+        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this);
+        map_over_remote_instances(functor);
+      }
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
@@ -5267,9 +5274,10 @@ namespace LegionRuntime {
       assert(currently_valid);
       currently_valid = false;
 #endif
-      // When we are no longer valid, remove all references to instance views
+      // When we are no longer valid, remove all valid references to version
+      // state objects on remote nodes. 
       // No need to hold the lock since no one else should be accessing us
-      if (is_owner())
+      if (is_owner() && !remote_instances.empty())
       {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this); 
