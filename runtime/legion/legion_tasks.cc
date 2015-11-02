@@ -9680,6 +9680,8 @@ namespace LegionRuntime {
       derez.deserialize(denom);
       Event applied_condition;
       derez.deserialize(applied_condition);
+      Processor target_proc;
+      derez.deserialize(target_proc);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -9701,6 +9703,35 @@ namespace LegionRuntime {
         CompositeRef virtual_ref;
         virtual_ref.unpack_reference(runtime, derez);
         return_virtual_instance(index, virtual_ref);
+      }
+      if (!locally_mapped_slices.empty())
+      {
+        SliceTask* slice = 0;
+        for (unsigned idx = 0; idx < locally_mapped_slices.size(); ++idx)
+        {
+          if (locally_mapped_slices[idx]->target_proc == target_proc)
+          {
+            slice = locally_mapped_slices[idx];
+            break;
+          }
+        }
+        assert(slice);
+        if (!slice->version_infos.empty())
+        {
+          std::set<Event> applied_conditions;
+          AddressSpaceID local_space = runtime->address_space;
+          for (unsigned idx = 0; idx < slice->version_infos.size(); idx++)
+          {
+            slice->version_infos[idx].apply_mapping(
+                slice->enclosing_contexts[idx].get_id(),
+                local_space, applied_conditions);
+          }
+          if (!applied_conditions.empty())
+          {
+            applied_conditions.insert(applied_condition);
+            applied_condition = Event::merge_events(applied_conditions);
+          }
+        }
       }
       return_slice_mapped(points, denom, applied_condition);
     }
@@ -9847,20 +9878,6 @@ namespace LegionRuntime {
     {
       if (!version_infos.empty())
       {
-        if (is_locally_mapped() && !runtime->is_local(target_proc))
-        {
-          std::set<Event> applied_conditions;
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
-                runtime->address_space, applied_conditions);
-          }
-          if (!applied_conditions.empty())
-          {
-            Event applied_condition = Event::merge_events(applied_conditions);
-            applied_condition.wait();
-          }
-        }
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
           version_infos[idx].release();
         version_infos.clear();
@@ -10685,6 +10702,7 @@ namespace LegionRuntime {
       rez.serialize(points.size());
       rez.serialize(denominator);
       rez.serialize(applied_condition);
+      rez.serialize(target_proc);
       // Also pack up any regions names we need for doing invalidations
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
