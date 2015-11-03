@@ -893,6 +893,13 @@ namespace Realm {
 			       50  // "high" latency
 			       );
 
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::FILE_MEM],
+			       15,  // "low" bandwidth
+			       50  // "high" latency
+			       );
+
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
 	    it++) {

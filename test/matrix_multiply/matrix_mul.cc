@@ -37,14 +37,13 @@ typedef int ElementType;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
+  MAIN_TASK_ID,
   COMPUTE_TASK_ID,
   COMPUTE_FROM_FILE_TASK_ID,
 };
 
 enum FieldIDs {
   FID_VAL,
-  FID_DERIV,
-  FID_CP
 };
 
 inline int io_setup(unsigned nr, aio_context_t *ctxp)
@@ -110,7 +109,7 @@ public:
     task->profile_task = false;
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
-    if (task->task_id == TOP_LEVEL_TASK_ID) {
+    if (task->task_id == TOP_LEVEL_TASK_ID || task->task_id == MAIN_TASK_ID) {
       task->target_proc = scheduler_cpu_proc;
     }
     if (task->task_id == COMPUTE_TASK_ID || task->task_id == COMPUTE_FROM_FILE_TASK_ID) {
@@ -121,8 +120,10 @@ public:
 
   virtual bool map_task(Task *task)
   {
+    DefaultMapper::map_task(task);
     for (unsigned idx = 0; idx < task->regions.size(); idx++)
     {
+      task->regions[idx].target_ranking.clear();
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
       task->regions[idx].virtual_map = false;
       task->regions[idx].enable_WAR_optimization = true;
@@ -156,8 +157,24 @@ static void update_mappers(Machine machine, HighLevelRuntime *rt,
   }
 }
 
-void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, TestMode mode)
+struct Config {
+  int nsize;
+  int nregions;
+  TestMode mode;
+};
+
+void main_task(const Task *task,
+               const std::vector<PhysicalRegion> &regions,
+               Context ctx, HighLevelRuntime *runtime)
 {
+  assert(regions.size() == 0);
+  assert(task->regions.size() == 0);
+  assert(task->arglen == sizeof(Config));
+  Config config = *((Config*)task->args);
+  int nsize = config.nsize;
+  int nregions = config.nregions;
+  TestMode mode = config.mode;
+
   char input_file[64];
   //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
   sprintf(input_file, "input.dat");
@@ -230,9 +247,9 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     runtime->unmap_region(ctx, pr_A);
 
     // Acquire the logical reagion so that we can launch sub-operations that make copies
-    /*AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+    AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
     acquire_launcher.add_field(FID_VAL);
-    runtime->issue_acquire(ctx, acquire_launcher);*/
+    runtime->issue_acquire(ctx, acquire_launcher);
   } else if (mode == READFILE) {
     global_fd = open(input_file, O_RDONLY | O_DIRECT, 00777);
     assert(global_fd != 0);
@@ -299,7 +316,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
   //ArgumentMap arg_map;
 
   if (mode == NONE) {
-    unsigned nslots = 128;
+    unsigned nslots = 8;
     std::queue<Future> future_vec;
     for (int i = 0; i < nregions; i++) {
       while (future_vec.size() >= nslots) {
@@ -320,7 +337,7 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
       future_vec.front().get_void_result();
       future_vec.pop();
     }
-#ifdef ORIGINAL_INDXE_LAUNCH
+#ifdef ORIGINAL_INDEX_LAUNCH
     IndexLauncher compute_launcher(COMPUTE_TASK_ID, launch_domain,
                                 TaskArgument(&nsize, sizeof(nsize)), arg_map);
     compute_launcher.add_region_requirement(
@@ -333,15 +350,20 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
     exec_f.wait_all_results();
 #endif
   } else if (mode == ATTACH) {
-    unsigned nslots = 128;
-    std::queue<Future> future_vec;
-
+    unsigned nslots = 8;
+    std::set<Future> future_set;
     for (int i = 0; i < nregions; i++) {
-      while (future_vec.size() >= nslots) {
-        future_vec.front().get_void_result();
-        future_vec.pop();
+      while (future_set.size() > nslots) {
+        std::set<Future>::iterator it;
+        for (it = future_set.begin(); it != future_set.end(); it++) {
+          if(!it->is_empty(false)) {
+            future_set.erase(it);
+            break;
+          }
+        }
       }
       LogicalRegion lr_sub = runtime->get_logical_subregion_by_color(ctx, lp_A, i);
+#ifdef USE_COPY_LAUNCHER
       CopyLauncher copy_launcher;
       IndexSpace is_mid = runtime->get_index_subspace(ctx, ip_A, i);
       LogicalRegion lr_mid = runtime->create_logical_region(ctx, is_mid, fs_A);
@@ -351,30 +373,33 @@ void main_task(Context ctx, HighLevelRuntime *runtime, int nsize, int nregions, 
       copy_launcher.add_src_field(0, FID_VAL);
       copy_launcher.add_dst_field(0, FID_VAL);
       runtime->issue_copy_operation(ctx, copy_launcher);
+#endif
       TaskLauncher task_launcher(COMPUTE_TASK_ID, TaskArgument(&i, sizeof(i)));
       task_launcher.add_region_requirement(
-          RegionRequirement(lr_mid, READ_ONLY, EXCLUSIVE, lr_mid));
+          RegionRequirement(lr_sub, READ_ONLY, EXCLUSIVE, lr_A));
       task_launcher.add_field(0, FID_VAL);
       task_launcher.add_region_requirement(
           RegionRequirement(lr_B, READ_ONLY, EXCLUSIVE, lr_B));
       task_launcher.add_field(1, FID_VAL);
-      future_vec.push(runtime->execute_task(ctx, task_launcher));
+      future_set.insert(runtime->execute_task(ctx, task_launcher));
+#ifdef USE_COPY_LAUNCHER
       runtime->destroy_logical_region(ctx, lr_mid);
+#endif
     }
-    while (!future_vec.empty()) {
-      future_vec.front().get_void_result();
-      future_vec.pop();
+    for (std::set<Future>::iterator it = future_set.begin(); it != future_set.end(); it++) {
+      it->get_void_result();
     }
+    future_set.clear();
 
     //Release and unmap the attached physicalregion
-    /*ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+    ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
     release_launcher.add_field(FID_VAL);
     runtime->issue_release(ctx, release_launcher);
     runtime->remap_region(ctx, pr_A);
-    runtime->detach_file(ctx, pr_A);*/
+    runtime->detach_file(ctx, pr_A);
   } else {
     assert(mode == READFILE);
-    unsigned nslots = 128;
+    unsigned nslots = 8;
     std::queue<Future> future_vec;
     for (int i = 0; i < nregions; i++) {
       while (future_vec.size() >= nslots) {
@@ -433,6 +458,7 @@ void top_level_task(const Task *task,
 {
   int nsize = 1024;
   int nregions = 4;
+  int ntimes = 1;
   TestMode mode = NONE;
 
   // Check for any command line arguments
@@ -444,6 +470,8 @@ void top_level_task(const Task *task,
         nsize = atoi(command_args.argv[++i]);
       else if (!strcmp(command_args.argv[i],"-s"))
         nregions = atoi(command_args.argv[++i]);
+      else if (!strcmp(command_args.argv[i],"-t"))
+        ntimes = atoi(command_args.argv[++i]);
       else if (!strcmp(command_args.argv[i],"-init"))
         mode = INIT;
       else if (!strcmp(command_args.argv[i], "-attach"))
@@ -456,10 +484,19 @@ void top_level_task(const Task *task,
   printf("Running matrix multiplication with nsize = %d...\n", nsize);
   printf("Partitioning data into %d sub-regions...\n", nregions);
   printf("TestMode = %d\n", mode);
-  for(nregions = 16; nregions < 1024 * 1024; nregions *= 2)
-    for (int i = 0; i < 3; i++)
-      if (nregions >= 1024 && nregions < 1024 * 1024)
-      main_task(ctx, runtime, nsize, nregions, (TestMode)i);
+  //for(nregions = 128; nregions < 1024 * 1024; nregions *= 2)
+    //for (int i = 0; i < 3; i++)
+      //if (nregions < 1024 * 1024) {
+        Config config;
+        config.nsize = nsize;
+        config.nregions = nregions;
+        config.mode = (TestMode) mode;
+        TaskLauncher main_task(MAIN_TASK_ID, TaskArgument(&config, sizeof(config)));
+        for (int times = 0; times < ntimes; times++) {
+          Future future = runtime->execute_task(ctx, main_task);
+          future.get_void_result();
+        }
+      //}
 }
 
 void compute_task(const Task *task,
@@ -485,9 +522,9 @@ void compute_task(const Task *task,
   int offset = lo_A.x[0];
   int nnsize = dom_A.get_rect<1>().dim_size(0);
   int nsize = (int) round(sqrt(nnsize));
-  ElementType sum = 0;
+  int sum = 0;
   int times = 0;
-  for (times = 0; times < 10; times++)
+  for (times = 0; times < 5; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       ElementType x = acc_A.read(ptr_t(offset + k * nsize + i));
@@ -553,9 +590,9 @@ void compute_from_file_task(const Task *task,
   assert(events[0].res == (int64_t) cb.aio_nbytes);
   io_destroy(ctx);
 
-  ElementType sum = 0;
+  int sum = 0;
   int times = 0;
-  for (times = 0; times < 10; times++)
+  for (times = 0; times < 5; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       ElementType x = arr_A[k * nsize + i];
@@ -572,10 +609,14 @@ int main(int argc, char **argv)
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
+  HighLevelRuntime::register_legion_task<main_task>(MAIN_TASK_ID,
+      Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<compute_task>(COMPUTE_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "compute_task");
   HighLevelRuntime::register_legion_task<compute_from_file_task>(COMPUTE_FROM_FILE_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "compute_from_file_task");
 
   // Register custom mappers
   HighLevelRuntime::set_registration_callback(update_mappers);

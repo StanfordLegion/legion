@@ -63,15 +63,17 @@ public:
     assert(sys_mem.size() == 1);
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
-    first_proc = Processor::NO_PROC, last_proc = Processor::NO_PROC;
+    machine.get_all_processors(all_procs);
+    scheduler_cpu_proc = Processor::NO_PROC;
     for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
       if (it->kind() == Processor::LOC_PROC) {
-        if (first_proc == Processor::NO_PROC) {
-          first_proc = *it;
-        }
-        last_proc = *it;
+        if (scheduler_cpu_proc == Processor::NO_PROC)
+          scheduler_cpu_proc = *it;
+        else
+          worker_cpu_procs.push_back(*it);
       }
     }
+    read_only_task_idx = 0;
   }
 
   virtual void select_task_options(Task *task)
@@ -80,10 +82,14 @@ public:
     task->spawn_task = false;
     task->map_locally = true;
     task->profile_task = false;
-    if (task->task_id == READ_ONLY_TASK_ID)
-      task->target_proc = first_proc;
-    else if (task->task_id == READ_WRITE_TASK_ID)
-      task->target_proc = last_proc;
+    if (task->task_id == TOP_LEVEL_TASK_ID)
+      task->target_proc = scheduler_cpu_proc;
+    if (task->task_id == READ_WRITE_TASK_ID)
+      task->target_proc = worker_cpu_procs[worker_cpu_procs.size() - 1];
+    else if (task->task_id == READ_WRITE_TASK_ID) {
+      task->target_proc = worker_cpu_procs[read_only_task_idx];
+      read_only_task_idx = (read_only_task_idx + 1) % (worker_cpu_procs.size() - 1);
+    }
   }
 
   virtual bool map_task(Task *task)
@@ -101,8 +107,10 @@ public:
     return true;
   }
 public:
+  int read_only_task_idx;
   std::vector<Memory> sys_mem;
-  Processor first_proc, last_proc;
+  std::vector<Processor> worker_cpu_procs;
+  Processor scheduler_cpu_proc;
 };
 
 static void update_mappers(Machine machine, HighLevelRuntime *rt,
@@ -120,8 +128,10 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, HighLevelRuntime *runtime)
 {
+  srand(123456);
   int nsize = 1024;
   int ntask = 4;
+  double ratio = 0.5;
   TestMode mode = NONE;
   char input_file[128];
   //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
@@ -136,12 +146,15 @@ void top_level_task(const Task *task,
         nsize = atoi(command_args.argv[++i]);
       else if (!strcmp(command_args.argv[i],"-t"))
         ntask = atoi(command_args.argv[++i]);
+      else if (!strcmp(command_args.argv[i], "-r"))
+        ratio = atof(command_args.argv[++i]);
       else if (!strcmp(command_args.argv[i],"-init"))
         mode = INIT;
     }
   }
   printf("Running read/write tasks with nsize = %d\n", nsize);
   printf("Generating #tasks = %d\n", ntask);
+  printf("read_only percentage = %.3lf\n", ratio);
 
   Rect<1> rect_A(Point<1>(0), Point<1>(nsize - 1));
   IndexSpace is_A = runtime->create_index_space(ctx,
@@ -210,7 +223,7 @@ void top_level_task(const Task *task,
 
     Future future;
     // Perform task
-    if (iter % 2 == 0) {
+    if (drand48() < ratio) {
       // read_only task
       TaskLauncher task_launcher(READ_ONLY_TASK_ID,
                                  TaskArgument(NULL, 0));
@@ -277,7 +290,7 @@ void read_only_task(const Task *task,
       int y = acc_A.read(ptr_t(i));
       if (i % 2 == 0) sum += x * y; else sum -= x * y;
     }
-  printf("OK!\n");
+  //printf("OK!\n");
 }
 
 void read_write_task(const Task *task,
@@ -304,10 +317,10 @@ void read_write_task(const Task *task,
       int y = acc_A.read(ptr_t(i));
       if (i % 2 == 0) sum += x * y; else sum -= x * y;
     }
-  for (int k = 0; k < nsize; k++) {
+  for (int k = 0; k < 1; k++) {
     acc_A.write(ptr_t(k), sum);
   }
-  printf("OK!\n");
+  //printf("OK!\n");
 }
 
 int main(int argc, char **argv)
