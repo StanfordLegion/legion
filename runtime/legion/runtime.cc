@@ -14894,6 +14894,11 @@ namespace LegionRuntime {
 	    it != red_table.end();
 	    it++)
 	  realm.register_reduction(it->first, it->second);
+
+        const SerdezOpTable &serdez_table = get_serdez_table();
+        for (SerdezOpTable::const_iterator it = serdez_table.begin();
+              it != serdez_table.end(); it++)
+          realm.register_custom_serdez(it->first, it->second);
       }
       
       // Parse any inputs for the high level runtime
