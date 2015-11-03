@@ -14,14 +14,22 @@
 
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
+local c = regentlib.c
 
-task f(s : region(int))
-where reads writes atomic(s) do
-end
+-- task f(x : regentlib.list(region))
+-- end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  f(r)
+  var rc = c.legion_coloring_create()
+  for i = 0, 7 do
+    c.legion_coloring_ensure_color(rc, i)
+  end
+  var p = partition(disjoint, r, rc)
+  c.legion_coloring_destroy(rc)
+
+  var x = list_range(3, 7)
+  var y = list_duplicate_partition(p, x)
+  -- f(x)
 end
 regentlib.start(main)

@@ -62,20 +62,23 @@ lib_path = (
  ])
 
 terra_exe = os.path.join(terra_dir, 'terra')
-terra_env = dict(os.environ.items() + [
-    ('TERRA_PATH', ';'.join(terra_path)),
-    (LD_LIBRARY_PATH, ':'.join(lib_path)),
-    ('INCLUDE_PATH', ';'.join(include_path)),
-])
+terra_env = {
+    'TERRA_PATH': ';'.join(terra_path),
+    LD_LIBRARY_PATH: ':'.join(lib_path),
+    'INCLUDE_PATH': ';'.join(include_path),
+}
 
-def regent(args, **kwargs):
+def regent(args, env = {}, **kwargs):
     cmd = []
     if 'LAUNCHER' in os.environ:
         cmd = cmd + (os.environ['LAUNCHER'].split()
                      if 'LAUNCHER' in os.environ else [])
     cmd = cmd + [terra_exe] + args
+    cmd_env = dict(os.environ.iteritems())
+    cmd_env.update(terra_env)
+    cmd_env.update(env)
     return subprocess.Popen(
-        cmd, env = terra_env, **kwargs)
+        cmd, env = cmd_env, **kwargs)
 
 if __name__ == '__main__':
     sys.exit(regent(sys.argv[1:]).wait())

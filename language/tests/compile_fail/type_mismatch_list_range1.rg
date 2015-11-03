@@ -12,16 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_list_range1.rg:23: type mismatch: expected int32 but got bool
+--   var x = list_range(true, 3)
+--                    ^
+
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
-
-task f(s : region(int))
-where reads writes atomic(s) do
+task f()
+  var x = list_range(true, 3)
 end
-
-task main()
-  var r = region(ispace(ptr, 5), int)
-  f(r)
-end
-regentlib.start(main)

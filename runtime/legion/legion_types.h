@@ -331,7 +331,9 @@ namespace LegionRuntime {
     template<typename T> struct ColoredPoints; 
     struct InputArgs;
     class ProjectionFunctor;
-    class HighLevelRuntime;
+    class Runtime;
+    // For backwards compatibility
+    typedef Runtime HighLevelRuntime;
 
     // Forward declarations for compiler level objects
     // legion.h
@@ -354,7 +356,7 @@ namespace LegionRuntime {
     class ProcessorManager;
     class MessageManager;
     class GarbageCollectionEpoch;
-    class Runtime;
+    class Internal;
 
     // legion_ops.h
     class Operation;
@@ -381,6 +383,7 @@ namespace LegionRuntime {
     class FillOp;
     class AttachOp;
     class DetachOp;
+    class TimingOp;
     class TaskOp;
 
     // legion_tasks.h
@@ -496,7 +499,7 @@ namespace LegionRuntime {
     class LegionProfiler;
     class LegionProfInstance;
 
-    typedef LowLevel::Runtime LLRuntime;
+    typedef LowLevel::Runtime RealmRuntime;
     typedef LowLevel::Machine Machine;
     typedef LowLevel::Domain Domain;
     typedef LowLevel::DomainPoint DomainPoint;
@@ -549,11 +552,11 @@ namespace LegionRuntime {
     typedef std::map<DomainPoint,Domain> DomainPointColoring;
     typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-        HighLevelRuntime *rt, const std::set<Processor> &local_procs);
+        Runtime *rt, const std::set<Processor> &local_procs);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
-        const DomainPoint&, HighLevelRuntime *rt);
+        const DomainPoint&, Runtime *rt);
     typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
-        const DomainPoint&, HighLevelRuntime *rt);
+        const DomainPoint&, Runtime *rt);
     typedef bool (*PredicateFnptr)(const void*, size_t, 
         const std::vector<Future> futures);
     typedef std::map<ProjectionID,RegionProjectionFnptr> 
@@ -562,7 +565,7 @@ namespace LegionRuntime {
       PartitionProjectionTable;
     typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
-      Context,HighLevelRuntime*,void*&,size_t&);
+                                Context,Runtime*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 
@@ -680,8 +683,8 @@ namespace LegionRuntime {
 #undef PROC_MASK
 
 #define FRIEND_ALL_RUNTIME_CLASSES                \
-    friend class HighLevelRuntime;                \
     friend class Runtime;                         \
+    friend class Internal;                        \
     friend class FuturePredicate;                 \
     friend class NotPredicate;                    \
     friend class AndPredicate;                    \
@@ -711,6 +714,7 @@ namespace LegionRuntime {
     friend class FillOp;                          \
     friend class AttachOp;                        \
     friend class DetachOp;                        \
+    friend class TimingOp;                        \
     friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \

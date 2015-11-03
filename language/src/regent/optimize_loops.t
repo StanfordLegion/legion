@@ -12,12 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Loop Optimizer
+-- Regent Loop Optimizer
 --
 -- Attempts to determine which loops can be transformed into index
 -- space task launches.
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 
@@ -118,309 +119,57 @@ function analyze_noninterference_self(cx, task, region_type,
   return true
 end
 
-local analyze_is_side_effect_free = {}
-
-function analyze_is_side_effect_free.expr_field_access(cx, node)
-  if not analyze_is_side_effect_free.expr(cx, node.value) then
-    return false
-  end
-  if std.is_bounded_type(std.as_read(node.value.expr_type)) or
-    std.is_ref(node.value.expr_type)
-  then
-    return false
-  end
-  return true
-end
-
-function analyze_is_side_effect_free.expr_index_access(cx, node)
-  if not analyze_is_side_effect_free.expr(cx, node.value) then
-    return false
-  end
-  return analyze_is_side_effect_free.expr(cx, node.index)
-end
-
-function analyze_is_side_effect_free.expr_method_call(cx, node)
-  if not analyze_is_side_effect_free.expr(cx, node.value) then
-    return false
-  end
-  for _, arg in ipairs(node.args) do
-    if not analyze_is_side_effect_free.expr(cx, arg) then
+local function analyze_is_side_effect_free_node(cx)
+  return function(node)
+    if node:is(ast.typed.expr.FieldAccess) then
+      local ptr_type = std.as_read(node.value.expr_type)
+      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    elseif node:is(ast.typed.expr.Call) then
+      return not std.is_task(node.fn.value)
+    elseif node:is(ast.typed.expr.RawContext) or
+      node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.Region) or
+      node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.Deref)
+    then
       return false
     end
   end
-  return true
 end
 
-function analyze_is_side_effect_free.expr_call(cx, node)
-  if std.is_task(node.fn.value) then
-    return false
-  end
-  if not analyze_is_side_effect_free.expr(cx, node.fn) then
-    return false
-  end
-  for _, arg in ipairs(node.args) do
-    if not analyze_is_side_effect_free.expr(cx, arg) then
+local function analyze_is_side_effect_free(cx, node)
+  return ast.mapreduce_node_postorder(
+    analyze_is_side_effect_free_node(cx),
+    data.all,
+    node, true)
+end
+
+local function analyze_is_loop_invariant_node(cx)
+  return function(node)
+    if node:is(ast.typed.expr.ID) then
+      assert(cx.loop_variable)
+      return node.value ~= cx.loop_variable
+    elseif node:is(ast.typed.expr.FieldAccess) then
+      local ptr_type = std.as_read(node.value.expr_type)
+      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    elseif node:is(ast.typed.expr.Call) or
+      node:is(ast.typed.expr.Region) or
+      node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.Deref)
+    then
       return false
     end
   end
-  return true
 end
 
-function analyze_is_side_effect_free.expr_cast(cx, node)
-  if not analyze_is_side_effect_free.expr(cx, node.fn) then
-    return false
-  end
-  return analyze_is_side_effect_free.expr(cx, node.arg)
-end
-
-function analyze_is_side_effect_free.expr_ctor(cx, node)
-  for _, field in ipairs(node.fields) do
-    if not analyze_is_side_effect_free.expr(cx, field.value) then
-      return false
-    end
-  end
-  return true
-end
-
-function analyze_is_side_effect_free.expr_isnull(cx, node)
-  return analyze_is_side_effect_free.expr(cx, node.pointer)
-end
-
-function analyze_is_side_effect_free.expr_dynamic_cast(cx, node)
-  return analyze_is_side_effect_free.expr(cx, node.value)
-end
-
-function analyze_is_side_effect_free.expr_static_cast(cx, node)
-  local value = analyze_is_side_effect_free.expr(cx, node.value)
-end
-
-function analyze_is_side_effect_free.expr_unary(cx, node)
-  return analyze_is_side_effect_free.expr(cx, node.rhs)
-end
-
-function analyze_is_side_effect_free.expr_binary(cx, node)
-  return (analyze_is_side_effect_free.expr(cx, node.lhs) and
-            analyze_is_side_effect_free.expr(cx, node.rhs))
-end
-
-function analyze_is_side_effect_free.expr(cx, node)
-  if node:is(ast.typed.expr.ID) then
-    return true
-
-  elseif node:is(ast.typed.expr.Constant) then
-    return true
-
-  elseif node:is(ast.typed.expr.Function) then
-    return true
-
-  elseif node:is(ast.typed.expr.FieldAccess) then
-    return analyze_is_side_effect_free.expr_field_access(cx, node)
-
-  elseif node:is(ast.typed.expr.IndexAccess) then
-    return analyze_is_side_effect_free.expr_index_access(cx, node)
-
-  elseif node:is(ast.typed.expr.MethodCall) then
-    return analyze_is_side_effect_free.expr_method_call(cx, node)
-
-  elseif node:is(ast.typed.expr.Call) then
-    return analyze_is_side_effect_free.expr_call(cx, node)
-
-  elseif node:is(ast.typed.expr.Cast) then
-    return analyze_is_side_effect_free.expr_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.Ctor) then
-    return analyze_is_side_effect_free.expr_ctor(cx, node)
-
-  elseif node:is(ast.typed.expr.RawContext) then
-    return false
-
-  elseif node:is(ast.typed.expr.RawFields) then
-    return false
-
-  elseif node:is(ast.typed.expr.RawPhysical) then
-    return false
-
-  elseif node:is(ast.typed.expr.RawRuntime) then
-    return false
-
-  elseif node:is(ast.typed.expr.Isnull) then
-    return analyze_is_side_effect_free.expr_isnull(cx, node)
-
-  elseif node:is(ast.typed.expr.New) then
-    return true
-
-  elseif node:is(ast.typed.expr.Null) then
-    return true
-
-  elseif node:is(ast.typed.expr.DynamicCast) then
-    return analyze_is_side_effect_free.expr_dynamic_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.StaticCast) then
-    return analyze_is_side_effect_free.expr_static_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.Region) then
-    return false
-
-  elseif node:is(ast.typed.expr.Partition) then
-    return false
-
-  elseif node:is(ast.typed.expr.CrossProduct) then
-    return false
-
-  elseif node:is(ast.typed.expr.Unary) then
-    return analyze_is_side_effect_free.expr_unary(cx, node)
-
-  elseif node:is(ast.typed.expr.Binary) then
-    return analyze_is_side_effect_free.expr_binary(cx, node)
-
-  elseif node:is(ast.typed.expr.Deref) then
-    return false
-
-  else
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end
-end
-
-local analyze_is_loop_invariant = {}
-
-function analyze_is_loop_invariant.expr_id(cx, node)
-  assert(cx.loop_variable)
-  return node.value ~= cx.loop_variable
-end
-
-function analyze_is_loop_invariant.expr_index_access(cx, node)
-  if not analyze_is_loop_invariant.expr(cx, node.value) then
-    return false
-  end
-  return analyze_is_loop_invariant.expr(cx, node.index)
-end
-
-function analyze_is_loop_invariant.expr_method_call(cx, node)
-  if not analyze_is_loop_invariant.expr(cx, node.value) then
-    return false
-  end
-  for _, arg in ipairs(node.args) do
-    if not analyze_is_loop_invariant.expr(cx, arg) then
-      return false
-    end
-  end
-  return true
-end
-
-function analyze_is_loop_invariant.expr_call(cx, node)
-  return false
-end
-
-function analyze_is_loop_invariant.expr_cast(cx, node)
-  if not analyze_is_loop_invariant.expr(cx, node.fn) then
-    return false
-  end
-  return analyze_is_loop_invariant.expr(cx, node.arg)
-end
-
-function analyze_is_loop_invariant.expr_ctor(cx, node)
-  for _, field in ipairs(node.fields) do
-    if not analyze_is_loop_invariant.expr(cx, field.value) then
-      return false
-    end
-  end
-  return true
-end
-
-function analyze_is_loop_invariant.expr_isnull(cx, node)
-  return analyze_is_loop_invariant.expr(cx, node.pointer)
-end
-
-function analyze_is_loop_invariant.expr_dynamic_cast(cx, node)
-  return analyze_is_loop_invariant.expr(cx, node.value)
-end
-
-function analyze_is_loop_invariant.expr_static_cast(cx, node)
-  return analyze_is_loop_invariant.expr(cx, node.value)
-end
-
-function analyze_is_loop_invariant.expr_unary(cx, node)
-  return analyze_is_loop_invariant.expr(cx, node.rhs)
-end
-
-function analyze_is_loop_invariant.expr_binary(cx, node)
-  return (analyze_is_loop_invariant.expr(cx, node.lhs) and
-            analyze_is_loop_invariant.expr(cx, node.rhs))
-end
-
-function analyze_is_loop_invariant.expr(cx, node)
-  if node:is(ast.typed.expr.ID) then
-    return analyze_is_loop_invariant.expr_id(cx, node)
-
-  elseif node:is(ast.typed.expr.Constant) then
-    return true
-
-  elseif node:is(ast.typed.expr.Function) then
-    return true
-
-  elseif node:is(ast.typed.expr.FieldAccess) then
-    return false -- could be a ExprDeref
-
-  elseif node:is(ast.typed.expr.IndexAccess) then
-    return analyze_is_loop_invariant.expr_index_access(cx, node)
-
-  elseif node:is(ast.typed.expr.MethodCall) then
-    return analyze_is_loop_invariant.expr_method_call(cx, node)
-
-  elseif node:is(ast.typed.expr.Call) then
-    return analyze_is_loop_invariant.expr_call(cx, node)
-
-  elseif node:is(ast.typed.expr.Cast) then
-    return analyze_is_loop_invariant.expr_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.Ctor) then
-    return analyze_is_loop_invariant.expr_ctor(cx, node)
-
-  elseif node:is(ast.typed.expr.RawContext) then
-    return true
-
-  elseif node:is(ast.typed.expr.RawFields) then
-    return true
-
-  elseif node:is(ast.typed.expr.RawPhysical) then
-    return true
-
-  elseif node:is(ast.typed.expr.RawRuntime) then
-    return true
-
-  elseif node:is(ast.typed.expr.Isnull) then
-    return analyze_is_loop_invariant.expr_isnull(cx, node)
-
-  elseif node:is(ast.typed.expr.New) then
-    return true
-
-  elseif node:is(ast.typed.expr.Null) then
-    return true
-
-  elseif node:is(ast.typed.expr.DynamicCast) then
-    return analyze_is_loop_invariant.expr_dynamic_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.StaticCast) then
-    return analyze_is_loop_invariant.expr_static_cast(cx, node)
-
-  elseif node:is(ast.typed.expr.Region) then
-    return false
-
-  elseif node:is(ast.typed.expr.Partition) then
-    return false
-
-  elseif node:is(ast.typed.expr.Unary) then
-    return analyze_is_loop_invariant.expr_unary(cx, node)
-
-  elseif node:is(ast.typed.expr.Binary) then
-    return analyze_is_loop_invariant.expr_binary(cx, node)
-
-  elseif node:is(ast.typed.expr.Deref) then
-    return false
-
-  else
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end
+local function analyze_is_loop_invariant(cx, node)
+  return ast.mapreduce_node_postorder(
+    analyze_is_loop_invariant_node(cx),
+    data.all,
+    node, true)
 end
 
 local optimize_index_launch_loops = {}
@@ -480,7 +229,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       log_fail(body, "loop optimization failed: reduction over " .. tostring(reduce_op) .. " " .. tostring(reduce_as_type) .. " not supported")
     end
 
-    if not analyze_is_side_effect_free.expr(cx, reduce_lhs) then
+    if not analyze_is_side_effect_free(cx, reduce_lhs) then
       log_fail(body, "loop optimization failed: reduction is not side-effect free")
     end
   end
@@ -534,12 +283,12 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local regions_previously_used = terralib.newlist()
   local mapping = {}
   for i, arg in ipairs(args) do
-    if not analyze_is_side_effect_free.expr(cx, arg) then
+    if not analyze_is_side_effect_free(cx, arg) then
       log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
       return node
     end
 
-    local arg_invariant = analyze_is_loop_invariant.expr(loop_cx, arg)
+    local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
     local arg_variant = false
     local partition_type
 
@@ -620,107 +369,17 @@ end
 
 local optimize_loops = {}
 
-function optimize_loops.block(cx, node)
-  return node {
-    stats = node.stats:map(
-      function(stat) return optimize_loops.stat(cx, stat) end)
-  }
-end
-
-function optimize_loops.stat_if(cx, node)
-  return node {
-    then_block = optimize_loops.block(cx, node.then_block),
-    elseif_blocks = node.elseif_blocks:map(
-      function(block) return optimize_loops.stat_elseif(cx, block) end),
-    else_block = optimize_loops.block(cx, node.else_block),
-  }
-end
-
-function optimize_loops.stat_elseif(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat_while(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat_for_num(cx, node)
-  local node_ = node { block = optimize_loops.block(cx, node.block) }
-  return optimize_index_launch_loops.stat_for_num(cx, node_)
-end
-
-function optimize_loops.stat_for_list(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat_for_list_vectorized(cx, node)
-  return node {
-    block = optimize_loops.block(cx, node.block),
-    orig_block = optimize_loops.block(cx, node.orig_block),
-  }
-end
-
-function optimize_loops.stat_repeat(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat_must_epoch(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat_block(cx, node)
-  return node { block = optimize_loops.block(cx, node.block) }
-end
-
-function optimize_loops.stat(cx, node)
-  if node:is(ast.typed.stat.If) then
-    return optimize_loops.stat_if(cx, node)
-
-  elseif node:is(ast.typed.stat.While) then
-    return optimize_loops.stat_while(cx, node)
-
-  elseif node:is(ast.typed.stat.ForNum) then
-    return optimize_loops.stat_for_num(cx, node)
-
-  elseif node:is(ast.typed.stat.ForList) then
-    return optimize_loops.stat_for_list(cx, node)
-
-  elseif node:is(ast.typed.stat.ForListVectorized) then
-    return optimize_loops.stat_for_list_vectorized(cx, node)
-
-  elseif node:is(ast.typed.stat.Repeat) then
-    return optimize_loops.stat_repeat(cx, node)
-
-  elseif node:is(ast.typed.stat.MustEpoch) then
-    return optimize_loops.stat_must_epoch(cx, node)
-
-  elseif node:is(ast.typed.stat.Block) then
-    return optimize_loops.stat_block(cx, node)
-
-  elseif node:is(ast.typed.stat.Var) then
+local function optimize_loops_node(cx)
+  return function(node)
+    if node:is(ast.typed.stat.ForNum) then
+      return optimize_index_launch_loops.stat_for_num(cx, node)
+    end
     return node
-
-  elseif node:is(ast.typed.stat.VarUnpack) then
-    return node
-
-  elseif node:is(ast.typed.stat.Return) then
-    return node
-
-  elseif node:is(ast.typed.stat.Break) then
-    return node
-
-  elseif node:is(ast.typed.stat.Assignment) then
-    return node
-
-  elseif node:is(ast.typed.stat.Reduce) then
-    return node
-
-  elseif node:is(ast.typed.stat.Expr) then
-    return node
-
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
   end
+end
+
+function optimize_loops.block(cx, node)
+  return ast.map_node_postorder(optimize_loops_node(cx), node)
 end
 
 function optimize_loops.stat_task(cx, node)

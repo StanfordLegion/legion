@@ -29,8 +29,6 @@ if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 -- ## Legion Bindings
 -- #################
 
--- FIXME (Elliott): This appears to be tickling a memory corruption bug.
--- require('legionlib')
 terralib.linklibrary("liblegion_terra.so")
 local c = terralib.includecstring([[
 #include "legion_c.h"
@@ -475,6 +473,10 @@ function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
 end
 
+function std.is_list(t)
+  return terralib.types.istype(t) and rawget(t, "is_list")
+end
+
 function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
@@ -555,6 +557,8 @@ function std.type_eq(a, b, mapping)
       end
     end
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -577,6 +581,8 @@ function std.type_maybe_eq(a, b, mapping)
     a.fspace == b.fspace
   then
     return true
+  elseif std.is_list(a) and std.is_list(b) then
+    return std.type_maybe_eq(a.element_type, b.element_type, mapping)
   else
     return false
   end
@@ -613,6 +619,8 @@ local function add_type(symbols, type)
     for _, arg in ipairs(type.args) do
       add_region_symbol(symbols, arg)
     end
+  elseif std.is_list(type) then
+    add_type(symbols, type.element_type)
   elseif std.is_region(type) then
     -- FIXME: Would prefer to not get errors at all here.
     pcall(function() add_type(symbols, type.fspace_type) end)
@@ -688,11 +696,11 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   then
     return (#param_type:partitions() == #arg_type:partitions()) and
       data.all(
-        data.zip(param_type:partitions(), arg_type:partitions()):map(
+        unpack(data.zip(param_type:partitions(), arg_type:partitions()):map(
           function(pair)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
-      end))
+      end)))
   else
     return false
   end
@@ -1137,6 +1145,127 @@ function std.fn_param_regions_by_index(fn_type)
 end
 
 -- #####################################
+-- ## Serialization Helpers
+-- #################
+
+function std.compute_serialized_size(value_type, value)
+  if std.is_list(value_type) then
+    local result = terralib.newsymbol(c.size_t, "result")
+    local element_type = value_type.element_type
+    local element = terralib.newsymbol(&element_type)
+
+    local size_actions, size_value = std.compute_serialized_size(
+      element_type, element)
+    local actions = quote
+      var [result] = 0
+      for i = 0, [value].__size do
+        var [element] = ([&element_type]([value].__data)) + i
+        [size_actions]
+        [result] = [result] + terralib.sizeof(element_type) + [size_value]
+      end
+    end
+    return actions, result
+  else
+    return quote end, 0
+  end
+end
+
+function std.serialize(value_type, value, fixed_ptr, data_ptr)
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. SSE vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
+  local actions = quote
+    terralib.attrstore(
+      [&value_type](fixed_ptr), value,
+      { align = [value_type_alignment] })
+  end
+
+  if std.is_list(value_type) then
+    local element_type = value_type.element_type
+    local element = terralib.newsymbol(element_type)
+    local element_ptr = terralib.newsymbol(&element_type)
+
+    local ser_actions = std.serialize(
+      element_type, element, element_ptr, data_ptr)
+    actions = quote
+      [actions]
+      for i = 0, [value].__size do
+        var [element] = ([&element_type]([value].__data))[i]
+        var [element_ptr] = [&element_type](@[data_ptr])
+        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        [ser_actions]
+      end
+    end
+  end
+
+  return actions
+end
+
+function std.deserialize(value_type, fixed_ptr, data_ptr)
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. SSE vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
+  local result = terralib.newsymbol(value_type, "result")
+  local actions = quote
+    var [result] = terralib.attrload(
+      [&value_type]([fixed_ptr]),
+      { align = [value_type_alignment] })
+  end
+
+  if std.is_list(value_type) then
+    local element_type = value_type.element_type
+    local element_ptr = terralib.newsymbol(&element_type)
+
+    local deser_actions, deser_value = std.deserialize(
+      element_type, element_ptr, data_ptr)
+    actions = quote
+      [actions]
+      [result].__data = c.malloc(
+        terralib.sizeof(element_type) * [result].__size)
+      std.assert([result].__data ~= nil, "malloc failed in deserialize")
+      for i = 0, [result].__size do
+        var [element_ptr] = [&element_type](@[data_ptr])
+        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        [deser_actions]
+        ([&element_type]([result].__data))[i] = [deser_value]
+      end
+    end
+  end
+
+  return actions, result
+end
+
+-- Keep in sync with std.type_size_bucket_type
+function std.type_size_bucket_name(value_type)
+  if std.is_list(value_type) then
+    return ""
+  elseif value_type == terralib.types.unit then
+    return "_void"
+  elseif terralib.sizeof(value_type) == 4 then
+    return "_uint32"
+  elseif terralib.sizeof(value_type) == 8 then
+    return "_uint64"
+  else
+    return ""
+  end
+end
+
+-- Keep in sync with std.type_size_bucket_name
+function std.type_size_bucket_type(value_type)
+  if std.is_list(value_type) then
+    return c.legion_task_result_t
+  elseif value_type == terralib.types.unit then
+    return terralib.types.unit
+  elseif terralib.sizeof(value_type) == 4 then
+    return uint32
+  elseif terralib.sizeof(value_type) == 8 then
+    return uint64
+  else
+    return c.legion_task_result_t
+  end
+end
+
+-- #####################################
 -- ## Types
 -- #################
 
@@ -1484,6 +1613,8 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
+  assert(not std.is_list(fspace_type),
+         "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
   st.entries = terralib.newlist({
@@ -1952,6 +2083,39 @@ std.future = terralib.memoize(function(result_type)
 
   function st.metamethods.__typename(st)
     return "future(" .. tostring(st.result_type) .. ")"
+  end
+
+  return st
+end)
+
+std.list = terralib.memoize(function(element_type)
+  if not terralib.types.istype(element_type) then
+    error("list expected a type as argument 1, got " .. tostring(element_type))
+  end
+
+  local st = terralib.types.newstruct("list")
+  st.entries = terralib.newlist({
+      { "__size", uint64 }, -- in elements
+      { "__data", &opaque },
+  })
+
+  st.is_list = true
+  st.element_type = element_type
+
+  function st:is_list_of_regions()
+    return std.is_region(self.element_type) or
+      (std.is_list(self.element_type) and
+         self.element_type:is_list_of_regions())
+  end
+
+  -- FIXME: Make the compiler manage cleanups, including lists.
+
+  function st:data(value)
+    return `([&self.element_type]([value].__data))
+  end
+
+  function st.metamethods.__typename(st)
+    return "list(" .. tostring(st.element_type) .. ")"
   end
 
   return st
@@ -2557,32 +2721,6 @@ do
       end
       std.reduction_op_ids[op.op][op_type] = op_id
     end
-  end
-end
-
--- Keep in sync with std.type_size_bucket_type
-function std.type_size_bucket_name(value_type)
-  if value_type == terralib.types.unit then
-    return "_void"
-  elseif terralib.sizeof(value_type) == 4 then
-    return "_uint32"
-  elseif terralib.sizeof(value_type) == 8 then
-    return "_uint64"
-  else
-    return ""
-  end
-end
-
--- Keep in sync with std.type_size_bucket_name
-function std.type_size_bucket_type(value_type)
-  if value_type == terralib.types.unit then
-    return terralib.types.unit
-  elseif terralib.sizeof(value_type) == 4 then
-    return uint32
-  elseif terralib.sizeof(value_type) == 8 then
-    return uint64
-  else
-    return c.legion_task_result_t
   end
 end
 

@@ -990,7 +990,7 @@ class SingleTask(object):
                 if diff:
                     src.logical_outgoing = actual_out
                 for dst in actual_out:
-                    printer.println(src.node_name+' -> '+dst.node_name+
+                    printer.println(dst.node_name+' -> '+src.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
                 count+=1
         else:
@@ -4285,9 +4285,10 @@ class State(object):
         # Least common ancestor is a region, so they came from different
         # partitions and are therefore not disjoint
         # TODO: handle when partitions are computed to be disjoint
-        if inode1.is_region():
+        if inode1.is_region() or not inode1.disjoint:
             return not inode1.is_independent(inode1_prev.uid, inode2_prev.uid)
-        return not inode1.disjoint
+        else:
+            return False
 
     def get_next_logical_mark(self):
         result = self.next_logical_mark
