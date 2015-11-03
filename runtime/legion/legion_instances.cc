@@ -195,7 +195,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LayoutDescription::add_field_info(FieldID fid, unsigned index,
-                                           size_t offset, size_t field_size)
+                                           size_t offset, size_t field_size,
+                                           CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -205,7 +206,7 @@ namespace LegionRuntime {
       // Use annonymous instances when creating these field infos since
       // we specifying layouts independently of any one instance
       field_infos[fid] = Domain::CopySrcDstField(PhysicalInstance::NO_INST,
-                                                 offset, field_size);
+                                                 offset, field_size, serdez_id);
       field_indexes[index] = fid;
 #ifdef DEBUG_HIGH_LEVEL
       assert(offset_size_map.find(offset) == offset_size_map.end());

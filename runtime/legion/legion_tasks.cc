@@ -3162,7 +3162,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void SingleTask::add_local_field(FieldSpace handle, FieldID fid, 
-                                     size_t field_size)
+                                     size_t field_size,CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       allocate_local_field(local_fields.back());
@@ -3170,20 +3170,21 @@ namespace LegionRuntime {
       // since it can be read by tasks that are being packed
       AutoLock o_lock(op_lock);
       local_fields.push_back(
-                    LocalFieldInfo(handle, fid, field_size, completion_event)); 
+          LocalFieldInfo(handle, fid, field_size, completion_event, serdez_id));
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::add_local_fields(FieldSpace handle,
                                       const std::vector<FieldID> &fields,
-                                      const std::vector<size_t> &field_sizes)
+                                      const std::vector<size_t> &field_sizes,
+                                      CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(fields.size() == field_sizes.size());
 #endif
       for (unsigned idx = 0; idx < fields.size(); idx++)
-        add_local_field(handle, fields[idx], field_sizes[idx]);
+        add_local_field(handle, fields[idx], field_sizes[idx], serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -3195,7 +3196,7 @@ namespace LegionRuntime {
       // event has triggered.  Otherwise it already exists on this node
       // so we are free to use it no matter what
       if (runtime->forest->allocate_field(info.handle, info.field_size,
-                                          info.fid, true/*local*/))
+                              info.fid, true/*local*/, info.serdez_id))
       {
         // Successfully allocated a local field, launch a task to reclaim it
         Serializer rez;

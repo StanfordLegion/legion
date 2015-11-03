@@ -1401,6 +1401,7 @@ namespace LegionRuntime {
                                               AddressSpaceID target);
       void send_field_allocation(FieldSpace space, FieldID fid, 
                                  size_t size, unsigned idx, 
+                                 CustomSerdezID serdez_id,
                                  AddressSpaceID target);
       void send_field_destruction(FieldSpace space, FieldID fid, 
                                   AddressSpaceID target); 
@@ -2072,10 +2073,12 @@ namespace LegionRuntime {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Internal* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezOpTable& get_serdez_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(

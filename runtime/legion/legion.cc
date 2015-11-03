@@ -3733,6 +3733,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_op(serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
@@ -3759,6 +3766,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return Internal::get_reduction_table();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_table();
     }
 
     //--------------------------------------------------------------------------

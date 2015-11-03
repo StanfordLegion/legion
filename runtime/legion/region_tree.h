@@ -188,21 +188,22 @@ namespace LegionRuntime {
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, bool local,
-                          CustomSerdezOp *op);
+                          FieldID fid, bool local, CustomSerdezID serdez_id);
       void free_field(FieldSpace handle, FieldID fid, AddressSpaceID source);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezOp *op);
+                           CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, const std::set<FieldID> &to_free,
                        AddressSpaceID source);
       void allocate_field_index(FieldSpace handle, size_t field_size, 
                                 FieldID fid, unsigned index, 
+                                CustomSerdezID serdez_id,
                                 AddressSpaceID source);
       void allocate_field_indexes(FieldSpace handle, 
                                   const std::vector<FieldID> &resulting_fields,
                                   const std::vector<size_t> &sizes,
                                   const std::vector<unsigned> &indexes,
+                                  CustomSerdezID serdez_id,
                                   AddressSpaceID source);
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
@@ -1194,21 +1195,25 @@ namespace LegionRuntime {
     public:
       struct FieldInfo {
       public:
-        FieldInfo(void) : field_size(0), idx(0), 
+        FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
                           local(false), destroyed(false) { }
-        FieldInfo(size_t size, unsigned id, bool loc)
-          : field_size(size), idx(id), local(loc), destroyed(false) { }
+        FieldInfo(size_t size, unsigned id, bool loc, CustomSerdezID sid)
+          : field_size(size), idx(id), serdez_id(sid),
+            local(loc), destroyed(false) { }
       public:
         size_t field_size;
         unsigned idx;
+        CustomSerdezID serdez_id;
         bool local;
         bool destroyed;
       };
       struct SendFieldAllocationFunctor {
       public:
         SendFieldAllocationFunctor(FieldSpace h, FieldID f, size_t s,
-                                   unsigned i, Internal *rt)
-          : handle(h), field(f), size(s), index(i), runtime(rt) { }
+                                   unsigned i, CustomSerdezID sid,
+                                   Internal *rt)
+          : handle(h), field(f), size(s), index(i), 
+            serdez_id(sid), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
@@ -1216,6 +1221,7 @@ namespace LegionRuntime {
         FieldID field;
         size_t size;
         unsigned index;
+        CustomSerdezID serdez_id;
         Internal *runtime;
       };
       struct SendFieldDestructionFunctor {
@@ -1290,9 +1296,11 @@ namespace LegionRuntime {
       static void handle_field_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      void allocate_field(FieldID fid, size_t size, bool local);
+      void allocate_field(FieldID fid, size_t size, bool local, 
+                          CustomSerdezID serdez_id);
       void allocate_field_index(FieldID fid, size_t size, 
-                                AddressSpaceID runtime, unsigned index);
+                                AddressSpaceID runtime, unsigned index,
+                                CustomSerdezID serdez_id);
       void free_field(FieldID fid, AddressSpaceID source);
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
@@ -1315,7 +1323,8 @@ namespace LegionRuntime {
     protected:
       void compute_create_offsets(const std::set<FieldID> &create_fields,
                                   std::vector<size_t> &field_sizes,
-                                  std::vector<unsigned> &indexes);
+                                  std::vector<unsigned> &indexes,
+                                  std::vector<CustomSerdezID> &serdez);
     public:
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
@@ -1339,7 +1348,8 @@ namespace LegionRuntime {
                                                    size_t blocking_factor,
                                    const std::set<FieldID> &create_fields,
                                    const std::vector<size_t> &field_sizes,
-                                   const std::vector<unsigned> &indexes);
+                                   const std::vector<unsigned> &indexes,
+                                   const std::vector<CustomSerdezID> &serdez);
       LayoutDescription* register_layout_description(LayoutDescription *desc);
     public:
       void upgrade_distributed_alloc(UserEvent to_trigger);

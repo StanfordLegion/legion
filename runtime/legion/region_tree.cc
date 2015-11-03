@@ -1084,13 +1084,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_field(FieldSpace handle, size_t field_size,
-                                          FieldID fid, bool local)
+                                          FieldID fid, bool local, 
+                                          CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
       if (local && node->has_field(fid))
         return true;
-      node->allocate_field(fid, field_size, local);
+      node->allocate_field(fid, field_size, local, serdez_id);
       return false;
     }
 
@@ -1106,7 +1107,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::allocate_fields(FieldSpace handle, 
                                            const std::vector<size_t> &sizes,
-                                           const std::vector<FieldID> &fields)
+                                           const std::vector<FieldID> &fields,
+                                           CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1116,7 +1118,8 @@ namespace LegionRuntime {
       FieldSpaceNode *node = get_node(handle);
       for (unsigned idx = 0; idx < fields.size(); idx++)
       {
-        node->allocate_field(fields[idx], sizes[idx], false/*local*/);
+        node->allocate_field(fields[idx], sizes[idx], 
+                             false/*local*/, serdez_id);
       }
     }
 
@@ -1138,11 +1141,12 @@ namespace LegionRuntime {
     void RegionTreeForest::allocate_field_index(FieldSpace handle, 
                                                 size_t field_size, FieldID fid,
                                                 unsigned index, 
+                                                CustomSerdezID serdez_id,
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      node->allocate_field_index(fid, field_size, source, index);
+      node->allocate_field_index(fid, field_size, source, index, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1150,6 +1154,7 @@ namespace LegionRuntime {
                                         const std::vector<FieldID> &fields,
                                         const std::vector<size_t> &sizes,
                                         const std::vector<unsigned> &indexes,
+                                        CustomSerdezID serdez_id,
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -1161,7 +1166,8 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < fields.size(); idx++)
       {
         unsigned index = indexes[idx];
-        node->allocate_field_index(fields[idx], sizes[idx], source, index);
+        node->allocate_field_index(fields[idx], sizes[idx], source, 
+                                   index, serdez_id);
       }
     }
 
@@ -8370,11 +8376,13 @@ namespace LegionRuntime {
                                                           AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      runtime->send_field_allocation(handle, field, size, index, target); 
+      runtime->send_field_allocation(handle, field, size, index, 
+                                     serdez_id, target); 
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::allocate_field(FieldID fid, size_t size, bool local)
+    void FieldSpaceNode::allocate_field(FieldID fid, size_t size, 
+                                        bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       if (!is_owner && !distributed_allocation.exists())
@@ -8402,20 +8410,20 @@ namespace LegionRuntime {
         assert(it->second.destroyed || (it->second.idx != index));
       }
 #endif
-      fields[fid] = FieldInfo(size, index, local);
+      fields[fid] = FieldInfo(size, index, local, serdez_id);
       // Send messages to all our subscribers telling them about the allocation
       // as long as it is not local.  Local fields get sent by the task contexts
       if (!local && !!creation_set)
       {
-        SendFieldAllocationFunctor functor(handle, fid, size, 
-                                           index, context->runtime);
+        SendFieldAllocationFunctor functor(handle, fid, size, index,
+                                           serdez_id, context->runtime);
         creation_set.map(functor);
       }
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::allocate_field_index(FieldID fid, size_t size,
-                                          AddressSpaceID source, unsigned index)
+                AddressSpaceID source, unsigned index, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -8434,15 +8442,15 @@ namespace LegionRuntime {
           assert(it->second.destroyed || (it->second.idx != index));
         }
 #endif
-        fields[fid] = FieldInfo(size, our_index, false/*local*/);
+        fields[fid] = FieldInfo(size, our_index, false/*local*/, serdez_id);
         // If we haven't done the allocation already send updates to
         // all our subscribers telling them where we allocated the field
         // Note this includes sending it back to the source which sent
         // us the allocation in the first place
         if (!!creation_set)
         {
-          SendFieldAllocationFunctor functor(handle, fid, size,
-                                             our_index, context->runtime);
+          SendFieldAllocationFunctor functor(handle, fid, size, our_index,
+                                             serdez_id, context->runtime);
           creation_set.map(functor);
         }
       }
@@ -8752,7 +8760,8 @@ namespace LegionRuntime {
     void FieldSpaceNode::compute_create_offsets(
                                         const std::set<FieldID> &create_fields, 
                                         std::vector<size_t> &field_sizes,
-                                        std::vector<unsigned> &indexes)
+                                        std::vector<unsigned> &indexes,
+                                        std::vector<CustomSerdezID> &serdez)
     //--------------------------------------------------------------------------
     {
       // Need to hold the lock when accessing field infos
@@ -8767,6 +8776,7 @@ namespace LegionRuntime {
 #endif
         field_sizes[idx] = finder->second.field_size;
         indexes[idx] = finder->second.idx;
+        serdez[idx] = finder->second.serdez_id;
       }
     }
 
@@ -8838,6 +8848,7 @@ namespace LegionRuntime {
         FieldID fid = *create_fields.begin();
         size_t field_size;
         unsigned field_index;
+        CustomSerdezID serdez_id;
         {
           // Need to hold the field lock when accessing field infos
           AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -8847,6 +8858,7 @@ namespace LegionRuntime {
 #endif
           field_size = finder->second.field_size;
           field_index = finder->second.idx;
+          serdez_id = finder->second.serdez_id;
         }
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
@@ -8863,13 +8875,15 @@ namespace LegionRuntime {
             // Now we need to make a layout
             std::vector<size_t> field_sizes(1);
             std::vector<unsigned> indexes(1);
+            std::vector<CustomSerdezID> serdez(1);
             field_sizes[0] = field_size;
             indexes[0] = field_index;
+            serdez[0] = serdez_id;
             layout = create_layout_description(inst_mask, domain,
                                                blocking_factor, 
                                                create_fields,
                                                field_sizes,
-                                               indexes);
+                                               indexes, serdez);
           }
 #ifdef DEBUG_HIGH_LEVEL
           assert(layout != NULL);
@@ -8888,7 +8902,8 @@ namespace LegionRuntime {
       {
         std::vector<size_t> field_sizes(create_fields.size());
         std::vector<unsigned> indexes(create_fields.size());
-        compute_create_offsets(create_fields, field_sizes, indexes);
+        std::vector<CustomSerdezID> serdez(create_fields.size());
+        compute_create_offsets(create_fields, field_sizes, indexes, serdez);
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
         PhysicalInstance inst = 
@@ -8906,7 +8921,7 @@ namespace LegionRuntime {
                                                blocking_factor,
                                                create_fields,
                                                field_sizes,
-                                               indexes);
+                                               indexes, serdez);
           }
 #ifdef DEBUG_HIGH_LEVEL
           assert(layout != NULL);
@@ -9150,7 +9165,8 @@ namespace LegionRuntime {
     {
       std::vector<size_t> field_sizes(create_fields.size());
       std::vector<unsigned> indexes(create_fields.size());
-      compute_create_offsets(create_fields, field_sizes, indexes);
+      std::vector<CustomSerdezID> serdez(create_fields.size());
+      compute_create_offsets(create_fields, field_sizes, indexes, serdez);
       // Now make the instance, this should always succeed
       const Domain &dom = node->get_domain_blocking();
       PhysicalInstance inst = attach_op->create_instance(dom, field_sizes);
@@ -9164,7 +9180,7 @@ namespace LegionRuntime {
                                            blocking_factor,
                                            create_fields,
                                            field_sizes,
-                                           indexes);
+                                           indexes, serdez);
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
@@ -9211,7 +9227,8 @@ namespace LegionRuntime {
         const FieldMask &mask, const Domain &domain, size_t blocking_factor,
                                      const std::set<FieldID> &create_fields,
                                      const std::vector<size_t> &field_sizes, 
-                                     const std::vector<unsigned> &indexes)
+                                     const std::vector<unsigned> &indexes,
+                                     const std::vector<CustomSerdezID> &serdez)
     //--------------------------------------------------------------------------
     {
       // Make the new field description and then register it
@@ -9223,7 +9240,7 @@ namespace LegionRuntime {
             it != create_fields.end(); it++, idx++)
       {
         result->add_field_info((*it), indexes[idx],
-                               accum_offset, field_sizes[idx]);
+                               accum_offset, field_sizes[idx], serdez[idx]);
         accum_offset += field_sizes[idx];
       }
       // Now we can register it
@@ -9358,7 +9375,8 @@ namespace LegionRuntime {
           if (!it->second.destroyed)
           {
             context->runtime->send_field_allocation(handle, it->first,
-                it->second.field_size, it->second.idx, target);
+                it->second.field_size, it->second.idx, 
+                it->second.serdez_id, target);
           }
         }
         // Finally add it to the creation set

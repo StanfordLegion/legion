@@ -317,7 +317,7 @@ namespace LegionRuntime {
        */
       inline FieldID allocate_field(size_t field_size, 
               FieldID desired_fieldid = AUTO_GENERATE_ID,
-              CustomSerdezID serdez_id = -1);
+              CustomSerdezID serdez_id = 0);
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
@@ -333,7 +333,7 @@ namespace LegionRuntime {
        */
       inline FieldID allocate_local_field(size_t field_size,
               FieldID desired_fieldid = AUTO_GENERATE_ID,
-              CustomSerdezID serdez_id = -1);
+              CustomSerdezID serdez_id = 0);
       /**
        * Allocate a collection of fields with the specified sizes.
        * Optionally pass in a set of field IDs to use when allocating
@@ -350,7 +350,7 @@ namespace LegionRuntime {
        */
       inline void allocate_fields(const std::vector<size_t> &field_sizes,
                                   std::vector<FieldID> &resulting_fields,
-                                  CustomSerdezID serdez_id = -1);
+                                  CustomSerdezID serdez_id = 0);
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
@@ -365,7 +365,7 @@ namespace LegionRuntime {
        */
       inline void allocate_local_fields(const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id = -1);
+                                        CustomSerdezID serdez_id = 0);
       /**
        * @return field space associated with this allocator
        */
@@ -5213,7 +5213,7 @@ namespace LegionRuntime {
        * @param serdez_id ID of the serdez operation to find
        * @return a pointer to the serdez operation object if it exists
        */
-      static const CustomSerdezOp* get_serdez_op(CustomSerdezID serdez_id);
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
 
       /**
        * Register a region projection function that can be used to map
@@ -5520,6 +5520,7 @@ namespace LegionRuntime {
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezOpTable& get_serdez_table(void);
     private:
       friend class Mapper;
       Internal *runtime;

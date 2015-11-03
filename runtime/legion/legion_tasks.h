@@ -248,16 +248,19 @@ namespace LegionRuntime {
       public:
         LocalFieldInfo(void)
           : handle(FieldSpace::NO_SPACE), fid(0),
-            field_size(0), reclaim_event(Event::NO_EVENT) { }
+            field_size(0), reclaim_event(Event::NO_EVENT),
+            serdez_id(0) { }
         LocalFieldInfo(FieldSpace sp, FieldID f,
-                       size_t size, Event reclaim)
+                       size_t size, Event reclaim,
+                       CustomSerdezID sid)
           : handle(sp), fid(f), field_size(size),
-            reclaim_event(reclaim) { }
+            reclaim_event(reclaim), serdez_id(sid) { }
       public:
-        FieldSpace handle;
-        FieldID    fid;
-        size_t     field_size;
-        Event      reclaim_event;
+        FieldSpace     handle;
+        FieldID        fid;
+        size_t         field_size;
+        Event          reclaim_event;
+        CustomSerdezID serdez_id;
       };
       struct DeferredDependenceArgs {
       public:
@@ -365,10 +368,12 @@ namespace LegionRuntime {
       void increment_frame(void);
       void decrement_frame(void);
     public:
-      void add_local_field(FieldSpace handle, FieldID fid, size_t size);
+      void add_local_field(FieldSpace handle, FieldID fid, 
+                           size_t size, CustomSerdezID serdez_id);
       void add_local_fields(FieldSpace handle, 
                             const std::vector<FieldID> &fields,
-                            const std::vector<size_t> &fields_sizes);
+                            const std::vector<size_t> &fields_sizes,
+                            CustomSerdezID serdez_id);
       void allocate_local_field(const LocalFieldInfo &info);
     public:
       ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
