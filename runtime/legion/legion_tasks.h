@@ -1201,6 +1201,7 @@ namespace LegionRuntime {
                                      MinimalPoint *mp);
       void enumerate_points(void);
       void premap_slice(void);
+      void apply_local_version_infos(std::set<Event> &map_conditions);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

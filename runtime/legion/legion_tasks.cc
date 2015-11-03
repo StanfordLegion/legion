@@ -9576,7 +9576,6 @@ namespace LegionRuntime {
       bool need_trigger = false;
       bool trigger_children_completed = false;
       bool trigger_children_commit = false;
-      Event map_condition = Event::NO_EVENT;
       {
         AutoLock o_lock(op_lock);
         total_points += points;
@@ -9588,11 +9587,6 @@ namespace LegionRuntime {
         if (slice_fraction.is_whole())
         {
           need_trigger = true;
-          if (!map_applied_conditions.empty())
-          {
-            map_condition = Event::merge_events(map_applied_conditions);
-            map_applied_conditions.clear();
-          }
           if ((complete_points == total_points) &&
               !children_complete_invoked)
           {
@@ -9608,7 +9602,30 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-        complete_mapping(map_condition);
+      {
+        // At this point, we know that we are mapped, see if we have
+        // any locally mapped slices which we need to apply changes
+        // Note we do this here while we're not holding the lock
+        if (!locally_mapped_slices.empty())
+        {
+          for (std::deque<SliceTask*>::const_iterator it = 
+                locally_mapped_slices.begin(); it != 
+                locally_mapped_slices.end(); it++)
+          {
+            (*it)->apply_local_version_infos(map_applied_conditions);
+          }
+        }
+        // Get the mapped precondition note we can now access this
+        // without holding the lock because we know we've seen
+        // all the responses so no one else will be mutating it.
+        if (!map_applied_conditions.empty())
+        {
+          Event map_condition = Event::merge_events(map_applied_conditions);
+          complete_mapping(map_condition);
+        }
+        else
+          complete_mapping();
+      }
       if (trigger_children_completed)
         trigger_children_complete();
       if (trigger_children_commit)
@@ -9680,8 +9697,6 @@ namespace LegionRuntime {
       derez.deserialize(denom);
       Event applied_condition;
       derez.deserialize(applied_condition);
-      Processor target_proc;
-      derez.deserialize(target_proc);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -9703,35 +9718,6 @@ namespace LegionRuntime {
         CompositeRef virtual_ref;
         virtual_ref.unpack_reference(runtime, derez);
         return_virtual_instance(index, virtual_ref);
-      }
-      if (!locally_mapped_slices.empty())
-      {
-        SliceTask* slice = 0;
-        for (unsigned idx = 0; idx < locally_mapped_slices.size(); ++idx)
-        {
-          if (locally_mapped_slices[idx]->target_proc == target_proc)
-          {
-            slice = locally_mapped_slices[idx];
-            break;
-          }
-        }
-        assert(slice);
-        if (!slice->version_infos.empty())
-        {
-          std::set<Event> applied_conditions;
-          AddressSpaceID local_space = runtime->address_space;
-          for (unsigned idx = 0; idx < slice->version_infos.size(); idx++)
-          {
-            slice->version_infos[idx].apply_mapping(
-                slice->enclosing_contexts[idx].get_id(),
-                local_space, applied_conditions);
-          }
-          if (!applied_conditions.empty())
-          {
-            applied_conditions.insert(applied_condition);
-            applied_condition = Event::merge_events(applied_conditions);
-          }
-        }
       }
       return_slice_mapped(points, denom, applied_condition);
     }
@@ -9983,6 +9969,19 @@ namespace LegionRuntime {
         }
       }
       premapped = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::apply_local_version_infos(std::set<Event> &map_conditions)
+    //--------------------------------------------------------------------------
+    {
+      // We know we are local
+      AddressSpaceID owner_space = runtime->address_space; 
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                                         owner_space, map_conditions);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10612,8 +10611,14 @@ namespace LegionRuntime {
       if (is_remote())
       {
         bool has_nonleaf_point = false;
-        for (unsigned idx = 0; idx < points.size(); ++idx)
-          has_nonleaf_point |= !points[idx]->is_leaf();
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          if (!points[idx]->is_leaf())
+          {
+            has_nonleaf_point = true;
+            break;
+          }
+        }
 
         // Only need to send something back if this wasn't mapped locally
         // wclee: also need to send back if there were some non-leaf point tasks
@@ -10702,7 +10707,6 @@ namespace LegionRuntime {
       rez.serialize(points.size());
       rez.serialize(denominator);
       rez.serialize(applied_condition);
-      rez.serialize(target_proc);
       // Also pack up any regions names we need for doing invalidations
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
