@@ -1674,24 +1674,55 @@ end
 
 function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
                                    params_struct_type, params_map, task_args,
-                                   task_args_setup)
-  -- This all has to be done in 64-bit integers to avoid imprecision
-  -- loss due to Lua's ONLY numeric type being double. Below we use
-  -- LuaJIT's uint64_t cdata type as a replacement.
+                                   task_args_setup, task_args_cleanup)
+  local size = terralib.newsymbol(c.size_t, "size")
+  local buffer = terralib.newsymbol(&opaque, "buffer")
 
-  -- Beware: LuaJIT does not expose bitwise operators at the Lua
-  -- level. Below we use plus (instead of bitwise or) and
-  -- exponentiation (instead of shift).
-  local params_map_value = 0ULL
-  for i, arg_type in ipairs(arg_types) do
-    if std.is_future(arg_type) then
-      params_map_value = params_map_value + (2ULL ^ (i-1))
-    end
+  task_args_setup:insert(quote
+    var [size] = terralib.sizeof(params_struct_type)
+  end)
+
+  for i, arg in ipairs(args) do
+    local arg_type = arg_types[i]
+    if not std.is_future(arg_type) then
+      local size_actions, size_value = std.compute_serialized_size(
+        arg_type, arg)
+      task_args_setup:insert(size_actions)
+      task_args_setup:insert(quote [size] = [size] + [size_value] end)
+   end
   end
 
+  task_args_setup:insert(quote
+    var [buffer] = c.malloc([size])
+    std.assert([buffer] ~= nil, "malloc failed in setup task args")
+    [task_args].args = [buffer]
+    [task_args].arglen = [size]
+  end)
+
+  local fixed_ptr = terralib.newsymbol(&params_struct_type, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
+  task_args_setup:insert(quote
+    var [fixed_ptr] = [&params_struct_type](buffer)
+    var [data_ptr] = [&uint8](buffer) + terralib.sizeof(params_struct_type)
+  end)
+
   if params_map then
+    -- This all has to be done in 64-bit integers to avoid imprecision
+    -- loss due to Lua's ONLY numeric type being double. Below we use
+    -- LuaJIT's uint64_t cdata type as a replacement.
+
+    -- Beware: LuaJIT does not expose bitwise operators at the Lua
+    -- level. Below we use plus (instead of bitwise or) and
+    -- exponentiation (instead of shift).
+    local params_map_value = 0ULL
+    for i, arg_type in ipairs(arg_types) do
+      if std.is_future(arg_type) then
+        params_map_value = params_map_value + (2ULL ^ (i-1))
+      end
+    end
+
     task_args_setup:insert(quote
-      [task_args].[params_map] = [params_map_value]
+      [fixed_ptr].[params_map] = [params_map_value]
     end)
   end
 
@@ -1704,11 +1735,17 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
       if terralib.issymbol(c_field_name) then
         c_field_name = c_field_name.displayname
       end
-      task_args_setup:insert(quote [task_args].[c_field_name] = [arg] end)
+
+      local param_type = param_types[i]
+      task_args_setup:insert(
+        std.serialize(
+          param_type, std.implicit_cast(arg_type, param_type, arg),
+          `(&[fixed_ptr].[c_field_name]), `(&[data_ptr])))
     end
   end
 
   -- Prepare the region arguments to the task.
+  -- (Region values have already been copied into task arguments verbatim.)
 
   -- Pass field IDs by-value to the task.
   local param_field_ids = task:get_field_id_params()
@@ -1724,11 +1761,21 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
         local param_field_id = param_field_ids[param_field_id_i]
         param_field_id_i = param_field_id_i + 1
         task_args_setup:insert(
-          quote [task_args].[param_field_id] = [arg_field_id] end)
+          quote [fixed_ptr].[param_field_id] = [arg_field_id] end)
       end
     end
   end
-  return task_args_setup
+
+  -- Check that the final sizes line up.
+  task_args_setup:insert(quote
+    std.assert([data_ptr] - [&uint8]([buffer]) == [size],
+      "mismatch in data serialized in setup task args")
+  end)
+
+  -- Add cleanup code for buffer.
+  task_args_cleanup:insert(quote
+    c.free([buffer])
+  end)
 end
 
 function expr_call_setup_future_arg(cx, task, arg, launcher, index, args_setup)
@@ -1964,12 +2011,13 @@ function codegen.expr_call(cx, node)
   local value_type = std.as_read(node.expr_type)
   if std.is_task(fn.value) then
     local params_struct_type = fn.value:get_params_struct()
-    local task_args = terralib.newsymbol(params_struct_type)
+    local task_args = terralib.newsymbol(c.legion_task_argument_t, "task_args")
     local task_args_setup = terralib.newlist()
+    local task_args_cleanup = terralib.newlist()
     expr_call_setup_task_args(
       cx, fn.value, arg_values, arg_types, param_types,
       params_struct_type, fn.value:get_params_map(),
-      task_args, task_args_setup)
+      task_args, task_args_setup, task_args_cleanup)
 
     local launcher = terralib.newsymbol("launcher")
 
@@ -2025,11 +2073,8 @@ function codegen.expr_call(cx, node)
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
-      var t_args : c.legion_task_argument_t
-      t_args.args = [&opaque](&[task_args])
-      t_args.arglen = terralib.sizeof(params_struct_type)
       var [launcher] = c.legion_task_launcher_create(
-        [fn.value:gettaskid()], t_args,
+        [fn.value:gettaskid()], [task_args],
         c.legion_predicate_true(), 0, 0)
       [args_setup]
     end
@@ -2040,6 +2085,7 @@ function codegen.expr_call(cx, node)
         var [future] = c.legion_task_launcher_execute(
           [cx.runtime], [cx.context], [launcher])
         c.legion_task_launcher_destroy(launcher)
+        [task_args_cleanup]
       end
     else
       launcher_execute = quote
@@ -3103,12 +3149,28 @@ function codegen.expr_future(cx, node)
   if result_type == terralib.types.unit then
     assert(false)
   elseif result_type == c.legion_task_result_t then
+    local buffer = terralib.newsymbol(&opaque, "buffer")
+    local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
     local result = terralib.newsymbol(c.legion_future_t, "result")
+
+    local size_actions, size_value = std.compute_serialized_size(
+      value_type, value.value)
+    local ser_actions = std.serialize(
+      value_type, value.value, buffer, `(&[data_ptr]))
     local actions = quote
       [actions]
-      var buffer = [value.value]
+      [size_actions]
+      var [buffer] = c.malloc(terralib.sizeof(value_type) + [size_value])
+      std.assert([buffer] ~= nil, "malloc failed in future")
+      var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(value_type)
+      [ser_actions]
+      std.assert(
+        [data_ptr] - [&uint8]([buffer]) ==
+          terralib.sizeof(value_type) + [size_value],
+        "mismatch in data serialized in future")
       var [result] = c.legion_future_from_buffer(
-        [cx.runtime], [&opaque](&buffer), terralib.sizeof(value_type))
+        [cx.runtime], [&opaque](&[buffer]), [size_value])
+      c.free([buffer])
     end
 
     return values.value(
@@ -3143,16 +3205,20 @@ function codegen.expr_future_get_result(cx, node)
   if result_type == terralib.types.unit then
     assert(false)
   elseif result_type == c.legion_task_result_t then
+    local result = terralib.newsymbol(c.legion_task_result_t, "result")
     local result_value = terralib.newsymbol(expr_type, "result_value")
-    local expr_type_alignment = data.min(terralib.sizeof(expr_type), 8)
+    local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
+
+    local deser_actions, deser_value = std.deserialize(
+      expr_type, `([result].value), `(&[data_ptr]))
     local actions = quote
       [actions]
-      var result = c.legion_future_get_result([value.value].__result)
-        -- Force unaligned access because malloc does not provide
-        -- blocks aligned for all purposes (e.g. SSE vectors).
-      var [result_value] = terralib.attrload(
-        [&expr_type](result.value),
-        { align = [expr_type_alignment] })
+      var [result] = c.legion_future_get_result([value.value].__result)
+      var [data_ptr] = [&uint8]([result].value) + terralib.sizeof(expr_type)
+      [deser_actions]
+      var [result_value] = [deser_value]
+      std.assert([result].value_size == [data_ptr] - [&uint8]([result].value),
+        "mismatch in data left over in future")
       c.legion_task_result_destroy(result)
     end
     return values.value(
@@ -3853,8 +3919,9 @@ function codegen.stat_index_launch(cx, node)
   local value_type = fn.value:gettype().returntype
 
   local params_struct_type = fn.value:get_params_struct()
-  local task_args = terralib.newsymbol(params_struct_type)
+  local task_args = terralib.newsymbol(c.legion_task_argument_t, "task_args")
   local task_args_setup = terralib.newlist()
+  local task_args_cleanup = terralib.newlist()
   for i, arg in ipairs(args) do
     local invariant = node.args_provably.invariant[i]
     if not invariant then
@@ -3864,7 +3931,7 @@ function codegen.stat_index_launch(cx, node)
   expr_call_setup_task_args(
     cx, fn.value, arg_values, arg_types, param_types,
     params_struct_type, fn.value:get_params_map(),
-    task_args, task_args_setup)
+    task_args, task_args_setup, task_args_cleanup)
 
   local launcher = terralib.newsymbol("launcher")
 
@@ -3952,14 +4019,11 @@ function codegen.stat_index_launch(cx, node)
     for [node.symbol] = [domain1], [domain2] do
       var [task_args]
       [task_args_setup]
-      var t_args : c.legion_task_argument_t
-      t_args.args = [&opaque](&[task_args])
-      t_args.arglen = terralib.sizeof(params_struct_type)
       c.legion_argument_map_set_point(
         [argument_map],
         c.legion_domain_point_from_point_1d(
           c.legion_point_1d_t { x = arrayof(int32, [node.symbol]) }),
-        t_args, true)
+        [task_args], true)
     end
     var g_args : c.legion_task_argument_t
     g_args.args = nil
@@ -4452,20 +4516,23 @@ function codegen.stat_task(cx, node)
   -- Unpack the by-value parameters to the task.
   local task_args_setup = terralib.newlist()
   local args = terralib.newsymbol(&params_struct_type, "args")
+  local arglen = terralib.newsymbol(c.size_t, "arglen")
+  local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
   if #(task:get_params_struct():getentries()) > 0 then
     task_args_setup:insert(quote
-      var [args]
+      var [args], [arglen], [data_ptr]
       if c.legion_task_get_is_index_space(c_task) then
-        var arglen = c.legion_task_get_local_arglen(c_task)
-        std.assert(arglen == terralib.sizeof(params_struct_type),
+        [arglen] = c.legion_task_get_local_arglen(c_task)
+        std.assert([arglen] >= terralib.sizeof(params_struct_type),
                    ["arglen mismatch in " .. tostring(task.name) .. " (index task)"])
         args = [&params_struct_type](c.legion_task_get_local_args(c_task))
       else
-        var arglen = c.legion_task_get_arglen(c_task)
-        std.assert(arglen == terralib.sizeof(params_struct_type),
+        [arglen] = c.legion_task_get_arglen(c_task)
+        std.assert([arglen] >= terralib.sizeof(params_struct_type),
                    ["arglen mismatch " .. tostring(task.name) .. " (single task)"])
         args = [&params_struct_type](c.legion_task_get_args(c_task))
       end
+      var [data_ptr] = [&uint8](args) + terralib.sizeof(params_struct_type)
     end)
     task_args_setup:insert(quote
       var [params_map] = args.[params_map]
@@ -4479,7 +4546,6 @@ function codegen.stat_task(cx, node)
     end)
     for i, param in ipairs(params) do
       local param_type = node.params[i].param_type
-      local param_type_alignment = data.min(terralib.sizeof(param_type), 8)
 
       local future = terralib.newsymbol("future")
       local future_type = std.future(param_type)
@@ -4499,14 +4565,15 @@ function codegen.stat_task(cx, node)
           span = node.span,
       }):read(cx)
 
+      local deser_actions, deser_value = std.deserialize(
+        param_type,
+        `(&args.[param.displayname or tostring(param)]),
+        `(&[data_ptr]))
       task_args_setup:insert(quote
         var [param] : param_type
         if ([params_map] and [2ULL ^ (i-1)]) == 0 then
-          -- Force unaligned access because malloc does not provide
-          -- blocks aligned for all purposes (e.g. SSE vectors).
-          [param] = terralib.attrload(
-            (&args.[param.displayname or tostring(param)]),
-            { align = [param_type_alignment] })
+          [deser_actions]
+          [param] = [deser_value]
         else
           std.assert([future_i] < [future_count], "missing future in task param")
           var [future] = c.legion_task_get_future([c_task], [future_i])
@@ -4517,7 +4584,10 @@ function codegen.stat_task(cx, node)
       end)
     end
     task_args_setup:insert(quote
-      std.assert([future_i] == [future_count], "extra futures left over in task params")
+      std.assert([future_i] == [future_count],
+        "extra futures left over in task params")
+      std.assert([arglen] == [data_ptr] - [&uint8]([args]),
+        "mismatch in data left over in task params")
     end)
   end
 
