@@ -14,12 +14,14 @@
 
 import "regent"
 
-task f(r : regentlib.list(int))
+task f(x : regentlib.list(int))
+  regentlib.assert(x[1] == 4, "test failed")
+  regentlib.assert(x[3] == 6, "test failed")
 end
 
 task main()
   var x = list_range(3, 7)
-  -- f(x)
+  f(x)
   regentlib.assert(x[0] == 3, "test failed")
   regentlib.assert(x[2] == 5, "test failed")
 end

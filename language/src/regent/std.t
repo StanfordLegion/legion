@@ -1149,9 +1149,25 @@ end
 -- #################
 
 function std.compute_serialized_size(value_type, value)
-  local actions = quote end
-  local result = 0
-  return actions, result
+  if std.is_list(value_type) then
+    local result = terralib.newsymbol(c.size_t, "result")
+    local element_type = value_type.element_type
+    local element = terralib.newsymbol(&element_type)
+
+    local size_actions, size_value = std.compute_serialized_size(
+      element_type, element)
+    local actions = quote
+      var [result] = 0
+      for i = 0, [value].__size do
+        var [element] = ([&element_type]([value].__data)) + i
+        [size_actions]
+        [result] = [result] + terralib.sizeof(element_type) + [size_value]
+      end
+    end
+    return actions, result
+  else
+    return quote end, 0
+  end
 end
 
 function std.serialize(value_type, value, fixed_ptr, data_ptr)
@@ -1163,19 +1179,59 @@ function std.serialize(value_type, value, fixed_ptr, data_ptr)
       [&value_type](fixed_ptr), value,
       { align = [value_type_alignment] })
   end
+
+  if std.is_list(value_type) then
+    local element_type = value_type.element_type
+    local element = terralib.newsymbol(element_type)
+    local element_ptr = terralib.newsymbol(&element_type)
+
+    local ser_actions = std.serialize(
+      element_type, element, element_ptr, data_ptr)
+    actions = quote
+      [actions]
+      for i = 0, [value].__size do
+        var [element] = ([&element_type]([value].__data))[i]
+        var [element_ptr] = [&element_type](@[data_ptr])
+        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        [ser_actions]
+      end
+    end
+  end
+
   return actions
 end
 
 function std.deserialize(value_type, fixed_ptr, data_ptr)
-  assert(terralib.types.istype(value_type))
-
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
-  local actions = quote end
-  local result = `(terralib.attrload(
-                     [&value_type](fixed_ptr),
-                     { align = [value_type_alignment] }))
+  local result = terralib.newsymbol(value_type, "result")
+  local actions = quote
+    var [result] = terralib.attrload(
+      [&value_type]([fixed_ptr]),
+      { align = [value_type_alignment] })
+  end
+
+  if std.is_list(value_type) then
+    local element_type = value_type.element_type
+    local element_ptr = terralib.newsymbol(&element_type)
+
+    local deser_actions, deser_value = std.deserialize(
+      element_type, element_ptr, data_ptr)
+    actions = quote
+      [actions]
+      [result].__data = c.malloc(
+        terralib.sizeof(element_type) * [result].__size)
+      std.assert([result].__data ~= nil, "malloc failed in deserialize")
+      for i = 0, [result].__size do
+        var [element_ptr] = [&element_type](@[data_ptr])
+        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        [deser_actions]
+        ([&element_type]([result].__data))[i] = [deser_value]
+      end
+    end
+  end
+
   return actions, result
 end
 
