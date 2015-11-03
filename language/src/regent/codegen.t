@@ -2743,6 +2743,40 @@ function codegen.expr_cross_product(cx, node)
     expr_type)
 end
 
+function codegen.expr_list_duplicate_partition(cx, node)
+  local partition_type = std.as_read(node.partition.expr_type)
+  local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
+  local indices_type = std.as_read(node.indices.expr_type)
+  local indices = codegen.expr(cx, node.indices):read(cx, indices_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local list = terralib.newsymbol("list")
+  local actions = quote
+    [partition.actions]
+    [indices.actions]
+    [emit_debuginfo(node)]
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+    var [list] = expr_type {
+      __size = [indices.value].__size,
+      __data = data
+    }
+    for i = 0, [indices.value].__size do
+      var color = [indices_type:data(indices.value)][i]
+      var orig_r = c.legion_logical_partition_get_logical_subregion_by_color(
+        [cx.runtime], [cx.context], [partition.value].impl, color)
+      var r = c.legion_logical_region_create(
+        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
+      [expr_type:data(list)][i] = [expr_type.element_type] { impl = r }
+    end
+  end
+
+  return values.value(
+    expr.just(actions, list),
+    expr_type)
+end
+
 function codegen.expr_list_range(cx, node)
   local start_type = std.as_read(node.start.expr_type)
   local start = codegen.expr(cx, node.start):read(cx, start_type)
@@ -2752,10 +2786,17 @@ function codegen.expr_list_range(cx, node)
 
   local list = terralib.newsymbol("list")
   local actions = quote
-    [start.actions];
-    [stop.actions];
-    [emit_debuginfo(node)];
-    var [list] = [expr_type:alloc(`([stop.value] - [start.value]))]
+    [start.actions]
+    [stop.actions]
+    [emit_debuginfo(node)]
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) *
+        ([stop.value] - [start.value]))
+    regentlib.assert(data ~= nil, "malloc failed in list_range")
+    var [list] = expr_type {
+      __size = [stop.value] - [start.value],
+      __data = data
+    }
     for i = [start.value], [stop.value] do
       [expr_type:data(list)][i - [start.value] ] = i
     end
@@ -3311,6 +3352,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListDuplicatePartition) then
+    return codegen.expr_list_duplicate_partition(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return codegen.expr_list_range(cx, node)

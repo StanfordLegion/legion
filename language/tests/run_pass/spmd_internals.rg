@@ -87,16 +87,14 @@ task main()
 
   var rc = c.legion_coloring_create()
   for i = lo, hi do
-    c.legion_coloring_ensure_color(rc, 0)
+    c.legion_coloring_ensure_color(rc, i)
   end
   var p_private = partition(disjoint, r_private, rc)
   var p_ghost = partition(aliased, r_ghost, rc)
   c.legion_coloring_destroy(rc)
 
-  var _ = list_range(0, 5)
-
-  -- var rs_private = list_duplicate_partition(p_private, list_range(lo, hi))
-  -- var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
+  var rs_private = list_duplicate_partition(p_private, list_range(lo, hi))
+  var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
   -- var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
   -- must_epoch
     for i = lo, hi, stride do

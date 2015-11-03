@@ -2108,14 +2108,6 @@ std.list = terralib.memoize(function(element_type)
          self.element_type:is_list_of_regions())
   end
 
-  function st:alloc(size)
-    return `(
-      self {
-        __size = [size],
-        __data = c.malloc(terralib.sizeof([self.element_type]) * [size]),
-      })
-  end
-
   -- FIXME: Make the compiler manage cleanups, including lists.
 
   function st:data(value)
@@ -2123,7 +2115,7 @@ std.list = terralib.memoize(function(element_type)
   end
 
   function st.metamethods.__typename(st)
-    return "list(" .. tostring(st.result_type) .. ")"
+    return "list(" .. tostring(st.element_type) .. ")"
   end
 
   return st
