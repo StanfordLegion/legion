@@ -73,7 +73,6 @@ public:
           worker_cpu_procs.push_back(*it);
       }
     }
-    read_only_task_idx = 0;
   }
 
   virtual void select_task_options(Task *task)
@@ -86,9 +85,9 @@ public:
       task->target_proc = scheduler_cpu_proc;
     if (task->task_id == READ_WRITE_TASK_ID)
       task->target_proc = worker_cpu_procs[worker_cpu_procs.size() - 1];
-    else if (task->task_id == READ_WRITE_TASK_ID) {
-      task->target_proc = worker_cpu_procs[read_only_task_idx];
-      read_only_task_idx = (read_only_task_idx + 1) % (worker_cpu_procs.size() - 1);
+    else if (task->task_id == READ_ONLY_TASK_ID) {
+      int idx = *((int*)task->args);
+      task->target_proc = worker_cpu_procs[idx % (worker_cpu_procs.size() - 1)];
     }
   }
 
@@ -98,7 +97,7 @@ public:
     {
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
       task->regions[idx].virtual_map = false;
-      task->regions[idx].enable_WAR_optimization = true;
+      task->regions[idx].enable_WAR_optimization = false;
       task->regions[idx].reduction_list = false;
       // Make everything SOA
       task->regions[idx].blocking_factor =
@@ -215,6 +214,7 @@ void top_level_task(const Task *task,
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
   runtime->unmap_region(ctx, pr_A);
+  int read_only_idx = 0;
   for (int iter = 0; iter < ntask; iter++) {
     // Acquire the logical reagion so that we can launch sub-operations that make copies
     AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
@@ -226,11 +226,12 @@ void top_level_task(const Task *task,
     if (drand48() < ratio) {
       // read_only task
       TaskLauncher task_launcher(READ_ONLY_TASK_ID,
-                                 TaskArgument(NULL, 0));
+                                 TaskArgument(&read_only_idx, sizeof(read_only_idx)));
       task_launcher.add_region_requirement(
           RegionRequirement(lr_A, READ_ONLY, EXCLUSIVE, lr_A));
       task_launcher.add_field(0, FID_VAL);
       future = runtime->execute_task(ctx, task_launcher);
+      read_only_idx ++;
     } else {
       // read_write task
       TaskLauncher task_launcher(READ_WRITE_TASK_ID,
@@ -284,7 +285,7 @@ void read_only_task(const Task *task,
   int nsize = dom_A.get_rect<1>().dim_size(0);
 
   int sum;
-  for (int k = 0; k < nsize; k++)
+  for (int k = 0; k * k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       int x = acc_A.read(ptr_t(k));
       int y = acc_A.read(ptr_t(i));
@@ -311,7 +312,7 @@ void read_write_task(const Task *task,
   int nsize = dom_A.get_rect<1>().dim_size(0);
 
   int sum;
-  for (int k = 0; k < nsize; k++)
+  for (int k = 0; k * k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
       int x = acc_A.read(ptr_t(k));
       int y = acc_A.read(ptr_t(i));
