@@ -31,47 +31,48 @@ task phase3(r_private : region(int), r_ghost : region(int))
 where reads writes(r_private), reads(r_ghost) do
 end
 
-if false then
 task shard(is : regentlib.list(int),
            rs_private : regentlib.list(region(int)),
-           rs_ghost : regentlib.list(region(int)),
-           rs_ghost_product : regentlib.list(regentlib.list(region(int))))
+           rs_ghost : regentlib.list(region(int))-- ,
+           -- rs_ghost_product : regentlib.list(regentlib.list(region(int)))
+          )
 where
-  reads writes(rs_private, rs_ghost, rs_ghost_product),
-  simultaneous(rs_ghost, rs_ghost_product),
-  rs_private * rs_ghost,
-  rs_private * rs_ghost_product,
-  rs_ghost * rs_ghost_product
+  reads writes(rs_private, rs_ghost-- , rs_ghost_product
+              ),
+  simultaneous(rs_ghost-- , rs_ghost_product
+  ),
+  rs_private * rs_ghost-- ,
+  -- rs_private * rs_ghost_product,
+  -- rs_ghost * rs_ghost_product
 do
-  for i in is do
-    phase1(rs_private[i], rs_ghost[i])
-  end
+  -- for i in is do
+  --   phase1(rs_private[i], rs_ghost[i])
+  -- end
 
   -- FIXME: Somehow we need to handle the use of reduction fields (or
   -- regions, but I believe fields are easier). This is marked using
   -- with_reduction_fields below.
 
-  -- Zero the reduction fields:
-  for i in is do
-    fill(with_reduction_fields(rs_ghost[i]), 0) -- awaits(...)
-  end
-  for i in is do
-    phase2(rs_private[i], with_reduction_fields(rs_ghost[i]))
-  end
-  copy((with_reduction_fields(rs_ghost)), rs_ghost, +) -- arrives(...)
-  copy((with_reduction_fields(rs_ghost)), rs_ghost_product, +) -- arrives(...)
-  -- Explicitly:
+  -- -- Zero the reduction fields:
   -- for i in is do
-  --   for rs_ghost_product_i_j in rs_ghost_product[i] do
-  --     copy(rs_ghost[i], rs_ghost_product_i_j)
-  --   end
+  --   fill(with_reduction_fields(rs_ghost[i]), 0) -- awaits(...)
   -- end
+  -- for i in is do
+  --   phase2(rs_private[i], with_reduction_fields(rs_ghost[i]))
+  -- end
+  -- copy((with_reduction_fields(rs_ghost)), rs_ghost, +) -- arrives(...)
+  -- copy((with_reduction_fields(rs_ghost)), rs_ghost_product, +) -- arrives(...)
+  -- -- Explicitly:
+  -- -- for i in is do
+  -- --   for rs_ghost_product_i_j in rs_ghost_product[i] do
+  -- --     copy(rs_ghost[i], rs_ghost_product_i_j)
+  -- --   end
+  -- -- end
 
-  -- awaits(...)
-  for i in is do
-    phase3(rs_private[i], rs_ghost[i])
-  end
-end
+  -- -- awaits(...)
+  -- for i in is do
+  --   phase3(rs_private[i], rs_ghost[i])
+  -- end
 end
 
 -- x : regentlib.list(regentlib.list(region(...))) = list_cross_product(y, z)
@@ -103,9 +104,9 @@ task main()
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)
       c.printf("launching shard ilo..ihi %d..%d\n",
                ilo, ihi)
-      var is = list_range(ilo, ihi)
-      -- var rs_p = rs_private[is]
-      -- var rs_g = rs_ghost[is]
+      var is = list_range(ilo-lo, ihi-lo)
+      var rs_p = rs_private[is]
+      var rs_g = rs_ghost[is]
       -- var rs_g_p = rs_ghost_product[is]
       -- shard(is, rs_p, rs_g, rs_g_p)
     end

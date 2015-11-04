@@ -1471,11 +1471,17 @@ function rawref:get_index(cx, index, result_type)
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
   end
-  assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
 
-  local result = expr.just(
-    quote [actions] end,
-    `([ref_expr.value][ [index.value] ]))
+  local result
+  if std.is_list(value_type) then
+    result = expr.just(
+      quote [actions] end,
+      `([value_type:data(ref_expr.value)][ [index.value] ]))
+  else
+    result = expr.just(
+      quote [actions] end,
+      `([ref_expr.value][ [index.value] ]))
+  end
   return values.rawref(result, &result_type, data.newtuple())
 end
 
@@ -1705,39 +1711,75 @@ function codegen.expr_index_access(cx, node)
     local index = codegen.expr(cx, node.index):read(cx)
     return values.ref(index, node.expr_type.pointer_type)
   elseif std.is_list(value_type) then
-    if not value_type:is_list_of_regions() then
-      local index = codegen.expr(cx, node.index):read(cx)
-      local value = values.value(
-        codegen.expr(cx, node.value):read(cx),
-        node.value.expr_type)
-      return value:get_index(cx, index, expr_type)
-    else
-      local index = codegen.expr(cx, node.index):read(cx)
-      local value = values.value(
-        codegen.expr(cx, node.value):read(cx),
-        node.value.expr_type)
-      local region = value:get_index(cx, index, expr_type):read(cx)
-      local region_type = node.expr_type
+    local index = codegen.expr(cx, node.index):read(cx)
+    if not std.is_list(node.expr_type) then
+      -- Single indexing
+      local value = codegen.expr(cx, node.value):get_index(cx, index, expr_type)
+      if not value_type:is_list_of_regions() then
+        return value
+      else
+        local region = value:read(cx)
+        local region_type = node.expr_type
 
-      -- FIXME: For the moment, iterators, allocators, and physical
-      -- regions are inaccessible since we assume lists are always
-      -- unmapped.
-      cx:add_ispace_root(
-        region_type:ispace(),
-        `([region_type].index_space),
-        false,
-        false)
-      cx:add_region_root(
-        region_type, region.value,
-        cx:list_of_regions(value_type).field_paths,
-        cx:list_of_regions(value_type).privilege_field_paths,
-        cx:list_of_regions(value_type).field_privileges,
-        cx:list_of_regions(value_type).field_types,
-        cx:list_of_regions(value_type).field_ids,
-        false,
-        false,
-        false)
-      return values.value(region, region_type)
+        -- FIXME: For the moment, iterators, allocators, and physical
+        -- regions are inaccessible since we assume lists are always
+        -- unmapped.
+        cx:add_ispace_root(
+          region_type:ispace(),
+          `([region_type].index_space),
+          false,
+          false)
+        cx:add_region_root(
+          region_type, region.value,
+          cx:list_of_regions(value_type).field_paths,
+          cx:list_of_regions(value_type).privilege_field_paths,
+          cx:list_of_regions(value_type).field_privileges,
+          cx:list_of_regions(value_type).field_types,
+          cx:list_of_regions(value_type).field_ids,
+          false,
+          false,
+          false)
+        return values.value(region, region_type)
+      end
+    else
+      -- List indexing
+      local value = codegen.expr(cx, node.value):read(cx)
+      local index_type = std.as_read(node.index.expr_type)
+
+      local list_type = node.expr_type
+      local list = terralib.newsymbol(list_type, "list")
+      local actions = quote
+        [value.actions]
+        [index.actions]
+        [emit_debuginfo(node)]
+
+        var data = c.malloc(
+          terralib.sizeof([list_type.element_type]) * [index.value].__size)
+        regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+        var [list] = [list_type] {
+          __size = [index.value].__size,
+          __data = data
+        }
+        for i = 0, [index.value].__size do
+          std.assert(i < [value.value].__size, "slice index out of bounds")
+          [list_type:data(list)][i] = [std.implicit_cast(
+            value_type.element_type,
+            list_type.element_type,
+            `([value_type:data(value.value)][
+                [index_type:data(index.value)][i] ]))]
+        end
+      end
+
+      if value_type:is_list_of_regions() then
+        cx:add_list_of_regions(
+          list_type, list,
+          cx:list_of_regions(value_type).field_paths,
+          cx:list_of_regions(value_type).privilege_field_paths,
+          cx:list_of_regions(value_type).field_privileges,
+          cx:list_of_regions(value_type).field_types,
+          cx:list_of_regions(value_type).field_ids)
+      end
+      return values.value(expr.just(actions, list), list_type)
     end
   else
     local index = codegen.expr(cx, node.index):read(cx)

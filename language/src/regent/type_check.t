@@ -242,7 +242,7 @@ function type_check.coherence(cx, node, result)
     for _, region_field in ipairs(region_fields) do
       local region = region_field.region
       local region_type = region.type
-      assert(std.is_region(region_type))
+      assert(std.type_supports_privileges(region_type))
       if not result[region_type] then
         result[region_type] = data.newmap()
       end
@@ -552,12 +552,18 @@ function type_check.expr_index_access(cx, node)
       span = node.span,
     }
   elseif std.is_list(value_type) then
-    if not std.validate_implicit_cast(index_type, int) then
-      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    local slice = std.type_eq(index_type, std.list(int))
+    if not (std.validate_implicit_cast(index_type, int) or slice) then
+      log.error(node, "type mismatch: expected " .. tostring(int) .. " or " ..
+                  tostring(std.list(int)) .. " but got " ..
+                  tostring(index_type))
     end
 
     if not value_type:is_list_of_regions() then
       local expr_type = value_type.element_type
+      if slice then
+        expr_type = std.list(expr_type)
+      end
       return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
@@ -568,8 +574,10 @@ function type_check.expr_index_access(cx, node)
     else
       local ispace = terralib.newsymbol(std.ispace(value_type:ispace().index_type))
       local expr_type = std.region(ispace, value_type:fspace())
+      if slice then
+        expr_type = std.list(expr_type)
+      end
       -- FIXME: Copy constraints from list type.
-
       return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
