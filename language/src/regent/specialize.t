@@ -224,6 +224,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return 1
 
@@ -840,6 +843,15 @@ function specialize.expr_list_duplicate_partition(cx, node)
   }
 end
 
+function specialize.expr_list_cross_product(cx, node)
+  return ast.specialized.expr.ListCrossProduct {
+    lhs = specialize.expr(cx, node.lhs),
+    rhs = specialize.expr(cx, node.rhs),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_list_range(cx, node)
   return ast.specialized.expr.ListRange {
     start = specialize.expr(cx, node.start),
@@ -972,6 +984,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return specialize.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return specialize.expr_list_cross_product(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return specialize.expr_list_range(cx, node)

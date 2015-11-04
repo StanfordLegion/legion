@@ -562,7 +562,9 @@ function type_check.expr_index_access(cx, node)
     if not value_type:is_list_of_regions() then
       local expr_type = value_type.element_type
       if slice then
-        expr_type = std.list(expr_type)
+        for i = 1, value_type:list_depth() do
+          expr_type = std.list(expr_type)
+        end
       end
       return ast.typed.expr.IndexAccess {
         value = value,
@@ -575,7 +577,10 @@ function type_check.expr_index_access(cx, node)
       local ispace = terralib.newsymbol(std.ispace(value_type:ispace().index_type))
       local expr_type = std.region(ispace, value_type:fspace())
       if slice then
-        expr_type = std.list(expr_type)
+        for i = 1, value_type:list_depth() do
+          expr_type = std.list(
+            expr_type, value_type:partition(), value_type.privilege_depth)
+        end
       end
       -- FIXME: Copy constraints from list type.
       return ast.typed.expr.IndexAccess {
@@ -1224,7 +1229,11 @@ function type_check.expr_list_duplicate_partition(cx, node)
   if not std.validate_implicit_cast(indices_type, std.list(int)) then
     log.error(node, "type mismatch: expected " .. tostring(std.list(int)) .. " but got " .. tostring(indices_type))
   end
-  local expr_type = std.list(std.region(partition_type:parent_region():fspace()))
+  local expr_type = std.list(
+    std.region(
+      terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
+      partition_type:parent_region():fspace()),
+    partition_type)
 
   std.add_privilege(cx, "reads", expr_type, data.newtuple())
   std.add_privilege(cx, "writes", expr_type, data.newtuple())
@@ -1243,6 +1252,41 @@ function type_check.expr_list_duplicate_partition(cx, node)
   return ast.typed.expr.ListDuplicatePartition {
     partition = partition,
     indices = indices,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_cross_product(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_read(cx, lhs)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
+  if not std.is_list_of_regions(lhs_type) then
+    log.error(node, "type mismatch: expected a list of regions but got " .. tostring(lhs_type))
+  end
+  if not std.is_list_of_regions(rhs_type) then
+    log.error(node, "type mismatch: expected a list of regions but got " .. tostring(rhs_type))
+  end
+  local expr_type = std.list(
+    std.list(
+      std.region(
+        terralib.newsymbol(std.ispace(rhs_type:ispace().index_type)),
+        rhs_type:fspace()),
+      nil, 1),
+    nil, 1)
+
+  -- FIXME: Copy privileges:
+  -- std.add_privilege(cx, "reads", expr_type, data.newtuple())
+  -- std.add_privilege(cx, "writes", expr_type, data.newtuple())
+
+  -- FIXME: Copy constraints.
+  cx:intern_region(expr_type)
+
+  return ast.typed.expr.ListCrossProduct {
+    lhs = lhs,
+    rhs = rhs,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1541,6 +1585,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
     return type_check.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListCrossProduct) then
+    return type_check.expr_list_cross_product(cx, node)
 
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)

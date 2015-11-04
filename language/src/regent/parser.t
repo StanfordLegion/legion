@@ -596,6 +596,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_cross_product") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:nextif(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListCrossProduct {
+      lhs = lhs,
+      rhs = rhs,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("list_range") then
     p:expect("(")
     local range_start = p:expr()

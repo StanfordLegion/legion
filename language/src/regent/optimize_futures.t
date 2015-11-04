@@ -157,6 +157,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListRange) then
     return nil
 
@@ -587,6 +590,15 @@ function optimize_futures.expr_list_duplicate_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_list_cross_product(cx, node)
+  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
+  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  return node {
+    lhs = lhs,
+    rhs = rhs,
+  }
+end
+
 function optimize_futures.expr_list_range(cx, node)
   local start = concretize(optimize_futures.expr(cx, node.start))
   local stop = concretize(optimize_futures.expr(cx, node.stop))
@@ -734,6 +746,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return optimize_futures.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return optimize_futures.expr_list_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return optimize_futures.expr_list_range(cx, node)

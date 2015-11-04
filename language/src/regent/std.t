@@ -485,6 +485,10 @@ function std.is_list(t)
   return terralib.types.istype(t) and rawget(t, "is_list")
 end
 
+function std.is_list_of_regions(t)
+  return std.is_list(t) and t:is_list_of_regions()
+end
+
 function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
@@ -494,12 +498,12 @@ function std.is_unpack_result(t)
 end
 
 function std.type_supports_privileges(t)
-  return std.is_region(t) or (std.is_list(t) and t:is_list_of_regions())
+  return std.is_region(t) or std.is_list_of_regions(t)
 end
 
 function std.type_supports_constraints(t)
   return std.is_region(t) or std.is_partition(t) or
-    (std.is_list(t) and t:is_list_of_regions())
+    std.is_list_of_regions(t)
 end
 
 struct std.untyped {}
@@ -698,8 +702,7 @@ local function type_compatible(a, b)
     (std.is_region(a) and std.is_region(b)) or
     (std.is_partition(a) and std.is_partition(b)) or
     (std.is_cross_product(a) and std.is_cross_product(b)) or
-    (std.is_list(a) and a:is_list_of_regions() and
-       std.is_list(b) and b:is_list_of_regions())
+    (std.is_list_of_regions(a) and std.is_list_of_regions(b))
 end
 
 local function type_isomorphic(param_type, arg_type, check, mapping)
@@ -720,11 +723,10 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
       end)))
-  elseif std.is_list(param_type) and param_type:is_list_of_regions() and
-    std.is_list(arg_type) and arg_type:is_list_of_regions()
+  elseif std.is_list_of_regions(param_type) and std.is_list_of_regions(arg_type)
   then
     return std.type_eq(
-      param_type.element_type.fspace_type, arg_type.element_type.fspace_type)
+      param_type.element_type:fspace(), arg_type.element_type:fspace())
   else
     return false
   end
@@ -760,7 +762,7 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
         return param_partition_as_arg_type
     end)
     return std.cross_product(unpack(param_partitions_as_arg_type))
-  elseif std.is_list(param_type) and param_type:is_list_of_regions() then
+  elseif std.is_list_of_regions(param_type) then
     local fspace_type = std.type_sub(param_type.element_type.fspace_type, mapping)
     return std.list(std.region(fspace_type))
   else
@@ -1111,8 +1113,7 @@ end
 function std.implicit_cast(from, to, expr)
    assert(not (std.is_ref(from) or std.is_rawref(from)))
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or
-     (std.is_list(to) and to:is_list_of_regions()) or
+     std.is_cross_product(to) or std.is_list_of_regions(to) or
      std.is_bounded_type(to) or std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
@@ -1125,8 +1126,7 @@ end
 
 function std.explicit_cast(from, to, expr)
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or
-     (std.is_list(to) and to:is_list_of_regions()) or
+     std.is_cross_product(to) or std.is_list_of_regions(to) or
      std.is_bounded_type(to) or std.is_fspace_instance(to)
    then
     return to:force_cast(from, to, expr)
@@ -1175,9 +1175,7 @@ end
 
 function std.fn_param_lists_of_regions_by_index(fn_type)
   local params = fn_type.parameters
-  return data.filteri(
-    function(t) return std.is_list(t) and t:is_list_of_regions() end,
-    params)
+  return data.filteri(function(t) return std.is_list_of_regions(t) end, params)
 end
 
 -- #####################################
@@ -2133,9 +2131,13 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
+  end
+
+  if partition_type and not std.is_partition(partition_type) then
+    error("list expected a partition type as argument 2, got " .. tostring(partition_type))
   end
 
   local st = terralib.types.newstruct("list")
@@ -2143,27 +2145,40 @@ std.list = terralib.memoize(function(element_type)
       { "__size", uint64 }, -- in elements
       { "__data", &opaque },
   })
+  if partition_type then
+    st.entries:insert({ "__partition", c.legion_logical_partition_t })
+  end
 
   st.is_list = true
   st.element_type = element_type
+  st.partition_type = partition_type or false
+  st.privilege_depth = privilege_depth or 0
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
-      (std.is_list(self.element_type) and
-         self.element_type:is_list_of_regions())
+      std.is_list_of_regions(self.element_type)
+  end
+
+  function st:partition()
+    return self.partition_type
   end
 
   function st:list_depth()
     return 1 + self.element_type:list_depth()
   end
 
+  function st:privilege_depth()
+    assert(self.privilege_depth < self:list_depth())
+    return self.privilege_depth
+  end
+
   function st:ispace()
-    assert(self:is_list_of_regions())
+    assert(std.is_list_of_regions(self))
     return self.element_type:ispace()
   end
 
   function st:fspace()
-    assert(self:is_list_of_regions())
+    assert(std.is_list_of_regions(self))
     return self.element_type:fspace()
   end
 
@@ -2178,11 +2193,19 @@ std.list = terralib.memoize(function(element_type)
   end
 
   function st:force_cast(from, to, expr)
-    assert(std.is_list(from) and from:is_list_of_regions() and
-             std.is_list(to) and to:is_list_of_regions())
+    assert(std.is_list_of_regions(from) and std.is_list_of_regions(to))
     -- FIXME: This would result in memory corruption if we ever freed
     -- the original data.
-    return `([to] { __size = [expr].__size, __data = [expr].__data })
+    if to:partition() then
+      assert(from:partition())
+      return `([to] {
+          __size = [expr].__size,
+          __data = [expr].__data,
+          __partition = [expr].__partition,
+        })
+    else
+      return `([to] { __size = [expr].__size, __data = [expr].__data })
+    end
   end
 
   function st.metamethods.__typename(st)

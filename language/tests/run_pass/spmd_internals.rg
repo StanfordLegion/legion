@@ -33,9 +33,8 @@ end
 
 task shard(is : regentlib.list(int),
            rs_private : regentlib.list(region(int)),
-           rs_ghost : regentlib.list(region(int))-- ,
-           -- rs_ghost_product : regentlib.list(regentlib.list(region(int)))
-          )
+           rs_ghost : regentlib.list(region(int)),
+           rs_ghost_product : regentlib.list(regentlib.list(region(int))))
 where
   reads writes(rs_private, rs_ghost-- , rs_ghost_product
               ),
@@ -98,7 +97,7 @@ task main()
   var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
   copy(r_private, rs_private)
   copy(r_ghost, rs_ghost)
-  -- var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
+  var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
   -- must_epoch
     for i = lo, hi, stride do
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)
@@ -107,7 +106,7 @@ task main()
       var is = list_range(ilo-lo, ihi-lo)
       var rs_p = rs_private[is]
       var rs_g = rs_ghost[is]
-      -- var rs_g_p = rs_ghost_product[is]
+      var rs_g_p = rs_ghost_product[is]
       -- shard(is, rs_p, rs_g, rs_g_p)
     end
   -- end

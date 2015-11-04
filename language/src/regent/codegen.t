@@ -1755,7 +1755,7 @@ function codegen.expr_index_access(cx, node)
 
         var data = c.malloc(
           terralib.sizeof([list_type.element_type]) * [index.value].__size)
-        regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+        regentlib.assert(data ~= nil, "malloc failed in index_access")
         var [list] = [list_type] {
           __size = [index.value].__size,
           __data = data
@@ -2998,7 +2998,8 @@ function codegen.expr_list_duplicate_partition(cx, node)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
     var [list] = expr_type {
       __size = [indices.value].__size,
-      __data = data
+      __data = data,
+      __partition = [partition.value].impl,
     }
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
@@ -3011,6 +3012,115 @@ function codegen.expr_list_duplicate_partition(cx, node)
   end
 
 
+
+  return values.value(
+    expr.just(actions, list),
+    expr_type)
+end
+
+function codegen.expr_list_cross_product(cx, node)
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local lhs = codegen.expr(cx, node.lhs):read(cx, lhs_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local rhs = codegen.expr(cx, node.rhs):read(cx, rhs_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lhs.actions]
+    [rhs.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local list = terralib.newsymbol(expr_type, "list")
+
+  assert(cx:has_list_of_regions(lhs_type))
+
+  cx:add_list_of_regions(
+    expr_type, list,
+    cx:list_of_regions(lhs_type).field_paths,
+    cx:list_of_regions(lhs_type).privilege_field_paths,
+    cx:list_of_regions(lhs_type).field_privileges,
+    cx:list_of_regions(lhs_type).field_types,
+    cx:list_of_regions(lhs_type).field_ids)
+
+  actions = quote
+    [actions]
+    var lhs_partition = [lhs.value].__partition.index_partition
+    var rhs_partition = [rhs.value].__partition.index_partition
+
+    -- Note: This is backwards on purpose. Privileges must be rooted
+    -- at rhs to be useful as copy destinations (which, as a rule,
+    -- must be dominated by the source).
+    var product = c.legion_terra_index_cross_product_create(
+      [cx.runtime], [cx.context], [rhs_partition], [lhs_partition])
+
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+    var [list] = expr_type {
+      __size = [rhs.value].__size,
+      __data = data,
+    }
+    for i = 0, [rhs.value].__size do
+      var root = [rhs_type:data(rhs.value)][i]
+      var color = c.legion_logical_region_get_color(
+        [cx.runtime], [cx.context],
+        [rhs_type:data(rhs.value)][i].impl)
+      var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
+        [cx.runtime], [cx.context],
+        product, color)
+
+      -- Count non-empty subspaces.
+      var subsize = 0
+      for j = 0, [lhs.value].__size do
+        var subcolor = c.legion_logical_region_get_color(
+          [cx.runtime], [cx.context],
+          [rhs_type:data(rhs.value)][i].impl)
+
+        var is = c.legion_index_partition_get_index_subspace(
+          [cx.runtime], [cx.context], product_ip1, subcolor)
+        var it = c.legion_index_iterator_create(
+          [cx.runtime], [cx.context], is)
+        var nonempty = c.legion_index_iterator_has_next(it)
+        if nonempty then
+          subsize = subsize + 1
+        end
+      end
+
+      -- Allocate sublist.
+      var subdata = c.malloc(
+        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+      regentlib.assert(subdata ~= nil, "malloc failed in list_duplicate_partition")
+      [expr_type:data(list)][i] = [expr_type.element_type] {
+        __size = subsize,
+        __data = subdata,
+      }
+
+      -- Fill sublist.
+      var subslot = 0
+      for j = 0, [lhs.value].__size do
+        var subcolor = c.legion_logical_region_get_color(
+          [cx.runtime], [cx.context],
+          [rhs_type:data(rhs.value)][i].impl)
+
+        var is = c.legion_index_partition_get_index_subspace(
+          [cx.runtime], [cx.context], product_ip1, subcolor)
+        var it = c.legion_index_iterator_create(
+          [cx.runtime], [cx.context], is)
+        var nonempty = c.legion_index_iterator_has_next(it)
+        if nonempty then
+          [expr_type.element_type:data(`([expr_type:data(list)][i]))][subslot] =
+            [expr_type.element_type.element_type] {
+              impl = c.legion_logical_region_t {
+                tree_id = root.impl.tree_id,
+                index_space = is,
+                field_space = root.impl.field_space,
+              }
+            }
+          subslot = subslot + 1
+        end
+      end
+    end
+  end
 
   return values.value(
     expr.just(actions, list),
@@ -3679,6 +3789,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return codegen.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return codegen.expr_list_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return codegen.expr_list_range(cx, node)
