@@ -705,7 +705,7 @@ namespace LegionRuntime {
         msgs_processor.push_back(LogMsgProcessor(sid, processor));
       }
       // Sequential
-      // Called in Runtime constructor in runtime.cc
+      // Called in Internal constructor in runtime.cc
       static void initialize_legion_logging(AddressSpaceID sid,
                                         const std::set<Processor> &processors)
       {
@@ -718,7 +718,7 @@ namespace LegionRuntime {
         }
       }
       // Sequential
-      // Called in Runtime destructor in runtime.cc
+      // Called in Internal destructor in runtime.cc
       static void finalize_legion_logging(const std::set<Processor> &processors)
       {
         log_logging.info("nodeinfo: {\"address_space\": %u, \"init_time\":%llu}", address_space, init_time);
@@ -921,14 +921,14 @@ namespace LegionRuntime {
       //========================================================================
 
       // Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static void log_processor(Processor proc, Processor utility,
                                        Processor::Kind kind)
       {
       }
 
       // Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static void log_memory(Memory mem, Memory::Kind kind,
                                     size_t capacity)
       {
@@ -936,7 +936,7 @@ namespace LegionRuntime {
       }
 
       // Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static void log_proc_mem_affinity(Processor proc, Memory mem,
                                                size_t bandwidth,
                                                size_t latency)
@@ -945,7 +945,7 @@ namespace LegionRuntime {
       }
 
       //Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static void log_mem_mem_affinity(Memory mem1, Memory mem2,
                                               size_t bandwidth,
                                               size_t latency)
@@ -1036,7 +1036,7 @@ namespace LegionRuntime {
       //========================================================================
 
       // Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static inline void log_task_collection(Processor::TaskFuncID task_id,
                                              bool leaf, bool idempotent,
                                              const char *name)
@@ -1045,7 +1045,7 @@ namespace LegionRuntime {
       }
 
       // Sequential
-      // Called in Runtime::perform_one_time_logging in runtime.cc
+      // Called in Internal::perform_one_time_logging in runtime.cc
       static inline void log_task_variant(Processor::TaskFuncID task_id,
                                           Processor::Kind proc_kind,
                                           bool single_task, bool index_task,
@@ -1055,7 +1055,7 @@ namespace LegionRuntime {
       }
 
       // Sequential
-      // Called in Runtime::launch_top_level_task in runtime.cc
+      // Called in Internal::launch_top_level_task in runtime.cc
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
                                             UniqueID unique_op_id)
       {
@@ -1176,15 +1176,15 @@ namespace LegionRuntime {
       //========================================================================
 
       // Thread-safe
-      // Called in Runtime::create_index_space
-      // Called in Runtime::create_index_space with domain in runtime.cc
+      // Called in Internal::create_index_space
+      // Called in Internal::create_index_space with domain in runtime.cc
       static inline void log_top_index_space(Processor p, IndexSpace space)
       {
         get_profiler().add_msg(LogMsgTopIndexSpace(space));
       }
 
       // Thread-safe
-      // Called in Runtime::create_index_partition in runtime.cc
+      // Called in Internal::create_index_partition in runtime.cc
       static inline void log_index_partition(Processor p,
                                              IndexSpace parent, 
                                              IndexPartition handle,
@@ -1194,7 +1194,7 @@ namespace LegionRuntime {
       }
 
       // Thread-safe
-      // Called in Runtime::create_index_partition in runtime.cc
+      // Called in Internal::create_index_partition in runtime.cc
       static inline void log_index_subspace(Processor p, IndexPartition parent,
                                             IndexSpace handle, Color color)
       {
@@ -1202,15 +1202,15 @@ namespace LegionRuntime {
       }
 
       // Thread-safe
-      // Called in Runtime::create_field_space in runtime.cc
+      // Called in Internal::create_field_space in runtime.cc
       static inline void log_field_space(Processor p, FieldSpace handle)
       {
         get_profiler().add_msg(LogMsgFieldSpace(handle));
       }
 
       // Thread-safe
-      // Called in Runtime::allocate_field in runtime.cc
-      // Called in Runtime::allocate_fields in runtime.cc
+      // Called in Internal::allocate_field in runtime.cc
+      // Called in Internal::allocate_fields in runtime.cc
       static inline void log_field_creation(Processor p, FieldSpace handle, 
                                             FieldID fid, bool local)
       {
@@ -1218,7 +1218,7 @@ namespace LegionRuntime {
       }
 
       // Thread-safe
-      // Called in Runtime::create_logical_region in runtime.cc
+      // Called in Internal::create_logical_region in runtime.cc
       static inline void log_top_region(Processor p, IndexSpace ispace,
                                         FieldSpace fspace, RegionTreeID tid)
       {

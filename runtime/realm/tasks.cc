@@ -22,7 +22,7 @@
 namespace Realm {
 
   Logger log_task("task");
-  Logger log_util("util");
+  Logger log_sched("sched");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -32,14 +32,42 @@ namespace Realm {
   Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
+	     Event _before_event,
 	     Event _finish_event, int _priority)
     : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
       args(_args, _arglen), priority(_priority)
   {
+    log_task.info() << "task " << this << " created: func=" << func_id
+		    << " proc=" << _proc << " arglen=" << _arglen
+		    << " before=" << _before_event << " after=" << _finish_event;
   }
 
   Task::~Task(void)
   {
+  }
+
+  void Task::mark_ready(void)
+  {
+    log_task.info() << "task " << this << " ready: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_ready();
+  }
+
+  void Task::mark_started(void)
+  {
+    log_task.info() << "task " << this << " started: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_started();
+  }
+
+  void Task::mark_completed(void)
+  {
+    log_task.info() << "task " << this << " completed: func=" << func_id
+		    << " proc=" << proc << " arglen=" << args.size()
+		    << " before=" << before_event << " after=" << finish_event;
+    Operation::mark_completed();
   }
 
   void Task::execute_on_processor(Processor p)
@@ -62,8 +90,6 @@ namespace Realm {
     start_enclosing(finish_event);
     unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
-    log_task.info("thread running ready task %p for proc " IDFMT "",
-		  this, p.id);
 
     // does the profiler want to know where it was run?
     if(measurements.wants_measurement<ProfilingMeasurements::OperationProcessorUsage>()) {
@@ -87,8 +113,6 @@ namespace Realm {
 
     mark_finished();
 
-    log_task.info("thread finished running task %p for proc " IDFMT "",
-		  this, p.id);
 #ifdef EVENT_GRAPH_TRACE
     unsigned long long stop = TimeStamp::get_current_time_in_micros();
     finish_enclosing();
@@ -296,6 +320,8 @@ namespace Realm {
     if(!really_blocked)
       return;
 
+    log_sched.debug() << "scheduler worker blocking: sched=" << this << " worker=" << thread;
+
     while(true) {
       // let's try to find something better to do than spin our wheels
 
@@ -355,16 +381,24 @@ namespace Realm {
 
   void ThreadedTaskScheduler::thread_ready(Thread *thread)
   {
+    log_sched.debug() << "scheduler worker ready: sched=" << this << " worker=" << thread;
+
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
     AutoHSLLock al(lock);
+
+    // this had better not be after shutdown was initiated
+    if(shutdown_flag) {
+      log_sched.fatal() << "scheduler worker awakened during shutdown: sched=" << this << " worker=" << thread;
+      assert(!shutdown_flag);
+    }
 
     // look up the priority of this thread and then add it to the resumable workers
     std::map<Thread *, int>::const_iterator it = worker_priorities.find(thread);
     assert(it != worker_priorities.end());
     int priority = it->second;
 
-    // if this worker is higher priority than any other resiumable workers and we're
+    // if this worker is higher priority than any other resumable workers and we're
     //  not at the max active thread count, we can immediately wake up the thread
     if((active_worker_count < cfg_max_active_workers) &&
        resumable_workers.empty(priority-1)) {
@@ -585,6 +619,7 @@ namespace Realm {
 
   void KernelThreadTaskScheduler::shutdown(void)
   {
+    log_sched.info() << "scheduler shutdown requested: sched=" << this;
     shutdown_flag = true;
     // setting the shutdown flag adds "work" to the system
     work_counter.increment_counter();
@@ -597,16 +632,12 @@ namespace Realm {
 	shutdown_condvar.wait();
     }
 
-#ifdef DEBUG_THREAD_SCHEDULER
-    printf("sched shutdown complete\n");
-#endif
+    log_sched.info() << "scheduler shutdown complete: sched=" << this;
   }
 
   void KernelThreadTaskScheduler::thread_starting(Thread *thread)
   {
-#ifdef DEBUG_THREAD_SCHEDULER
-    printf("worker starting: %p\n", thread);
-#endif
+    log_sched.info() << "scheduler worker started: sched=" << this << " worker=" << thread;
 
     // see if we're supposed to be active yet
     {
@@ -627,6 +658,8 @@ namespace Realm {
 
   void KernelThreadTaskScheduler::thread_terminating(Thread *thread)
   {
+    log_sched.info() << "scheduler worker terminating: sched=" << this << " worker=" << thread;
+
     AutoHSLLock al(lock);
 
     // if the thread is still in our all_workers list, this was unexpected
@@ -815,6 +848,7 @@ namespace Realm {
 
   void UserThreadTaskScheduler::shutdown(void)
   {
+    log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
     AutoHSLLock al(lock);
 
@@ -831,6 +865,7 @@ namespace Realm {
       all_hosts.erase(t);
       delete t;
     }
+    log_sched.info() << "scheduler shutdown complete: sched=" << this;
   }
 
   namespace ThreadLocal {
@@ -876,6 +911,7 @@ namespace Realm {
   void UserThreadTaskScheduler::thread_starting(Thread *thread)
   {
     // nothing to do here
+    log_sched.info() << "scheduler worker created: sched=" << this << " worker=" << thread;
   }
 
   void UserThreadTaskScheduler::thread_terminating(Thread *thread)

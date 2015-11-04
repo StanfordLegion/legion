@@ -33,14 +33,13 @@ OUTFILE		:= liblegion_terra.so
 GEN_SRC		:= \
   legion_terra.cc lua_mapper_wrapper.cc \
   legion_terra_partitions.cc \
-  liszt_gpu_mapper.cc \
   # .cc files
 GEN_GPU_SRC	:=		# .cu files
 
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
-INC_FLAGS += -I$(TERRA_DIR)/release/include/terra
+INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 LD_FLAGS +=
 
 CC_FLAGS += -fPIC

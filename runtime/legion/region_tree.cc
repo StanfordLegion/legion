@@ -38,7 +38,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RegionTreeForest::RegionTreeForest(Runtime *rt)
+    RegionTreeForest::RegionTreeForest(Internal *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -1440,7 +1440,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
     }
 
@@ -1489,7 +1489,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
     }
 
@@ -1742,7 +1742,7 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -1793,7 +1793,7 @@ namespace LegionRuntime {
 #endif
       bool result = traverser.traverse(start_node);
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       if (result)
         return traverser.get_instance_ref();
@@ -1841,7 +1841,7 @@ namespace LegionRuntime {
       target_node->remap_region(ctx.get_id(), view, user_mask, 
                                 version_info, needed_mask);
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       return MappingRef(view, needed_mask);
     }
@@ -1893,7 +1893,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       if (result)
         return traverser.get_instance_ref();
@@ -1995,7 +1995,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2009,9 +2009,10 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert(composite_view->get_parent() == NULL);
+      assert(composite_view->logical_node->is_region());
 #endif
-      RegionNode *child_node = get_node(req.region);
+      RegionNode *child_node = composite_view->logical_node->as_region_node();
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       child_node->register_virtual(ctx.get_id(), composite_view,
@@ -2198,7 +2199,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2380,7 +2381,7 @@ namespace LegionRuntime {
       }
       Event result = Event::merge_events(result_events);
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2492,7 +2493,7 @@ namespace LegionRuntime {
 #endif
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      end_perf_trace(Internal::perf_trace_tolerance);
 #endif
       // No need to add copy users since we added them when we
       // mapped this copy operation
@@ -2625,6 +2626,7 @@ namespace LegionRuntime {
     Event RegionTreeForest::detach_file(RegionTreeContext ctx,
                                         const RegionRequirement &req,
                                         DetachOp *detach_op,
+                                        VersionInfo &version_info,
                                         const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
@@ -2632,14 +2634,9 @@ namespace LegionRuntime {
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *detach_node = get_node(req.region);
-      FieldMask detach_mask = 
-        detach_node->column_source->get_field_mask(req.privilege_fields);
-      MaterializedView *detach_view = ref.get_materialized_view();
-      UserEvent done_event = UserEvent::create_user_event();
-      detach_view->unmake_persistent(detach_op->get_parent(),
-                                     detach_op->find_parent_index(0),
-                                     runtime->address_space, done_event);
-      return done_event;
+      // Perform the detachment
+      return detach_node->detach_file(ctx.get_id(), detach_op, 
+                                      version_info, ref);
     }
 
     //--------------------------------------------------------------------------
@@ -5286,8 +5283,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ AddressSpaceID IndexSpaceNode::get_owner_space(IndexSpace handle, 
-                                                              Runtime *rt)
+    /*static*/ AddressSpaceID IndexSpaceNode::get_owner_space(IndexSpace handle,
+                                                              Internal *rt)
     //--------------------------------------------------------------------------
     {
       return (handle.id % rt->runtime_stride);
@@ -5680,7 +5677,7 @@ namespace LegionRuntime {
             ready = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (Internal::dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -6605,7 +6602,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID IndexPartNode::get_owner_space(
-                                          IndexPartition part, Runtime *runtime)
+                                         IndexPartition part, Internal *runtime)
     //--------------------------------------------------------------------------
     {
       return (part.id % runtime->runtime_stride);
@@ -6917,7 +6914,7 @@ namespace LegionRuntime {
             ready_event = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (Internal::dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -7863,7 +7860,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID FieldSpaceNode::get_owner_space(FieldSpace handle,
-                                                              Runtime *rt)
+                                                              Internal *rt)
     //--------------------------------------------------------------------------
     {
       return (handle.id % rt->runtime_stride);
@@ -8712,7 +8709,7 @@ namespace LegionRuntime {
       }
 #ifdef DEBUG_HIGH_LEVEL
       // Have a little bit of code for logging bit masks when requested
-      if (Runtime::bit_mask_logging)
+      if (Internal::bit_mask_logging)
       {
         char *bit_string = result.to_string();
         fprintf(stderr,"%s\n",bit_string);
@@ -9034,7 +9031,7 @@ namespace LegionRuntime {
       }
       ReductionManager *result = NULL;
       // Find the reduction operation for this instance
-      const ReductionOp *reduction_op = Runtime::get_reduction_op(redop);
+      const ReductionOp *reduction_op = Internal::get_reduction_op(redop);
 #ifdef DEBUG_HIGH_LEVEL
       std::map<FieldID,FieldInfo>::const_iterator finder =
 #endif
@@ -9706,7 +9703,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID RegionTreeNode::get_owner_space(RegionTreeID tid,
-                                                              Runtime *runtime)
+                                                              Internal *runtime)
     //--------------------------------------------------------------------------
     {
       return (tid % runtime->runtime_stride);
@@ -9945,9 +9942,9 @@ namespace LegionRuntime {
         if (!!non_dominated_mask)
         {
           perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                          true/*record*/, false/*has skip*/, false/*track dom*/>(
-                              user, state.prev_epoch_users, non_dominated_mask, 
-                              open_below, arrived/*validates*/ && !projecting);
+                        true/*record*/, false/*has skip*/, false/*track dom*/>(
+                          user, state.prev_epoch_users, non_dominated_mask, 
+                          open_below, arrived/*validates*/ && !projecting);
         }
       }
       const bool is_write = IS_WRITE(user.usage); // only writes
@@ -13088,8 +13085,14 @@ namespace LegionRuntime {
           postconditions[copy_post] = pre_set.set_mask;
         }
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-        IndexSpace copy_index_space =
-                        dst->logical_node->as_region_node()->row_source->handle;
+        IndexSpaceID index_space_id;
+        if (dst->logical_node->is_region())
+          index_space_id =
+            dst->logical_node->as_region_node()->row_source->handle.get_id();
+        else
+          index_space_id =
+            dst->logical_node->as_partition_node()->row_source->handle.get_id();
+
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = update_views.begin(); it != update_views.end(); it++)
         {
@@ -13103,7 +13106,7 @@ namespace LegionRuntime {
                 Processor::get_executing_processor(),
                 it->first->manager->get_instance(),
                 dst->manager->get_instance(),
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle,
                 manager_node->handle.tree_id,
                 copy_pre, copy_post, copy_fields, 0/*redop*/);
@@ -13119,7 +13122,7 @@ namespace LegionRuntime {
             LegionSpy::log_copy_operation(
                 it->first->manager->get_instance().id,
                 dst->manager->get_instance().id,
-                copy_index_space.get_id(),
+                index_space_id,
                 manager_node->column_source->handle.id,
                 manager_node->handle.tree_id, copy_pre, copy_post,
                 0/*redop*/, field_set);
@@ -13321,6 +13324,17 @@ namespace LegionRuntime {
       {
         state->valid_views.erase(*it);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::filter_valid_views(PhysicalState *state, 
+                                            LogicalView *to_filter)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        state->valid_views.find(to_filter);
+      if (finder != state->valid_views.end())
+        state->valid_views.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -14317,7 +14331,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID RegionNode::get_owner_space(LogicalRegion handle,
-                                                          Runtime *runtime)
+                                                          Internal *runtime)
     //--------------------------------------------------------------------------
     {
       return (handle.tree_id % runtime->runtime_stride);
@@ -14615,7 +14629,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         LegionSpy::log_physical_instance(manager->get_instance().id,
             manager->memory.id, handle.index_space.id,
-            handle.field_space.id, handle.tree_id);
+            handle.field_space.id, handle.tree_id, blocking_factor);
         for (std::set<FieldID>::const_iterator it = fields.begin();
              it != fields.end(); ++it)
           LegionSpy::log_instance_field(manager->get_instance().id, *it);
@@ -15157,9 +15171,30 @@ namespace LegionRuntime {
                             version_info.get_upper_bound_node());
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(ctx, version_info);
-      update_valid_views(state, attach_mask, false/*dirty*/, view);
+      // We need to invalidate all other instances for these fields since
+      // we are now making this the only valid copy of the data
+      update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
       return InstanceRef(ready_event, view);
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionNode::detach_file(ContextID ctx, DetachOp *detach_op, 
+                                  VersionInfo &version_info, 
+                                  const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView *detach_view = ref.get_materialized_view();
+      // First remove this view from the set of valid views
+      PhysicalState *state = get_physical_state(ctx, version_info);
+      filter_valid_views(state, detach_view);
+      // Then remove it from the set of persistent views
+      UserEvent done_event = UserEvent::create_user_event();
+      detach_view->unmake_persistent(detach_op->get_parent(),
+                                     detach_op->find_parent_index(0),
+                                     context->runtime->address_space, 
+                                     done_event);
+      return done_event;
     }
 
     //--------------------------------------------------------------------------
@@ -15842,7 +15877,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID PartitionNode::get_owner_space(
-                                      LogicalPartition handle, Runtime *runtime)
+                                     LogicalPartition handle, Internal *runtime)
     //--------------------------------------------------------------------------
     {
       return (handle.tree_id % runtime->runtime_stride);

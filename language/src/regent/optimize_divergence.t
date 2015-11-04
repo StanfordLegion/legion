@@ -48,307 +48,21 @@ function context:mark_region_divergence(...)
   end
 end
 
-local analyze_region_divergence = {}
-
-function analyze_region_divergence.expr_field_access(cx, node)
-  local value_type = std.as_read(node.value.expr_type)
-  if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
-    cx:mark_region_divergence(unpack(value_type:bounds()))
-  end
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_index_access(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-  analyze_region_divergence.expr(cx, node.index)
-end
-
-function analyze_region_divergence.expr_method_call(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-  node.args:map(function(arg) analyze_region_divergence.expr(cx, arg) end)
-end
-
-function analyze_region_divergence.expr_call(cx, node)
-  analyze_region_divergence.expr(cx, node.fn)
-  node.args:map(function(arg) analyze_region_divergence.expr(cx, arg) end)
-end
-
-function analyze_region_divergence.expr_cast(cx, node)
-  analyze_region_divergence.expr(cx, node.fn)
-  analyze_region_divergence.expr(cx, node.arg)
-end
-
-function analyze_region_divergence.expr_ctor(cx, node)
-  node.fields:map(function(field) analyze_region_divergence.expr(cx, field.value) end)
-end
-
-function analyze_region_divergence.expr_raw_physical(cx, node)
-  analyze_region_divergence.expr(cx, node.region)
-end
-
-function analyze_region_divergence.expr_raw_fields(cx, node)
-  analyze_region_divergence.expr(cx, node.region)
-end
-
-function analyze_region_divergence.expr_raw_value(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_isnull(cx, node)
-  analyze_region_divergence.expr(cx, node.pointer)
-end
-
-function analyze_region_divergence.expr_dynamic_cast(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_static_cast(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_unary(cx, node)
-  analyze_region_divergence.expr(cx, node.rhs)
-end
-
-function analyze_region_divergence.expr_binary(cx, node)
-  analyze_region_divergence.expr(cx, node.lhs)
-  analyze_region_divergence.expr(cx, node.rhs)
-end
-
-function analyze_region_divergence.expr_deref(cx, node)
-  local value_type = std.as_read(node.value.expr_type)
-  if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
-    cx:mark_region_divergence(unpack(value_type:bounds()))
-  end
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_future(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr_future_get_result(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
-    return
-
-  elseif node:is(ast.typed.ExprConstant) then
-    return
-
-  elseif node:is(ast.typed.ExprFunction) then
-    return
-
-  elseif node:is(ast.typed.ExprFieldAccess) then
-    return analyze_region_divergence.expr_field_access(cx, node)
-
-  elseif node:is(ast.typed.ExprIndexAccess) then
-    return analyze_region_divergence.expr_index_access(cx, node)
-
-  elseif node:is(ast.typed.ExprMethodCall) then
-    return analyze_region_divergence.expr_method_call(cx, node)
-
-  elseif node:is(ast.typed.ExprCall) then
-    return analyze_region_divergence.expr_call(cx, node)
-
-  elseif node:is(ast.typed.ExprCast) then
-    return analyze_region_divergence.expr_cast(cx, node)
-
-  elseif node:is(ast.typed.ExprCtor) then
-    return analyze_region_divergence.expr_ctor(cx, node)
-
-  elseif node:is(ast.typed.ExprRawContext) then
-    return
-
-  elseif node:is(ast.typed.ExprRawFields) then
-    return analyze_region_divergence.expr_raw_fields(cx, node)
-
-  elseif node:is(ast.typed.ExprRawPhysical) then
-    return analyze_region_divergence.expr_raw_physical(cx, node)
-
-  elseif node:is(ast.typed.ExprRawRuntime) then
-    return
-
-  elseif node:is(ast.typed.ExprRawValue) then
-    return analyze_region_divergence.expr_raw_value(cx, node)
-
-  elseif node:is(ast.typed.ExprIsnull) then
-    return analyze_region_divergence.expr_isnull(cx, node)
-
-  elseif node:is(ast.typed.ExprNew) then
-    return
-
-  elseif node:is(ast.typed.ExprNull) then
-    return
-
-  elseif node:is(ast.typed.ExprDynamicCast) then
-    return analyze_region_divergence.expr_dynamic_cast(cx, node)
-
-  elseif node:is(ast.typed.ExprStaticCast) then
-    return analyze_region_divergence.expr_static_cast(cx, node)
-
-  elseif node:is(ast.typed.ExprIspace) then
-    return
-
-  elseif node:is(ast.typed.ExprRegion) then
-    return
-
-  elseif node:is(ast.typed.ExprPartition) then
-    return
-
-  elseif node:is(ast.typed.ExprCrossProduct) then
-    return
-
-  elseif node:is(ast.typed.ExprUnary) then
-    return analyze_region_divergence.expr_unary(cx, node)
-
-  elseif node:is(ast.typed.ExprBinary) then
-    return analyze_region_divergence.expr_binary(cx, node)
-
-  elseif node:is(ast.typed.ExprDeref) then
-    return analyze_region_divergence.expr_deref(cx, node)
-
-  elseif node:is(ast.typed.ExprFuture) then
-    return analyze_region_divergence.expr_future(cx, node)
-
-  elseif node:is(ast.typed.ExprFutureGetResult) then
-    return analyze_region_divergence.expr_future_get_result(cx, node)
-
-  else
-    assert(false, "unexpected node type " .. tostring(node.node_type))
+local function analyze_region_divergence_node(cx)
+  return function(node)
+    if node:is(ast.typed.expr.FieldAccess) or
+      node:is(ast.typed.expr.Deref)
+    then
+      local value_type = std.as_read(node.value.expr_type)
+      if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
+        cx:mark_region_divergence(unpack(value_type:bounds()))
+      end
+    end
   end
 end
 
-function analyze_region_divergence.block(cx, node)
-  node.stats:map(function(stat) analyze_region_divergence.stat(cx, stat) end)
-end
-
-function analyze_region_divergence.stat_if(cx, node)
-  analyze_region_divergence.expr(cx, node.cond)
-  analyze_region_divergence.block(cx, node.then_block)
-  node.elseif_blocks:map(
-    function(block) analyze_region_divergence.stat_elseif(cx, block) end)
-  analyze_region_divergence.block(cx, node.else_block)
-end
-
-function analyze_region_divergence.stat_elseif(cx, node)
-  analyze_region_divergence.expr(cx, node.cond)
-  analyze_region_divergence.block(cx, node.block)
-end
-
-function analyze_region_divergence.stat_while(cx, node)
-  analyze_region_divergence.expr(cx, node.cond)
-  analyze_region_divergence.block(cx, node.block)
-end
-
-function analyze_region_divergence.stat_for_num(cx, node)
-  node.values:map(function(value) analyze_region_divergence.expr(cx, value) end)
-  analyze_region_divergence.block(cx, node.block)
-end
-
-function analyze_region_divergence.stat_for_list(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-  analyze_region_divergence.block(cx, node.block)
-end
-
-function analyze_region_divergence.stat_repeat(cx, node)
-  analyze_region_divergence.block(cx, node.block)
-  analyze_region_divergence.expr(cx, node.until_cond)
-end
-
-function analyze_region_divergence.stat_block(cx, node)
-  analyze_region_divergence.block(cx, node.block)
-end
-
-function analyze_region_divergence.stat_index_launch(cx, node)
-  analyze_region_divergence.expr(cx, node.call)
-  if node.reduce_lhs then
-    analyze_region_divergence.expr(cx, node.reduce_lhs)
-  end
-end
-
-function analyze_region_divergence.stat_var(cx, node)
-  node.values:map(function(value) analyze_region_divergence.expr(cx, value) end)
-end
-
-function analyze_region_divergence.stat_var_unpack(cx, node)
-  analyze_region_divergence.expr(cx, node.value)
-end
-
-function analyze_region_divergence.stat_return(cx, node)
-  if node.value then
-    analyze_region_divergence.expr(cx, node.value)
-  end
-end
-
-function analyze_region_divergence.stat_assignment(cx, node)
-  node.lhs:map(function(lh) analyze_region_divergence.expr(cx, lh) end)
-  node.rhs:map(function(rh) analyze_region_divergence.expr(cx, rh) end)
-end
-
-function analyze_region_divergence.stat_reduce(cx, node)
-  node.lhs:map(function(lh) analyze_region_divergence.expr(cx, lh) end)
-  node.rhs:map(function(rh) analyze_region_divergence.expr(cx, rh) end)
-end
-
-function analyze_region_divergence.stat_expr(cx, node)
-  analyze_region_divergence.expr(cx, node.expr)
-end
-
-function analyze_region_divergence.stat(cx, node)
-  if node:is(ast.typed.StatIf) then
-    analyze_region_divergence.stat_if(cx, node)
-
-  elseif node:is(ast.typed.StatWhile) then
-    analyze_region_divergence.stat_while(cx, node)
-
-  elseif node:is(ast.typed.StatForNum) then
-    analyze_region_divergence.stat_for_num(cx, node)
-
-  elseif node:is(ast.typed.StatForList) then
-    analyze_region_divergence.stat_for_list(cx, node)
-
-  elseif node:is(ast.typed.StatRepeat) then
-    analyze_region_divergence.stat_repeat(cx, node)
-
-  elseif node:is(ast.typed.StatBlock) then
-    analyze_region_divergence.stat_block(cx, node)
-
-  elseif node:is(ast.typed.StatIndexLaunch) then
-    analyze_region_divergence.stat_index_launch(cx, node)
-
-  elseif node:is(ast.typed.StatVar) then
-    analyze_region_divergence.stat_var(cx, node)
-
-  elseif node:is(ast.typed.StatVarUnpack) then
-    analyze_region_divergence.stat_var_unpack(cx, node)
-
-  elseif node:is(ast.typed.StatReturn) then
-    analyze_region_divergence.stat_return(cx, node)
-
-  elseif node:is(ast.typed.StatBreak) then
-    return
-
-  elseif node:is(ast.typed.StatAssignment) then
-    analyze_region_divergence.stat_assignment(cx, node)
-
-  elseif node:is(ast.typed.StatReduce) then
-    analyze_region_divergence.stat_reduce(cx, node)
-
-  elseif node:is(ast.typed.StatExpr) then
-    analyze_region_divergence.stat_expr(cx, node)
-
-  elseif node:is(ast.typed.StatMapRegions) then
-    return
-
-  elseif node:is(ast.typed.StatUnmapRegions) then
-    return
-
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
+local function analyze_region_divergence(cx, node)
+  return ast.traverse_node_postorder(analyze_region_divergence_node(cx), node)
 end
 
 local function invert_forest(forest)
@@ -368,14 +82,14 @@ local optimize_divergence = {}
 
 function optimize_divergence.stat_task(cx, node)
   local cx = cx:new_task_scope()
-  analyze_region_divergence.block(cx, node.body)
+  analyze_region_divergence(cx, node.body)
   local divergence = invert_forest(cx.region_div)
 
   return node { region_divergence = divergence }
 end
 
 function optimize_divergence.stat_top(cx, node)
-  if node:is(ast.typed.StatTask) then
+  if node:is(ast.typed.stat.Task) then
     return optimize_divergence.stat_task(cx, node)
 
   else

@@ -153,7 +153,10 @@ namespace Realm {
 	  pending_copies.pop_front();
 	}
 
-	copy->execute(this);
+	{
+	  AutoGPUContext agc(gpu);
+	  copy->execute(this);
+	}
 
 	// no backpressure on copies yet - keep going until list is empty
       }
@@ -258,6 +261,9 @@ namespace Realm {
       off_t span_start = pos * elmt_size;
       size_t span_bytes = len * elmt_size;
 
+      CUstream raw_stream = local_stream->get_stream();
+      log_stream.debug() << "memcpy added to stream " << raw_stream;
+
       switch (kind)
       {
         case GPU_MEMCPY_HOST_TO_DEVICE:
@@ -265,7 +271,7 @@ namespace Realm {
             CHECK_CU( cuMemcpyHtoDAsync((CUdeviceptr)(((char*)dst)+span_start),
                                         (((char*)src)+span_start),
                                         span_bytes,
-                                        local_stream->get_stream()) );
+                                        raw_stream) );
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_HOST:
@@ -273,7 +279,7 @@ namespace Realm {
             CHECK_CU( cuMemcpyDtoHAsync((((char*)dst)+span_start),
                                         (CUdeviceptr)(((char*)src)+span_start),
                                         span_bytes,
-                                        local_stream->get_stream()) );
+                                        raw_stream) );
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
@@ -281,7 +287,7 @@ namespace Realm {
             CHECK_CU( cuMemcpyDtoDAsync((CUdeviceptr)(((char*)dst)+span_start),
                                         (CUdeviceptr)(((char*)src)+span_start),
                                         span_bytes,
-                                        local_stream->get_stream()) );
+                                        raw_stream) );
             break;
           }
         case GPU_MEMCPY_PEER_TO_PEER:
@@ -294,7 +300,7 @@ namespace Realm {
             CHECK_CU( cuMemcpyPeerAsync((CUdeviceptr)(((char*)dst)+span_start), dst_ctx,
                                         (CUdeviceptr)(((char*)src)+span_start), src_ctx,
                                         span_bytes,
-                                        local_stream->get_stream()) );
+                                        raw_stream) );
             break;
           }
         default:
@@ -1621,12 +1627,15 @@ namespace Realm {
         CU_LAUNCH_PARAM_END
       };
 
+      CUstream raw_stream = gpu->get_current_task_stream()->get_stream();
+      log_stream.debug() << "kernel " << func << " added to stream " << raw_stream;
+
       // Launch the kernel on our stream dammit!
       CHECK_CU( cuLaunchKernel(f, 
 			       config.grid.x, config.grid.y, config.grid.z,
                                config.block.x, config.block.y, config.block.z,
                                config.shared,
-			       gpu->get_current_task_stream()->get_stream(),
+			       raw_stream,
 			       NULL, extra) );
 
       // pop the config we just used
@@ -2222,14 +2231,14 @@ namespace Realm {
 	    CUresult ret;
 	    {
 	      AutoGPUContext agc(gpus[i]);
-	      ret = cuMemHostGetDevicePointer(&gpuptr, zcmem_cpu_base, 0);
+	      ret = cuMemHostGetDevicePointer(&gpuptr, base, 0);
 	    }
 	    if(ret == CUDA_SUCCESS) {
 	      // no test for && ((void *)gpuptr == base)) {
 	      log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
 	      gpus[i]->pinned_sysmems.insert((*it)->me);
 	    } else {
-	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << base << ") !?";
+	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";
 	    }
 	  }
 	}

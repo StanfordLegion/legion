@@ -18,6 +18,8 @@
 #ifndef REALM_H
 #define REALM_H
 
+#include "realm/realm_config.h"
+
 #include "realm/profiling.h"
 #include "realm/redop.h"
 #include "realm/event.h"

@@ -460,7 +460,7 @@ namespace Realm {
     {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
-                            finish_event, priority);
+                            start_event, finish_event, priority);
 
       if (start_event.has_triggered())
         enqueue_task(task);
@@ -476,8 +476,6 @@ namespace Realm {
 
     bool DeferredTaskSpawn::event_triggered(void)
     {
-      log_task.debug() << "deferred task now ready: func=" << task->func_id
-                       << " finish=" << task->get_finish_event();
       proc->enqueue_task(task);
       return true;
     }
@@ -500,13 +498,17 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
-    log_task.debug("remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
-		   args.proc.id, args.func_id, args.start_id, args.start_gen);
+
     Event start_event, finish_event;
     start_event.id = args.start_id;
     start_event.gen = args.start_gen;
     finish_event.id = args.finish_id;
     finish_event.gen = args.finish_gen;
+
+    log_task.debug() << "received remote spawn request:"
+		     << " func=" << args.func_id
+		     << " proc=" << args.proc
+		     << " finish=" << finish_event;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
     fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
@@ -588,10 +590,10 @@ namespace Realm {
 				     Event start_event, Event finish_event,
 				     int priority)
     {
-      log_task.debug("spawning remote task: proc=" IDFMT " task=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
-		     me.id, func_id, 
-		     start_event.id, start_event.gen,
-		     finish_event.id, finish_event.gen);
+      log_task.debug() << "sending remote spawn request:"
+		       << " func=" << func_id
+		       << " proc=" << me
+		       << " finish=" << finish_event;
 
       SpawnTaskMessage::send_request(ID(me).node(), me, func_id,
 				     args, arglen, &reqs,
@@ -630,10 +632,10 @@ namespace Realm {
     if(it != get_runtime()->task_table.end()) {
       Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_INIT,
 			 0, 0,
-			 Event::NO_EVENT, 0);
+			 Event::NOEVENT, Event::NO_EVENT, 0);
       task_queue.put(t, task_queue.PRI_MAX_FINITE);
     } else {
-      log_task.info("no processor init task: proc=" IDFMT "", me.id);
+      log_proc.info("no processor init task: proc=" IDFMT "", me.id);
     }
 #endif
 
@@ -662,18 +664,13 @@ namespace Realm {
   {
     assert(func_id != 0);
     // create a task object for this
-    Task *task = new Task(me, func_id, args, arglen, reqs, finish_event, priority);
+    Task *task = new Task(me, func_id, args, arglen, reqs,
+			  start_event, finish_event, priority);
 
     // if the start event has already triggered, we can enqueue right away
     if(start_event.has_triggered()) {
-      log_task.info("new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
-		    func_id, start_event.id, start_event.gen,
-		    finish_event.id, finish_event.gen);
       enqueue_task(task);
     } else {
-      log_task.info("deferring spawn: func=%d event=" IDFMT "/%d finish=" IDFMT "/%d",
-               func_id, start_event.id, start_event.gen,
-               finish_event.id, finish_event.gen);
       EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
   }
@@ -735,10 +732,10 @@ namespace Realm {
     if(it != get_runtime()->task_table.end()) {
       Task *t = new Task(me, Processor::TASK_ID_PROCESSOR_SHUTDOWN,
 			 0, 0,
-			 Event::NO_EVENT, 0);
+			 Event::NO_EVENT, Event::NO_EVENT, 0);
       task_queue.put(t, task_queue.PRI_MIN_FINITE);
     } else {
-      log_task.info("no processor shutdown task: proc=" IDFMT "", me.id);
+      log_proc.info("no processor shutdown task: proc=" IDFMT "", me.id);
     }
 #endif
 

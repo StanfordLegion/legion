@@ -111,19 +111,21 @@ namespace LegionRuntime {
         return static_cast<const T>(t_.impl);                           \
       }
 
-      NEW_OPAQUE_WRAPPER(legion_runtime_t, HighLevelRuntime *);
+      NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, Context);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
+      NEW_OPAQUE_WRAPPER(legion_phase_barrier_t, PhaseBarrier *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);

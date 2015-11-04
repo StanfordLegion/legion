@@ -36,7 +36,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
   
     //--------------------------------------------------------------------------
-    TaskOp::TaskOp(Runtime *rt)
+    TaskOp::TaskOp(Internal *rt)
       : Task(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -301,7 +301,7 @@ namespace LegionRuntime {
       derez.deserialize(depth);
       derez.deserialize(speculated);
       derez.deserialize(premapped);
-      variants = Runtime::get_variant_collection(task_id);
+      variants = Internal::get_variant_collection(task_id);
       derez.deserialize(selected_variant);
       derez.deserialize(target_proc);
       size_t num_additional_procs;
@@ -330,7 +330,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::process_unpack_task(Runtime *rt, 
+    /*static*/ void TaskOp::process_unpack_task(Internal *rt, 
                                                 Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -378,7 +378,7 @@ namespace LegionRuntime {
     void TaskOp::initialize_base_task(SingleTask *ctx, bool track, 
                                       const Predicate &p,
                                       Processor::TaskFuncID tid)
-    //-------------------------------------------------------------------------- 
+    //--------------------------------------------------------------------------
     {
       initialize_speculation(ctx, track, regions.size(), p);
       // Fill in default values for all of the Task fields
@@ -388,7 +388,7 @@ namespace LegionRuntime {
       depth = parent_ctx->depth+1;
       speculated = false;
       premapped = false;
-      variants = Runtime::get_variant_collection(tid);
+      variants = Internal::get_variant_collection(tid);
       selected_variant = 0;
       target_proc = orig_proc;
       inline_task = false;
@@ -1370,16 +1370,16 @@ namespace LegionRuntime {
           case ERROR_BAD_REGION_PRIVILEGES:
             {
               log_region.error("Privileges %x for region " 
-                                     "(%x,%x,%x) are not a subset of privileges " 
-                                     "of parent task's privileges for "
-                                     "region requirement %d of task %s "
-                                     "(ID %lld)",
-                                     regions[idx].privilege, 
-                                     regions[idx].region.index_space.id,
-                                     regions[idx].region.field_space.id, 
-                                     regions[idx].region.tree_id, idx, 
-                                     this->variants->name, 
-                                     get_unique_task_id());
+                               "(%x,%x,%x) are not a subset of privileges " 
+                               "of parent task's privileges for "
+                               "region requirement %d of task %s "
+                               "(ID %lld)",
+                               regions[idx].privilege, 
+                               regions[idx].region.index_space.id,
+                               regions[idx].region.field_space.id, 
+                               regions[idx].region.tree_id, idx, 
+                               this->variants->name, 
+                               get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1500,7 +1500,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void TaskOp::update_arrival_barriers(
-                                const std::vector<PhaseBarrier> &phase_barriers) 
+                                const std::vector<PhaseBarrier> &phase_barriers)
     //--------------------------------------------------------------------------
     {
       for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -1570,7 +1570,7 @@ namespace LegionRuntime {
               if (functor == NULL)
               {
                 PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
+                  Internal::find_partition_projection_function(
                       regions[idx].projection);
                 regions[idx].region = 
                   (*projfn)(regions[idx].partition,
@@ -1604,7 +1604,7 @@ namespace LegionRuntime {
               if (functor == NULL)
               {
                 RegionProjectionFnptr projfn = 
-                  Runtime::find_region_projection_function(
+                  Internal::find_region_projection_function(
                       regions[idx].projection);
                 regions[idx].region = 
                  (*projfn)(regions[idx].region,index_point,runtime->high_level);
@@ -2107,7 +2107,8 @@ namespace LegionRuntime {
                  (req.handle_type == REG_PROJECTION);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_logical_requirement(Processor::get_executing_processor(),
+      LegionLogging::log_logical_requirement(
+                                           Processor::get_executing_processor(),
                                            uid, idx, reg,
                                            reg ? req.region.index_space.id :
                                                  req.partition.index_partition,
@@ -2137,7 +2138,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SingleTask::SingleTask(Runtime *rt)
+    SingleTask::SingleTask(Internal *rt)
       : TaskOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -2159,6 +2160,7 @@ namespace LegionRuntime {
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
+      initial_region_count = 0;
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
@@ -2174,10 +2176,10 @@ namespace LegionRuntime {
       pending_frames = 0;
       context_order_event = Event::NO_EVENT;
       // Set some of the default values for a context
-      max_window_size = Runtime::initial_task_window_size;
-      hysteresis_percentage = Runtime::initial_task_window_hysteresis;
+      max_window_size = Internal::initial_task_window_size;
+      hysteresis_percentage = Internal::initial_task_window_hysteresis;
       max_outstanding_frames = -1;
-      min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
+      min_tasks_to_schedule = Internal::initial_tasks_to_schedule;
       min_frames_to_schedule = 0;
     }
 
@@ -2379,7 +2381,7 @@ namespace LegionRuntime {
       // Find the inline function pointer for this task
       Processor::TaskFuncID low_id = 
         child->variants->get_variant(child->selected_variant).low_id;
-      InlineFnptr fn = Runtime::find_inline_function(low_id);
+      InlineFnptr fn = Internal::find_inline_function(low_id);
       
       // Do the inlining
       child->perform_inlining(inline_task, fn);
@@ -2883,7 +2885,7 @@ namespace LegionRuntime {
 #endif
         runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
 #ifdef INORDER_EXECUTION
-        if (Runtime::program_order_execution && !term_event.has_triggered())
+        if (Internal::program_order_execution && !term_event.has_triggered())
         {
           Processor proc = get_executing_processor();
           runtime->pre_wait(proc);
@@ -2902,7 +2904,7 @@ namespace LegionRuntime {
 #endif
         runtime->add_to_dependence_queue(get_executing_processor(), capture_op);
 #ifdef INORDER_EXECUTION
-        if (Runtime::program_order_execution && !term_event.has_triggered())
+        if (Internal::program_order_execution && !term_event.has_triggered())
         {
           Processor proc = get_executing_processor();
           runtime->pre_wait(proc);
@@ -4500,7 +4502,8 @@ namespace LegionRuntime {
 	      std::set<Memory> visible_memories;
 	      machine.get_visible_memories(target, visible_memories);
 	      Memory premap_memory = premapped.get_memory();
-	      if (visible_memories.find(premap_memory) == visible_memories.end())
+	      if (visible_memories.find(premap_memory) == 
+                  visible_memories.end())
               {
 		log_region.error("Illegal premapped region for logical "
 			               "region (%x,%d,%d) index %d of "
@@ -4640,17 +4643,20 @@ namespace LegionRuntime {
     void SingleTask::invalidate_region_tree_contexts(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+#ifdef DEBUG_HIGH_LEVEL
+      assert(initial_region_count <= regions.size());
+#endif
+      for (unsigned idx = 0; idx < initial_region_count; idx++)
       {
-        // Invalidate our contexts
-        if (virtual_mapped[idx])
-          runtime->forest->invalidate_current_context(enclosing_contexts[idx],
-                                                      regions[idx].region,
-                                                      true/*logical only*/);
-        else
-          runtime->forest->invalidate_current_context(context,
-                                                      regions[idx].region,
-                                                      false/*logical only*/);
+        runtime->forest->invalidate_current_context(context,
+                                                    regions[idx].region,
+                                                    false/*logical only*/);
+      }
+      for (unsigned idx = initial_region_count; idx < regions.size(); idx++)
+      {
+        runtime->forest->invalidate_current_context(enclosing_contexts[idx],
+                                                    regions[idx].region,
+                                                    true/*logical only*/);
       }
     }
 
@@ -4742,6 +4748,17 @@ namespace LegionRuntime {
               !(regions[idx].flags & NO_ACCESS_FLAG))
           {
             Memory inst_mem = physical_instances[idx].get_memory();
+            if (visible_memories.find(inst_mem) == visible_memories.end())
+            {
+              log_region.error("Illegal mapped region for region requirement "
+                               "%d of task %s (UID %lld)! Memory " IDFMT 
+                               " is not visible from processor " IDFMT "!",
+                               idx, this->variants->name, 
+                               this->get_unique_task_id(),
+                               inst_mem.id, target_proc.id);
+              assert(false);
+              exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+            }
             assert(visible_memories.find(inst_mem) != visible_memories.end());
           }
 #endif
@@ -4757,8 +4774,18 @@ namespace LegionRuntime {
                   additional_procs.begin(); it != additional_procs.end(); it++)
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(additional_visible_memories.find(*it) !=
-                      additional_visible_memories.end());
+              if (additional_visible_memories.find(*it) ==
+                  additional_visible_memories.end())
+              {
+                log_region.error("Illegal mapped region for region requirement "
+                                 "%d of task %s (UID %lld)! Memory " IDFMT 
+                                 " is not visible from processor " IDFMT "!",
+                                 idx, this->variants->name, 
+                                 this->get_unique_task_id(), it->id,
+                                 target_proc.id);
+                assert(false);
+                exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
+              }
 #endif
               const std::set<Memory> &visible_mems = 
                               additional_visible_memories[*it];
@@ -4811,6 +4838,8 @@ namespace LegionRuntime {
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx])
           {
+            clone_requirements[idx].copy_without_mapping_info(regions[idx]);
+            localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegion::Impl>(regions[idx],
                     Event::NO_EVENT, false/*mapped*/,
@@ -4874,8 +4903,9 @@ namespace LegionRuntime {
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
+          initial_region_count = regions.size();
           // Have the mapper configure the properties of the context
-          this->min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
+          this->min_tasks_to_schedule = Internal::initial_tasks_to_schedule;
           this->min_frames_to_schedule = 0;
           runtime->invoke_mapper_configure_context(current_proc, this);
           // Do a little bit of checking on the output.  Make
@@ -4946,7 +4976,7 @@ namespace LegionRuntime {
       // Record the dependences
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), wait_on_events, start_condition);
+        Processor::get_executing_processor(), wait_on_events, start_condition);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
@@ -5460,7 +5490,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MultiTask::MultiTask(Runtime *rt)
+    MultiTask::MultiTask(Internal *rt)
       : TaskOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -5932,7 +5962,7 @@ namespace LegionRuntime {
       derez.deserialize(redop);
       if (redop > 0)
       {
-        reduction_op = Runtime::get_reduction_op(redop);
+        reduction_op = Internal::get_reduction_op(redop);
         initialize_reduction_state();
       }
       size_t num_points;
@@ -6007,7 +6037,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndividualTask::IndividualTask(Runtime *rt)
+    IndividualTask::IndividualTask(Internal *rt)
       : SingleTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -6539,7 +6569,7 @@ namespace LegionRuntime {
           // Add references so they aren't garbage collected
           result.impl->add_base_gc_ref(DEFERRED_TASK_REF);
           predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
-          Runtime::DeferredFutureSetArgs args;
+          Internal::DeferredFutureSetArgs args;
           args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
           args.target = result.impl;
           args.result = predicate_false_future.impl;
@@ -7268,7 +7298,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PointTask::PointTask(Runtime *rt)
+    PointTask::PointTask(Internal *rt)
       : SingleTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -7693,7 +7723,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    WrapperTask::WrapperTask(Runtime *rt)
+    WrapperTask::WrapperTask(Internal *rt)
       : SingleTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -7860,7 +7890,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteTask::RemoteTask(Runtime *rt)
+    RemoteTask::RemoteTask(Internal *rt)
       : WrapperTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -8050,7 +8080,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InlineTask::InlineTask(Runtime *rt)
+    InlineTask::InlineTask(Internal *rt)
       : WrapperTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -8253,7 +8283,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexTask::IndexTask(Runtime *rt)
+    IndexTask::IndexTask(Internal *rt)
       : MultiTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -8445,7 +8475,7 @@ namespace LegionRuntime {
       must_parallelism = launcher.must_parallelism;
       index_domain = launcher.launch_domain;
       redop = redop_id;
-      reduction_op = Runtime::get_reduction_op(redop);
+      reduction_op = Internal::get_reduction_op(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
@@ -8601,7 +8631,7 @@ namespace LegionRuntime {
       must_parallelism = must;
       index_domain = domain;
       redop = redop_id;
-      reduction_op = Runtime::get_reduction_op(redop);
+      reduction_op = Internal::get_reduction_op(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
@@ -8988,7 +9018,7 @@ namespace LegionRuntime {
             // Add references so things won't be prematurely collected
             future_map.impl->add_reference();
             predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
-            Runtime::DeferredFutureMapSetArgs args;
+            Internal::DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = future_map.impl;
             args.result = predicate_false_future.impl;
@@ -9031,7 +9061,7 @@ namespace LegionRuntime {
             // Add references so they aren't garbage collected 
             reduction_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
             predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
-            Runtime::DeferredFutureSetArgs args;
+            Internal::DeferredFutureSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
             args.target = reduction_future.impl;
             args.result = predicate_false_future.impl;
@@ -9444,7 +9474,7 @@ namespace LegionRuntime {
             if (functor == NULL)
             {
               PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
+                  Internal::find_partition_projection_function(
                       regions[idx].projection);
               for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
                     minimal_points.begin(); it != minimal_points.end(); it++)
@@ -9478,7 +9508,7 @@ namespace LegionRuntime {
             if (functor == NULL)
             {
               RegionProjectionFnptr projfn = 
-                Runtime::find_region_projection_function(
+                Internal::find_region_projection_function(
                     regions[idx].projection);
               for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
                     minimal_points.begin(); it != minimal_points.end(); it++)
@@ -9546,7 +9576,6 @@ namespace LegionRuntime {
       bool need_trigger = false;
       bool trigger_children_completed = false;
       bool trigger_children_commit = false;
-      Event map_condition = Event::NO_EVENT;
       {
         AutoLock o_lock(op_lock);
         total_points += points;
@@ -9558,11 +9587,6 @@ namespace LegionRuntime {
         if (slice_fraction.is_whole())
         {
           need_trigger = true;
-          if (!map_applied_conditions.empty())
-          {
-            map_condition = Event::merge_events(map_applied_conditions);
-            map_applied_conditions.clear();
-          }
           if ((complete_points == total_points) &&
               !children_complete_invoked)
           {
@@ -9578,7 +9602,30 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-        complete_mapping(map_condition);
+      {
+        // At this point, we know that we are mapped, see if we have
+        // any locally mapped slices which we need to apply changes
+        // Note we do this here while we're not holding the lock
+        if (!locally_mapped_slices.empty())
+        {
+          for (std::deque<SliceTask*>::const_iterator it = 
+                locally_mapped_slices.begin(); it != 
+                locally_mapped_slices.end(); it++)
+          {
+            (*it)->apply_local_version_infos(map_applied_conditions);
+          }
+        }
+        // Get the mapped precondition note we can now access this
+        // without holding the lock because we know we've seen
+        // all the responses so no one else will be mutating it.
+        if (!map_applied_conditions.empty())
+        {
+          Event map_condition = Event::merge_events(map_applied_conditions);
+          complete_mapping(map_condition);
+        }
+        else
+          complete_mapping();
+      }
       if (trigger_children_completed)
         trigger_children_complete();
       if (trigger_children_commit)
@@ -9760,7 +9807,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SliceTask::SliceTask(Runtime *rt)
+    SliceTask::SliceTask(Internal *rt)
       : MultiTask(rt)
     //--------------------------------------------------------------------------
     {
@@ -9922,6 +9969,19 @@ namespace LegionRuntime {
         }
       }
       premapped = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::apply_local_version_infos(std::set<Event> &map_conditions)
+    //--------------------------------------------------------------------------
+    {
+      // We know we are local
+      AddressSpaceID owner_space = runtime->address_space; 
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                                         owner_space, map_conditions);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10550,8 +10610,20 @@ namespace LegionRuntime {
       }
       if (is_remote())
       {
+        bool has_nonleaf_point = false;
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          if (!points[idx]->is_leaf())
+          {
+            has_nonleaf_point = true;
+            break;
+          }
+        }
+
         // Only need to send something back if this wasn't mapped locally
-        if (!is_locally_mapped())
+        // wclee: also need to send back if there were some non-leaf point tasks
+        // because they haven't recorded themselves as mapped
+        if (!is_locally_mapped() || has_nonleaf_point)
         {
           Serializer rez;
           pack_remote_mapped(rez, applied_condition);
@@ -10711,7 +10783,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SliceTask::handle_slice_return(Runtime *rt, 
+    /*static*/ void SliceTask::handle_slice_return(Internal *rt, 
                                                    Deserializer &derez)
     //--------------------------------------------------------------------------
     {

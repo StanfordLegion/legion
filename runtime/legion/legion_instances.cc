@@ -788,7 +788,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceManager::handle_send_manager(Runtime *runtime, 
+    /*static*/ void InstanceManager::handle_send_manager(Internal *runtime, 
                                      AddressSpaceID source, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -973,7 +973,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionManager::handle_send_manager(Runtime *runtime, 
+    /*static*/ void ReductionManager::handle_send_manager(Internal *runtime, 
                                      AddressSpaceID source, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -998,7 +998,7 @@ namespace LegionRuntime {
       derez.deserialize(use_event);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
-      const ReductionOp *op = Runtime::get_reduction_op(redop);
+      const ReductionOp *op = Internal::get_reduction_op(redop);
       if (foldable)
       {
         FoldReductionManager *manager = 

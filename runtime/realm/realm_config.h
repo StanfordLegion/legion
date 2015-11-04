@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,21 +13,20 @@
  * limitations under the License.
  */
 
-#ifndef __LISZT_GPU_MAPPER_H__
-#define __LISZT_GPU_MAPPER_H__
+// configuration settings that control how Realm is built
+// this is expected to become an auto-generated file at some point
 
-//#include <stdbool.h>
-//#include <stddef.h>
-//#include <stdint.h>
+#ifndef REALM_CONFIG_H
+#define REALM_CONFIG_H
 
-#ifdef __cplusplus
-extern "C" {
+// if set, uses ucontext.h for user level thread switching, otherwise falls
+//  back to POSIX threads
+#define REALM_USE_USER_THREADS
+
+// if set, uses Linux's kernel-level io_submit interface, otherwise uses
+//  POSIX AIO for async file I/O
+#ifdef __linux__
+#define REALM_USE_KERNEL_AIO
 #endif
 
-void register_liszt_gpu_mapper();
-
-#ifdef __cplusplus
-}
 #endif
-
-#endif // __LISZT_GPU_MAPPER_H__

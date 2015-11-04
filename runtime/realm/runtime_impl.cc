@@ -433,6 +433,35 @@ namespace Realm {
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
 	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+
+      // and one more... disable GASNet's probing of pinnable memory - it's
+      //  painfully slow on most systems (the gemini conduit doesn't probe
+      //  at all, so it's ok)
+      // we can do this because in gasnet_attach() we will ask for exactly as
+      //  much as we need, and we can detect failure there if that much memory
+      //  doesn't actually exist
+      // inconveniently, we have to set a PHYSMEM_MAX before we call
+      //  gasnet_init and we don't have our argc/argv until after, so we can't
+      //  set PHYSMEM_MAX correctly, but setting it to something really big to
+      //  prevent all the early checks from failing gets us to that final actual
+      //  alloc/pin in gasnet_attach ok
+      {
+	// the only way to control this is with environment variables, so set
+	//  them unless the user has already set them (in which case, we assume
+	//  they know what they're doing)
+	// do handle the case where NOPROBE is set to 1, but PHYSMEM_MAX isn't
+	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
+	if(!e || (atoi(e) > 0)) {
+	  if(!e)
+	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	  if(!getenv("GASNET_PHYSMEM_MAX")) {
+	    // just because it's fun to read things like this 20 years later:
+	    // "nobody will ever build a system with more than 1 TB of RAM..."
+	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	  }
+	}
+      }
+
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
         char s[80];
@@ -568,18 +597,18 @@ namespace Realm {
                        "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
-      if (gasnet_nodes() > (1 << ID::NODE_BITS))
+      if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
 #ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
-                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS));
+                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
 #else
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes.  Update the allocation "
                        "of bits in ID or switch to 64-bit IDs with the "
                        "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS));
+                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
 #endif
         gasnet_exit(1);
       }

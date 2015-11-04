@@ -19,26 +19,35 @@ where reads(s) do
   return @y
 end
 
-task h(s : region(int), y : ptr(int, s)) : int
+task g(s : region(int), y : ptr(int, s), z : int)
 where reads(s), writes(s) do
-  @y += 100
-  return @y
+  @y += z
 end
 
-task g() : int
+task h(s : region(int), y : ptr(int, s), z : int)
+where reads(s), writes(s) do
+  @y *= z
+end
+
+task k() : int
   var r = region(ispace(ptr, 5), int)
   var x = new(ptr(int, r))
-  @x = 5
-  f(r, x)
-  h(r, x)
-  f(r, x)
-  for i = 0, 5 do
-    h(r, x)
+  var s = region(ispace(ptr, 5), int)
+  var y = new(ptr(int, s))
+
+  @x = 100
+  @y = 1
+
+  g(s, y, f(r, x))
+  h(r, x, 10)
+  g(s, y, f(r, x))
+  for i = 0, 2 do
+    h(s, y, 2)
   end
-  return f(r, x)
+  return f(s, y)
 end
 
 task main()
-  regentlib.assert(g() == 605, "test failed")
+  regentlib.assert(k() == (1 + 100 + 1000)*2*2, "test failed")
 end
 regentlib.start(main)

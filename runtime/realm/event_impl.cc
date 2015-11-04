@@ -117,8 +117,10 @@ namespace Realm {
 
     Thread *thread = Thread::self();
     if(thread) {
+      log_event.info() << "thread blocked: thread=" << thread << " event=" << *this;
       // describe the condition we want the thread to wait on
       thread->wait_for_condition(EventTriggeredCondition(e, gen));
+      log_event.info() << "thread resumed: thread=" << thread << " event=" << *this;
       return;
     }
 
@@ -139,7 +141,9 @@ namespace Realm {
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
     
+    log_event.info() << "external thread blocked: event=" << *this;
     e->external_wait(gen);
+    log_event.info() << "external thread resumed: event=" << *this;
   }
 
 
@@ -156,7 +160,7 @@ namespace Realm {
     UserEvent u;
     u.id = e.id;
     u.gen = e.gen;
-    log_event.info("user event created: event=" IDFMT "/%d", e.id, e.gen);
+    log_event.info() << "user event created: event=" << e;
     return u;
   }
 
@@ -164,6 +168,7 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
+    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on;
     GenEventImpl *e = get_runtime()->get_genevent_impl(*this);
 #ifdef EVENT_GRAPH_TRACE
     Event enclosing = find_enclosing_termination_event();
@@ -322,14 +327,12 @@ namespace Realm {
       {
 	// save ID and generation because we can't reference finish_event after the
 	// decrement (unless last_trigger ends up being true)
-	ID::IDType id = finish_event->me.id();
-	Event::gen_t gen = finish_event->generation + 1;
+	Event e = finish_event->current_event();
 
 	int count_left = __sync_fetch_and_add(&count_needed, -1);
 
         // Put the logging first to avoid segfaults
-        log_event.info("received trigger merged event " IDFMT "/%d (%d)",
-		  id, gen, count_left);
+        log_event.debug() << "received trigger merged event=" << e << " left=" << count_left;
 
 	// count is the value before the decrement, so it was 1, it's now 0
 	bool last_trigger = (count_left == 1);
@@ -369,8 +372,7 @@ namespace Realm {
 	  if(!wait_count) first_wait = *it;
 	  wait_count++;
 	}
-      log_event.info("merging events - at least %d not triggered",
-		wait_count);
+      log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
       // Avoid these optimizations if we are doing event graph tracing
 #ifndef EVENT_GRAPH_TRACE
@@ -396,8 +398,7 @@ namespace Realm {
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
-	log_event.info("merged event " IDFMT "/%d waiting for " IDFMT "/%d",
-		  e.id, e.gen, (*it).id, (*it).gen);
+	log_event.info() << "event merging: event=" << e << " wait_on=" << *it;
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
@@ -428,6 +429,8 @@ namespace Realm {
       if(!ev3.has_triggered()) { first_wait = ev3; wait_count++; }
       if(!ev2.has_triggered()) { first_wait = ev2; wait_count++; }
       if(!ev1.has_triggered()) { first_wait = ev1; wait_count++; }
+
+      log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
       // Avoid these optimizations if we are doing event graph tracing
 #ifndef EVENT_GRAPH_TRACE
@@ -462,12 +465,30 @@ namespace Realm {
       // get the Event for this GenEventImpl before any triggers can occur
       Event e = finish_event->current_event();
 
-      m->add_event(ev1);
-      m->add_event(ev2);
-      m->add_event(ev3);
-      m->add_event(ev4);
-      m->add_event(ev5);
-      m->add_event(ev6);
+      if(ev1.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev1;
+	m->add_event(ev1);
+      }
+      if(ev2.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev2;
+	m->add_event(ev2);
+      }
+      if(ev3.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev3;
+	m->add_event(ev3);
+      }
+      if(ev4.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev4;
+	m->add_event(ev4);
+      }
+      if(ev5.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev5;
+	m->add_event(ev5);
+      }
+      if(ev6.exists()) {
+	log_event.info() << "event merging: event=" << e << " wait_on=" << ev6;
+	m->add_event(ev6);
+      }
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
@@ -505,7 +526,8 @@ namespace Realm {
       assert(impl);
       assert(ID(impl->me).type() == ID::ID_EVENT);
 
-      log_event.info("event created: event=" IDFMT "/%d", impl->me.id(), impl->generation+1);
+      log_event.info() << "event created: event=" << impl->current_event();
+
 #ifdef EVENT_TRACING
       {
 	EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -805,8 +827,10 @@ namespace Realm {
       if(!wait_on.has_triggered()) {
 	// deferred trigger
 	// TODO: forward the deferred trigger to the owning node if it's remote
-	log_event.info("deferring event trigger: in=" IDFMT "/%d out=" IDFMT "/%d",
-		       wait_on.id, wait_on.gen, me.id(), gen_triggered);
+	Event t;
+	t.id = me.id();
+	t.gen = gen_triggered;
+	log_event.info() << "deferring event trigger: event=" << t << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredEventTrigger(this));
 	return;
       }
