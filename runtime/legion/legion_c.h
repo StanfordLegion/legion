@@ -754,6 +754,24 @@ extern "C" {
                                   legion_logical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::has_parent_logical_partition()
+   */
+  bool
+  legion_logical_region_has_parent_logical_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_partition()
+   */
+  legion_logical_partition_t
+  legion_logical_region_get_parent_logical_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::attach_name()
    */
   void
@@ -829,6 +847,15 @@ extern "C" {
     legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_parent_logical_region(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t handle);
 
   // -----------------------------------------------------------------------
   // Region Requirement Operations
