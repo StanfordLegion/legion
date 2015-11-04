@@ -582,6 +582,7 @@ function type_check.expr_index_access(cx, node)
             expr_type, value_type:partition(), value_type.privilege_depth)
         end
       end
+      std.copy_privileges(cx, value_type, expr_type)
       -- FIXME: Copy constraints from list type.
       return ast.typed.expr.IndexAccess {
         value = value,
@@ -1277,10 +1278,7 @@ function type_check.expr_list_cross_product(cx, node)
       nil, 1),
     nil, 1)
 
-  -- FIXME: Copy privileges:
-  -- std.add_privilege(cx, "reads", expr_type, data.newtuple())
-  -- std.add_privilege(cx, "writes", expr_type, data.newtuple())
-
+  std.copy_privileges(cx, rhs_type, expr_type)
   -- FIXME: Copy constraints.
   cx:intern_region(expr_type)
 

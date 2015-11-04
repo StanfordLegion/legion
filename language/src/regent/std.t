@@ -106,6 +106,23 @@ function std.add_privilege(cx, privilege, region, field_path)
   cx.privileges[privilege][region][field_path] = true
 end
 
+function std.copy_privileges(cx, from_region, to_region)
+  assert(std.type_supports_privileges(from_region))
+  assert(std.type_supports_privileges(to_region))
+  local privileges_to_copy = terralib.newlist()
+  for privilege, privilege_regions in cx.privileges:items() do
+    local privilege_fields = privilege_regions[from_region]
+    if privilege_fields then
+      for _, field_path in privilege_fields:keys() do
+        privileges_to_copy:insert({privilege, to_region, field_path})
+      end
+    end
+  end
+  for _, privilege in ipairs(privileges_to_copy) do
+    std.add_privilege(cx, unpack(privilege))
+  end
+end
+
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
   assert(std.type_supports_constraints(lhs))
   assert(std.type_supports_constraints(rhs))
@@ -2165,11 +2182,6 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
 
   function st:list_depth()
     return 1 + self.element_type:list_depth()
-  end
-
-  function st:privilege_depth()
-    assert(self.privilege_depth < self:list_depth())
-    return self.privilege_depth
   end
 
   function st:ispace()

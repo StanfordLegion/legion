@@ -36,11 +36,9 @@ task shard(is : regentlib.list(int),
            rs_ghost : regentlib.list(region(int)),
            rs_ghost_product : regentlib.list(regentlib.list(region(int))))
 where
-  reads writes(rs_private, rs_ghost-- , rs_ghost_product
-              ),
-  simultaneous(rs_ghost-- , rs_ghost_product
-  ),
-  rs_private * rs_ghost-- ,
+  reads writes(rs_private, rs_ghost, rs_ghost_product),
+  simultaneous(rs_ghost, rs_ghost_product)-- ,
+  -- rs_private * rs_ghost,
   -- rs_private * rs_ghost_product,
   -- rs_ghost * rs_ghost_product
 do
@@ -107,7 +105,7 @@ task main()
       var rs_p = rs_private[is]
       var rs_g = rs_ghost[is]
       var rs_g_p = rs_ghost_product[is]
-      -- shard(is, rs_p, rs_g, rs_g_p)
+      shard(is, rs_p, rs_g, rs_g_p)
     end
   -- end
 end

@@ -2045,6 +2045,61 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
   end
 end
 
+function setup_list_of_regions_add_region(
+    cx, container_type, value_type, value, region, parent, field_paths,
+    add_requirement, add_field, requirement_args, launcher)
+  return quote
+    var [region] = [value].impl
+    var [parent] = [value].impl
+    [data.range(container_type.privilege_depth):map(
+       function()
+         return quote
+           std.assert(
+             c.legion_logical_region_has_parent_logical_partition(
+               [cx.runtime], [cx.context], [parent]),
+             "invalid privilege depth for region in list")
+           var partition = c.legion_logical_region_get_parent_logical_partition(
+             [cx.runtime], [cx.context], [parent])
+           [parent] = c.legion_logical_partition_get_parent_logical_region(
+             [cx.runtime], [cx.context], partition)
+         end
+       end)]
+    var requirement = [add_requirement]([requirement_args])
+    [field_paths:map(
+       function(field_path)
+         local field_id = cx:list_of_regions(container_type):field_id(field_path)
+         return quote
+           [add_field]([launcher], requirement, [field_id], true)
+         end
+       end)]
+    end
+end
+
+function setup_list_of_regions_add_list(
+    cx, container_type, value_type, value, region, parent, field_paths,
+    add_requirement, add_field, requirement_args, launcher)
+  local element = terralib.newsymbol()
+  if std.is_list(value_type.element_type) then
+    return quote
+      for i = 0, [value].__size do
+        var [element] = [value_type:data(value)][i]
+        [setup_list_of_regions_add_list(
+           cx, container_type, value_type.element_type, element, region, parent,
+           field_paths, add_requirement, add_field, requirement_args, launcher)]
+      end
+    end
+  else
+    return quote
+      for i = 0, [value].__size do
+        var [element] = [value_type:data(value)][i]
+        [setup_list_of_regions_add_region(
+           cx, container_type, value_type.element_type, element, region, parent,
+           field_paths, add_requirement, add_field, requirement_args, launcher)]
+      end
+    end
+  end
+end
+
 function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
                                              launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences =
@@ -2095,9 +2150,8 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
     local list = cx:list_of_regions(arg_type).list_of_logical_regions
 
     local region = terralib.newsymbol("region")
-    local requirement = terralib.newsymbol("requirement")
-    local requirement_args = terralib.newlist({
-        launcher, `([region].impl)})
+    local parent = terralib.newsymbol("parent")
+    local requirement_args = terralib.newlist({launcher, region})
     if index then
       requirement_args:insert(0)
     end
@@ -2107,23 +2161,13 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
       requirement_args:insert(privilege_mode)
     end
     requirement_args:insertall(
-      {coherence_mode, `([region].impl), 0, false})
+      {coherence_mode, parent, 0, false})
 
     args_setup:insert(
-      quote
-        for i = 0, [list].__size do
-          var [region] = [arg_type:data(list)][i]
-          var [requirement] = [add_requirement]([requirement_args])
-          [field_paths:map(
-             function(field_path)
-               local field_id = cx:list_of_regions(arg_type):field_id(field_path)
-               return quote
-               add_field(
-                 [launcher], [requirement], [field_id], true)
-               end
-             end)]
-        end
-      end)
+      setup_list_of_regions_add_list(
+        cx, arg_type, arg_type, list,
+        region, parent, field_paths, add_requirement, add_field,
+        requirement_args, launcher))
   end
 end
 
@@ -5237,15 +5281,8 @@ function codegen.stat_task(cx, node)
     local field_ids_by_field_path = data.dict(
       data.zip(field_paths:map(data.hash), param_field_ids[list_i]))
 
-    local physical_regions_index = terralib.newlist()
-    for i, field_paths in ipairs(privilege_field_paths) do
-      task_setup:insert(quote
-        std.assert([physical_region_i] < c_num_regions, "too few physical regions in task setup")
-        c.legion_runtime_unmap_region(
-          [cx.runtime], [cx.context], [c_regions][ [physical_region_i] ])
-      end)
-      physical_region_i = physical_region_i + 1
-    end
+    -- We never actually access physical instances for lists, so don't
+    -- build any accessors here.
 
     cx:add_list_of_regions(list_type, list,
                            field_paths,
