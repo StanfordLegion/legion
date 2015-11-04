@@ -668,6 +668,18 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
   runtime->destroy_logical_region(ctx, handle);
 }
 
+legion_color_t
+legion_logical_region_get_color(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->get_logical_region_color(ctx, handle);
+}
+
 void
 legion_logical_region_attach_name(legion_runtime_t runtime_,
                                   legion_logical_region_t handle_,

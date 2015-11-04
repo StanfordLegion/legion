@@ -746,6 +746,14 @@ extern "C" {
                                 legion_logical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_region_color()
+   */
+  legion_color_t
+  legion_logical_region_get_color(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_logical_region_t handle);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::attach_name()
    */
   void
