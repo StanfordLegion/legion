@@ -324,6 +324,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       end
     end
 
+    if std.is_list(arg_type) and arg_type:is_list_of_regions() then
+      -- FIXME: Deoptimize lists of regions for the moment. Lists
+      -- would have to be (at a minimum) invariant though other
+      -- restrictions may apply.
+      log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is a list of regions")
+      return node
+    end
+
     -- Tests for non-interference.
     if std.is_region(arg_type) then
       do

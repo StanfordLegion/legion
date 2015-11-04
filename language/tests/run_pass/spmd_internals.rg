@@ -95,13 +95,15 @@ task main()
 
   var rs_private = list_duplicate_partition(p_private, list_range(lo, hi))
   var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
+  copy(r_private, rs_private)
+  copy(r_ghost, rs_ghost)
   -- var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
   -- must_epoch
     for i = lo, hi, stride do
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)
       c.printf("launching shard ilo..ihi %d..%d\n",
                ilo, ihi)
-      -- var is = list_range(ilo, ihi)
+      var is = list_range(ilo, ihi)
       -- var rs_p = rs_private[is]
       -- var rs_g = rs_ghost[is]
       -- var rs_g_p = rs_ghost_product[is]

@@ -16,20 +16,49 @@ import "regent"
 
 local c = regentlib.c
 
--- task f(x : regentlib.list(region))
--- end
+struct t {
+  a : int,
+  b : int,
+  c : int,
+}
+
+task f(r : region(t), p : partition(disjoint, r),
+       is : regentlib.list(int), rs : regentlib.list(region(t)))
+where reads writes(r, rs) do
+
+  copy(rs.a, rs.b, *)
+  copy(r.b, rs.b, +)
+  for i in is do
+    -- Because rs indexing is zero-based, we have to subtract the
+    -- offset.
+    copy((rs[i-3]).b, (p[i]).a, +)
+  end
+end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
+  var r = region(ispace(ptr, 10), t)
   var rc = c.legion_coloring_create()
   for i = 0, 7 do
-    c.legion_coloring_ensure_color(rc, i)
+    var x = new(ptr(t, r))
+    x.a = i
+    x.b = 10*i
+    x.c = i
+    c.legion_coloring_add_point(rc, i, __raw(x))
   end
   var p = partition(disjoint, r, rc)
   c.legion_coloring_destroy(rc)
 
-  var x = list_range(3, 7)
-  var y = list_duplicate_partition(p, x)
-  -- f(x)
+  var is = list_range(3, 7)
+  var rs = list_duplicate_partition(p, is)
+  copy(r, rs)
+  f(r, p, is, rs)
+
+  for x in r do
+    if x.c >= 3 then
+      regentlib.assert(x.a == x.c * x.c * 10 + x.c * 10 + x.c, "test failed")
+    else
+      regentlib.assert(x.a == x.c, "test failed")
+    end
+  end
 end
 regentlib.start(main)

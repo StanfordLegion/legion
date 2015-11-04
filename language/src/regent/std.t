@@ -94,7 +94,9 @@ end
 -- #################
 
 function std.add_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   if not cx.privileges[privilege] then
     cx.privileges[privilege] = data.newmap()
   end
@@ -105,8 +107,8 @@ function std.add_privilege(cx, privilege, region, field_path)
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
-  assert(std.is_region(lhs) or std.is_partition(lhs))
-  assert(std.is_region(rhs) or std.is_partition(rhs))
+  assert(std.type_supports_constraints(lhs))
+  assert(std.type_supports_constraints(rhs))
   if not cx.constraints[op] then
     cx.constraints[op] = {}
   end
@@ -148,7 +150,9 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
 end
 
 function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
@@ -159,7 +163,9 @@ function std.search_privilege(cx, privilege, region, field_path, visited)
 end
 
 function std.check_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
     if std.search_privilege(cx, privilege, region, field_path:slice(1, i), {}) then
       return true
@@ -234,13 +240,13 @@ function std.check_constraint(cx, constraint)
   if terralib.issymbol(lhs) then
     lhs = lhs.type
   end
-  assert(std.is_region(lhs) or std.is_partition(lhs))
+  assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
   if terralib.issymbol(rhs) then
     rhs = rhs.type
   end
-  assert(std.is_region(rhs) or std.is_partition(rhs))
+  assert(std.type_supports_constraints(rhs))
 
   local constraint = {
     lhs = lhs,
@@ -335,14 +341,16 @@ local function find_field_privilege(privileges, coherence_modes,
 end
 
 function std.find_task_privileges(region_type, privileges, coherence_modes)
-  assert(std.is_region(region_type) and privileges and data.is_map(coherence_modes))
+  assert(std.type_supports_privileges(region_type))
+  assert(privileges)
+  assert(data.is_map(coherence_modes))
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
   local grouped_field_paths = terralib.newlist()
   local grouped_field_types = terralib.newlist()
 
   local field_paths, field_types = std.flatten_struct_fields(
-    region_type.fspace_type)
+    region_type:fspace())
 
   local privilege_index = data.newmap()
   local privilege_next_index = 1
@@ -483,6 +491,15 @@ end
 
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
+end
+
+function std.type_supports_privileges(t)
+  return std.is_region(t) or (std.is_list(t) and t:is_list_of_regions())
+end
+
+function std.type_supports_constraints(t)
+  return std.is_region(t) or std.is_partition(t) or
+    (std.is_list(t) and t:is_list_of_regions())
 end
 
 struct std.untyped {}
@@ -680,7 +697,9 @@ local function type_compatible(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or
     (std.is_partition(a) and std.is_partition(b)) or
-    (std.is_cross_product(a) and std.is_cross_product(b))
+    (std.is_cross_product(a) and std.is_cross_product(b)) or
+    (std.is_list(a) and a:is_list_of_regions() and
+       std.is_list(b) and b:is_list_of_regions())
 end
 
 local function type_isomorphic(param_type, arg_type, check, mapping)
@@ -701,6 +720,11 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
       end)))
+  elseif std.is_list(param_type) and param_type:is_list_of_regions() and
+    std.is_list(arg_type) and arg_type:is_list_of_regions()
+  then
+    return std.type_eq(
+      param_type.element_type.fspace_type, arg_type.element_type.fspace_type)
   else
     return false
   end
@@ -736,6 +760,9 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
         return param_partition_as_arg_type
     end)
     return std.cross_product(unpack(param_partitions_as_arg_type))
+  elseif std.is_list(param_type) and param_type:is_list_of_regions() then
+    local fspace_type = std.type_sub(param_type.element_type.fspace_type, mapping)
+    return std.list(std.region(fspace_type))
   else
     assert(false)
   end
@@ -1084,8 +1111,9 @@ end
 function std.implicit_cast(from, to, expr)
    assert(not (std.is_ref(from) or std.is_rawref(from)))
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_bounded_type(to) or
-     std.is_fspace_instance(to)
+     std.is_cross_product(to) or
+     (std.is_list(to) and to:is_list_of_regions()) or
+     std.is_bounded_type(to) or std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
   elseif std.is_index_type(to) then
@@ -1097,8 +1125,9 @@ end
 
 function std.explicit_cast(from, to, expr)
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_bounded_type(to) or
-     std.is_fspace_instance(to)
+     std.is_cross_product(to) or
+     (std.is_list(to) and to:is_list_of_regions()) or
+     std.is_bounded_type(to) or std.is_fspace_instance(to)
    then
     return to:force_cast(from, to, expr)
   else
@@ -1134,14 +1163,21 @@ function std.flatten_struct_fields(struct_type)
   return field_paths, field_types
 end
 
-function std.fn_param_regions(fn_type)
+function std.fn_params_with_privileges_by_index(fn_type)
   local params = fn_type.parameters
-  return data.filter(std.is_region, params)
+  return data.filteri(std.type_supports_privileges, params)
 end
 
 function std.fn_param_regions_by_index(fn_type)
   local params = fn_type.parameters
   return data.filteri(std.is_region, params)
+end
+
+function std.fn_param_lists_of_regions_by_index(fn_type)
+  local params = fn_type.parameters
+  return data.filteri(
+    function(t) return std.is_list(t) and t:is_list_of_regions() end,
+    params)
 end
 
 -- #####################################
@@ -1633,6 +1669,15 @@ function std.region(ispace_symbol, fspace_type)
     return ispace
   end
 
+  function st:fspace()
+    return st.fspace_type
+  end
+
+  -- For API compatibility with std.list:
+  function st:list_depth()
+    return 0
+  end
+
   -- Region types can have an optional partition. This is used by
   -- cross_product to enable patterns like prod[i][j]. Of course, the
   -- region can have other partitions as well. This is simply used as
@@ -2108,10 +2153,36 @@ std.list = terralib.memoize(function(element_type)
          self.element_type:is_list_of_regions())
   end
 
+  function st:list_depth()
+    return 1 + self.element_type:list_depth()
+  end
+
+  function st:ispace()
+    assert(self:is_list_of_regions())
+    return self.element_type:ispace()
+  end
+
+  function st:fspace()
+    assert(self:is_list_of_regions())
+    return self.element_type:fspace()
+  end
+
   -- FIXME: Make the compiler manage cleanups, including lists.
 
   function st:data(value)
     return `([&self.element_type]([value].__data))
+  end
+
+  function st:hash()
+    return self
+  end
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_list(from) and from:is_list_of_regions() and
+             std.is_list(to) and to:is_list_of_regions())
+    -- FIXME: This would result in memory corruption if we ever freed
+    -- the original data.
+    return `([to] { __size = [expr].__size, __data = [expr].__data })
   end
 
   function st.metamethods.__typename(st)
