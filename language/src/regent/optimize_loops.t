@@ -54,12 +54,13 @@ function check_privilege_noninterference(cx, task, region_type,
   local privileges_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
-        param_region_type, task:getprivileges(), task:get_coherence_modes()))
+        param_region_type, task:getprivileges(),
+        task:get_coherence_modes(), task:get_flags()))
   local other_privileges_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         other_param_region_type,
-        task:getprivileges(), task:get_coherence_modes()))
+        task:getprivileges(), task:get_coherence_modes(), task:get_flags()))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -104,7 +105,8 @@ function analyze_noninterference_self(cx, task, region_type,
   local param_region_type = mapping[region_type]
   assert(param_region_type)
   local privileges, privilege_field_paths = std.find_task_privileges(
-    param_region_type, task:getprivileges(), task:get_coherence_modes())
+    param_region_type, task:getprivileges(),
+    task:get_coherence_modes(), task:get_flags())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     if not (
