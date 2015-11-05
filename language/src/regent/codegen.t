@@ -3604,7 +3604,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:list_of_regions(region_type).privilege_field_paths,
       cx:list_of_regions(region_type).field_privileges,
       cx:list_of_regions(region_type).field_types,
-      field_ids)
+      new_field_ids)
   else
     assert(false)
   end

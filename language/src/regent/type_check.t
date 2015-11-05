@@ -1557,6 +1557,12 @@ function type_check.expr_with_scratch_fields(cx, node)
   local expr_type = std.region(
     terralib.newsymbol(region_type:ispace()),
     region_type:fspace())
+  if std.is_list_of_regions(region_type) then
+    for i = 1, region_type:list_depth() do
+      expr_type = std.list(
+        expr_type, region_type:partition(), region_type.privilege_depth)
+    end
+  end
 
   std.copy_privileges(cx, region_type, expr_type)
 
