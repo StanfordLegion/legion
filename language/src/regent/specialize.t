@@ -912,6 +912,14 @@ function specialize.expr_copy(cx, node)
   }
 end
 
+function specialize.expr_allocate_scratch_fields(cx, node)
+  return ast.specialized.expr.AllocateScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_unary(cx, node)
   return ast.specialized.expr.Unary {
     op = node.op,
@@ -1023,6 +1031,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Copy) then
     return specialize.expr_copy(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
+    return specialize.expr_allocate_scratch_fields(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)

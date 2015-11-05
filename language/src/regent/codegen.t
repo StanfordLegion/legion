@@ -359,6 +359,16 @@ function list_of_regions:field_id(field_path)
   return field_id
 end
 
+function context:has_region_or_list(value_type)
+  if std.is_region(value_type) then
+    return self:has_region(value_type)
+  elseif std.is_list(value_type) and value_type:is_list_of_regions() then
+    return self:has_list_of_regions(value_type)
+  else
+    assert(false)
+  end
+end
+
 function context:region_or_list(value_type)
   if std.is_region(value_type) then
     return self:region(value_type)
@@ -3406,6 +3416,51 @@ function codegen.expr_copy(cx, node)
   return values.value(expr.just(actions, quote end), terralib.types.unit)
 end
 
+function codegen.expr_allocate_scratch_fields(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = quote
+    [region.actions]
+    [emit_debuginfo(node)]
+  end
+
+  assert(cx:has_region_or_list(region_type))
+  local field_space
+  if std.is_region(region_type) then
+    field_space = `([region.value].impl.field_space)
+  elseif std.is_list_of_regions(region_type) then
+    field_space = terralib.newsymbol("field_space")
+    actions = quote
+      regentlib.assert([region.value].__size > 0, "attempting to allocate scratch fields for empty list")
+      var r = [region_type:data(region.value)][0]
+      var [field_space] = r.impl.field_space
+    end
+  else
+    assert(false)
+  end
+
+  local field_ids = terralib.newsymbol(expr_type, "field_ids")
+  actions = quote
+    [actions]
+    var fsa = c.legion_field_allocator_create(
+      [cx.runtime], [cx.context], [field_space])
+    var [field_ids]
+    [data.zip(data.range(#node.region.fields), node.region.fields):map(
+       function(field)
+         local i, field_path = unpack(field)
+         local field_type = cx:region_or_list(region_type):field_type(field_path)
+         return quote
+           [field_ids][i] = c.legion_field_allocator_allocate_field(
+             fsa, terralib.sizeof(field_type), -1ULL)
+         end
+       end)]
+  end
+
+  return values.value(expr.just(actions, field_ids), expr_type)
+end
+
 local lift_unary_op_to_futures = terralib.memoize(
   function (op, rhs_type, expr_type)
     assert(terralib.types.istype(rhs_type) and
@@ -3850,6 +3905,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return codegen.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.AllocateScratchFields) then
+    return codegen.expr_allocate_scratch_fields(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return codegen.expr_unary(cx, node)

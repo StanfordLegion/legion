@@ -1420,7 +1420,20 @@ function type_check.expr_copy(cx, node)
     dst = dst,
     op = node.op,
     conditions = conditions,
-    expr_type = terralib.types.unit,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_allocate_scratch_fields(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local expr_type = std.c.legion_field_id_t[#region.fields]
+
+  return ast.typed.expr.AllocateScratchFields {
+    region = region,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1642,6 +1655,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)
+
+  elseif node:is(ast.specialized.expr.AllocateScratchFields) then
+    return type_check.expr_allocate_scratch_fields(cx, node)
 
   elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)

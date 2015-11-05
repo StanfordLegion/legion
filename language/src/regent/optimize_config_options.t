@@ -52,6 +52,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.stat.IndexLaunch)
     then
       return false
