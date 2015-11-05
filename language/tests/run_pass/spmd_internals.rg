@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ll:cpu", "4"]]
+
 import "regent"
 
 -- A test of various language features need for expressing the
@@ -37,14 +40,15 @@ task shard(is : regentlib.list(int),
            rs_ghost_product : regentlib.list(regentlib.list(region(int))))
 where
   reads writes(rs_private, rs_ghost, rs_ghost_product),
-  simultaneous(rs_ghost, rs_ghost_product)-- ,
+  simultaneous(rs_ghost, rs_ghost_product),
+  no_access_flag(rs_ghost_product)-- ,
   -- rs_private * rs_ghost,
   -- rs_private * rs_ghost_product,
   -- rs_ghost * rs_ghost_product
 do
-  -- for i in is do
-  --   phase1(rs_private[i], rs_ghost[i])
-  -- end
+  for i in is do
+    phase1(rs_private[i], rs_ghost[i])
+  end
 
   -- FIXME: Somehow we need to handle the use of reduction fields (or
   -- regions, but I believe fields are easier). This is marked using
@@ -66,10 +70,10 @@ do
   -- --   end
   -- -- end
 
-  -- -- awaits(...)
-  -- for i in is do
-  --   phase3(rs_private[i], rs_ghost[i])
-  -- end
+  -- awaits(...)
+  for i in is do
+    phase3(rs_private[i], rs_ghost[i])
+  end
 end
 
 -- x : regentlib.list(regentlib.list(region(...))) = list_cross_product(y, z)
@@ -96,17 +100,18 @@ task main()
   copy(r_private, rs_private)
   copy(r_ghost, rs_ghost)
   var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
-  -- must_epoch
+  must_epoch
     for i = lo, hi, stride do
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)
       c.printf("launching shard ilo..ihi %d..%d\n",
                ilo, ihi)
-      var is = list_range(ilo-lo, ihi-lo)
+      var is = list_range(ilo, ihi)
+      var iis = list_range(0, ihi-ilo)
       var rs_p = rs_private[is]
       var rs_g = rs_ghost[is]
       var rs_g_p = rs_ghost_product[is]
-      shard(is, rs_p, rs_g, rs_g_p)
+      shard(iis, rs_p, rs_g, rs_g_p)
     end
-  -- end
+  end
 end
 regentlib.start(main)

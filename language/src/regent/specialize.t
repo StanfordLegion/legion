@@ -433,6 +433,30 @@ function specialize.coherence_modes(cx, node)
     function(coherence) return specialize.coherence(cx, coherence) end)
 end
 
+function specialize.flag_kind(cx, node)
+  if node:is(ast.unspecialized.flag_kind.NoAccessFlag) then
+    return ast.specialized.flag_kind.NoAccessFlag(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.flag_kinds(cx, node)
+  return node:map(function(flag) return specialize.flag_kind(cx, flag) end)
+end
+
+function specialize.flag(cx, node)
+  return ast.specialized.Flag {
+    flags = specialize.flag_kinds(cx, node.flags),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.flags(cx, node)
+  return node:map(function(flag) return specialize.flag(cx, flag) end)
+end
+
 function specialize.condition_kind(cx, node)
   if node:is(ast.unspecialized.condition_kind.Arrives) then
     return ast.specialized.condition_kind.Arrives(node)
@@ -1332,6 +1356,7 @@ function specialize.stat_task(cx, node)
   local return_type = node.return_type_expr(cx.env:env())
   local privileges = specialize.privileges(cx, node.privileges)
   local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
+  local flags = specialize.flags(cx, node.flags)
   local conditions = specialize.conditions(cx, node.conditions)
   local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
@@ -1342,6 +1367,7 @@ function specialize.stat_task(cx, node)
     return_type = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
     conditions = conditions,
     constraints = constraints,
     body = body,

@@ -1969,9 +1969,9 @@ end
 
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
                                     index, args_setup)
-  local privileges, privilege_field_paths, privilege_field_types, coherences =
+  local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
-                             task:get_coherence_modes())
+                             task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
@@ -2102,9 +2102,9 @@ end
 
 function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
                                              launcher, index, args_setup)
-  local privileges, privilege_field_paths, privilege_field_types, coherences =
+  local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
-                             task:get_coherence_modes())
+                             task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
 
@@ -2175,9 +2175,9 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
                                        partition, launcher, index,
                                        args_setup)
   assert(index)
-  local privileges, privilege_field_paths, privilege_field_types, coherences =
+  local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
-                             task:get_coherence_modes())
+                             task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
@@ -5165,7 +5165,7 @@ function codegen.stat_task(cx, node)
 
     local privileges, privilege_field_paths, privilege_field_types =
       std.find_task_privileges(region_type, task:getprivileges(),
-                               task:get_coherence_modes())
+                               task:get_coherence_modes(), task:get_flags())
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
@@ -5271,7 +5271,7 @@ function codegen.stat_task(cx, node)
 
     local privileges, privilege_field_paths, privilege_field_types =
       std.find_task_privileges(list_type, task:getprivileges(),
-                               task:get_coherence_modes())
+                               task:get_coherence_modes(), task:get_flags())
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)

@@ -264,6 +264,50 @@ function type_check.coherence_modes(cx, node)
   return result
 end
 
+function type_check.flag_kind(cx, node)
+  if node:is(ast.specialized.flag_kind.NoAccessFlag) then
+    return std.no_access_flag
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.flag_kinds(cx, node)
+  return node:map(function(flag) return type_check.flag_kind(cx, flag) end)
+end
+
+function type_check.flag(cx, node, result)
+  local flags = type_check.flag_kinds(cx, node.flags)
+  local region_fields = type_check.regions(cx, node.regions)
+
+  for _, flag in ipairs(flags) do
+    for _, region_field in ipairs(region_fields) do
+      local region = region_field.region
+      local region_type = region.type
+      assert(std.type_supports_privileges(region_type))
+      if not result[region_type] then
+        result[region_type] = data.newmap()
+      end
+
+      local fields = region_field.fields
+      for _, field in ipairs(fields) do
+        if not result[region_type][field] then
+          result[region_type][field] = data.newmap()
+        end
+        result[region_type][field][flag] = true
+      end
+    end
+  end
+end
+
+function type_check.flags(cx, node)
+  local result = data.newmap()
+  for _, flag in ipairs(node) do
+    type_check.flag(cx, flag, result)
+  end
+  return result
+end
+
 function type_check.condition_kind(cx, node)
   if node:is(ast.specialized.condition_kind.Arrives) then
     return std.arrives
@@ -2111,6 +2155,9 @@ function type_check.stat_task(cx, node)
   local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
   prototype:set_coherence_modes(coherence_modes)
 
+  local flags = type_check.flags(cx, node.flags)
+  prototype:set_flags(flags)
+
   local conditions = type_check.conditions(cx, node.conditions, params)
   prototype:set_conditions(conditions)
 
@@ -2147,6 +2194,7 @@ function type_check.stat_task(cx, node)
     return_type = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
     constraints = constraints,
     body = body,
     config_options = ast.TaskConfigOptions {
