@@ -391,7 +391,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
+    TraceCaptureOp::TraceCaptureOp(Internal *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -479,7 +479,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp::TraceCompleteOp(Runtime *rt)
+    TraceCompleteOp::TraceCompleteOp(Internal *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {

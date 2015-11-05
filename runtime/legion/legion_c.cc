@@ -46,7 +46,7 @@ legion_ptr_safe_cast(legion_runtime_t runtime_,
                      legion_ptr_t pointer_,
                      legion_logical_region_t region_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   ptr_t pointer = CObjectWrapper::unwrap(pointer_);
   LogicalRegion region = CObjectWrapper::unwrap(region_);
@@ -159,7 +159,7 @@ legion_domain_point_safe_cast(legion_runtime_t runtime_,
                               legion_domain_point_t point_,
                               legion_logical_region_t region_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   DomainPoint point = CObjectWrapper::unwrap(point_);
   LogicalRegion region = CObjectWrapper::unwrap(region_);
@@ -295,7 +295,7 @@ legion_index_space_create(legion_runtime_t runtime_,
                           legion_context_t ctx_,
                           size_t max_num_elmts)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   IndexSpace is = runtime->create_index_space(ctx, max_num_elmts);
@@ -307,7 +307,7 @@ legion_index_space_create_domain(legion_runtime_t runtime_,
                                  legion_context_t ctx_,
                                  legion_domain_t domain_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   Domain domain = CObjectWrapper::unwrap(domain_);
 
@@ -320,7 +320,7 @@ legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -332,7 +332,7 @@ legion_index_space_get_domain(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -344,7 +344,7 @@ legion_index_space_attach_name(legion_runtime_t runtime_,
                                legion_index_space_t handle_,
                                const char *name)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
   runtime->attach_name(handle, name);
@@ -355,7 +355,7 @@ legion_index_space_retrieve_name(legion_runtime_t runtime_,
                                  legion_index_space_t handle_,
                                  const char **result)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
   runtime->retrieve_name(handle, *result);
@@ -373,7 +373,7 @@ legion_index_partition_create_coloring(legion_runtime_t runtime_,
                                        bool disjoint,
                                        int part_color /* = -1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Coloring *coloring = CObjectWrapper::unwrap(coloring_);
@@ -391,7 +391,7 @@ legion_index_partition_create_blockify_1d(legion_runtime_t runtime_,
                                           legion_blockify_1d_t blockify_,
                                           int part_color /* = -1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
@@ -409,7 +409,7 @@ legion_index_partition_create_blockify_2d(legion_runtime_t runtime_,
                                           legion_blockify_2d_t blockify_,
                                           int part_color /* = -1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
@@ -427,7 +427,7 @@ legion_index_partition_create_blockify_3d(legion_runtime_t runtime_,
                                           legion_blockify_3d_t blockify_,
                                           int part_color /* = -1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
@@ -448,7 +448,7 @@ legion_index_partition_create_domain_coloring(
   bool disjoint,
   int part_color /* = -1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Domain color_space = CObjectWrapper::unwrap(color_space_);
@@ -565,7 +565,7 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        int color /* = AUTO_GENERATE_ID */,
                                        bool allocable /* = false */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
@@ -589,7 +589,7 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
                                           legion_index_partition_t handle_,
                                           legion_color_t color)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
@@ -603,7 +603,7 @@ legion_index_partition_destroy(legion_runtime_t runtime_,
                                legion_context_t ctx_,
                                legion_index_partition_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
@@ -618,7 +618,7 @@ legion_field_space_t
 legion_field_space_create(legion_runtime_t runtime_,
                           legion_context_t ctx_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   FieldSpace fs = runtime->create_field_space(ctx);
@@ -630,7 +630,7 @@ legion_field_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_field_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -647,7 +647,7 @@ legion_logical_region_create(legion_runtime_t runtime_,
                              legion_index_space_t index_,
                              legion_field_space_t fields_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace index = CObjectWrapper::unwrap(index_);
   FieldSpace fields = CObjectWrapper::unwrap(fields_);
@@ -661,11 +661,50 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_logical_region_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
   runtime->destroy_logical_region(ctx, handle);
+}
+
+legion_color_t
+legion_logical_region_get_color(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->get_logical_region_color(ctx, handle);
+}
+
+bool
+legion_logical_region_has_parent_logical_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->has_parent_logical_partition(ctx, handle);
+}
+
+legion_logical_partition_t
+legion_logical_region_get_parent_logical_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  LogicalPartition p = runtime->get_parent_logical_partition(ctx, handle);
+  return CObjectWrapper::wrap(p);
 }
 
 void
@@ -673,7 +712,7 @@ legion_logical_region_attach_name(legion_runtime_t runtime_,
                                   legion_logical_region_t handle_,
                                   const char *name)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
   runtime->attach_name(handle, name);
@@ -684,7 +723,7 @@ legion_logical_region_retrieve_name(legion_runtime_t runtime_,
                                     legion_logical_region_t handle_,
                                     const char **result)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
   runtime->retrieve_name(handle, *result);
@@ -700,7 +739,7 @@ legion_logical_partition_create(legion_runtime_t runtime_,
                                 legion_logical_region_t parent_,
                                 legion_index_partition_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
@@ -716,7 +755,7 @@ legion_logical_partition_create_by_tree(legion_runtime_t runtime_,
                                         legion_field_space_t fspace_,
                                         legion_region_tree_id_t tid)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
@@ -731,7 +770,7 @@ legion_logical_partition_destroy(legion_runtime_t runtime_,
                                  legion_context_t ctx_,
                                  legion_logical_partition_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
@@ -745,7 +784,7 @@ legion_logical_partition_get_logical_subregion(
   legion_logical_partition_t parent_,
   legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
@@ -761,11 +800,25 @@ legion_logical_partition_get_logical_subregion_by_color(
   legion_logical_partition_t parent_,
   legion_color_t c)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
 
   LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  return CObjectWrapper::wrap(r);
+}
+
+legion_logical_region_t
+legion_logical_partition_get_parent_logical_region(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+
+  LogicalRegion r = runtime->get_parent_logical_region(ctx, handle);
   return CObjectWrapper::wrap(r);
 }
 
@@ -1061,7 +1114,7 @@ legion_index_allocator_create(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -1100,7 +1153,7 @@ legion_field_allocator_create(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_field_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -1240,7 +1293,7 @@ legion_future_from_buffer(legion_runtime_t runtime_,
                           const void *buffer,
                           size_t size)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   TaskResult task_result(buffer, size);
   Future *result = new Future(Future::from_value(runtime, task_result));
@@ -1251,7 +1304,7 @@ legion_future_t
 legion_future_from_uint32(legion_runtime_t runtime_,
                           uint32_t value)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   Future *result = new Future(Future::from_value(runtime, value));
   return CObjectWrapper::wrap(result);
@@ -1261,7 +1314,7 @@ legion_future_t
 legion_future_from_uint64(legion_runtime_t runtime_,
                           uint64_t value)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   Future *result = new Future(Future::from_value(runtime, value));
   return CObjectWrapper::wrap(result);
@@ -1415,7 +1468,7 @@ legion_task_launcher_execute(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_task_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
@@ -1556,7 +1609,7 @@ legion_index_launcher_execute(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_index_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
@@ -1570,7 +1623,7 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
                                         legion_index_launcher_t launcher_,
                                         legion_reduction_op_id_t redop)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
@@ -1759,7 +1812,7 @@ legion_inline_launcher_execute(legion_runtime_t runtime_,
                                legion_context_t ctx_,
                                legion_inline_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   InlineLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
@@ -1782,7 +1835,7 @@ legion_runtime_remap_region(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             legion_physical_region_t region_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   PhysicalRegion *region = CObjectWrapper::unwrap(region_);
 
@@ -1794,7 +1847,7 @@ legion_runtime_unmap_region(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             legion_physical_region_t region_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   PhysicalRegion *region = CObjectWrapper::unwrap(region_);
 
@@ -1805,12 +1858,51 @@ void
 legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
                                  legion_context_t ctx_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->unmap_all_regions(ctx);
 }
 
+void
+legion_runtime_fill_field(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_predicate_t pred_ /* = legion_predicate_true() */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  runtime->fill_field(ctx, handle, parent, fid, value, value_size, *pred);
+}
+
+void
+legion_runtime_fill_field_future(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  runtime->fill_field(ctx, handle, parent, fid, *f, *pred);
+}
 
 // -----------------------------------------------------------------------
 // Copy Operations
@@ -1841,7 +1933,7 @@ legion_copy_launcher_execute(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_copy_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
@@ -2025,7 +2117,7 @@ legion_runtime_begin_trace(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_trace_id_t tid)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->begin_trace(ctx, tid);
@@ -2036,7 +2128,7 @@ legion_runtime_end_trace(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_trace_id_t tid)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->end_trace(ctx, tid);
@@ -2050,7 +2142,7 @@ void
 legion_runtime_issue_mapping_fence(legion_runtime_t runtime_,
                                    legion_context_t ctx_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->issue_mapping_fence(ctx);
@@ -2060,7 +2152,7 @@ void
 legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
                                      legion_context_t ctx_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->issue_execution_fence(ctx);
@@ -2074,7 +2166,7 @@ legion_processor_t
 legion_runtime_get_executing_processor(legion_runtime_t runtime_,
                                        legion_context_t ctx_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   Processor proc = runtime->get_executing_processor(ctx);
@@ -2361,7 +2453,7 @@ legion_index_iterator_create(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
@@ -2533,25 +2625,25 @@ legion_runtime_start(int argc,
                      char **argv,
                      bool background /* = false */)
 {
-  return HighLevelRuntime::start(argc, argv, background);
+  return Runtime::start(argc, argv, background);
 }
 
 void
 legion_runtime_wait_for_shutdown(void)
 {
-  HighLevelRuntime::wait_for_shutdown();
+  Runtime::wait_for_shutdown();
 }
 
 void
 legion_runtime_set_top_level_task_id(legion_task_id_t top_id)
 {
-  HighLevelRuntime::set_top_level_task_id(top_id);
+  Runtime::set_top_level_task_id(top_id);
 }
 
 const legion_input_args_t
 legion_runtime_get_input_args(void)
 {
-  return CObjectWrapper::wrap_const(HighLevelRuntime::get_input_args());
+  return CObjectWrapper::wrap_const(Runtime::get_input_args());
 }
 
 // a pointer to the callback function that is last registered
@@ -2559,7 +2651,7 @@ static legion_registration_callback_pointer_t callback;
 
 void
 registration_callback_wrapper(Machine machine,
-                              HighLevelRuntime *rt,
+                              Runtime *rt,
                               const std::set<Processor> &local_procs)
 {
   legion_machine_t machine_ = CObjectWrapper::wrap(&machine);
@@ -2582,7 +2674,7 @@ legion_runtime_set_registration_callback(
   legion_registration_callback_pointer_t callback_)
 {
   callback = callback_;
-  HighLevelRuntime::set_registration_callback(registration_callback_wrapper);
+  Runtime::set_registration_callback(registration_callback_wrapper);
 }
 
 void
@@ -2591,7 +2683,7 @@ legion_runtime_replace_default_mapper(
   legion_mapper_t mapper_,
   legion_processor_t proc_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Mapper *mapper = CObjectWrapper::unwrap(mapper_);
   Processor proc = CObjectWrapper::unwrap(proc_);
 
@@ -2602,7 +2694,7 @@ void
 task_wrapper_void(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
                   Context ctx,
-                  HighLevelRuntime *runtime,
+                  Runtime *runtime,
                   const legion_task_pointer_void_t &task_pointer)
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
@@ -2635,7 +2727,7 @@ legion_runtime_register_task_void(
   Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
   TaskConfigOptions options = CObjectWrapper::unwrap(options_);
 
-  return HighLevelRuntime::register_legion_task<
+  return Runtime::register_legion_task<
     legion_task_pointer_void_t, task_wrapper_void>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
@@ -2644,7 +2736,7 @@ TaskResult
 task_wrapper(const Task *task,
              const std::vector<PhysicalRegion> &regions,
              Context ctx,
-             HighLevelRuntime *runtime,
+             Runtime *runtime,
              const legion_task_pointer_t &task_pointer)
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
@@ -2682,7 +2774,7 @@ legion_runtime_register_task(
   Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
   TaskConfigOptions options = CObjectWrapper::unwrap(options_);
 
-  return HighLevelRuntime::register_legion_task<
+  return Runtime::register_legion_task<
     TaskResult, legion_task_pointer_t, task_wrapper>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
@@ -2691,7 +2783,7 @@ uint32_t
 task_wrapper_uint32(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx,
-                    HighLevelRuntime *runtime,
+                    Runtime *runtime,
                     const legion_task_pointer_uint32_t &task_pointer)
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
@@ -2724,7 +2816,7 @@ legion_runtime_register_task_uint32(
   Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
   TaskConfigOptions options = CObjectWrapper::unwrap(options_);
 
-  return HighLevelRuntime::register_legion_task<
+  return Runtime::register_legion_task<
     uint32_t, legion_task_pointer_uint32_t, task_wrapper_uint32>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
@@ -2733,7 +2825,7 @@ uint64_t
 task_wrapper_uint64(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx,
-                    HighLevelRuntime *runtime,
+                    Runtime *runtime,
                     const legion_task_pointer_uint64_t &task_pointer)
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
@@ -2766,14 +2858,14 @@ legion_runtime_register_task_uint64(
   Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
   TaskConfigOptions options = CObjectWrapper::unwrap(options_);
 
-  return HighLevelRuntime::register_legion_task<
+  return Runtime::register_legion_task<
     uint64_t, legion_task_pointer_uint64_t, task_wrapper_uint64>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
 
 class FunctorWrapper : public ProjectionFunctor {
 public:
-  FunctorWrapper(HighLevelRuntime *rt,
+  FunctorWrapper(Runtime *rt,
                  legion_projection_functor_logical_region_t region_fn,
                  legion_projection_functor_logical_partition_t partition_fn)
     : ProjectionFunctor(rt)
@@ -2828,7 +2920,7 @@ legion_runtime_register_projection_functor(
   legion_projection_functor_logical_region_t region_functor,
   legion_projection_functor_logical_partition_t partition_functor)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   FunctorWrapper *functor =
     new FunctorWrapper(runtime, region_functor, partition_functor);

@@ -249,24 +249,42 @@ function parser.coherence_kind(p)
   end
 end
 
-function parser.privilege_and_coherence_kinds(p)
+function parser.is_flag_kind(p)
+  return p:matches("no_access_flag")
+end
+
+function parser.flag_kind(p)
+  local start = ast.save(p)
+  if p:nextif("no_access_flag") then
+    return ast.unspecialized.flag_kind.NoAccessFlag {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected flag")
+  end
+end
+
+function parser.privilege_coherence_flag_kinds(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
+  local flags = terralib.newlist()
   while not p:matches("(") do
     if p:is_privilege_kind() then
       privileges:insert(p:privilege_kind())
     elseif p:is_coherence_kind() then
       coherence_modes:insert(p:coherence_kind())
+    elseif p:is_flag_kind() then
+      flags:insert(p:flag_kind())
     else
       p:error("expected privilege or coherence mode")
     end
   end
-  return privileges, coherence_modes
+  return privileges, coherence_modes, flags
 end
 
-function parser.privilege_and_coherence(p)
+function parser.privilege_coherence_flags(p)
   local start = ast.save(p)
-  local privileges, coherence_modes = p:privilege_and_coherence_kinds()
+  local privileges, coherence_modes, flags = p:privilege_coherence_flag_kinds()
   p:expect("(")
   local regions = p:regions()
   p:expect(")")
@@ -281,7 +299,12 @@ function parser.privilege_and_coherence(p)
     regions = regions,
     span = ast.span(start, p),
   }
-  return privilege, coherence
+  local flag = ast.unspecialized.Flag {
+    flags = flags,
+    regions = regions,
+    span = ast.span(start, p),
+  }
+  return privilege, coherence, flag
 end
 
 function parser.is_condition_kind(p)
@@ -583,6 +606,45 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_duplicate_partition") then
+    p:expect("(")
+    local partition = p:expr()
+    p:nextif(",")
+    local indices = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListDuplicatePartition {
+      partition = partition,
+      indices = indices,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_cross_product") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:nextif(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListCrossProduct {
+      lhs = lhs,
+      rhs = rhs,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_range") then
+    p:expect("(")
+    local range_start = p:expr()
+    p:nextif(",")
+    local range_stop = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListRange {
+      start = range_start,
+      stop = range_stop,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("phase_barrier") then
     p:expect("(")
     local value = p:expr()
@@ -625,6 +687,49 @@ function parser.expr_prefix(p)
       dst = dst,
       op = op,
       conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("fill") then
+    p:expect("(")
+    local dst = p:expr_region_root()
+    p:expect(",")
+    local value = p:expr()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Fill {
+      dst = dst,
+      value = value,
+      conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("allocate_scratch_fields") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.AllocateScratchFields {
+      region = region,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("with_scratch_fields") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local field_ids = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.WithScratchFields {
+      region = region,
+      field_ids = field_ids,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -1279,14 +1384,16 @@ end
 function parser.stat_task_effects(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
+  local flags = terralib.newlist()
   local conditions = terralib.newlist()
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() then
-        local privilege, coherence = p:privilege_and_coherence()
+      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+        local privilege, coherence, flag = p:privilege_coherence_flags()
         privileges:insert(privilege)
         coherence_modes:insert(coherence)
+        flags:insert(flag)
       elseif p:is_condition_kind() then
         conditions:insert(p:condition())
       else
@@ -1295,7 +1402,7 @@ function parser.stat_task_effects(p)
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, conditions, constraints
+  return privileges, coherence_modes, flags, conditions, constraints
 end
 
 function parser.stat_task(p, options)
@@ -1304,7 +1411,7 @@ function parser.stat_task(p, options)
   local name = p:expect(p.name).value
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
-  local privileges, coherence_modes, conditions, constraints =
+  local privileges, coherence_modes, flags, conditions, constraints =
     p:stat_task_effects()
   local body = p:block()
   p:expect("end")
@@ -1315,6 +1422,7 @@ function parser.stat_task(p, options)
     return_type_expr = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
     conditions = conditions,
     constraints = constraints,
     body = body,

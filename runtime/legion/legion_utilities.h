@@ -1206,8 +1206,8 @@ namespace LegionRuntime {
           last_index(_last_index), lock(Reservation::create_reservation()) { }
       virtual ~DynamicTableNodeBase(void) { lock.destroy_reservation(); }
     public:
-      int level;
-      IT first_index, last_index;
+      const int level;
+      const IT first_index, last_index;
       Reservation lock;
     };
 
@@ -8510,7 +8510,7 @@ namespace LegionRuntime {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
-            inner->elems[0] = parent;
+            inner->elems[0] = root;
             root = parent;
           }
         }

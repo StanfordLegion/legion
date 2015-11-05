@@ -121,7 +121,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(Runtime *rt, 
+    /*static*/ void TreeStateLogger::capture_state(Internal *rt, 
                   const RegionRequirement *req, unsigned idx, 
                   const char *task_name, long long uid, 
                   RegionTreeNode *node, ContextID ctx, bool before, 
@@ -130,7 +130,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (Runtime::logging_region_tree_state)
+      if (Internal::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);

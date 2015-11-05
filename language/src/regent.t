@@ -58,6 +58,7 @@ local language = {
     "__unroll",
     "__vectorize",
     "aliased", -- reserved for future use
+    "allocate_scratch_fields",
     "advance",
     "arrives",
     "awaits",
@@ -67,13 +68,18 @@ local language = {
     "disjoint", -- reserved for future use
     "dynamic_cast",
     "exclusive",
+    "fill",
     "index_type", -- reserved for future use
     "isnull",
     "ispace",
+    "list_cross_product",
+    "list_duplicate_partition",
+    "list_range",
     "max",
     "min",
     "must_epoch",
     "new",
+    "no_access_flag",
     "null",
     "partition",
     "phase_barrier",
@@ -86,6 +92,7 @@ local language = {
     "simultaneous",
     "static_cast",
     "wild", -- reserved for future use
+    "with_scratch_fields",
     "where",
     "writes",
   },

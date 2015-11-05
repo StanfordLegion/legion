@@ -990,7 +990,7 @@ class SingleTask(object):
                 if diff:
                     src.logical_outgoing = actual_out
                 for dst in actual_out:
-                    printer.println(src.node_name+' -> '+dst.node_name+
+                    printer.println(dst.node_name+' -> '+src.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
                 count+=1
         else:

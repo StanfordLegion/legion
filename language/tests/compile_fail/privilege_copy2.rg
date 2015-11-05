@@ -12,16 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- privilege_copy2.rg:24: invalid privileges in copy: writes($s)
+--   copy(r, s)
+--      ^
+
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
-
-task f(s : region(int))
-where reads writes atomic(s) do
+task k(r : region(int), s : region(int))
+where reads(r, s) do
+  copy(r, s)
 end
-
-task main()
-  var r = region(ispace(ptr, 5), int)
-  f(r)
-end
-regentlib.start(main)

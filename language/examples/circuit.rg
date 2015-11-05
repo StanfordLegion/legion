@@ -302,7 +302,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
         @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr)) =
           random_element(piece_node_ptrs[n], conf.nodes_per_piece)
 
-        if (100 * drand48()) < conf.pct_wire_in_piece then
+        if ((100 * drand48()) < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
           @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) =
             random_element(piece_node_ptrs[n], conf.nodes_per_piece)
         else

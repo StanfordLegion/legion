@@ -111,7 +111,7 @@ namespace LegionRuntime {
         return static_cast<const T>(t_.impl);                           \
       }
 
-      NEW_OPAQUE_WRAPPER(legion_runtime_t, HighLevelRuntime *);
+      NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, Context);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);

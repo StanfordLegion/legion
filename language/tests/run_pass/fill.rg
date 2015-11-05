@@ -14,14 +14,26 @@
 
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
+struct t {
+  a : int,
+  b : float,
+  c : uint8,
+}
 
-task f(s : region(int))
-where reads writes atomic(s) do
+task k() : int
+  var r = region(ispace(ptr, 5), t)
+  var x = new(ptr(t, r))
+
+  x.a = 123
+  x.b = 3.14
+  x.c = 48
+
+  fill(r.{a, b, c}, 25)
+
+  return x.a + x.b + x.c
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  f(r)
+  regentlib.assert(k() == 75, "test failed")
 end
 regentlib.start(main)

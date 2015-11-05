@@ -131,7 +131,7 @@ namespace LegionRuntime {
         unsigned count;
       };
     public:
-      DistributedCollectable(Runtime *rt, DistributedID did,
+      DistributedCollectable(Internal *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              AddressSpaceID local_space,
                              bool register_with_runtime = true);
@@ -194,14 +194,14 @@ namespace LegionRuntime {
       virtual void send_remote_resource_update(AddressSpaceID target,
                                                unsigned count, bool add);
     public:
-      static void handle_did_remote_registration(Runtime *runtime,
+      static void handle_did_remote_registration(Internal *runtime,
                                                  Deserializer &derez,
                                                  AddressSpaceID source);
-      static void handle_did_remote_valid_update(Runtime *runtime,
+      static void handle_did_remote_valid_update(Internal *runtime,
                                                  Deserializer &derez);
-      static void handle_did_remote_gc_update(Runtime *runtime,
+      static void handle_did_remote_gc_update(Internal *runtime,
                                               Deserializer &derez);
-      static void handle_did_remote_resource_update(Runtime *runtime,
+      static void handle_did_remote_resource_update(Internal *runtime,
                                                     Deserializer &derez);
     protected:
       bool update_state(bool &need_activate, bool &need_validate,
@@ -209,7 +209,7 @@ namespace LegionRuntime {
                         bool &do_deletion);
       bool can_delete(void);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;

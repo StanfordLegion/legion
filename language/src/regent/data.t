@@ -87,14 +87,11 @@ function data.max(a, b)
 end
 
 -- #####################################
--- ## Lists
+-- ## Booleans
 -- #################
 
--- The following methods work on Terra lists, or regular Lua tables
--- with 1-based consecutive numeric indices.
-
-function data.any(list)
-  for _, elt in ipairs(list) do
+function data.any(...)
+  for _, elt in ipairs({...}) do
     if elt then
       return true
     end
@@ -102,14 +99,21 @@ function data.any(list)
   return false
 end
 
-function data.all(list)
-  for _, elt in ipairs(list) do
+function data.all(...)
+  for _, elt in ipairs({...}) do
     if not elt then
       return false
     end
   end
   return true
 end
+
+-- #####################################
+-- ## Lists
+-- #################
+
+-- The following methods work on Terra lists, or regular Lua tables
+-- with 1-based consecutive numeric indices.
 
 function data.range(start, stop) -- zero-based, exclusive (as in Python)
   if stop == nil then

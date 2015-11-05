@@ -12,16 +12,18 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_list_duplicate_partition2.rg:28: type mismatch: expected list(int32) but got bool
+--   var x = list_duplicate_partition(p, true)
+--                                  ^
+
 import "regent"
 
--- Tests for a runtime bug in atomic coherence around deferred unlocking.
+local c = regentlib.c
 
-task f(s : region(int))
-where reads writes atomic(s) do
-end
-
-task main()
+task f()
   var r = region(ispace(ptr, 5), int)
-  f(r)
+  var rc = c.legion_coloring_create()
+  var p = partition(disjoint, r, rc)
+  var x = list_duplicate_partition(p, true)
 end
-regentlib.start(main)

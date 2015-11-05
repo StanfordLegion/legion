@@ -250,6 +250,27 @@ function ast.map_node_postorder(fn, node)
   return node
 end
 
+function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
+  if ast.is_node(node) then
+    local result = init
+    for _, child in pairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return reduce_fn(result, map_fn(node))
+  elseif terralib.islist(node) then
+    local result = init
+    for _, child in ipairs(node) do
+      result = reduce_fn(
+        result,
+        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    end
+    return result
+  end
+  return init
+end
+
 function ast.traverse_expr_postorder(fn, node)
   ast.traverse_node_postorder(
     function(child)
@@ -359,6 +380,10 @@ ast.unspecialized.coherence_kind:leaf("Simultaneous")
 ast.unspecialized.coherence_kind:leaf("Relaxed")
 ast.unspecialized:leaf("Coherence", {"coherence_modes", "regions"})
 
+ast.unspecialized:inner("flag_kind", {})
+ast.unspecialized.flag_kind:leaf("NoAccessFlag")
+ast.unspecialized:leaf("Flag", {"flags", "regions"})
+
 ast.unspecialized:leaf("ConditionVariable", {"name"})
 ast.unspecialized:inner("condition_kind", {})
 ast.unspecialized.condition_kind:leaf("Arrives")
@@ -391,9 +416,15 @@ ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
 ast.unspecialized.expr:leaf("Partition", {"disjointness_expr",
                                           "region_type_expr", "coloring"})
 ast.unspecialized.expr:leaf("CrossProduct", {"arg_type_exprs"})
+ast.unspecialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.unspecialized.expr:leaf("ListRange", {"start", "stop"})
 ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.unspecialized.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.unspecialized.expr:leaf("AllocateScratchFields", {"region"})
+ast.unspecialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.unspecialized.expr:leaf("RegionRoot", {"region", "fields"})
 ast.unspecialized.expr:leaf("Condition", {"conditions", "values"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
@@ -421,7 +452,7 @@ ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 
 ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
-                                     "privileges", "coherence_modes",
+                                     "privileges", "coherence_modes", "flags",
                                      "conditions", "constraints", "body"})
 ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
@@ -455,6 +486,10 @@ ast.specialized.coherence_kind:leaf("Atomic")
 ast.specialized.coherence_kind:leaf("Simultaneous")
 ast.specialized.coherence_kind:leaf("Relaxed")
 ast.specialized:leaf("Coherence", {"coherence_modes", "regions"})
+
+ast.specialized:inner("flag_kind", {})
+ast.specialized.flag_kind:leaf("NoAccessFlag")
+ast.specialized:leaf("Flag", {"flags", "regions"})
 
 ast.specialized:leaf("ConditionVariable", {"symbol"})
 ast.specialized:inner("condition_kind", {})
@@ -490,9 +525,15 @@ ast.specialized.expr:leaf("Region", {"ispace", "ispace_symbol", "fspace_type",
 ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                         "expr_type"})
 ast.specialized.expr:leaf("CrossProduct", {"args", "expr_type"})
+ast.specialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.specialized.expr:leaf("ListRange", {"start", "stop"})
 ast.specialized.expr:leaf("PhaseBarrier", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.specialized.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.specialized.expr:leaf("AllocateScratchFields", {"region"})
+ast.specialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.specialized.expr:leaf("RegionRoot", {"region", "fields"})
 ast.specialized.expr:leaf("Condition", {"conditions", "values"})
 ast.specialized.expr:leaf("Function", {"value"})
@@ -522,7 +563,7 @@ ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 
 ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
-                                   "privileges", "coherence_modes",
+                                   "privileges", "coherence_modes", "flags",
                                    "conditions", "constraints", "body",
                                    "prototype"})
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
@@ -558,9 +599,15 @@ ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
 ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
+ast.typed.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.typed.expr:leaf("ListRange", {"start", "stop"})
 ast.typed.expr:leaf("PhaseBarrier", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.typed.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.typed.expr:leaf("AllocateScratchFields", {"region"})
+ast.typed.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.typed.expr:leaf("RegionRoot", {"region", "fields"})
 ast.typed.expr:leaf("Condition", {"conditions", "values"})
 ast.typed.expr:leaf("Constant", {"value"})
@@ -600,7 +647,7 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
 ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
-                             "coherence_modes", "constraints", "body",
+                             "coherence_modes", "flags", "constraints", "body",
                              "config_options", "region_divergence",
                              "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})

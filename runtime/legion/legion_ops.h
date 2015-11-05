@@ -59,6 +59,7 @@ namespace LegionRuntime {
         FILL_OP_KIND,
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
+        TIMING_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
@@ -87,6 +88,7 @@ namespace LegionRuntime {
         "Fill",                     \
         "Attach",                   \
         "Detach",                   \
+        "Timing",                   \
         "Trace Capture",            \
         "Trace Complete",           \
         "Task",                     \
@@ -129,7 +131,7 @@ namespace LegionRuntime {
           { mapping_dependences.insert(dependence); }
         inline void add_resolution_dependence(Event dependence)
           { resolution_dependences.insert(dependence); }
-        void issue_stage_triggers(Operation *op, Runtime *runtime, 
+        void issue_stage_triggers(Operation *op, Internal *runtime, 
                                   MustEpochOp *must_epoch);
       private:
         std::set<Event> mapping_dependences;
@@ -139,12 +141,12 @@ namespace LegionRuntime {
       public:
         inline void add_commit_dependence(Event dependence)
           { commit_dependences.insert(dependence); }
-        bool issue_commit_trigger(Operation *op, Runtime *runtime);
+        bool issue_commit_trigger(Operation *op, Internal *runtime);
       private:
         std::set<Event> commit_dependences;
       };
     public:
-      Operation(Runtime *rt);
+      Operation(Internal *rt);
       virtual ~Operation(void);
     public:
       virtual void activate(void) = 0;
@@ -345,7 +347,7 @@ namespace LegionRuntime {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
     protected:
       Reservation op_lock;
       GenerationID gen;
@@ -444,7 +446,7 @@ namespace LegionRuntime {
      */
     class Predicate::Impl : public Operation {
     public:
-      Impl(Runtime *rt);
+      Impl(Internal *rt);
     public:
       void activate_predicate(void);
       void deactivate_predicate(void);
@@ -484,7 +486,7 @@ namespace LegionRuntime {
         RESOLVE_FALSE_STATE,
       };
     public:
-      SpeculativeOp(Runtime *rt);
+      SpeculativeOp(Internal *rt);
     public:
       void activate_speculative(void);
       void deactivate_speculative(void);
@@ -539,7 +541,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
-      MapOp(Runtime *rt);
+      MapOp(Internal *rt);
       MapOp(const MapOp &rhs);
       virtual ~MapOp(void);
     public:
@@ -600,7 +602,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
-      CopyOp(Runtime *rt);
+      CopyOp(Internal *rt);
       CopyOp(const CopyOp &rhs);
       virtual ~CopyOp(void);
     public:
@@ -669,7 +671,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
-      FenceOp(Runtime *rt);
+      FenceOp(Internal *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
     public:
@@ -701,7 +703,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
-      FrameOp(Runtime *rt);
+      FrameOp(Internal *rt);
       FrameOp(const FrameOp &rhs);
       virtual ~FrameOp(void);
     public:
@@ -742,7 +744,7 @@ namespace LegionRuntime {
         LOGICAL_PARTITION_DELETION,
       };
     public:
-      DeletionOp(Runtime *rt);
+      DeletionOp(Internal *rt);
       DeletionOp(const DeletionOp &rhs);
       virtual ~DeletionOp(void);
     public:
@@ -791,7 +793,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
-      CloseOp(Runtime *rt);
+      CloseOp(Internal *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
     public:
@@ -828,7 +830,7 @@ namespace LegionRuntime {
      */
     class InterCloseOp : public CloseOp {
     public:
-      InterCloseOp(Runtime *runtime);
+      InterCloseOp(Internal *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
     public:
@@ -887,7 +889,7 @@ namespace LegionRuntime {
      */
     class PostCloseOp : public CloseOp {
     public:
-      PostCloseOp(Runtime *runtime);
+      PostCloseOp(Internal *runtime);
       PostCloseOp(const PostCloseOp &rhs);
       virtual ~PostCloseOp(void);
     public:
@@ -918,7 +920,7 @@ namespace LegionRuntime {
      */
     class VirtualCloseOp : public CloseOp {
     public:
-      VirtualCloseOp(Runtime *runtime);
+      VirtualCloseOp(Internal *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
       virtual ~VirtualCloseOp(void);
     public:
@@ -948,7 +950,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
-      AcquireOp(Runtime *rt);
+      AcquireOp(Internal *rt);
       AcquireOp(const AcquireOp &rhs);
       virtual ~AcquireOp(void);
     public:
@@ -1002,7 +1004,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
-      ReleaseOp(Runtime *rt);
+      ReleaseOp(Internal *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
     public:
@@ -1057,7 +1059,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
-      DynamicCollectiveOp(Runtime *rt);
+      DynamicCollectiveOp(Internal *rt);
       DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
       virtual ~DynamicCollectiveOp(void);
     public:
@@ -1091,7 +1093,7 @@ namespace LegionRuntime {
         FuturePredOp *future_pred_op;
       };
     public:
-      FuturePredOp(Runtime *rt);
+      FuturePredOp(Internal *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
@@ -1119,7 +1121,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
-      NotPredOp(Runtime *rt);
+      NotPredOp(Internal *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
     public:
@@ -1147,7 +1149,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
-      AndPredOp(Runtime *rt);
+      AndPredOp(Internal *rt);
       AndPredOp(const AndPredOp &rhs);
       virtual ~AndPredOp(void);
     public:
@@ -1182,7 +1184,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
-      OrPredOp(Runtime *rt);
+      OrPredOp(Internal *rt);
       OrPredOp(const OrPredOp &rhs);
       virtual ~OrPredOp(void);
     public:
@@ -1238,7 +1240,7 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      MustEpochOp(Runtime *rt);
+      MustEpochOp(Internal *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
     public:
@@ -1404,7 +1406,7 @@ namespace LegionRuntime {
     public:
       MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
     public:
-      void distribute_tasks(Runtime *runtime,
+      void distribute_tasks(Internal *runtime,
                             const std::vector<IndividualTask*> &indiv_tasks,
                             const std::set<SliceTask*> &slice_tasks);
     public:
@@ -1579,7 +1581,7 @@ namespace LegionRuntime {
         std::vector<IndexSpace> handles;
       };
     public:
-      PendingPartitionOp(Runtime *rt);
+      PendingPartitionOp(Internal *rt);
       PendingPartitionOp(const PendingPartitionOp &rhs);
       virtual ~PendingPartitionOp(void);
     public:
@@ -1650,7 +1652,7 @@ namespace LegionRuntime {
         BY_PREIMAGE,
       };
     public:
-      DependentPartitionOp(Runtime *rt);
+      DependentPartitionOp(Internal *rt);
       DependentPartitionOp(const DependentPartitionOp &rhs);
       virtual ~DependentPartitionOp(void);
     public:
@@ -1707,7 +1709,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
-      FillOp(Runtime *rt);
+      FillOp(Internal *rt);
       FillOp(const FillOp &rhs);
       virtual ~FillOp(void);
     public:
@@ -1769,7 +1771,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
     public:
-      AttachOp(Runtime *rt);
+      AttachOp(Internal *rt);
       AttachOp(const AttachOp &rhs);
       virtual ~AttachOp(void);
     public:
@@ -1818,7 +1820,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
-      DetachOp(Runtime *rt);
+      DetachOp(Internal *rt);
       DetachOp(const DetachOp &rhs);
       virtual ~DetachOp(void);
     public:
@@ -1845,6 +1847,43 @@ namespace LegionRuntime {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+    };
+
+    /**
+     * \class TimingOp
+     * Operation for performing timing measurements
+     */
+    class TimingOp : public Operation {
+    public:
+      enum MeasurementKind {
+        ABSOLUTE_MEASUREMENT,
+        MICROSECOND_MEASUREMENT,
+        NANOSECOND_MEASUREMENT,
+      };
+    public:
+      TimingOp(Internal *rt);
+      TimingOp(const TimingOp &rhs);
+      virtual ~TimingOp(void);
+    public:
+      TimingOp& operator=(const TimingOp &rhs);
+    public:
+      Future initialize(SingleTask *ctx, const Future &pre);
+      Future initialize_microseconds(SingleTask *ctx, const Future &pre);
+      Future initialize_nanoseconds(SingleTask *ctx, const Future &pre);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void deferred_execute(void);
+      virtual void trigger_complete(void);
+    protected:
+      MeasurementKind kind;
+      Future precondition;
+      Future result;
     };
 
   }; //namespace HighLevel
