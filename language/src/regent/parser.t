@@ -691,6 +691,26 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("fill") then
+    p:expect("(")
+    local dst = p:expr_region_root()
+    p:expect(",")
+    local value = p:expr()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Fill {
+      dst = dst,
+      value = value,
+      conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("allocate_scratch_fields") then
     p:expect("(")
     local region = p:expr_region_root()

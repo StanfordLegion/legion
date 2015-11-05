@@ -12,25 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- privilege_fill2.rg:24: invalid privileges in copy: reads($r)
+--   fill(r, 0)
+--      ^
+
 import "regent"
 
-task k() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-  var s = region(ispace(ptr, 5), int)
-  var y = new(ptr(int, s))
-
-  @x = 123
-  @y = 456
-
-  copy(r, s)
-  @y *= 2
-  copy(s, r, +)
-
-  return @x
+task k(r : region(int))
+where writes(r) do
+  fill(r, 0)
 end
-
-task main()
-  regentlib.assert(k() == 369, "test failed")
-end
-regentlib.start(main)

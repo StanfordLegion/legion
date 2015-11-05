@@ -68,6 +68,7 @@ local language = {
     "disjoint", -- reserved for future use
     "dynamic_cast",
     "exclusive",
+    "fill",
     "index_type", -- reserved for future use
     "isnull",
     "ispace",

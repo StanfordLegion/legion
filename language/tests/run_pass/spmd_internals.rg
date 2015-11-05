@@ -59,9 +59,7 @@ do
   end
 
   -- -- Zero the reduction fields:
-  -- for i in is do
-  --   fill((with_scratch_fields(rs_ghost[i].{a, b}, f)).{a, b}, 0) -- awaits(...)
-  -- end
+  -- fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0) -- awaits(...)
   for i in is do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end

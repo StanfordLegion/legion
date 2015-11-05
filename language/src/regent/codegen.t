@@ -3416,6 +3416,103 @@ function codegen.expr_copy(cx, node)
   return values.value(expr.just(actions, quote end), terralib.types.unit)
 end
 
+local function expr_fill_setup_region(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    value_value, value_type)
+  assert(std.is_region(dst_type))
+  assert(std.type_supports_privileges(dst_container_type))
+
+  local dst_parent = get_container_root(cx, dst_container_type, dst_value)
+
+  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
+  local value_fields, value_field_types
+  if terralib.types.istype(value_type) then
+    value_fields, value_field_types = std.flatten_struct_fields(value_type)
+  else
+    value_fields = terralib.newlist(data.newtuple())
+    value_field_types = value_type
+  end
+
+  local actions = terralib.newlist()
+  for i, dst_field in ipairs(dst_fields) do
+    local dst_copy_fields = data.filter(
+      function(field) return field:starts_with(dst_field) end,
+      dst_all_fields)
+    assert(#dst_copy_fields == #value_fields)
+
+    for j, dst_copy_field in ipairs(dst_copy_fields) do
+      local value_field = value_fields[j]
+      local value_field_type = value_field_types[j]
+      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
+
+      local fill_value = value_value
+      for _, field_name in ipairs(value_field) do
+        fill_value = `([value_value].[field_name])
+      end
+      fill_value = std.implicit_cast(
+        value_field_type, dst_field_type, fill_value)
+
+      actions:insert(quote
+        var buffer : dst_field_type = [fill_value]
+        c.legion_runtime_fill_field(
+          [cx.runtime], [cx.context], [dst_value].impl, [dst_parent].impl,
+          dst_field_id, &buffer, terralib.sizeof(dst_field_type),
+          c.legion_predicate_true())
+      end)
+    end
+  end
+  return actions
+end
+
+local function expr_fill_setup_list(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    value_value, value_type)
+  if std.is_list(dst_type) then
+    local dst_element_type = dst_type.element_type
+    local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    return quote
+      for i = 0, [dst_value].__size do
+        var [dst_element] = [dst_type:data(dst_value)][i]
+        [expr_fill_setup_list(
+           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           value_value, value_type)]
+      end
+    end
+  else
+    return expr_fill_setup_region(
+      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      value_value, value_type)
+  end
+end
+
+function codegen.expr_fill(cx, node)
+  local dst_type = std.as_read(node.dst.expr_type)
+  local dst = codegen.expr_region_root(cx, node.dst):read(cx, dst_type)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local conditions = node.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
+
+  local actions = quote
+    [dst.actions]
+    [value.actions]
+    [conditions:map(
+       function(condition)
+         return condition:map(function(value) return value.actions end)
+       end)]
+    [emit_debuginfo(node)]
+
+    [expr_fill_setup_list(
+       cx, dst.value, dst_type, dst_type, node.dst.fields,
+       value.value, value_type)]
+  end
+
+  return values.value(expr.just(actions, quote end), terralib.types.unit)
+end
+
 function codegen.expr_allocate_scratch_fields(cx, node)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
@@ -3959,6 +4056,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return codegen.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Fill) then
+    return codegen.expr_fill(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return codegen.expr_allocate_scratch_fields(cx, node)

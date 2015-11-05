@@ -1415,10 +1415,119 @@ function type_check.expr_copy(cx, node)
     end
   end
 
+  for _, field_path in ipairs(src.fields) do
+    if not std.check_privilege(cx, std.reads, src_type, field_path) then
+      local src_region
+      if node.src.region:is(ast.specialized.expr.ID) then
+        src_region = node.src.region.value
+      else
+        src_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.reads) .. "(" ..
+          (data.newtuple(src_region) .. field_path):mkstring(".") .. ")")
+    end
+  end
+  for _, field_path in ipairs(dst.fields) do
+    if node.op then
+      if not std.check_privilege(cx, std.reduces(node.op), dst_type, field_path)
+      then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node,
+          "invalid privileges in copy: " .. tostring(std.reduces(node.op)) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+    else
+      if not std.check_privilege(cx, std.reads, dst_type, field_path) then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node, "invalid privileges in copy: " .. tostring(std.reads) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+      if not std.check_privilege(cx, std.writes, dst_type, field_path) then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node, "invalid privileges in copy: " .. tostring(std.writes) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+    end
+  end
+
   return ast.typed.expr.Copy {
     src = src,
     dst = dst,
     op = node.op,
+    conditions = conditions,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_fill(cx, node)
+  local dst = type_check.expr_region_root(cx, node.dst)
+  local dst_type = std.check_read(cx, dst)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  local conditions = node.conditions:map(
+    function(condition) return type_check.expr_condition(cx, condition) end)
+  local expr_type = terralib.types.unit
+
+  for i, dst_field in ipairs(dst.fields) do
+    local dst_type = std.get_field_path(dst_type:fspace(), dst_field)
+    if not std.validate_implicit_cast(value_type, dst_type) then
+      log.error(node, "type mismatch between " .. tostring(value_type) ..
+                  " and " .. tostring(dst_type))
+    end
+  end
+
+  for _, field_path in ipairs(dst.fields) do
+    if not std.check_privilege(cx, std.reads, dst_type, field_path) then
+      local dst_region
+      if node.dst.region:is(ast.specialized.expr.ID) then
+        dst_region = node.dst.region.value
+      else
+        dst_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, dst_type, field_path) then
+      local dst_region
+      if node.dst.region:is(ast.specialized.expr.ID) then
+        dst_region = node.dst.region.value
+      else
+        dst_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.Fill {
+    dst = dst,
+    value = value,
     conditions = conditions,
     expr_type = expr_type,
     options = node.options,
@@ -1676,6 +1785,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)
+
+  elseif node:is(ast.specialized.expr.Fill) then
+    return type_check.expr_fill(cx, node)
 
   elseif node:is(ast.specialized.expr.AllocateScratchFields) then
     return type_check.expr_allocate_scratch_fields(cx, node)

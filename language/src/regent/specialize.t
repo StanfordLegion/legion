@@ -239,6 +239,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.Copy) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.Fill) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.Unary) then
     return get_num_accessed_fields(node.rhs)
 
@@ -912,6 +915,16 @@ function specialize.expr_copy(cx, node)
   }
 end
 
+function specialize.expr_fill(cx, node)
+  return ast.specialized.expr.Fill {
+    dst = specialize.expr_region_root(cx, node.dst),
+    value = specialize.expr(cx, node.value),
+    conditions = specialize.expr_conditions(cx, node.conditions),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_allocate_scratch_fields(cx, node)
   return ast.specialized.expr.AllocateScratchFields {
     region = specialize.expr_region_root(cx, node.region),
@@ -1040,6 +1053,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Copy) then
     return specialize.expr_copy(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Fill) then
+    return specialize.expr_fill(cx, node)
 
   elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
     return specialize.expr_allocate_scratch_fields(cx, node)

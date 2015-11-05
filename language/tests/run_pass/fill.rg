@@ -14,23 +14,26 @@
 
 import "regent"
 
+struct t {
+  a : int,
+  b : float,
+  c : uint8,
+}
+
 task k() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-  var s = region(ispace(ptr, 5), int)
-  var y = new(ptr(int, s))
+  var r = region(ispace(ptr, 5), t)
+  var x = new(ptr(t, r))
 
-  @x = 123
-  @y = 456
+  x.a = 123
+  x.b = 3.14
+  x.c = 48
 
-  copy(r, s)
-  @y *= 2
-  copy(s, r, +)
+  fill(r.{a, b, c}, 25)
 
-  return @x
+  return x.a + x.b + x.c
 end
 
 task main()
-  regentlib.assert(k() == 369, "test failed")
+  regentlib.assert(k() == 75, "test failed")
 end
 regentlib.start(main)
