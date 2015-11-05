@@ -1703,7 +1703,7 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
-  assert(not std.is_list(fspace_type),
+  assert(not std.is_list_of_regions(fspace_type),
          "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
