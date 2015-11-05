@@ -54,12 +54,13 @@ function check_privilege_noninterference(cx, task, region_type,
   local privileges_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
-        param_region_type, task:getprivileges(), task:get_coherence_modes()))
+        param_region_type, task:getprivileges(),
+        task:get_coherence_modes(), task:get_flags()))
   local other_privileges_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         other_param_region_type,
-        task:getprivileges(), task:get_coherence_modes()))
+        task:getprivileges(), task:get_coherence_modes(), task:get_flags()))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -104,7 +105,8 @@ function analyze_noninterference_self(cx, task, region_type,
   local param_region_type = mapping[region_type]
   assert(param_region_type)
   local privileges, privilege_field_paths = std.find_task_privileges(
-    param_region_type, task:getprivileges(), task:get_coherence_modes())
+    param_region_type, task:getprivileges(),
+    task:get_coherence_modes(), task:get_flags())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     if not (
@@ -132,6 +134,10 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -158,6 +164,10 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -322,6 +332,14 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
           end
         end
       end
+    end
+
+    if std.is_list(arg_type) and arg_type:is_list_of_regions() then
+      -- FIXME: Deoptimize lists of regions for the moment. Lists
+      -- would have to be (at a minimum) invariant though other
+      -- restrictions may apply.
+      log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is a list of regions")
+      return node
     end
 
     -- Tests for non-interference.

@@ -12,14 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_for4.rg:23: iterator for loop expected ispace, region or list, got int32
---   for x in 1 do end
---     ^
-
 import "regent"
 
-task f()
-  for x in 1 do end
+struct t {
+  a : int,
+  b : float,
+  c : uint8,
+}
+
+task k() : int
+  var r = region(ispace(ptr, 5), t)
+  var x = new(ptr(t, r))
+
+  x.a = 123
+  x.b = 3.14
+  x.c = 48
+
+  fill(r.{a, b, c}, 25)
+
+  return x.a + x.b + x.c
 end
-f()
+
+task main()
+  regentlib.assert(k() == 75, "test failed")
+end
+regentlib.start(main)

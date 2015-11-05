@@ -67,7 +67,7 @@ local function uses(cx, region_type, polarity)
       rhs = other_region_type,
       op = "*"
     }
-    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
+    if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
       not std.check_constraint(cx, constraint)
     then
       usage[other_region_type] = polarity
@@ -170,6 +170,9 @@ local function analyze_usage_node(cx)
       return usage_meet(
         uses(cx, src_type, remote),
         uses(cx, dst_type, remote))
+    elseif node:is(ast.typed.expr.Fill) then
+      local dst_type = std.as_read(node.dst.expr_type)
+      return uses(cx, dst_type, remote)
     elseif node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.Deref)
     then
@@ -471,7 +474,7 @@ function task_initial_usage(cx, privileges)
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
       local region = privilege.region
-      assert(std.is_region(region.type))
+      assert(std.type_supports_privileges(region.type))
       usage = usage_meet(usage, uses(cx, region.type, inline))
     end
   end

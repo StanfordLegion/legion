@@ -13,13 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_for4.rg:23: iterator for loop expected ispace, region or list, got int32
---   for x in 1 do end
---     ^
+-- privilege_fill1.rg:24: invalid privileges in copy: writes($r)
+--   fill(r, 0)
+--      ^
 
 import "regent"
 
-task f()
-  for x in 1 do end
+task k(r : region(int))
+where reads(r) do
+  fill(r, 0)
 end
-f()
