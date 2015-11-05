@@ -157,6 +157,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListRange) then
     return nil
 
@@ -167,6 +170,15 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.Copy) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Fill) then
+    return nil
+
+  elseif node:is(ast.typed.expr.AllocateScratchFields) then
+    return nil
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
     return nil
 
   elseif node:is(ast.typed.expr.Unary) then
@@ -587,6 +599,15 @@ function optimize_futures.expr_list_duplicate_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_list_cross_product(cx, node)
+  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
+  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  return node {
+    lhs = lhs,
+    rhs = rhs,
+  }
+end
+
 function optimize_futures.expr_list_range(cx, node)
   local start = concretize(optimize_futures.expr(cx, node.start))
   local stop = concretize(optimize_futures.expr(cx, node.stop))
@@ -621,6 +642,36 @@ function optimize_futures.expr_copy(cx, node)
     src = src,
     dst = dst,
     conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_fill(cx, node)
+  local dst = concretize(optimize_futures.expr_region_root(cx, node.dst))
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  local conditions = node.conditions:map(
+    function(condition)
+      return concretize(optimize_futures.expr_condition(cx, condition))
+    end)
+  return node {
+    dst = dst,
+    value = value,
+    conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_allocate_scratch_fields(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
+function optimize_futures.expr_with_scratch_fields(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  return node {
+    region = region,
+    field_ids = field_ids,
   }
 end
 
@@ -735,6 +786,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return optimize_futures.expr_list_duplicate_partition(cx, node)
 
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return optimize_futures.expr_list_cross_product(cx, node)
+
   elseif node:is(ast.typed.expr.ListRange) then
     return optimize_futures.expr_list_range(cx, node)
 
@@ -746,6 +800,15 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Fill) then
+    return optimize_futures.expr_fill(cx, node)
+
+  elseif node:is(ast.typed.expr.AllocateScratchFields) then
+    return optimize_futures.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
+    return optimize_futures.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)
