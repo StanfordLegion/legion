@@ -1439,6 +1439,27 @@ function type_check.expr_allocate_scratch_fields(cx, node)
   }
 end
 
+function type_check.expr_with_scratch_fields(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local field_ids = type_check.expr(cx, node.field_ids)
+  local field_ids_type = std.check_read(cx, field_ids)
+
+  local expr_type = std.region(
+    terralib.newsymbol(region_type:ispace()),
+    region_type:fspace())
+
+  std.copy_privileges(cx, region_type, expr_type)
+
+  return ast.typed.expr.WithScratchFields {
+    region = region,
+    field_ids = field_ids,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 local function unary_op_type(op)
   return function(cx, rhs_type)
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -1658,6 +1679,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.AllocateScratchFields) then
     return type_check.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.specialized.expr.WithScratchFields) then
+    return type_check.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)

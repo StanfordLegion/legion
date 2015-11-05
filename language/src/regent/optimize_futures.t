@@ -175,6 +175,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return nil
 
+  elseif node:is(ast.typed.expr.WithScratchFields) then
+    return nil
+
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
 
@@ -646,6 +649,15 @@ function optimize_futures.expr_allocate_scratch_fields(cx, node)
   }
 end
 
+function optimize_futures.expr_with_scratch_fields(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  return node {
+    region = region,
+    field_ids = field_ids,
+  }
+end
+
 function optimize_futures.expr_unary(cx, node)
   local rhs = optimize_futures.expr(cx, node.rhs)
   local rhs_type = std.as_read(rhs.expr_type)
@@ -774,6 +786,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return optimize_futures.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
+    return optimize_futures.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)

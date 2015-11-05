@@ -701,6 +701,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("with_scratch_fields") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local field_ids = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.WithScratchFields {
+      region = region,
+      field_ids = field_ids,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   else
     p:error("unexpected token in expression")
   end

@@ -920,6 +920,15 @@ function specialize.expr_allocate_scratch_fields(cx, node)
   }
 end
 
+function specialize.expr_with_scratch_fields(cx, node)
+  return ast.specialized.expr.WithScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    field_ids = specialize.expr(cx, node.field_ids),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_unary(cx, node)
   return ast.specialized.expr.Unary {
     op = node.op,
@@ -1034,6 +1043,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
     return specialize.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.WithScratchFields) then
+    return specialize.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)

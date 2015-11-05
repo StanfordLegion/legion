@@ -3461,6 +3461,60 @@ function codegen.expr_allocate_scratch_fields(cx, node)
   return values.value(expr.just(actions, field_ids), expr_type)
 end
 
+function codegen.expr_with_scratch_fields(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+  local field_ids_type = std.as_read(node.field_ids.expr_type)
+  local field_ids = codegen.expr(cx, node.field_ids):read(cx, field_ids_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = quote
+    [region.actions]
+    [field_ids.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local value = expr.once_only(
+    actions,
+    std.implicit_cast(region_type, expr_type, region.value))
+
+  assert(cx:has_region_or_list(region_type))
+
+  local old_field_ids = cx:region_or_list(region_type).field_ids
+  local new_field_ids = {}
+  for k, v in pairs(old_field_ids) do
+    new_field_ids[k] = v
+  end
+  for i, field_path in pairs(node.region.fields) do
+    new_field_ids[field_path:hash()] = `([field_ids.value][ [i-1] ])
+  end
+
+  if std.is_region(region_type) then
+    cx:add_region_root(
+      expr_type, value.value,
+      cx:region(region_type).field_paths,
+      cx:region(region_type).privilege_field_paths,
+      cx:region(region_type).field_privileges,
+      cx:region(region_type).field_types,
+      new_field_ids,
+      false,
+      false,
+      false)
+  elseif std.is_list_of_regions(region_type) then
+    cx:add_list_of_regions(
+      expr_type, value.value,
+      cx:list_of_regions(region_type).field_paths,
+      cx:list_of_regions(region_type).privilege_field_paths,
+      cx:list_of_regions(region_type).field_privileges,
+      cx:list_of_regions(region_type).field_types,
+      field_ids)
+  else
+    assert(false)
+  end
+
+  return values.value(value, expr_type)
+end
+
 local lift_unary_op_to_futures = terralib.memoize(
   function (op, rhs_type, expr_type)
     assert(terralib.types.istype(rhs_type) and
@@ -3908,6 +3962,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return codegen.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
+    return codegen.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return codegen.expr_unary(cx, node)
