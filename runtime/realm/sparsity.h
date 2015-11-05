@@ -90,13 +90,24 @@ namespace Realm {
     //  fashion and fetched by other nodes on demand, so the application code needs to call
     //  make_valid() before attempting to use the contents and either wait on the event or 
     //  otherwise defer the actual use until the event has triggered
-    Event make_valid(void);
+    Event make_valid(bool precise = true);
+    bool is_valid(bool precise = true);
 
     // a sparsity map entry is similar to an IndexSpace - it's a rectangle and optionally a
     //  reference to another SparsityMap OR a pointer to a HierarchicalBitMap, which is a 
     //  dense array of bits describing the validity of each point in the rectangle
 
+    const std::vector<SparsityMapEntry<N,T> >& get_entries(void);
+    
+    // a sparsity map can exist in an approximate form as well - this is a bounded list of rectangles
+    //  that are guaranteed to cover all actual entries
+
+    const std::vector<ZRect<N,T> >& get_approx_rects(void);
+
+  protected:
+    bool entries_valid, approx_valid;
     std::vector<SparsityMapEntry<N,T> > entries;
+    std::vector<ZRect<N,T> > approx_rects;
   };
 
 }; // namespace Realm

@@ -49,5 +49,36 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapPublicImpl<N,T>
+
+  template <int N, typename T>
+  inline bool SparsityMapPublicImpl<N,T>::is_valid(bool precise /*= true*/)
+  {
+    return (precise ? entries_valid : approx_valid);
+  }
+
+  template <int N, typename T>
+  inline const std::vector<SparsityMapEntry<N,T> >& SparsityMapPublicImpl<N,T>::get_entries(void)
+  {
+    if(!entries_valid) {
+      // TODO: warn here?
+      make_valid(true /*precise*/).wait();
+    }
+    return entries;
+  }
+    
+  template <int N, typename T>
+  inline const std::vector<ZRect<N,T> >& SparsityMapPublicImpl<N,T>::get_approx_rects(void)
+  {
+    if(!approx_valid) {
+      // TODO: warn here?
+      make_valid(false /*!precise*/).wait();
+    }
+    return approx_rects;
+  }
+
+
 }; // namespace Realm
 

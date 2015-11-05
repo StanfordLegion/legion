@@ -1227,6 +1227,10 @@ namespace Realm {
     // true if there is no sparsity map (i.e. the bounds fully define the domain)
     bool dense(void) const;
 
+    // kicks off any operation needed to get detailed sparsity information - asking for
+    //  approximate data can be a lot quicker for complicated index spaces
+    Event make_valid(bool precise = true) const;
+
     // queries for individual points or rectangles
     bool contains(const ZPoint<N,T>& p) const;
     bool contains_all(const ZRect<N,T>& r) const;
@@ -1234,6 +1238,17 @@ namespace Realm {
 
     // actual number of points in index space (may be less than volume of bounding box)
     size_t volume(void) const;
+
+
+    // approximate versions of the above queries - the approximation is guaranteed to be a supserset,
+    //  so if contains_approx returns false, contains would too
+    bool contains_approx(const ZPoint<N,T>& p) const;
+    bool contains_all_approx(const ZRect<N,T>& r) const;
+    bool contains_any_approx(const ZRect<N,T>& r) const;
+
+    // actual number of points in index space (may be less than volume of bounding box)
+    size_t volume_approx(void) const;
+
 
     // as an alternative to IndexSpaceIterator's, this will internally iterate over rectangles
     //  and call your callable/lambda for each subrectangle

@@ -614,7 +614,15 @@ namespace Realm {
 
   template <int N, typename T>
   SparsityMapPublicImpl<N,T>::SparsityMapPublicImpl(void)
+    : entries_valid(false), approx_valid(false)
   {}
+
+  // call actual implementation - inlining makes this cheaper than a virtual method
+  template <int N, typename T>
+  Event SparsityMapPublicImpl<N,T>::make_valid(bool precise /*= true*/)
+  {
+    return static_cast<SparsityMapImpl<N,T> *>(this)->make_valid(precise);
+  }
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -632,6 +640,18 @@ namespace Realm {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(sparsity);
     return wrapper->get_or_create<N,T>();
   }
+
+  // actual implementation - SparsityMapPublicImpl's version just calls this one
+  template <int N, typename T>
+  Event SparsityMapImpl<N,T>::make_valid(bool precise /*= true*/)
+  {
+    if(precise)
+      assert(this->entries_valid);
+    else
+      assert(this->approx_valid);
+    return Event::NO_EVENT;
+  }
+
 
   // methods used in the population of a sparsity map
 
@@ -725,6 +745,8 @@ namespace Realm {
 		<< " bitmap=" << this->entries[i].bitmap
 		<< std::endl;
 #endif
+    assert(!this->entries_valid);
+    this->entries_valid = true;
   }
 
 
@@ -1091,8 +1113,9 @@ namespace Realm {
 	bitmask.add_rect(it->bounds);
       } else {
 	SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->sparsity);
-	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = impl->entries.begin();
-	    it2 != impl->entries.end();
+	const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = entries.begin();
+	    it2 != entries.end();
 	    it2++) {
 	  ZRect<N,T> isect = it->bounds.intersection(it2->bounds);
 	  if(isect.empty())
@@ -1259,8 +1282,9 @@ namespace Realm {
       todo.push_back(lhs.bounds);
     } else {
       SparsityMapImpl<N,T> *l_impl = SparsityMapImpl<N,T>::lookup(lhs.sparsity);
-      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = l_impl->entries.begin();
-	  it != l_impl->entries.end();
+      const std::vector<SparsityMapEntry<N,T> >& entries = l_impl->get_entries();
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	  it != entries.end();
 	  it++) {
 	ZRect<N,T> isect = lhs.bounds.intersection(it->bounds);
 	if(isect.empty())

@@ -69,6 +69,9 @@ namespace Realm {
   public:
     SparsityMapImpl(void);
 
+    // actual implementation - SparsityMapPublicImpl's version just calls this one
+    Event make_valid(bool precise = true);
+
     static SparsityMapImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
 
     // methods used in the population of a sparsity map
