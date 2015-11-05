@@ -23,20 +23,26 @@ function parser.value(p)
   local value
   if p:matches(p.number) then
     local token = p:next(p.number)
+    local pos = ast.save(p)
     value = ast.unspecialized.expr.Constant {
       constant = token.value,
       type = token.valuetype,
+      position = pos,
     }
   elseif p:nextif("$") then
     local token = p:next(p.name)
+    local pos = ast.save(p)
     value = ast.unspecialized.expr.Variable {
       id = "$" .. token.value,
+      position = pos,
     }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
+    local pos = ast.save(p)
     value = ast.unspecialized.expr.Constant {
       constant = token.value,
       type = "keyword",
+      position = pos,
     }
   else
     p:error("unexpected type of value")
@@ -50,23 +56,29 @@ function parser.expr(p)
     if p:nextif("[") then
       if p:matches(p.name) and p:lookahead("=") then
         local constraints = p:constraints()
+        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Index {
           value = expr,
           index = constraints,
+          position = pos,
         }
       else
         local value = p:value()
+        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Index {
           value = expr,
           index = value,
+          position = pos,
         }
       end
       p:expect("]")
     elseif p:nextif(".") then
       local token = p:next(p.name)
+      local pos = ast.save(p)
       expr = ast.unspecialized.expr.Field {
         value = expr,
         field = token.value,
+        position = pos,
       }
     else
       break
@@ -77,12 +89,14 @@ end
 
 function parser.property(p)
   local field = p:next(p.name)
+  local pos = ast.save(p)
   p:expect(":")
   local value = p:expr()
   p:expect(";")
   return ast.unspecialized.Property {
     field = field.value,
     value = value,
+    position = pos,
   }
 end
 
@@ -95,12 +109,14 @@ function parser.properties(p)
 end
 
 function parser.constraint(p)
+  local pos = ast.save(p)
   local field = p:next(p.name)
   p:expect("=")
   local value = p:expr()
   return ast.unspecialized.Constraint {
     field = field.value,
     value = value,
+    position = pos,
   }
 end
 
@@ -131,6 +147,7 @@ function parser.element(p)
   else
     p:error("unexpected element name")
   end
+  local pos = ast.save(p)
 
   local name = terralib.newlist()
   local classes = terralib.newlist()
@@ -157,6 +174,7 @@ function parser.element(p)
     name = name,
     classes = classes,
     constraints = constraints,
+    position = pos,
   }
 end
 
@@ -167,6 +185,7 @@ function parser.selector(p)
   until p:matches(",") or p:matches("{")
   return ast.unspecialized.Selector {
     elements = elements,
+    position = elements[1].position,
   }
 end
 
@@ -190,6 +209,7 @@ function parser.rule(p)
   return ast.unspecialized.Rule {
     selectors = selectors,
     properties = properties,
+    position = selectors[1].position,
   }
 end
 
@@ -206,6 +226,7 @@ function parser.top(p)
     p:error("unexpected token in top-level statement")
   end
   p:expect("bishop")
+  local pos = ast.save(p)
 
   local rules = p:rules()
 
@@ -216,6 +237,7 @@ function parser.top(p)
 
   return ast.unspecialized.Rules {
     rules = rules,
+    position = pos,
   }
 end
 

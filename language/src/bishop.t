@@ -15,6 +15,7 @@
 -- Bishop Language Entry Point
 
 local parser = require("bishop/parser")
+local specialize = require("bishop/specialize")
 
 local language = {
   name = "bishop",

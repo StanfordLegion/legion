@@ -141,7 +141,7 @@ function ast_ctor:__call(node)
     end
   end
   rawset(node, "node_type", self)
-  rawset(node, "unparse", self.unparse)
+  if rawget(self, "unparse") then rawset(node, "unparse", self.unparse) end
   setmetatable(node, ast_node)
   return node
 end
@@ -222,9 +222,30 @@ function ast_factory:__tostring()
   return self.name
 end
 
+-- Location
+
+ast:leaf("Position", { "filename", "linenumber", "offset" }, true)
+
+function ast.save(p)
+  local token = p:cur()
+  return ast.Position {
+    filename = p.source,
+    linenumber = token.linenumber,
+    offset = token.offset,
+  }
+end
+
+function ast.trivial_pos()
+  return ast.Position {
+    source = "",
+    line = 0,
+    offset = 0,
+  }
+end
+
 -- Node Types (Unspecialized)
 
-ast:inner("unspecialized", {})
+ast:inner("unspecialized", { "position" })
 
 ast.unspecialized:leaf("Rules", { "rules" })
 function ast.unspecialized.Rules:unparse()
