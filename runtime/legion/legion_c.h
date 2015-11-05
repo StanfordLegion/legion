@@ -1699,6 +1699,33 @@ extern "C" {
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
                                    legion_context_t ctx);
 
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   */
+  void
+  legion_runtime_fill_field(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_predicate_t pred /* = legion_predicate_true() */);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   */
+  void
+  legion_runtime_fill_field_future(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t f,
+    legion_predicate_t pred /* = legion_predicate_true() */);
+
   // -----------------------------------------------------------------------
   // Copy Operations
   // -----------------------------------------------------------------------
