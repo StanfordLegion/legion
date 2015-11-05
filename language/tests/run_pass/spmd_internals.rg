@@ -58,13 +58,13 @@ do
     phase1(rs_private[i], rs_ghost[i])
   end
 
-  -- -- Zero the reduction fields:
-  -- fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0) -- awaits(...)
+  -- Zero the reduction fields:
+  fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0) -- awaits(...)
   for i in is do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end
   -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +) -- arrives(...)
-  -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +) -- arrives(...)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +) -- arrives(...)
 
   -- awaits(...)
   for i in is do
