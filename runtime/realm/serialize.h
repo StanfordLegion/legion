@@ -82,6 +82,11 @@ char operator,(const is_directly_serializable::inner&, const T&);
 #define TYPE_IS_SERIALIZABLE(T) \
   void *operator,(const is_directly_serializable::inner&, const T&);
 
+#define TEMPLATE_TYPE_IS_SERIALIZABLE(P,T)				\
+  template <P> void *operator,(const is_directly_serializable::inner&, const T&);
+#define TEMPLATE_TYPE_IS_SERIALIZABLE2(P1,P2,T1,T2)			\
+  template <P1,P2> void *operator,(const is_directly_serializable::inner&, const T1,T2&);
+
 namespace Realm {
   namespace Serialization {
     // there are three kinds of serializer we use and a single deserializer:

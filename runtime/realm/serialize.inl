@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 // base integer/float types are all serializable
+TYPE_IS_SERIALIZABLE(bool);
 TYPE_IS_SERIALIZABLE(char);
 TYPE_IS_SERIALIZABLE(unsigned char);
 TYPE_IS_SERIALIZABLE(short);

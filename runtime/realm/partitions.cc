@@ -708,7 +708,12 @@ namespace Realm {
   // class PartitioningMicroOp
 
   PartitioningMicroOp::PartitioningMicroOp(void)
-    : wait_count(2), async_microop(0)
+    : wait_count(2), requestor(gasnet_mynode()), async_microop(0)
+  {}
+
+  PartitioningMicroOp::PartitioningMicroOp(gasnet_node_t _requestor,
+					   AsyncMicroOp *_async_microop)
+    : wait_count(2), requestor(_requestor), async_microop(_async_microop)
   {}
 
   PartitioningMicroOp::~PartitioningMicroOp(void)
@@ -722,7 +727,7 @@ namespace Realm {
       op_queue->enqueue_partitioning_microop(this);
   }
 
-  void PartitioningMicroOp::finish_dispatch(Operation *op)
+  void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op)
   {
     // if there were no registrations by caller (or if they're really fast), the count will be 2
     //  and we can execute this microop inline
@@ -889,13 +894,52 @@ namespace Realm {
   }
 
   template <int N, typename T, typename FT>
-  void ByFieldMicroOp<N,T,FT>::dispatch(Operation *op)
+  void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op)
   {
+    // a ByFieldMicroOp should always be executed on whichever node the field data lives
+    gasnet_node_t exec_node = ID(inst).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
 
     // no other dependencies
     finish_dispatch(op);
+  }
+
+  template <int N, typename T, typename FT>
+  template <typename S>
+  bool ByFieldMicroOp<N,T,FT>::serialize_params(S& s) const
+  {
+    return((s << parent_space) &&
+	   (s << inst_space) &&
+	   (s << inst) &&
+	   (s << value_set) &&
+	   (s << sparsity_outputs));
+  }
+
+  template <int N, typename T, typename FT>
+  template <typename S>
+  ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(gasnet_node_t _requestor,
+					 AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> parent_space) &&
+	       (s >> inst_space) &&
+	       (s >> inst) &&
+	       (s >> value_set) &&
+	       (s >> sparsity_outputs));
+    assert(ok);
   }
 
 
@@ -988,7 +1032,7 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void ImageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
+  void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op)
   {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
@@ -1094,7 +1138,7 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
+  void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op)
   {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
@@ -1193,7 +1237,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void UnionMicroOp<N,T>::dispatch(Operation *op)
+  void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op)
   {
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
@@ -1290,7 +1334,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void IntersectionMicroOp<N,T>::dispatch(Operation *op)
+  void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op)
   {
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
@@ -1438,7 +1482,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void DifferenceMicroOp<N,T>::dispatch(Operation *op)
+  void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op)
   {
     // need valid data for each source
     if(!lhs.dense()) {
@@ -1458,6 +1502,66 @@ namespace Realm {
     }
 
     finish_dispatch(op);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteMicroOpMessage
+  
+  template <int N, typename T>
+  /*static*/ void RemoteMicroOpMessage::decode_request(RequestArgs args,
+						       const void *data, size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+
+    switch(args.opcode) {
+    case PartitioningMicroOp::UOPCODE_BY_FIELD:
+      {
+	ByFieldMicroOp<N,T,int> *uop = new ByFieldMicroOp<N,T,int>(args.sender,
+								 args.async_microop,
+								 fbd);
+	uop->dispatch(args.operation);
+	break;
+      }
+    default:
+      assert(0);
+    }
+  }
+
+  /*static*/ void RemoteMicroOpMessage::handle_request(RequestArgs args,
+						       const void *data, size_t datalen)
+  {
+    log_part.info() << "received remote micro op message: dim=" << args.dim
+		    << " idxtype=" << args.idxtype << " opcode=" << args.opcode;
+
+    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
+      decode_request<1,int>(args, data, datalen);
+      return;
+    }
+    assert(0);
+  }
+  
+  template <typename T>
+  /*static*/ void RemoteMicroOpMessage::send_request(gasnet_node_t target, 
+						     PartitioningOperation *operation,
+						     const T& microop)
+  {
+    RequestArgs args;
+
+    args.sender = gasnet_mynode();
+    args.dim = T::DIM;
+    args.idxtype = sizeof(typename T::IDXTYPE);
+    args.opcode = T::OPCODE;
+    args.operation = operation;
+    args.async_microop = microop.async_microop;
+
+    Serialization::DynamicBufferSerializer dbs(256);
+    microop.serialize_params(dbs);
+    ByteArray b = dbs.detach_bytearray();
+
+    Message::request(target, args, b.base(), b.size(), PAYLOAD_FREE);
+    b.detach();
   }
 
 

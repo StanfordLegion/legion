@@ -20,6 +20,12 @@
 
 #include "instance.h"
 
+#include "serialize.h"
+
+TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZPoint<N,T>);
+TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZRect<N,T>);
+TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZIndexSpace<N,T>);
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

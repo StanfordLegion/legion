@@ -19,6 +19,9 @@
 #include "instance.h"
 
 #include "indexspace.h"
+#include "serialize.h"
+
+TYPE_IS_SERIALIZABLE(Realm::RegionInstance);
 
 namespace Realm {
 

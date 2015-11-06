@@ -35,7 +35,7 @@
 namespace Realm {
 
   class PartitioningMicroOp;
-
+  class PartitioningOperation;
 
   // although partitioning operations eventually generate SparsityMap's, we work with
   //  various intermediates that try to keep things from turning into one big bitmask
@@ -151,16 +151,35 @@ namespace Realm {
     template <int N, typename T>
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
+    enum Opcode {
+      UOPCODE_INVALID,
+      UOPCODE_BY_FIELD,
+      UOPCODE_IMAGE,
+      UOPCODE_PREIMAGE,
+      UOPCODE_UNION,
+      UOPCODE_INTERSECTION,
+      UOPCODE_DIFFERENCE,
+    };
+
   protected:
-    void finish_dispatch(Operation *op);
+    PartitioningMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop);
+
+    void finish_dispatch(PartitioningOperation *op);
 
     int wait_count;  // how many sparsity maps are we still waiting for?
+    gasnet_node_t requestor;
     AsyncMicroOp *async_microop;
   };
 
   template <int N, typename T, typename FT>
   class ByFieldMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    typedef FT FIELDTYPE;
+
+    static const Opcode OPCODE = UOPCODE_BY_FIELD;
+
     ByFieldMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ByFieldMicroOp(void);
@@ -171,9 +190,17 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
+    friend class RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    ByFieldMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmasks(std::map<FT, BM *>& bitmasks);
 
@@ -197,7 +224,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
     template <typename BM>
@@ -222,7 +249,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
     template <typename BM>
@@ -246,7 +273,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
     template <typename BM>
@@ -267,7 +294,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
     template <typename BM>
@@ -287,7 +314,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(Operation *op);
+    void dispatch(PartitioningOperation *op);
 
   protected:
     template <typename BM>
@@ -458,6 +485,33 @@ namespace Realm {
   };
 
 
+  ////////////////////////////////////////
+  //
+  // active messages
+
+  struct RemoteMicroOpMessage {
+    struct RequestArgs : public BaseMedium {
+      gasnet_node_t sender;
+      int dim;
+      int idxtype;
+      PartitioningMicroOp::Opcode opcode;
+      PartitioningOperation *operation;
+      AsyncMicroOp *async_microop;
+    };
+
+    template <int N, typename T>
+    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+
+    static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+    typedef ActiveMessageMediumNoReply<REMOTE_MICROOP_MSGID,
+                                       RequestArgs,
+                                       handle_request> Message;
+
+    template <typename T>
+    static void send_request(gasnet_node_t target, PartitioningOperation *operation,
+			     const T& microop);
+  };
 };
 
 #endif // REALM_PARTITIONS_H

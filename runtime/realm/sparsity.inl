@@ -18,6 +18,10 @@
 // nop, but helps IDEs
 #include "sparsity.h"
 
+#include "serialize.h"
+
+TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::SparsityMap<N,T>);
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

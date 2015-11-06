@@ -59,6 +59,7 @@
       METADATA_RESPONSE_MSGID, // should really be a reply
       METADATA_INVALIDATE_MSGID,
       METADATA_INVALIDATE_ACK_MSGID,
+      REMOTE_MICROOP_MSGID,
     };
 
 
