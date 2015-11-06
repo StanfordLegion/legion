@@ -289,6 +289,22 @@ namespace Realm {
 							      count_offset, list_size, 
                                                               parent_inst);
 
+      // HACK: reverse engineer the ZIndexSpace from the old-style linearization and
+      //  create the new linearized index space widget
+      if(linear.get_dim() == 1) {
+	//log_inst.print() << "dim == 1";
+	LegionRuntime::Arrays::Mapping<1,1> *m = linear.get_mapping<1>();
+	Rect<1> src_lo = m->preimage(Point<1>(0));
+	Rect<1> src_hi = m->preimage(Point<1>(block_size - 1));
+	//log_inst.print() << "preimage = " << src_lo.lo.x[0] << ", " << src_hi.hi.x[0];
+
+	ZIndexSpace<1> is;
+	is.bounds.lo = src_lo.lo.x[0];
+	is.bounds.hi = src_hi.hi.x[0];
+	i_impl->lis = new AffineLinearizedIndexSpace<1,int>(is);
+      }
+
+
       // find/make an available index to store this in
       ID::IDType index;
       {

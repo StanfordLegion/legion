@@ -726,21 +726,6 @@ namespace Realm {
     return os;
   }
 
-  template <int N, typename T>
-  inline RegionInstance ZIndexSpace<N,T>::create_instance(Memory memory,
-							  const std::vector<size_t> &field_sizes,
-							  size_t block_size,
-							  const ProfilingRequestSet& reqs) const
-  {
-    // for now, create a instance that holds our entire bounding box and can therefore use a simple
-    //  linearizer
-
-    return RegionInstance::create_instance(memory,
-					   AffineLinearizedIndexSpace<N,T>(*this),
-					   field_sizes,
-					   reqs);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1026,14 +1011,38 @@ namespace Realm {
 
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RegionInstance
+
   template <int N, typename T>
-  const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
+  inline /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
+								   const ZIndexSpace<N,T>& space,
+								   const std::vector<size_t> &field_sizes,
+								   const ProfilingRequestSet& reqs)
+  {
+    if(N == 1) {
+      assert(space.dense());
+      LegionRuntime::Arrays::Rect<1> r;
+      r.lo = space.bounds.lo.x;
+      r.hi = space.bounds.hi.x;
+      Domain d = Domain::from_rect<1>(r);
+      return d.create_instance(memory, field_sizes, space.bounds.volume(), reqs);
+    } else {
+      // TODO: all sorts of serialization fun...
+      assert(false);
+      return RegionInstance::NO_INST;
+    }
+  }
+
+  template <int N, typename T>
+  inline const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
   {
     return get_lis().as_dim<N,T>().indexspace;
   }
 		
   template <int N>
-  const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
+  inline const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
   {
     return get_lis().as_dim<N,int>().indexspace;
   }

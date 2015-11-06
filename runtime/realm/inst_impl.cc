@@ -102,6 +102,7 @@ namespace Realm {
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped((void *)i_impl));
     }
 
+#if 0
     /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
 							      const LinearizedIndexSpaceIntfc& lis,
 							      const std::vector<size_t>& field_sizes,
@@ -134,6 +135,7 @@ namespace Realm {
 			 
       return r;
     }
+#endif
 
     const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
     {

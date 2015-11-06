@@ -490,8 +490,8 @@ namespace LegionRuntime {
       virtual Rect<ODIM> image_dense_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect) const = 0;
       virtual Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const = 0;
 
-      virtual Rect<IDIM> preimage(const Point<ODIM> p) const { assert(0); return Rect<IDIM>(); }//= 0;
-      virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); return false; }//= 0;
+      virtual Rect<IDIM> preimage(const Point<ODIM> p) const = 0;//{ assert(0); return Rect<IDIM>(); }//= 0;
+      virtual bool preimage_is_dense(const Point<ODIM> p) const = 0;//{ assert(0); return false; }//= 0;
       
       inline void add_reference(void)
       {
@@ -822,8 +822,11 @@ namespace LegionRuntime {
 
       Rect<IDIM> preimage(const Point<ODIM> p) const
       {
-	assert(0);
-	return Rect<IDIM>();
+	assert(DIM == 1);
+	Rect<IDIM> r;
+	r.lo.x[0] = (p.x[0] - offset) / strides.x[0];
+	r.hi = r.lo;
+	return r;
       }
 
       bool preimage_is_dense(const Point<ODIM> p) const

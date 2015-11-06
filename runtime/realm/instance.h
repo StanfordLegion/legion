@@ -53,8 +53,9 @@ namespace Realm {
     Memory get_location(void) const;
     const LinearizedIndexSpaceIntfc& get_lis(void) const;
 
+    template <int N, typename T>
     static RegionInstance create_instance(Memory memory,
-					  const LinearizedIndexSpaceIntfc& lis,
+					  const ZIndexSpace<N,T>& space,
 					  const std::vector<size_t>& field_sizes,
 					  const ProfilingRequestSet& prs);
 

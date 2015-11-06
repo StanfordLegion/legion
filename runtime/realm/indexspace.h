@@ -1264,12 +1264,12 @@ namespace Realm {
     void foreach_subrect(LAMBDA lambda, const ZRect<N,T>& restriction);
 
     // instance creation
-
+#if 0
     RegionInstance create_instance(Memory memory,
 				   const std::vector<size_t>& field_sizes,
 				   size_t block_size,
 				   const ProfilingRequestSet& reqs) const;
-
+#endif
 
 
     // partitioning operations

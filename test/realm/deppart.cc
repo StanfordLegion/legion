@@ -216,10 +216,10 @@ public:
     cell_blockid_field_data.resize(n_blocks);
 
     for(size_t i = 0; i < ss_cells_w.size(); i++) {
-      RegionInstance ri = ss_cells_w[i].create_instance(memories[i % memories.size()],
-							 cell_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_cells_w[i],
+							  cell_fields,
+							  Realm::ProfilingRequestSet());
       ri_cells[i] = ri;
     
       cell_blockid_field_data[i].index_space = ss_cells_w[i];
@@ -233,10 +233,10 @@ public:
     face_type_field_data.resize(n_blocks);
 
     for(size_t i = 0; i < ss_faces_w.size(); i++) {
-      RegionInstance ri = ss_faces_w[i].create_instance(memories[i % memories.size()],
-							 face_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_faces_w[i],
+							  face_fields,
+							  Realm::ProfilingRequestSet());
       ri_faces[i] = ri;
 
       face_left_field_data[i].index_space = ss_faces_w[i];
@@ -862,10 +862,10 @@ public:
     subckt_field_data.resize(num_pieces);
 
     for(size_t i = 0; i < ss_nodes_eq.size(); i++) {
-      RegionInstance ri = ss_nodes_eq[i].create_instance(memories[i % memories.size()],
-							 node_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_nodes_eq[i],
+							  node_fields,
+							  Realm::ProfilingRequestSet());
       ri_nodes[i] = ri;
     
       subckt_field_data[i].index_space = ss_nodes_eq[i];
@@ -878,10 +878,10 @@ public:
     out_node_field_data.resize(num_pieces);
 
     for(size_t i = 0; i < ss_edges_eq.size(); i++) {
-      RegionInstance ri = ss_edges_eq[i].create_instance(memories[i % memories.size()],
-							 edge_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_edges_eq[i],
+							  edge_fields,
+							  Realm::ProfilingRequestSet());
       ri_edges[i] = ri;
 
       in_node_field_data[i].index_space = ss_edges_eq[i];
@@ -1203,10 +1203,10 @@ public:
     zone_color_field_data.resize(numpc);
 
     for(size_t i = 0; i < ss_zones_w.size(); i++) {
-      RegionInstance ri = ss_zones_w[i].create_instance(memories[i % memories.size()],
-							 zone_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_zones_w[i],
+							  zone_fields,
+							  Realm::ProfilingRequestSet());
       ri_zones[i] = ri;
     
       zone_color_field_data[i].index_space = ss_zones_w[i];
@@ -1221,10 +1221,10 @@ public:
     side_ok_field_data.resize(numpc);
 
     for(size_t i = 0; i < ss_sides_w.size(); i++) {
-      RegionInstance ri = ss_sides_w[i].create_instance(memories[i % memories.size()],
-							 side_fields,
-							 1,
-							 Realm::ProfilingRequestSet());
+      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
+							  ss_sides_w[i],
+							  side_fields,
+							  Realm::ProfilingRequestSet());
       ri_sides[i] = ri;
 
       side_mapsz_field_data[i].index_space = ss_sides_w[i];
