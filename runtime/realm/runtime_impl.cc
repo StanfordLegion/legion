@@ -24,6 +24,7 @@
 #include "activemsg.h"
 
 #include "cmdline.h"
+#include "partitions.h"
 
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
@@ -478,6 +479,8 @@ namespace Realm {
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
 
+      PartitioningOpQueue::configure_from_cmdline(cmdline);
+
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
@@ -696,6 +699,8 @@ namespace Realm {
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
 							core_reservations);
+
+      PartitioningOpQueue::start_worker_threads(core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1181,6 +1186,7 @@ namespace Realm {
 
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
+      PartitioningOpQueue::stop_worker_threads();
       LegionRuntime::LowLevel::stop_dma_worker_threads();
       stop_activemsg_threads();
 

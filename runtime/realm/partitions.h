@@ -22,6 +22,10 @@
 #include "sparsity.h"
 #include "activemsg.h"
 #include "id.h"
+#include "operation.h"
+#include "threads.h"
+#include "cmdline.h"
+#include "pri_queue.h"
 
 // NOTE: all these interfaces are templated, which means partitions.cc is going
 //  to have to somehow know which ones to instantiate - we'll try to have a 
@@ -117,7 +121,6 @@ namespace Realm {
 
   /////////////////////////////////////////////////////////////////////////
 
-  template <int N, typename T>
   class PartitioningMicroOp {
   public:
     virtual ~PartitioningMicroOp(void);
@@ -126,7 +129,7 @@ namespace Realm {
   };
 
   template <int N, typename T, typename FT>
-  class ByFieldMicroOp : public PartitioningMicroOp<N,T> {
+  class ByFieldMicroOp : public PartitioningMicroOp {
   public:
     ByFieldMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
@@ -152,7 +155,7 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2>
-  class ImageMicroOp : public PartitioningMicroOp<N,T> {
+  class ImageMicroOp : public PartitioningMicroOp {
   public:
     ImageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N2,T2> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
@@ -161,6 +164,8 @@ namespace Realm {
     void add_sparsity_output(ZIndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
 
     virtual void execute(void);
+
+    void dispatch(Operation *op);
 
   protected:
     template <typename BM>
@@ -175,7 +180,7 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2>
-  class PreimageMicroOp : public PartitioningMicroOp<N,T> {
+  class PreimageMicroOp : public PartitioningMicroOp {
   public:
     PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
@@ -197,7 +202,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class UnionMicroOp : public PartitioningMicroOp<N,T> {
+  class UnionMicroOp : public PartitioningMicroOp {
   public:
     UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     UnionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
@@ -216,7 +221,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class IntersectionMicroOp : public PartitioningMicroOp<N,T> {
+  class IntersectionMicroOp : public PartitioningMicroOp {
   public:
     IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     IntersectionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
@@ -235,7 +240,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class DifferenceMicroOp : public PartitioningMicroOp<N,T> {
+  class DifferenceMicroOp : public PartitioningMicroOp {
   public:
     DifferenceMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
@@ -251,6 +256,72 @@ namespace Realm {
     ZIndexSpace<N,T> lhs, rhs;
     SparsityMap<N,T> sparsity_output;
   };
+
+  ////////////////////////////////////////
+  //
+  
+  class PartitioningOperation : public Operation {
+  public:
+    PartitioningOperation(const ProfilingRequestSet &reqs,
+			  Event _finish_event);
+
+    virtual void execute(void) = 0;
+
+    void deferred_launch(Event wait_for);
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class ImageOperation : public PartitioningOperation {
+  public:
+    ImageOperation(const ZIndexSpace<N,T>& _parent,
+		   const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& _field_data,
+		   const ProfilingRequestSet &reqs,
+		   Event _finish_event);
+
+    virtual ~ImageOperation(void);
+
+    ZIndexSpace<N,T> add_source(const ZIndexSpace<N2,T2>& source);
+
+    virtual void execute(void);
+
+  protected:
+    ZIndexSpace<N,T> parent;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
+    std::vector<ZIndexSpace<N2,T2> > sources;
+    std::vector<SparsityMap<N,T> > images;
+  };
+
+  ////////////////////////////////////////
+  //
+
+  class PartitioningOpQueue {
+  public:
+    PartitioningOpQueue(CoreReservation *_rsrv);
+    ~PartitioningOpQueue(void);
+
+    static void configure_from_cmdline(std::vector<std::string>& cmdline);
+    static void start_worker_threads(CoreReservationSet& crs);
+    static void stop_worker_threads(void);
+
+    enum {
+      OPERATION_PRIORITY = 1,
+      MICROOP_PRIORITY = 0
+    };
+
+    void enqueue_partitioning_operation(PartitioningOperation *op);
+    void enqueue_partitioning_microop(PartitioningMicroOp *uop);
+
+    void worker_thread_loop(void);
+
+  protected:
+    bool shutdown_flag;
+    CoreReservation *rsrv;
+    PriorityQueue<void *, DummyLock> queued_ops;
+    GASNetHSL mutex;
+    GASNetCondVar condvar;
+    std::vector<Thread *> workers;
+  };
+
 
 };
 

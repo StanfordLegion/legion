@@ -23,7 +23,10 @@
 
 namespace Realm {
 
+  Logger log_part("part");
   Logger log_uop_timing("uop_timing");
+
+  static PartitioningOpQueue *op_queue = 0;
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -153,32 +156,16 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
-    // create a new sparsity map for each subspace
     size_t n = sources.size();
     images.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      images[i].bounds = this->bounds;
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(field_data.size());
-      images[i].sparsity = sparsity;
-    }
+    for(size_t i = 0; i < n; i++)
+      images[i] = op->add_source(sources[i]);
 
-    for(size_t i = 0; i < field_data.size(); i++) {
-      ImageMicroOp<N,T,N2,T2> uop(*this,
-				  field_data[i].index_space,
-				  field_data[i].inst,
-				  field_data[i].field_offset);
-      for(size_t j = 0; j < sources.size(); j++)
-	uop.add_sparsity_output(sources[j], images[j].sparsity);
-      uop.execute();
-    }
-
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -752,10 +739,9 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class PartitioningMicroOp<N,T>
+  // class PartitioningMicroOp
 
-  template <int N, typename T>
-  PartitioningMicroOp<N,T>::~PartitioningMicroOp(void)
+  PartitioningMicroOp::~PartitioningMicroOp(void)
   {}
 
 
@@ -984,6 +970,12 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void ImageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
+  {
+    execute();
   }
 
 
@@ -1345,6 +1337,211 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PartitioningOperation
+
+  class DeferredPartitioningOp : public EventWaiter {
+  public:
+    DeferredPartitioningOp(PartitioningOperation *_op) : op(_op) {}
+
+    virtual bool event_triggered(void) { op_queue->enqueue_partitioning_operation(op); return true; }
+
+    virtual void print_info(FILE *f) {}
+
+  protected:
+    PartitioningOperation *op;
+  };
+
+  PartitioningOperation::PartitioningOperation(const ProfilingRequestSet &reqs,
+					       Event _finish_event)
+    : Operation(_finish_event, reqs)
+  {}
+
+  void PartitioningOperation::deferred_launch(Event wait_for)
+  {
+    if(wait_for.has_triggered())
+      op_queue->enqueue_partitioning_operation(this);
+    else
+      EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));
+  };
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ImageOperation<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2>
+  ImageOperation<N,T,N2,T2>::ImageOperation(const ZIndexSpace<N,T>& _parent,
+					    const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& _field_data,
+					    const ProfilingRequestSet &reqs,
+					    Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+    , parent(_parent)
+    , field_data(_field_data)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  ImageOperation<N,T,N2,T2>::~ImageOperation(void)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const ZIndexSpace<N2,T2>& source)
+  {
+    // try to filter out obviously empty sources
+    if(source.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise it'll be something smaller than the current parent
+    ZIndexSpace<N,T> image;
+    image.bounds = parent.bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    image.sparsity = sparsity;
+
+    sources.push_back(source);
+    images.push_back(sparsity);
+
+    return image;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void ImageOperation<N,T,N2,T2>::execute(void)
+  {
+    for(size_t i = 0; i < images.size(); i++)
+      SparsityMapImpl<N,T>::lookup(images[i])->update_contributor_count(field_data.size());
+
+    for(size_t i = 0; i < field_data.size(); i++) {
+      ImageMicroOp<N,T,N2,T2> uop(parent,
+				  field_data[i].index_space,
+				  field_data[i].inst,
+				  field_data[i].field_offset);
+      for(size_t j = 0; j < sources.size(); j++)
+	uop.add_sparsity_output(sources[j], images[j]);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PartitioningOpQueue
+
+  static int num_partitioning_workers = 1;
+  PartitioningOpQueue::PartitioningOpQueue( CoreReservation *_rsrv)
+    : shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
+  {}
+  
+  PartitioningOpQueue::~PartitioningOpQueue(void)
+  {
+    assert(shutdown_flag);
+    delete rsrv;
+  }
+
+  /*static*/ void PartitioningOpQueue::configure_from_cmdline(std::vector<std::string>& cmdline)
+  {
+    CommandLineParser cp;
+
+    cp.add_option_int("-dp:workers", num_partitioning_workers);
+
+    cp.parse_command_line(cmdline);
+  }
+
+  /*static*/ void PartitioningOpQueue::start_worker_threads(CoreReservationSet& crs)
+  {
+    assert(op_queue == 0);
+    CoreReservation *rsrv = new CoreReservation("partitioning", crs,
+						CoreReservationParameters());
+    op_queue = new PartitioningOpQueue(rsrv);
+    ThreadLaunchParameters tlp;
+    for(int i = 0; i < num_partitioning_workers; i++) {
+      Thread *t = Thread::create_kernel_thread<PartitioningOpQueue,
+					       &PartitioningOpQueue::worker_thread_loop>(op_queue,
+											 tlp,
+											 *rsrv);
+      op_queue->workers.push_back(t);
+    }
+  }
+
+  /*static*/ void PartitioningOpQueue::stop_worker_threads(void)
+  {
+    assert(op_queue != 0);
+
+    op_queue->shutdown_flag = true;
+    {
+      AutoHSLLock al(op_queue->mutex);
+      op_queue->condvar.broadcast();
+    }
+    for(size_t i = 0; i < op_queue->workers.size(); i++) {
+      op_queue->workers[i]->join();
+      delete op_queue->workers[i];
+    }
+    op_queue->workers.clear();
+
+    delete op_queue;
+    op_queue = 0;
+  }
+      
+  void PartitioningOpQueue::enqueue_partitioning_operation(PartitioningOperation *op)
+  {
+    op->mark_ready();
+
+    AutoHSLLock al(mutex);
+
+    queued_ops.put(op, OPERATION_PRIORITY);
+
+    op_queue->condvar.broadcast();
+  }
+
+  void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
+  {
+    AutoHSLLock al(mutex);
+
+    queued_ops.put(uop, MICROOP_PRIORITY);
+
+    op_queue->condvar.broadcast();
+  }
+
+  void PartitioningOpQueue::worker_thread_loop(void)
+  {
+    log_part.info() << "worker started for op queue " << this;
+
+    while(!shutdown_flag) {
+      void *op = 0;
+      int priority;
+      while(!op && !shutdown_flag) {
+	AutoHSLLock al(mutex);
+	op = queued_ops.get(&priority);
+	if(!op && !shutdown_flag)
+	  condvar.wait();
+      }
+      if(op) {
+	switch(priority) {
+	case OPERATION_PRIORITY:
+	  {
+	    PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
+	    log_part.info() << "worker " << this << " starting op " << p_op;
+	    p_op->mark_started();
+	    p_op->execute();
+	    p_op->mark_finished();
+	    log_part.info() << "worker " << this << " finished op " << p_op;
+	    break;
+	  }
+	case MICROOP_PRIORITY:
+	  {
+	    PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
+	    p_uop->execute();
+	    break;
+	  }
+	default: assert(0);
+	}
+      }
+    }
+
+    log_part.info() << "worker finishing for op queue " << this;
   }
 
 

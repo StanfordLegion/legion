@@ -1236,6 +1236,8 @@ namespace Realm {
     bool contains_all(const ZRect<N,T>& r) const;
     bool contains_any(const ZRect<N,T>& r) const;
 
+    bool overlaps(const ZIndexSpace<N,T>& other) const;
+
     // actual number of points in index space (may be less than volume of bounding box)
     size_t volume(void) const;
 
@@ -1246,7 +1248,10 @@ namespace Realm {
     bool contains_all_approx(const ZRect<N,T>& r) const;
     bool contains_any_approx(const ZRect<N,T>& r) const;
 
-    // actual number of points in index space (may be less than volume of bounding box)
+    bool overlaps_approx(const ZIndexSpace<N,T>& other) const;
+
+    // approximage number of points in index space (may be less than volume of bounding box, but larger than
+    //   actual volume)
     size_t volume_approx(void) const;
 
 
