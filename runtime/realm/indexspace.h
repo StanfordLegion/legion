@@ -1230,6 +1230,7 @@ namespace Realm {
     // kicks off any operation needed to get detailed sparsity information - asking for
     //  approximate data can be a lot quicker for complicated index spaces
     Event make_valid(bool precise = true) const;
+    bool is_valid(bool precise = true) const;
 
     // queries for individual points or rectangles
     bool contains(const ZPoint<N,T>& p) const;

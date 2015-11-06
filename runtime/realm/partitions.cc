@@ -630,6 +630,37 @@ namespace Realm {
       finalize();
   }
 
+  // adds a microop as a waiter for valid sparsity map data - returns true
+  //  if the uop is added to the list (i.e. will be getting a callback at some point),
+  //  or false if the sparsity map became valid before this call (i.e. no callback)
+  template <int N, typename T>
+  bool SparsityMapImpl<N,T>::add_waiter(PartitioningMicroOp *uop, bool precise)
+  {
+    // early out
+    if(precise ? this->entries_valid : this->approx_valid)
+      return false;
+
+    // take lock and retest, and register if not ready
+    bool registered = false;
+    {
+      AutoHSLLock al(mutex);
+
+      if(precise) {
+	if(!this->entries_valid) {
+	  precise_waiters.push_back(uop);
+	  registered = true;
+	}
+      } else {
+	if(!this->approx_valid) {
+	  approx_waiters.push_back(uop);
+	  registered = true;
+	}
+      }
+    }
+
+    return registered;
+  }
+
   template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
@@ -642,8 +673,33 @@ namespace Realm {
 		<< " bitmap=" << this->entries[i].bitmap
 		<< std::endl;
 #endif
-    assert(!this->entries_valid);
-    this->entries_valid = true;
+    {
+      AutoHSLLock al(mutex);
+
+      assert(!this->entries_valid);
+      this->entries_valid = true;
+
+      for(std::vector<PartitioningMicroOp *>::const_iterator it = precise_waiters.begin();
+	  it != precise_waiters.end();
+	  it++)
+	(*it)->sparsity_map_ready(this, true);
+      precise_waiters.clear();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AsyncMicroOp
+
+  AsyncMicroOp::AsyncMicroOp(Operation *_op, PartitioningMicroOp *_uop)
+    : Operation::AsyncWorkItem(_op)
+    , uop(_uop)
+  {}
+    
+  void AsyncMicroOp::request_cancellation(void)
+  {
+    // ignored
   }
 
 
@@ -651,9 +707,42 @@ namespace Realm {
   //
   // class PartitioningMicroOp
 
+  PartitioningMicroOp::PartitioningMicroOp(void)
+    : wait_count(2), async_microop(0)
+  {}
+
   PartitioningMicroOp::~PartitioningMicroOp(void)
   {}
 
+  template <int N, typename T>
+  void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise)
+  {
+    int left = __sync_sub_and_fetch(&wait_count, 1);
+    if(left == 0)
+      op_queue->enqueue_partitioning_microop(this);
+  }
+
+  void PartitioningMicroOp::finish_dispatch(Operation *op)
+  {
+    // if there were no registrations by caller (or if they're really fast), the count will be 2
+    //  and we can execute this microop inline
+    int left1 = __sync_sub_and_fetch(&wait_count, 1);
+    if(left1 == 1) {
+      execute();
+      return;
+    }
+
+    // if the count was greater than 1, it probably has to be queued, so create an 
+    //  AsyncMicroOp so that the op knows we're not done yet
+    async_microop = new AsyncMicroOp(op, this);
+    op->add_async_work_item(async_microop);
+
+    // now do the last decrement - if it returns 0, we can still do the operation inline
+    //  (otherwise it'll get queued when somebody else does the last decrement)
+    int left2 = __sync_sub_and_fetch(&wait_count, 1);
+    if(left2 == 0)
+      execute();
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -794,12 +883,19 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T, typename FT>
   void ByFieldMicroOp<N,T,FT>::dispatch(Operation *op)
   {
-    execute();
+    // instance index spaces should always be valid
+    assert(inst_space.is_valid(true /*precise*/));
+
+    // no other dependencies
+    finish_dispatch(op);
   }
 
 
@@ -886,12 +982,29 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
   {
-    execute();
+    // instance index spaces should always be valid
+    assert(inst_space.is_valid(true /*precise*/));
+
+    // need valid data for each source
+    for(size_t i = 0; i < sources.size(); i++) {
+      if(!sources[i].dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(sources[i].sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op);
   }
 
 
@@ -975,12 +1088,29 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
   {
-    execute();
+    // instance index spaces should always be valid
+    assert(inst_space.is_valid(true /*precise*/));
+
+    // need valid data for each source
+    for(size_t i = 0; i < targets.size(); i++) {
+      if(!targets[i].dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(targets[i].sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -1057,12 +1187,28 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T>
   void UnionMicroOp<N,T>::dispatch(Operation *op)
   {
-    execute();
+    // need valid data for each input
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(!it->dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op);
   }
 
 
@@ -1138,12 +1284,28 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::dispatch(Operation *op)
   {
-    execute();
+    // need valid data for each input
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(!it->dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op);
   }
 
 
@@ -1270,12 +1432,32 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
+
+    if(async_microop)
+      async_microop->mark_finished();
   }
 
   template <int N, typename T>
   void DifferenceMicroOp<N,T>::dispatch(Operation *op)
   {
-    execute();
+    // need valid data for each source
+    if(!lhs.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(lhs.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+
+    if(!rhs.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(rhs.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+
+    finish_dispatch(op);
   }
 
 
@@ -1302,7 +1484,7 @@ namespace Realm {
 
   void PartitioningOperation::deferred_launch(Event wait_for)
   {
-    if(wait_for.has_triggered())
+    if(1 || wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
       EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));
@@ -1354,14 +1536,14 @@ namespace Realm {
       SparsityMapImpl<N,T>::lookup(subspaces[i])->update_contributor_count(field_data.size());
 
     for(size_t i = 0; i < field_data.size(); i++) {
-      ByFieldMicroOp<N,T,FT> uop(parent,
-				 field_data[i].index_space,
-				 field_data[i].inst,
-				 field_data[i].field_offset);
+      ByFieldMicroOp<N,T,FT> *uop = new ByFieldMicroOp<N,T,FT>(parent,
+							       field_data[i].index_space,
+							       field_data[i].inst,
+							       field_data[i].field_offset);
       for(size_t j = 0; j < colors.size(); j++)
-	uop.add_sparsity_output(colors[j], subspaces[j]);
+	uop->add_sparsity_output(colors[j], subspaces[j]);
       //uop.set_value_set(colors);
-      uop.dispatch(this);
+      uop->dispatch(this);
     }
   }
 
@@ -1411,13 +1593,13 @@ namespace Realm {
       SparsityMapImpl<N,T>::lookup(images[i])->update_contributor_count(field_data.size());
 
     for(size_t i = 0; i < field_data.size(); i++) {
-      ImageMicroOp<N,T,N2,T2> uop(parent,
-				  field_data[i].index_space,
-				  field_data[i].inst,
-				  field_data[i].field_offset);
+      ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
+								 field_data[i].index_space,
+								 field_data[i].inst,
+								 field_data[i].field_offset);
       for(size_t j = 0; j < sources.size(); j++)
-	uop.add_sparsity_output(sources[j], images[j]);
-      uop.dispatch(this);
+	uop->add_sparsity_output(sources[j], images[j]);
+      uop->dispatch(this);
     }
   }
 
@@ -1467,13 +1649,13 @@ namespace Realm {
       SparsityMapImpl<N,T>::lookup(preimages[i])->update_contributor_count(field_data.size());
 
     for(size_t i = 0; i < field_data.size(); i++) {
-      PreimageMicroOp<N,T,N2,T2> uop(parent,
-				  field_data[i].index_space,
-				  field_data[i].inst,
-				  field_data[i].field_offset);
+      PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+								       field_data[i].index_space,
+								       field_data[i].inst,
+								       field_data[i].field_offset);
       for(size_t j = 0; j < targets.size(); j++)
-	uop.add_sparsity_output(targets[j], preimages[j]);
-      uop.dispatch(this);
+	uop->add_sparsity_output(targets[j], preimages[j]);
+      uop->dispatch(this);
     }
   }
 
@@ -1547,9 +1729,9 @@ namespace Realm {
     for(size_t i = 0; i < outputs.size(); i++) {
       SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
 
-      UnionMicroOp<N,T> uop(inputs[i]);
-      uop.add_sparsity_output(outputs[i]);
-      uop.dispatch(this);
+      UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(inputs[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this);
     }
   }
 
@@ -1621,9 +1803,9 @@ namespace Realm {
     for(size_t i = 0; i < outputs.size(); i++) {
       SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
 
-      IntersectionMicroOp<N,T> uop(inputs[i]);
-      uop.add_sparsity_output(outputs[i]);
-      uop.dispatch(this);
+      IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(inputs[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this);
     }
   }
 
@@ -1671,9 +1853,9 @@ namespace Realm {
     for(size_t i = 0; i < outputs.size(); i++) {
       SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
 
-      DifferenceMicroOp<N,T> uop(lhss[i], rhss[i]);
-      uop.add_sparsity_output(outputs[i]);
-      uop.dispatch(this);
+      DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(lhss[i], rhss[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this);
     }
   }
 
@@ -1759,7 +1941,7 @@ namespace Realm {
 
   void PartitioningOpQueue::worker_thread_loop(void)
   {
-    log_part.info() << "worker started for op queue " << this;
+    log_part.info() << "worker " << Thread::self() << " started for op queue " << this;
 
     while(!shutdown_flag) {
       void *op = 0;
@@ -1785,7 +1967,9 @@ namespace Realm {
 	case MICROOP_PRIORITY:
 	  {
 	    PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
+	    log_part.info() << "worker " << this << " starting uop " << p_uop;
 	    p_uop->execute();
+	    log_part.info() << "worker " << this << " starting uop " << p_uop;
 	    break;
 	  }
 	default: assert(0);
@@ -1793,7 +1977,7 @@ namespace Realm {
       }
     }
 
-    log_part.info() << "worker finishing for op queue " << this;
+    log_part.info() << "worker " << Thread::self() << " finishing for op queue " << this;
   }
 
 

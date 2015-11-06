@@ -374,6 +374,15 @@ namespace Realm {
       return Event::NO_EVENT;
   }
 
+  template <int N, typename T>
+  bool ZIndexSpace<N,T>::is_valid(bool precise /*= true*/) const
+  {
+    if(sparsity.exists())
+      return sparsity.impl()->is_valid(precise);
+    else
+      return true;
+  }
+
   // queries for individual points or rectangles
   template <int N, typename T>
   inline bool ZIndexSpace<N,T>::contains(const ZPoint<N,T>& p) const

@@ -34,6 +34,9 @@
 
 namespace Realm {
 
+  class PartitioningMicroOp;
+
+
   // although partitioning operations eventually generate SparsityMap's, we work with
   //  various intermediates that try to keep things from turning into one big bitmask
 
@@ -66,6 +69,7 @@ namespace Realm {
     std::vector<ZRect<N,T> > rects;
   };
 
+
   /////////////////////////////////////////////////////////////////////////
 
   template <int N, typename T>
@@ -89,11 +93,17 @@ namespace Realm {
     void contribute_nothing(void);
     void contribute_dense_rect_list(const DenseRectangleList<N,T>& rects);
 
+    // adds a microop as a waiter for valid sparsity map data - returns true
+    //  if the uop is added to the list (i.e. will be getting a callback at some point),
+    //  or false if the sparsity map became valid before this call (i.e. no callback)
+    bool add_waiter(PartitioningMicroOp *uop, bool precise);
+
   protected:
     void finalize(void);
     
     int remaining_contributor_count;
     GASNetHSL mutex;
+    std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
   };
 
   // we need a type-erased wrapper to store in the runtime's lookup table
@@ -121,11 +131,31 @@ namespace Realm {
 
   /////////////////////////////////////////////////////////////////////////
 
+  class AsyncMicroOp : public Operation::AsyncWorkItem {
+  public:
+    AsyncMicroOp(Operation *_op, PartitioningMicroOp *_uop);
+    
+    virtual void request_cancellation(void);
+      
+  protected:
+    PartitioningMicroOp *uop;
+  };
+
   class PartitioningMicroOp {
   public:
+    PartitioningMicroOp(void);
     virtual ~PartitioningMicroOp(void);
 
     virtual void execute(void) = 0;
+
+    template <int N, typename T>
+    void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
+
+  protected:
+    void finish_dispatch(Operation *op);
+
+    int wait_count;  // how many sparsity maps are we still waiting for?
+    AsyncMicroOp *async_microop;
   };
 
   template <int N, typename T, typename FT>
