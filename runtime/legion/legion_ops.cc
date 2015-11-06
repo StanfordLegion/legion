@@ -9639,6 +9639,9 @@ namespace LegionRuntime {
     bool DetachOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
+      // Actual unmap of an inline mapped region was deferred to here
+      if (region.impl->is_mapped())
+        region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
       InstanceRef reference = region.impl->get_reference();
       // Check that this is actually a file

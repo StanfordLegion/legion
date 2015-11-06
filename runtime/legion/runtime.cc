@@ -9033,7 +9033,9 @@ namespace LegionRuntime {
       if (region.impl->is_mapped())
       {
         ctx->unregister_inline_mapped_region(region);
-        region.impl->unmap_region();
+	// Defer the unmap itself until DetachOp::trigger_execution to avoid
+	// blocking the application task
+	//   region.impl->unmap_region();
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
