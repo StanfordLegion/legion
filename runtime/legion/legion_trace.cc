@@ -117,17 +117,65 @@ namespace LegionRuntime {
           op_map[key] = index;
           // Add a new vector for storing dependences onto the back
           dependences.push_back(LegionVector<DependenceRecord>::aligned());
+          // Record meta-data about the trace for verifying that
+          // it is being replayed correctly
+          op_info.push_back(OperationInfo(op));
         }
         else // Otherwise, track close operations separately
           close_dependences[key] = LegionVector<DependenceRecord>::aligned();
       }
       else
       {
+        // Check for exceeding the trace size
+        if (index >= dependences.size())
+        {
+          log_run.error("Trace violation! Recorded %ld operations in trace "
+                        "%d in task %s (UID %lld) but %d operations have "
+                        "now been issued!", dependences.size(), tid,
+                        ctx->variants->name, ctx->get_unique_task_id(), index);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_TRACE_VIOLATION);
+        }
         if (!op->is_close_op())
         {
+          // Check to see if the meta-data alignes
+          const OperationInfo &info = op_info[index];
+          // Check that they are the same kind of operation
+          if (info.kind != op->get_operation_kind())
+          {
+            log_run.error("Trace violation! Operation at index %d of trace %d "
+                          "in task %s (UID %lld) was recorded as having type "
+                          "%s but instead has type %s in replay.",
+                          index, tid, ctx->variants->name, 
+                          ctx->get_unique_task_id(), 
+                          Operation::get_string_rep(info.kind),
+                          Operation::get_string_rep(op->get_operation_kind()));
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
+          // Check that they have the same number of region requirements
+          if (info.count != op->get_region_count())
+          {
+            log_run.error("Trace violation! Operation at index %d of trace %d "
+                          "in task %s (UID %lld) was recorded as having %d "
+                          "regions, but instead has %ld regions in replay.",
+                          index, tid, ctx->variants->name,
+                          ctx->get_unique_task_id(), info.count,
+                          op->get_region_count());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
+          // If we make it here, everything is good
           const LegionVector<DependenceRecord>::aligned &deps = 
                                                           dependences[index];
           operations.push_back(key);
+          
           // Add a mapping reference since people will be 
           // registering dependences
           op->add_mapping_reference(gen);  

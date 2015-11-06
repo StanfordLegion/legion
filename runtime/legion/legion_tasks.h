@@ -75,6 +75,7 @@ namespace LegionRuntime {
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void) = 0;

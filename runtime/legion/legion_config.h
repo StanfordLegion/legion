@@ -294,6 +294,7 @@ typedef enum legion_error_t {
   ERROR_NO_PROCESSORS = 131,
   ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING = 132,
   ERROR_INVALID_MAPPED_REGION_LOCATION = 133,
+  ERROR_TRACE_VIOLATION = 134,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
