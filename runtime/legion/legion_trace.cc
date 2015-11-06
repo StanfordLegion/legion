@@ -132,7 +132,7 @@ namespace LegionRuntime {
           log_run.error("Trace violation! Recorded %ld operations in trace "
                         "%d in task %s (UID %lld) but %d operations have "
                         "now been issued!", dependences.size(), tid,
-                        ctx->variants->name, ctx->get_unique_task_id(), index);
+                        ctx->variants->name, ctx->get_unique_task_id(),index+1);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
