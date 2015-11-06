@@ -118,33 +118,16 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, e);
 
-    // create a new sparsity map for each subspace
     size_t n = colors.size();
     subspaces.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      subspaces[i].bounds = this->bounds;
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(field_data.size());
-      subspaces[i].sparsity = sparsity;      
-    }
+    for(size_t i = 0; i < n; i++)
+      subspaces[i] = op->add_color(colors[i]);
 
-    for(size_t i = 0; i < field_data.size(); i++) {
-      ByFieldMicroOp<N,T,FT> uop(*this,
-				 field_data[i].index_space,
-				 field_data[i].inst,
-				 field_data[i].field_offset);
-      for(size_t j = 0; j < colors.size(); j++)
-	uop.add_sparsity_output(colors[j], subspaces[j].sparsity);
-      //uop.set_value_set(colors);
-      uop.execute();
-    }
-
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
 
@@ -176,32 +159,16 @@ namespace Realm {
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
-    // create a new sparsity map for each subspace
     size_t n = targets.size();
     preimages.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      preimages[i].bounds = this->bounds;
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(field_data.size());
-      preimages[i].sparsity = sparsity;
-    }
+    for(size_t i = 0; i < n; i++)
+      preimages[i] = op->add_target(targets[i]);
 
-    for(size_t i = 0; i < field_data.size(); i++) {
-      PreimageMicroOp<N,T,N2,T2> uop(*this,
-				     field_data[i].index_space,
-				     field_data[i].inst,
-				     field_data[i].field_offset);
-      for(size_t j = 0; j < targets.size(); j++)
-	uop.add_sparsity_output(targets[j], preimages[j].sparsity);
-      uop.execute();
-    }
-
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -211,8 +178,8 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/)
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -220,20 +187,11 @@ namespace Realm {
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      results[i].bounds = lhss[li].bounds.union_bbox(rhss[ri].bounds);
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(1);
-      results[i].sparsity = sparsity;
-
-      UnionMicroOp<N,T> uop(lhss[li],
-			    rhss[ri]);
-      uop.add_sparsity_output(results[i].sparsity);
-      uop.execute();
+      results[i] = op->add_union(lhss[li], rhss[ri]);
     }
 
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -243,8 +201,8 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/)
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -252,22 +210,11 @@ namespace Realm {
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      results[i].bounds = lhss[li].bounds.intersection(rhss[ri].bounds);
-      // TODO: early out for empty bounds intersection
-
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(1);
-      results[i].sparsity = sparsity;
-
-      IntersectionMicroOp<N,T> uop(lhss[li],
-				   rhss[ri]);
-      uop.add_sparsity_output(results[i].sparsity);
-      uop.execute();
+      results[i] = op->add_intersection(lhss[li], rhss[ri]);
     }
 
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -277,28 +224,20 @@ namespace Realm {
 							 const ProfilingRequestSet &reqs,
 							 Event wait_on /*= Event::NO_EVENT*/)
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    DifferenceOperation<N,T> *op = new DifferenceOperation<N,T>(reqs, e);
 
-    // just give copies of lhss for now
-    assert(lhss.size() == rhss.size());
-    size_t n = lhss.size();
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
     results.resize(n);
     for(size_t i = 0; i < n; i++) {
-      results[i].bounds = lhss[i].bounds;
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-      impl->update_contributor_count(1);
-      results[i].sparsity = sparsity;
-
-      DifferenceMicroOp<N,T> uop(lhss[i],
-				 rhss[i]);
-      uop.add_sparsity_output(results[i].sparsity);
-      uop.execute();
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i] = op->add_difference(lhss[li], rhss[ri]);
     }
 
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -307,27 +246,13 @@ namespace Realm {
 						   const ProfilingRequestSet &reqs,
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
 
-    assert(!subspaces.empty());
-    // build a union_bbox for the new bounds
-    ZRect<N,T> bounds = subspaces[0].bounds;
-    for(size_t i = 1; i < subspaces.size(); i++)
-      bounds = bounds.union_bbox(subspaces[i].bounds);
+    result = op->add_union(subspaces);
 
-    result.bounds = bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-    SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-    impl->update_contributor_count(1);
-    result.sparsity = sparsity;
-
-    UnionMicroOp<N,T> uop(subspaces);
-    uop.add_sparsity_output(result.sparsity);
-    uop.execute();
-
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -336,28 +261,13 @@ namespace Realm {
 							  const ProfilingRequestSet &reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
+    Event e = GenEventImpl::create_genevent()->current_event();
+    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
-    assert(!subspaces.empty());
-    // build an intersection of all bounds for the new bounds
-    // TODO: optimize empty case
-    ZRect<N,T> bounds = subspaces[0].bounds;
-    for(size_t i = 1; i < subspaces.size(); i++)
-      bounds = bounds.intersection(subspaces[i].bounds);
+    result = op->add_intersection(subspaces);
 
-    result.bounds = bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
-    SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity);
-    impl->update_contributor_count(1);
-    result.sparsity = sparsity;
-
-    IntersectionMicroOp<N,T> uop(subspaces);
-    uop.add_sparsity_output(result.sparsity);
-    uop.execute();
-
-    return Event::NO_EVENT;
+    op->deferred_launch(wait_on);
+    return e;
   }
 
 
@@ -886,6 +796,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T, typename FT>
+  void ByFieldMicroOp<N,T,FT>::dispatch(Operation *op)
+  {
+    execute();
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1061,6 +977,11 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T, int N2, typename T2>
+  void PreimageMicroOp<N,T,N2,T2>::dispatch(Operation *op)
+  {
+    execute();
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1138,6 +1059,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::dispatch(Operation *op)
+  {
+    execute();
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1211,6 +1138,12 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
+  }
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::dispatch(Operation *op)
+  {
+    execute();
   }
 
 
@@ -1339,6 +1272,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::dispatch(Operation *op)
+  {
+    execute();
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1372,6 +1311,63 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ByFieldOperation<N,T,FT>
+
+  template <int N, typename T, typename FT>
+  ByFieldOperation<N,T,FT>::ByFieldOperation(const ZIndexSpace<N,T>& _parent,
+					     const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& _field_data,
+					     const ProfilingRequestSet &reqs,
+					     Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+    , parent(_parent)
+    , field_data(_field_data)
+  {}
+
+  template <int N, typename T, typename FT>
+  ByFieldOperation<N,T,FT>::~ByFieldOperation(void)
+  {}
+
+  template <int N, typename T, typename FT>
+  ZIndexSpace<N,T> ByFieldOperation<N,T,FT>::add_color(FT color)
+  {
+    // an empty parent leads to trivially empty subspaces
+    if(parent.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise it'll be something smaller than the current parent
+    ZIndexSpace<N,T> subspace;
+    subspace.bounds = parent.bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    subspace.sparsity = sparsity;
+
+    colors.push_back(color);
+    subspaces.push_back(sparsity);
+
+    return subspace;
+  }
+
+  template <int N, typename T, typename FT>
+  void ByFieldOperation<N,T,FT>::execute(void)
+  {
+    for(size_t i = 0; i < subspaces.size(); i++)
+      SparsityMapImpl<N,T>::lookup(subspaces[i])->update_contributor_count(field_data.size());
+
+    for(size_t i = 0; i < field_data.size(); i++) {
+      ByFieldMicroOp<N,T,FT> uop(parent,
+				 field_data[i].index_space,
+				 field_data[i].inst,
+				 field_data[i].field_offset);
+      for(size_t j = 0; j < colors.size(); j++)
+	uop.add_sparsity_output(colors[j], subspaces[j]);
+      //uop.set_value_set(colors);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ImageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
@@ -1392,7 +1388,7 @@ namespace Realm {
   ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const ZIndexSpace<N2,T2>& source)
   {
     // try to filter out obviously empty sources
-    if(source.empty())
+    if(parent.empty() || source.empty())
       return ZIndexSpace<N,T>(/*empty*/);
 
     // otherwise it'll be something smaller than the current parent
@@ -1421,6 +1417,262 @@ namespace Realm {
 				  field_data[i].field_offset);
       for(size_t j = 0; j < sources.size(); j++)
 	uop.add_sparsity_output(sources[j], images[j]);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PreimageOperation<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2>
+  PreimageOperation<N,T,N2,T2>::PreimageOperation(const ZIndexSpace<N,T>& _parent,
+						  const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& _field_data,
+						  const ProfilingRequestSet &reqs,
+						  Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+    , parent(_parent)
+    , field_data(_field_data)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  PreimageOperation<N,T,N2,T2>::~PreimageOperation(void)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  ZIndexSpace<N,T> PreimageOperation<N,T,N2,T2>::add_target(const ZIndexSpace<N2,T2>& target)
+  {
+    // try to filter out obviously empty targets
+    if(parent.empty() || target.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise it'll be something smaller than the current parent
+    ZIndexSpace<N,T> preimage;
+    preimage.bounds = parent.bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    preimage.sparsity = sparsity;
+
+    targets.push_back(target);
+    preimages.push_back(sparsity);
+
+    return preimage;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void PreimageOperation<N,T,N2,T2>::execute(void)
+  {
+    for(size_t i = 0; i < preimages.size(); i++)
+      SparsityMapImpl<N,T>::lookup(preimages[i])->update_contributor_count(field_data.size());
+
+    for(size_t i = 0; i < field_data.size(); i++) {
+      PreimageMicroOp<N,T,N2,T2> uop(parent,
+				  field_data[i].index_space,
+				  field_data[i].inst,
+				  field_data[i].field_offset);
+      for(size_t j = 0; j < targets.size(); j++)
+	uop.add_sparsity_output(targets[j], preimages[j]);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class UnionOperation<N,T>
+
+  template <int N, typename T>
+  UnionOperation<N,T>::UnionOperation(const ProfilingRequestSet& reqs,
+				      Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  UnionOperation<N,T>::~UnionOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const ZIndexSpace<N,T>& lhs,
+						  const ZIndexSpace<N,T>& rhs)
+  {
+    // simple case - if both lhs and rhs are empty, the union must be empty too
+    if(lhs.empty() && rhs.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise create a new index space whose bounds can fit both lhs and rhs
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds.union_bbox(rhs.bounds);
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    std::vector<ZIndexSpace<N,T> > ops(2);
+    ops[0] = lhs;
+    ops[1] = rhs;
+    inputs.push_back(ops);
+    outputs.push_back(sparsity);
+
+    return output;
+  }
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const std::vector<ZIndexSpace<N,T> >& ops)
+  {
+    // build a bounding box that can hold all the operands, and pay attention to the
+    //  case where they're all empty
+    ZIndexSpace<N,T> output;
+    bool all_empty = true;
+    for(size_t i = 0; i < ops.size(); i++)
+      if(!ops[i].empty()) {
+	all_empty = false;
+	output.bounds = output.bounds.union_bbox(ops[i].bounds);
+      }
+
+    if(!all_empty) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void UnionOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+
+      UnionMicroOp<N,T> uop(inputs[i]);
+      uop.add_sparsity_output(outputs[i]);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntersectionOperation<N,T>
+
+  template <int N, typename T>
+  IntersectionOperation<N,T>::IntersectionOperation(const ProfilingRequestSet& reqs,
+						    Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  IntersectionOperation<N,T>::~IntersectionOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const ZIndexSpace<N,T>& lhs,
+								const ZIndexSpace<N,T>& rhs)
+  {
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds.intersection(rhs.bounds);
+    
+    if(!output.bounds.empty()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      std::vector<ZIndexSpace<N,T> > ops(2);
+      ops[0] = lhs;
+      ops[1] = rhs;
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const std::vector<ZIndexSpace<N,T> >& ops)
+  {
+    // special case for empty operand list
+    if(ops.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // build the intersection of all bounding boxes
+    ZIndexSpace<N,T> output;
+    output.bounds = ops[0].bounds;
+    for(size_t i = 1; i < ops.size(); i++)
+      output.bounds = output.bounds.intersection(ops[i].bounds);
+
+    if(!output.bounds.empty()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void IntersectionOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+
+      IntersectionMicroOp<N,T> uop(inputs[i]);
+      uop.add_sparsity_output(outputs[i]);
+      uop.dispatch(this);
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DifferenceOperation<N,T>
+
+  template <int N, typename T>
+  DifferenceOperation<N,T>::DifferenceOperation(const ProfilingRequestSet& reqs,
+				      Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  DifferenceOperation<N,T>::~DifferenceOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const ZIndexSpace<N,T>& lhs,
+							    const ZIndexSpace<N,T>& rhs)
+  {
+    // simple cases - an empty lhs or a dense rhs that covers lhs both yield an empty
+    //  difference
+    if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds)))
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise the difference is no larger than the lhs
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds;
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    lhss.push_back(lhs);
+    rhss.push_back(rhs);
+    outputs.push_back(sparsity);
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void DifferenceOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+
+      DifferenceMicroOp<N,T> uop(lhss[i], rhss[i]);
+      uop.add_sparsity_output(outputs[i]);
       uop.dispatch(this);
     }
   }

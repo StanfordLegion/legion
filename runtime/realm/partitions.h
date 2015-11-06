@@ -141,6 +141,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    void dispatch(Operation *op);
+
   protected:
     template <typename BM>
     void populate_bitmasks(std::map<FT, BM *>& bitmasks);
@@ -190,6 +192,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    void dispatch(Operation *op);
+
   protected:
     template <typename BM>
     void populate_bitmasks(std::map<int, BM *>& bitmasks);
@@ -212,6 +216,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    void dispatch(Operation *op);
+
   protected:
     template <typename BM>
     void populate_bitmask(BM& bitmask);
@@ -231,6 +237,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    void dispatch(Operation *op);
+
   protected:
     template <typename BM>
     void populate_bitmask(BM& bitmask);
@@ -248,6 +256,8 @@ namespace Realm {
     void add_sparsity_output(SparsityMap<N,T> _sparsity);
 
     virtual void execute(void);
+
+    void dispatch(Operation *op);
 
   protected:
     template <typename BM>
@@ -270,6 +280,27 @@ namespace Realm {
     void deferred_launch(Event wait_for);
   };
 
+  template <int N, typename T, typename FT>
+  class ByFieldOperation : public PartitioningOperation {
+  public:
+    ByFieldOperation(const ZIndexSpace<N,T>& _parent,
+		     const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& _field_data,
+		     const ProfilingRequestSet &reqs,
+		     Event _finish_event);
+
+    virtual ~ByFieldOperation(void);
+
+    ZIndexSpace<N,T> add_color(FT color);
+
+    virtual void execute(void);
+
+  protected:
+    ZIndexSpace<N,T> parent;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> > field_data;
+    std::vector<FT> colors;
+    std::vector<SparsityMap<N,T> > subspaces;
+  };
+
   template <int N, typename T, int N2, typename T2>
   class ImageOperation : public PartitioningOperation {
   public:
@@ -289,6 +320,80 @@ namespace Realm {
     std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > images;
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class PreimageOperation : public PartitioningOperation {
+  public:
+    PreimageOperation(const ZIndexSpace<N,T>& _parent,
+		      const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& _field_data,
+		      const ProfilingRequestSet &reqs,
+		      Event _finish_event);
+
+    virtual ~PreimageOperation(void);
+
+    ZIndexSpace<N,T> add_target(const ZIndexSpace<N2,T2>& target);
+
+    virtual void execute(void);
+
+  protected:
+    ZIndexSpace<N,T> parent;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > > field_data;
+    std::vector<ZIndexSpace<N2,T2> > targets;
+    std::vector<SparsityMap<N,T> > preimages;
+  };
+
+  template <int N, typename T>
+  class UnionOperation : public PartitioningOperation {
+  public:
+    UnionOperation(const ProfilingRequestSet& reqs,
+		   Event _finish_event);
+
+    virtual ~UnionOperation(void);
+
+    ZIndexSpace<N,T> add_union(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
+    ZIndexSpace<N,T> add_union(const std::vector<ZIndexSpace<N,T> >& ops);
+
+    virtual void execute(void);
+
+  protected:
+    std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
+    std::vector<SparsityMap<N,T> > outputs;
+  };
+
+  template <int N, typename T>
+  class IntersectionOperation : public PartitioningOperation {
+  public:
+    IntersectionOperation(const ProfilingRequestSet& reqs,
+			  Event _finish_event);
+
+    virtual ~IntersectionOperation(void);
+
+    ZIndexSpace<N,T> add_intersection(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
+    ZIndexSpace<N,T> add_intersection(const std::vector<ZIndexSpace<N,T> >& ops);
+
+    virtual void execute(void);
+
+  protected:
+    std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
+    std::vector<SparsityMap<N,T> > outputs;
+  };
+
+  template <int N, typename T>
+  class DifferenceOperation : public PartitioningOperation {
+  public:
+    DifferenceOperation(const ProfilingRequestSet& reqs,
+			Event _finish_event);
+
+    virtual ~DifferenceOperation(void);
+
+    ZIndexSpace<N,T> add_difference(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
+
+    virtual void execute(void);
+
+  protected:
+    std::vector<ZIndexSpace<N,T> > lhss, rhss;
+    std::vector<SparsityMap<N,T> > outputs;
   };
 
   ////////////////////////////////////////
