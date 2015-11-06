@@ -23,6 +23,7 @@ local function make_factory(name)
       name = name,
       expected_fields = false,
       print_collapsed = false,
+      print_hidden = false,
     },
     ast_factory)
 end
@@ -52,11 +53,13 @@ function ast.is_node(node)
   return type(node) == "table" and getmetatable(node) == ast_node
 end
 
-local function ast_node_tostring(node, indent)
+local function ast_node_tostring(node, indent, hide)
   local newline = "\n"
   local spaces = string.rep("  ", indent)
   local spaces1 = string.rep("  ", indent + 1)
   if ast.is_node(node) then
+    local hidden = node.node_type.print_hidden
+    if hide and hidden then return "<hidden>" end
     local collapsed = node.node_type.print_collapsed
     if collapsed then
       newline = ""
@@ -67,7 +70,7 @@ local function ast_node_tostring(node, indent)
     for k, v in pairs(node) do
       if k ~= "node_type" then
         str = str .. spaces1 .. k .. " = " ..
-          ast_node_tostring(v, indent + 1) .. "," .. newline
+          ast_node_tostring(v, indent + 1, hide) .. "," .. newline
       end
     end
     return str .. spaces .. ")"
@@ -75,7 +78,7 @@ local function ast_node_tostring(node, indent)
     local str = "{" .. newline
     for i, v in ipairs(node) do
       str = str .. spaces1 ..
-        ast_node_tostring(v, indent + 1) .. "," .. newline
+        ast_node_tostring(v, indent + 1, hide) .. "," .. newline
     end
     return str .. spaces .. "}"
   elseif type(node) == "string" then
@@ -86,11 +89,11 @@ local function ast_node_tostring(node, indent)
 end
 
 function ast_node:__tostring()
-  return ast_node_tostring(self, 0)
+  return ast_node_tostring(self, 0, false)
 end
 
-function ast_node:printpretty()
-  print(tostring(self))
+function ast_node:printpretty(hide)
+  print(ast_node_tostring(self, 0, hide))
 end
 
 function ast_node:is(node_type)
@@ -175,13 +178,14 @@ function ast_factory:__index(field)
   error(tostring(self) .. " has no field '" .. field .. "'", 2)
 end
 
-function ast_factory:inner(ctor_name, expected_fields, print_collapsed)
+function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hidden)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
-      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
+      print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_factory)
 
   assert(rawget(self, ctor_name) == nil,
@@ -190,13 +194,14 @@ function ast_factory:inner(ctor_name, expected_fields, print_collapsed)
   return ctor
 end
 
-function ast_factory:leaf(ctor_name, expected_fields, print_collapsed)
+function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hidden)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
-      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
+      print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_ctor)
 
   assert(rawget(self, ctor_name) == nil,
@@ -285,7 +290,7 @@ end
 
 ast:inner("location")
 ast.location:leaf("Position", {"line", "offset"}, true)
-ast.location:leaf("Span", {"source", "start", "stop"})
+ast.location:leaf("Span", {"source", "start", "stop"}, false, true)
 
 -- Helpers for extracting location from token stream.
 local function position_from_start(token)
@@ -340,7 +345,8 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"})
+ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"},
+                 false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
