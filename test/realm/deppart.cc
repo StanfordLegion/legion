@@ -1584,6 +1584,7 @@ void top_level_task(const void *args, size_t arglen, Processor p)
 	}
 	assert(p.exists());
 	procs.push_back(p);
+	log_app.debug() << "System mem #" << (sysmems.size() - 1) << " = " << *sysmems.rbegin() << " (" << *procs.rbegin() << ")";
       }
     }
   }
