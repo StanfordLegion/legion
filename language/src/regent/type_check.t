@@ -2351,6 +2351,7 @@ function type_check.stat_task(cx, node)
     privileges = privileges,
     coherence_modes = coherence_modes,
     flags = flags,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     config_options = ast.TaskConfigOptions {

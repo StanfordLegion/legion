@@ -657,9 +657,9 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
 ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
-                             "coherence_modes", "flags", "constraints", "body",
-                             "config_options", "region_divergence",
-                             "prototype"})
+                             "coherence_modes", "flags", "conditions",
+                             "constraints", "body", "config_options",
+                             "region_divergence", "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
 ast.typed.stat:leaf("Fspace", {"name", "fspace"})
 
