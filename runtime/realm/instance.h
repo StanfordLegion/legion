@@ -34,7 +34,7 @@ typedef ptrdiff_t intptr_t;
 
 namespace Realm {
 
-  template <int N, typename T> class ZIndexSpace;
+  template <int N, typename T> struct ZIndexSpace;
   class LinearizedIndexSpaceIntfc;
   class ProfilingRequestSet;
 

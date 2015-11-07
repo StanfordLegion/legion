@@ -193,7 +193,7 @@ namespace Realm {
     void dispatch(PartitioningOperation *op);
 
   protected:
-    friend class RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage;
     template <typename S>
     bool serialize_params(S& s) const;
 
