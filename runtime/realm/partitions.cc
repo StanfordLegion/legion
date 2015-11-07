@@ -460,7 +460,7 @@ namespace Realm {
   SparsityMapPublicImpl<N,T> *SparsityMap<N,T>::impl(void) const
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
-    return wrapper->get_or_create<N,T>();
+    return wrapper->get_or_create<N,T>(*this);
   }
 
 
@@ -479,7 +479,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ SparsityMapImpl<N,T> *SparsityMapImplWrapper::get_or_create(void)
+  /*static*/ SparsityMapImpl<N,T> *SparsityMapImplWrapper::get_or_create(SparsityMap<N,T> me)
   {
     // set the size if it's zero and check if it's not
     int olddim = __sync_val_compare_and_swap(&dim, 0, N);
@@ -492,7 +492,7 @@ namespace Realm {
       return static_cast<SparsityMapImpl<N,T> *>(impl);
 
     // create one and try to swap it in
-    SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>;
+    SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
     impl = __sync_val_compare_and_swap(&map_impl, 0, (void *)new_impl);
     if(impl != 0) {
       // we lost the race - free the one we made and return the winner
@@ -527,15 +527,15 @@ namespace Realm {
   // class SparsityMapImpl<N,T>
 
   template <int N, typename T>
-  SparsityMapImpl<N,T>::SparsityMapImpl(void)
-    : remaining_contributor_count(0)
+  SparsityMapImpl<N,T>::SparsityMapImpl(SparsityMap<N,T> _me)
+    : me(_me), remaining_contributor_count(0)
   {}
 
   template <int N, typename T>
   inline /*static*/ SparsityMapImpl<N,T> *SparsityMapImpl<N,T>::lookup(SparsityMap<N,T> sparsity)
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(sparsity);
-    return wrapper->get_or_create<N,T>();
+    return wrapper->get_or_create<N,T>(sparsity);
   }
 
   // actual implementation - SparsityMapPublicImpl's version just calls this one
@@ -566,6 +566,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
+    assert(ID(me).node() == gasnet_mynode());
     int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
     assert(left >= 0);
     if(left == 0)

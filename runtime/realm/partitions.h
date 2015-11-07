@@ -75,7 +75,7 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMapImpl : public SparsityMapPublicImpl<N,T> {
   public:
-    SparsityMapImpl(void);
+    SparsityMapImpl(SparsityMap<N,T> _me);
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
@@ -97,6 +97,8 @@ namespace Realm {
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
     //  or false if the sparsity map became valid before this call (i.e. no callback)
     bool add_waiter(PartitioningMicroOp *uop, bool precise);
+
+    SparsityMap<N,T> me;
 
   protected:
     void finalize(void);
@@ -123,7 +125,7 @@ namespace Realm {
     void *map_impl;  // actual implementation
 
     template <int N, typename T>
-    SparsityMapImpl<N,T> *get_or_create(void);
+    SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);
 
     void destroy(void);
   };
