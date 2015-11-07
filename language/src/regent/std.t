@@ -297,9 +297,13 @@ end
 function std.meet_privilege(a, b)
   if a == b then
     return a
-  elseif not a or a == "none" then
+  elseif not a then
     return b
-  elseif not b or b == "none" then
+  elseif not b then
+    return a
+  elseif a == "none" then
+    return b
+  elseif b == "none" then
     return a
   else
     return "reads_writes"
