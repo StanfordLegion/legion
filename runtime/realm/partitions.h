@@ -92,6 +92,7 @@ namespace Realm {
 
     void contribute_nothing(void);
     void contribute_dense_rect_list(const DenseRectangleList<N,T>& rects);
+    void contribute_raw_rects(const ZRect<N,T>* rects, size_t count, bool last);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -150,6 +151,9 @@ namespace Realm {
 
     virtual void execute(void) = 0;
 
+    void mark_started(void);
+    void mark_finished(void);
+
     template <int N, typename T>
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
@@ -166,7 +170,7 @@ namespace Realm {
   protected:
     PartitioningMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop);
 
-    void finish_dispatch(PartitioningOperation *op);
+    void finish_dispatch(PartitioningOperation *op, bool inline_ok);
 
     int wait_count;  // how many sparsity maps are we still waiting for?
     gasnet_node_t requestor;
@@ -192,7 +196,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     friend struct RemoteMicroOpMessage;
@@ -226,7 +230,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     template <typename BM>
@@ -251,7 +255,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     template <typename BM>
@@ -275,7 +279,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     template <typename BM>
@@ -296,7 +300,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     template <typename BM>
@@ -316,7 +320,7 @@ namespace Realm {
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation *op);
+    void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
     template <typename BM>
@@ -514,6 +518,45 @@ namespace Realm {
     static void send_request(gasnet_node_t target, PartitioningOperation *operation,
 			     const T& microop);
   };
+
+  struct RemoteMicroOpCompleteMessage {
+    struct RequestArgs {
+      AsyncMicroOp *async_microop;
+    };
+
+    static void handle_request(RequestArgs args);
+
+    typedef ActiveMessageShortNoReply<REMOTE_MICROOP_COMPLETE_MSGID,
+                                      RequestArgs,
+                                      handle_request> Message;
+
+    static void send_request(gasnet_node_t target, AsyncMicroOp *async_microop);
+  };
+
+  struct RemoteSparsityContribMessage {
+    struct RequestArgs : public BaseMedium {
+      int dim;
+      int idxtype;
+      id_t sparsity_id;
+      int sequence_id;
+      int sequence_count;
+    };
+
+    template <int N, typename T>
+    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+
+    static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+    typedef ActiveMessageMediumNoReply<REMOTE_SPARSITY_CONTRIB_MSGID,
+                                       RequestArgs,
+                                       handle_request> Message;
+
+    template <int N, typename T>
+    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
+			     int sequence_id, int sequence_count,
+			     const ZRect<N,T> *rects, size_t count);
+  };
+
 };
 
 #endif // REALM_PARTITIONS_H

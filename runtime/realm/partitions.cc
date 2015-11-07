@@ -563,10 +563,23 @@ namespace Realm {
     __sync_fetch_and_add(&remaining_contributor_count, delta);
   }
 
+  namespace {
+    int remote_contribution_sequence_id = 0;
+  };
+
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
-    assert(ID(me).node() == gasnet_mynode());
+    gasnet_node_t owner = ID(me).node();
+
+    if(owner != gasnet_mynode()) {
+      // send (the lack of) data to the owner to collect
+      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 1,
+						      0, 0);
+      return;
+    }
+
     int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
     assert(left >= 0);
     if(left == 0)
@@ -576,6 +589,37 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_dense_rect_list(const DenseRectangleList<N,T>& rects)
   {
+    gasnet_node_t owner = ID(me).node();
+
+    if(owner != gasnet_mynode()) {
+      // send the data to the owner to collect
+      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      const size_t max_to_send = 2048 / sizeof(ZRect<N,T>);
+      const ZRect<N,T> *rdata = &rects.rects[0];
+      int seq_count = 0;
+      size_t remaining = rects.rects.size();
+      // send partial messages first
+      while(remaining > max_to_send) {
+	RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 0,
+							rdata, max_to_send);
+	seq_count++;
+	remaining -= max_to_send;
+	rdata += max_to_send;
+      }
+      // final message includes the count of all messages (including this one!)
+      RemoteSparsityContribMessage::send_request<N,T>(owner, me, 
+						      seq_id, seq_count + 1,
+						      rdata, remaining);
+      return;
+    }
+
+    contribute_raw_rects(&rects.rects[0], rects.rects.size(), true);
+  }
+
+  template <int N, typename T>
+  void SparsityMapImpl<N,T>::contribute_raw_rects(const ZRect<N,T>* rects,
+						  size_t count, bool last)
+  {
     {
       AutoHSLLock al(mutex);
       
@@ -584,10 +628,8 @@ namespace Realm {
       // can't use iterators on entry list, since push_back invalidates end()
       size_t orig_count = this->entries.size();
 
-      for(typename std::vector<ZRect<N,T> >::const_iterator it = rects.rects.begin();
-	  it != rects.rects.end();
-	  it++) {
-	const ZRect<N,T>& r = *it;
+      for(size_t i = 0; i < count; i++) {
+	const ZRect<N,T>& r = rects[i];
 
 	// index is declared outside for loop so we can detect early exits
 	size_t idx;
@@ -625,10 +667,12 @@ namespace Realm {
       }
     }
 
-    int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
-    assert(left >= 0);
-    if(left == 0)
-      finalize();
+    if(last) {
+      int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+      assert(left >= 0);
+      if(left == 0)
+	finalize();
+    }
   }
 
   // adds a microop as a waiter for valid sparsity map data - returns true
@@ -720,6 +764,19 @@ namespace Realm {
   PartitioningMicroOp::~PartitioningMicroOp(void)
   {}
 
+  void PartitioningMicroOp::mark_started(void)
+  {}
+
+  void PartitioningMicroOp::mark_finished(void)
+  {
+    if(async_microop) {
+      if(requestor == gasnet_mynode())
+	async_microop->mark_finished();
+      else
+	RemoteMicroOpCompleteMessage::send_request(requestor, async_microop);
+    }
+  }
+
   template <int N, typename T>
   void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise)
   {
@@ -728,13 +785,18 @@ namespace Realm {
       op_queue->enqueue_partitioning_microop(this);
   }
 
-  void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op)
+  void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // if there were no registrations by caller (or if they're really fast), the count will be 2
     //  and we can execute this microop inline
     int left1 = __sync_sub_and_fetch(&wait_count, 1);
     if(left1 == 1) {
-      execute();
+      if(inline_ok) {
+	mark_started();
+	execute();
+	mark_finished();
+      } else
+	op_queue->enqueue_partitioning_microop(this);
       return;
     }
 
@@ -746,8 +808,14 @@ namespace Realm {
     // now do the last decrement - if it returns 0, we can still do the operation inline
     //  (otherwise it'll get queued when somebody else does the last decrement)
     int left2 = __sync_sub_and_fetch(&wait_count, 1);
-    if(left2 == 0)
-      execute();
+    if(left2 == 0) {
+      if(inline_ok) {
+	mark_started();
+	execute();
+	mark_finished();
+      } else
+	op_queue->enqueue_partitioning_microop(this);
+    }
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -889,13 +957,10 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T, typename FT>
-  void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op)
+  void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a ByFieldMicroOp should always be executed on whichever node the field data lives
     gasnet_node_t exec_node = ID(inst).node();
@@ -915,7 +980,7 @@ namespace Realm {
     assert(inst_space.is_valid(true /*precise*/));
 
     // no other dependencies
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
   template <int N, typename T, typename FT>
@@ -925,6 +990,7 @@ namespace Realm {
     return((s << parent_space) &&
 	   (s << inst_space) &&
 	   (s << inst) &&
+	   (s << field_offset) &&
 	   (s << value_set) &&
 	   (s << sparsity_outputs));
   }
@@ -938,6 +1004,7 @@ namespace Realm {
     bool ok = ((s >> parent_space) &&
 	       (s >> inst_space) &&
 	       (s >> inst) &&
+	       (s >> field_offset) &&
 	       (s >> value_set) &&
 	       (s >> sparsity_outputs));
     assert(ok);
@@ -1027,13 +1094,10 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T, int N2, typename T2>
-  void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op)
+  void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
@@ -1049,7 +1113,7 @@ namespace Realm {
       }
     }
 
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
 
@@ -1133,13 +1197,10 @@ namespace Realm {
       } else
 	impl->contribute_nothing();
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op)
+  void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
@@ -1155,7 +1216,7 @@ namespace Realm {
       }
     }
 
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -1232,13 +1293,10 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T>
-  void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op)
+  void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
@@ -1253,7 +1311,7 @@ namespace Realm {
       }
     }
 
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
 
@@ -1329,13 +1387,10 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T>
-  void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op)
+  void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
@@ -1350,7 +1405,7 @@ namespace Realm {
       }
     }
 
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
 
@@ -1477,13 +1532,10 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
       impl->contribute_dense_rect_list(drl);
     }
-
-    if(async_microop)
-      async_microop->mark_finished();
   }
 
   template <int N, typename T>
-  void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op)
+  void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // need valid data for each source
     if(!lhs.dense()) {
@@ -1502,7 +1554,7 @@ namespace Realm {
 	__sync_fetch_and_add(&wait_count, 1);
     }
 
-    finish_dispatch(op);
+    finish_dispatch(op, inline_ok);
   }
 
 
@@ -1522,7 +1574,7 @@ namespace Realm {
 	ByFieldMicroOp<N,T,int> *uop = new ByFieldMicroOp<N,T,int>(args.sender,
 								 args.async_microop,
 								 fbd);
-	uop->dispatch(args.operation);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
 	break;
       }
     default:
@@ -1565,6 +1617,80 @@ namespace Realm {
     b.detach();
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteMicroOpCompleteMessage
+
+  struct RequestArgs {
+    AsyncMicroOp *async_microop;
+  };
+  
+  /*static*/ void RemoteMicroOpCompleteMessage::handle_request(RequestArgs args)
+  {
+    log_part.info() << "received remote micro op complete message: " << args.async_microop;
+    args.async_microop->mark_finished();
+  }
+
+  /*static*/ void RemoteMicroOpCompleteMessage::send_request(gasnet_node_t target,
+							     AsyncMicroOp *async_microop)
+  {
+    RequestArgs args;
+    args.async_microop = async_microop;
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteSparsityContribMessage
+
+  template <int N, typename T>
+  /*static*/ void RemoteSparsityContribMessage::decode_request(RequestArgs args,
+							       const void *data, size_t datalen)
+  {
+    SparsityMap<N,T> sparsity;
+    sparsity.id = args.sparsity_id;
+
+    log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
+    size_t count = datalen / sizeof(ZRect<N,T>);
+    assert((datalen % sizeof(ZRect<N,T>)) == 0);
+    assert(args.sequence_count == 1); // handle fragments later
+    SparsityMapImpl<N,T>::lookup(sparsity)->contribute_raw_rects((const ZRect<N,T> *)data,
+								 count,
+								 true);
+  }
+
+  /*static*/ void RemoteSparsityContribMessage::handle_request(RequestArgs args,
+							       const void *data, size_t datalen)
+  {
+    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
+      decode_request<1,int>(args, data, datalen);
+      return;
+    }
+    assert(0);
+  }
+
+  template <int N, typename T>
+  /*static*/ void RemoteSparsityContribMessage::send_request(gasnet_node_t target,
+							     SparsityMap<N,T> sparsity,
+							     int sequence_id,
+							     int sequence_count,
+							     const ZRect<N,T> *rects,
+							     size_t count)
+  {
+    RequestArgs args;
+
+    args.dim = N;
+    args.idxtype = sizeof(T);
+    args.sparsity_id = sparsity.id;
+    args.sequence_id = sequence_id;
+    args.sequence_count = sequence_count;
+
+    Message::request(target, args, rects, count * sizeof(ZRect<N,T>),
+		     PAYLOAD_COPY);
+  }
+  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1648,7 +1774,7 @@ namespace Realm {
       for(size_t j = 0; j < colors.size(); j++)
 	uop->add_sparsity_output(colors[j], subspaces[j]);
       //uop.set_value_set(colors);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -1704,7 +1830,7 @@ namespace Realm {
 								 field_data[i].field_offset);
       for(size_t j = 0; j < sources.size(); j++)
 	uop->add_sparsity_output(sources[j], images[j]);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -1760,7 +1886,7 @@ namespace Realm {
 								       field_data[i].field_offset);
       for(size_t j = 0; j < targets.size(); j++)
 	uop->add_sparsity_output(targets[j], preimages[j]);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -1836,7 +1962,7 @@ namespace Realm {
 
       UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(inputs[i]);
       uop->add_sparsity_output(outputs[i]);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -1910,7 +2036,7 @@ namespace Realm {
 
       IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(inputs[i]);
       uop->add_sparsity_output(outputs[i]);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -1960,7 +2086,7 @@ namespace Realm {
 
       DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(lhss[i], rhss[i]);
       uop->add_sparsity_output(outputs[i]);
-      uop->dispatch(this);
+      uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
 
@@ -2073,7 +2199,9 @@ namespace Realm {
 	  {
 	    PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
 	    log_part.info() << "worker " << this << " starting uop " << p_uop;
+	    p_uop->mark_started();
 	    p_uop->execute();
+	    p_uop->mark_finished();
 	    log_part.info() << "worker " << this << " starting uop " << p_uop;
 	    break;
 	  }
