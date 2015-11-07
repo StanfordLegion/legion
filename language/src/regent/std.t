@@ -2227,6 +2227,14 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return 1 + self.element_type:list_depth()
   end
 
+  function st:region()
+    assert(std.is_list_of_regions(self))
+    if std.is_list(self.element_type) then
+      return self.element_type:region()
+    end
+    return self.element_type
+  end
+
   function st:ispace()
     assert(std.is_list_of_regions(self))
     return self.element_type:ispace()
@@ -2241,7 +2249,7 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     assert(std.is_list_of_regions(self))
     local ispace = terralib.newsymbol(
       std.ispace(self:ispace().index_type),
-      self.element_type.ispace_symbol.displayname)
+      self:region().ispace_symbol.displayname)
     return std.region(ispace, self:fspace())
   end
 
