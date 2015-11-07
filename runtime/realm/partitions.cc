@@ -687,6 +687,7 @@ namespace Realm {
 
     // take lock and retest, and register if not ready
     bool registered = false;
+    bool request_data = false;
     {
       AutoHSLLock al(mutex);
 
@@ -694,14 +695,19 @@ namespace Realm {
 	if(!this->entries_valid) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
+	  request_data = ID(me).node() != gasnet_mynode();
 	}
       } else {
 	if(!this->approx_valid) {
 	  approx_waiters.push_back(uop);
 	  registered = true;
+	  request_data = ID(me).node() != gasnet_mynode();
 	}
       }
     }
+
+    // TODO: requesting data
+    assert(!request_data);
 
     return registered;
   }
@@ -802,8 +808,13 @@ namespace Realm {
 
     // if the count was greater than 1, it probably has to be queued, so create an 
     //  AsyncMicroOp so that the op knows we're not done yet
-    async_microop = new AsyncMicroOp(op, this);
-    op->add_async_work_item(async_microop);
+    if(requestor == gasnet_mynode()) {
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+    } else {
+      // request came from somewhere else - it had better have a async_microop already
+      assert(async_microop != 0);
+    }
 
     // now do the last decrement - if it returns 0, we can still do the operation inline
     //  (otherwise it'll get queued when somebody else does the last decrement)
@@ -1099,6 +1110,20 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // an ImageMicroOp should always be executed on whichever node the field data lives
+    gasnet_node_t exec_node = ID(inst).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
 
@@ -1114,6 +1139,33 @@ namespace Realm {
     }
 
     finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename S>
+  bool ImageMicroOp<N,T,N2,T2>::serialize_params(S& s) const
+  {
+    return((s << parent_space) &&
+	   (s << inst_space) &&
+	   (s << inst) &&
+	   (s << field_offset) &&
+	   (s << sources) &&
+	   (s << sparsity_outputs));
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename S>
+  ImageMicroOp<N,T,N2,T2>::ImageMicroOp(gasnet_node_t _requestor,
+					AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> parent_space) &&
+	       (s >> inst_space) &&
+	       (s >> inst) &&
+	       (s >> field_offset) &&
+	       (s >> sources) &&
+	       (s >> sparsity_outputs));
+    assert(ok);
   }
 
 
@@ -1202,6 +1254,20 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // a PreimageMicroOp should always be executed on whichever node the field data lives
+    gasnet_node_t exec_node = ID(inst).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
 
@@ -1218,6 +1284,34 @@ namespace Realm {
 
     finish_dispatch(op, inline_ok);
   }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename S>
+  bool PreimageMicroOp<N,T,N2,T2>::serialize_params(S& s) const
+  {
+    return((s << parent_space) &&
+	   (s << inst_space) &&
+	   (s << inst) &&
+	   (s << field_offset) &&
+	   (s << targets) &&
+	   (s << sparsity_outputs));
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename S>
+  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(gasnet_node_t _requestor,
+					      AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> parent_space) &&
+	       (s >> inst_space) &&
+	       (s >> inst) &&
+	       (s >> field_offset) &&
+	       (s >> targets) &&
+	       (s >> sparsity_outputs));
+    assert(ok);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1574,6 +1668,22 @@ namespace Realm {
 	ByFieldMicroOp<N,T,int> *uop = new ByFieldMicroOp<N,T,int>(args.sender,
 								 args.async_microop,
 								 fbd);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_IMAGE:
+      {
+	ImageMicroOp<N,T,N,T> *uop = new ImageMicroOp<N,T,N,T>(args.sender,
+							       args.async_microop,
+							       fbd);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_PREIMAGE:
+      {
+	PreimageMicroOp<N,T,N,T> *uop = new PreimageMicroOp<N,T,N,T>(args.sender,
+								     args.async_microop,
+								     fbd);
 	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
 	break;
       }

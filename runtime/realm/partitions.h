@@ -222,6 +222,13 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class ImageMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
+    static const Opcode OPCODE = UOPCODE_IMAGE;
+
     ImageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N2,T2> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ImageMicroOp(void);
@@ -233,6 +240,14 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
+    friend struct RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    ImageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmasks(std::map<int, BM *>& bitmasks);
 
@@ -247,6 +262,13 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class PreimageMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
+    static const Opcode OPCODE = UOPCODE_PREIMAGE;
+
     PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~PreimageMicroOp(void);
@@ -258,6 +280,14 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
+    friend struct RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    PreimageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmasks(std::map<int, BM *>& bitmasks);
 
