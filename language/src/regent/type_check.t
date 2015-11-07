@@ -618,13 +618,11 @@ function type_check.expr_index_access(cx, node)
         span = node.span,
       }
     else
-      local ispace = terralib.newsymbol(std.ispace(value_type:ispace().index_type))
-      local expr_type = std.region(ispace, value_type:fspace())
+      local expr_type
       if slice then
-        for i = 1, value_type:list_depth() do
-          expr_type = std.list(
-            expr_type, value_type:partition(), value_type.privilege_depth)
-        end
+        expr_type = value_type:slice()
+      else
+        expr_type = value_type:subregion_dynamic()
       end
       std.copy_privileges(cx, value_type, expr_type)
       -- FIXME: Copy constraints from list type.

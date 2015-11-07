@@ -2233,6 +2233,24 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return self.element_type:fspace()
   end
 
+  function st:subregion_dynamic()
+    assert(std.is_list_of_regions(self))
+    local ispace = terralib.newsymbol(
+      std.ispace(self:ispace().index_type),
+      self.element_type.ispace_symbol.displayname)
+    return std.region(ispace, self:fspace())
+  end
+
+  function st:slice()
+    assert(std.is_list_of_regions(self))
+    local slice_type = self:subregion_dynamic()
+    for i = 1, self:list_depth() do
+      slice_type = std.list(
+        slice_type, self:partition(), self.privilege_depth)
+    end
+    return slice_type
+  end
+
   -- FIXME: Make the compiler manage cleanups, including lists.
 
   function st:data(value)
