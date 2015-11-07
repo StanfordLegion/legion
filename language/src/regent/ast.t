@@ -59,7 +59,7 @@ local function ast_node_tostring(node, indent, hide)
   local spaces1 = string.rep("  ", indent + 1)
   if ast.is_node(node) then
     local hidden = node.node_type.print_hidden
-    if hide and hidden then return "<hidden>" end
+    if hide and hidden then return end
     local collapsed = node.node_type.print_collapsed
     if collapsed then
       newline = ""
@@ -69,16 +69,20 @@ local function ast_node_tostring(node, indent, hide)
     local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
       if k ~= "node_type" then
-        str = str .. spaces1 .. k .. " = " ..
-          ast_node_tostring(v, indent + 1, hide) .. "," .. newline
+        local vstr = ast_node_tostring(v, indent + 1, hide)
+        if vstr then
+          str = str .. spaces1 .. k .. " = " .. vstr .. "," .. newline
+        end
       end
     end
     return str .. spaces .. ")"
   elseif terralib.islist(node) then
     local str = "{" .. newline
     for i, v in ipairs(node) do
-      str = str .. spaces1 ..
-        ast_node_tostring(v, indent + 1, hide) .. "," .. newline
+      local vstr = ast_node_tostring(v, indent + 1, hide)
+      if vstr then
+        str = str .. spaces1 .. vstr .. "," .. newline
+      end
     end
     return str .. spaces .. "}"
   elseif type(node) == "string" then
