@@ -294,6 +294,10 @@ function data.map:values()
   return pairs(self.__values_by_hash)
 end
 
+function data.map:copy()
+  return self:map(function(k, v) return v end)
+end
+
 function data.map:map(fn)
   local result = data.newmap()
   for k, v in self:items() do
