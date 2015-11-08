@@ -29,6 +29,25 @@ void sigalrm_handler(int sig)
   exit(1);
 }
 
+template <int N, typename T>
+void dump_sparse_index_space(const char *pfx, ZIndexSpace<N,T> is)
+{
+  std::cout << pfx << ": " << is << "\n";
+  if(!is.sparsity.exists()) return;
+  SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();
+  const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+  for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+      it != entries.end();
+      it++) {
+    std::cout << "  " << it->bounds;
+    if(it->bitmap)
+      std::cout << " bitmap(" << it->bitmap << ")";
+    if(it->sparsity.exists())
+      std::cout << " sparsity(" << it->sparsity << ")";
+    std::cout << "\n";
+  }
+} 
+
 template <typename T, T DEFVAL>
 class WithDefault {
 public:
@@ -780,6 +799,7 @@ public:
     
     {
       AffineAccessor<int,1> a_subckt_id(i_args.ri_nodes, 0 /* offset */);
+      //std::cout << "a_subckt_id = " << a_subckt_id << "\n";
       
       for(int i = is_nodes.bounds.lo; i <= is_nodes.bounds.hi; i++) {
 	int subckt;
@@ -791,6 +811,9 @@ public:
     {
       AffineAccessor<ZPoint<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(ZPoint<1>) /* offset */);
       AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
+
+      //std::cout << "a_in_node = " << a_in_node << "\n";
+      //std::cout << "a_out_node = " << a_out_node << "\n";
       
       for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++) {
 	ZPoint<1> in_node, out_node;
@@ -996,6 +1019,18 @@ public:
     // we'll make up the list of nodes we expect to be shared as we walk the edges
     std::map<int, std::set<int> > ghost_nodes;
 
+#ifdef DUMP_OUTPUT_SPACES
+    dump_sparse_index_space<1,int>("is_private", is_private);
+    dump_sparse_index_space<1,int>("is_shared", is_shared);
+    
+    for(int p = 0; p < num_pieces; p++) {
+      std::cout << "Piece #" << p << "\n";
+      dump_sparse_index_space<1,int>("p_pvt", p_pvt[p]);
+      dump_sparse_index_space<1,int>("p_shr", p_shr[p]);
+      dump_sparse_index_space<1,int>("p_ghost", p_ghost[p]);
+    }
+#endif
+    
     for(int i = 0; i < num_edges; i++) {
       // regenerate the random info for this edge and the two nodes it touches
       ZPoint<1> in_node, out_node;
@@ -1673,7 +1708,7 @@ int main(int argc, char **argv)
       break;
     }
 
-    printf("unknown parameter: %s\n", argv[i]);
+    //printf("unknown parameter: %s\n", argv[i]);
   }
 
   // if no test specified, use circuit (with default parameters)
