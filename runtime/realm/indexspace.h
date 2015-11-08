@@ -1517,6 +1517,7 @@ namespace Realm {
 
     size_t volume, offset;
     ZPoint<N, ptrdiff_t> strides;
+    ZRect<N,T> dbg_bounds;
   };
 
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
@@ -1559,14 +1560,24 @@ namespace Realm {
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
 
-    FT *ptr(const ZPoint<N,T>& p);
-    FT read(const ZPoint<N,T>& p);
-    void write(const ZPoint<N,T>& p, FT newval);
+    FT *ptr(const ZPoint<N,T>& p) const;
+    FT read(const ZPoint<N,T>& p) const;
+    void write(const ZPoint<N,T>& p, FT newval) const;
 
-  protected:
+  //protected:
+  //friend
+  // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
+#define REALM_ACCESSOR_DEBUG
+#ifdef REALM_ACCESSOR_DEBUG
+    RegionInstance dbg_inst;
+    ZRect<N,T> dbg_bounds;
+#endif
     intptr_t base;
     ZPoint<N,T> strides;
   };
+
+  template <typename FT, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
 }; // namespace Realm
 

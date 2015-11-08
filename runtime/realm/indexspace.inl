@@ -910,6 +910,7 @@ namespace Realm {
   {
     const ZRect<N,T>& bounds = this->indexspace.bounds;
     volume = bounds.volume();
+    dbg_bounds = bounds;
     if(volume) {
       offset = 0;
       ptrdiff_t s = 1;  // initial stride == 1
@@ -974,8 +975,14 @@ namespace Realm {
     ptrdiff_t element_stride;
     inst.get_strided_access_parameters(0, alis.volume, field_offset, sizeof(FT), base, element_stride);
 
-    base -= element_stride * alis.offset;
+    // base offset is currently done in get_strided_access_parameters, since we're piggybacking on the
+    //  old-style linearizers for now
+    //base -= element_stride * alis.offset;
     strides = element_stride * alis.strides;
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = inst;
+    dbg_bounds = alis.dbg_bounds;
+#endif
   }
 
   template <typename FT, int N, typename T>
@@ -996,7 +1003,7 @@ namespace Realm {
 #endif
 
   template <typename FT, int N, typename T>
-  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p)
+  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p) const
   {
     intptr_t rawptr = base;
     for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
@@ -1004,17 +1011,29 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p)
+  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
   {
     return *(this->ptr(p));
   }
 
   template <typename FT, int N, typename T>
-  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval)
+  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
   {
     *(ptr(p)) = newval;
   }
 
+  template <typename FT, int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a)
+  {
+    os << "AffineAccessor{ base=" << std::hex << a.base << std::dec << " strides=" << a.strides;
+#ifdef REALM_ACCESSOR_DEBUG
+    os << " inst=" << a.dbg_inst;
+    os << " bounds=" << a.dbg_bounds;
+    os << "->[" << std::hex << a.ptr(a.dbg_bounds.lo) << "," << a.ptr(a.dbg_bounds.hi)+1 << std::dec << "]";
+#endif
+    os << " }";
+    return os;
+  }
 
 
   ////////////////////////////////////////////////////////////////////////
