@@ -26,6 +26,7 @@
 #include "threads.h"
 #include "cmdline.h"
 #include "pri_queue.h"
+#include "nodeset.h"
 
 // NOTE: all these interfaces are templated, which means partitions.cc is going
 //  to have to somehow know which ones to instantiate - we'll try to have a 
@@ -99,6 +100,9 @@ namespace Realm {
     //  or false if the sparsity map became valid before this call (i.e. no callback)
     bool add_waiter(PartitioningMicroOp *uop, bool precise);
 
+    void remote_data_request(gasnet_node_t requestor, bool send_precise, bool send_approx);
+    void remote_data_reply(gasnet_node_t requestor, bool send_precise, bool send_approx);
+
     SparsityMap<N,T> me;
 
   protected:
@@ -107,6 +111,11 @@ namespace Realm {
     int remaining_contributor_count;
     GASNetHSL mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
+    bool precise_requested, approx_requested;
+    Event precise_ready_event, approx_ready_event;
+    NodeSet remote_precise_waiters, remote_approx_waiters;
+    NodeSet remote_sharers;
+    size_t sizeof_precise;
   };
 
   // we need a type-erased wrapper to store in the runtime's lookup table
@@ -587,6 +596,30 @@ namespace Realm {
 			     const ZRect<N,T> *rects, size_t count);
   };
 
+  struct RemoteSparsityRequestMessage {
+    struct RequestArgs {
+      gasnet_node_t sender;
+      int dim;
+      int idxtype;
+      id_t sparsity_id;
+      bool send_precise;
+      bool send_approx;
+    };
+
+    template <int N, typename T>
+    static void decode_request(RequestArgs args);
+
+    static void handle_request(RequestArgs args);
+
+    typedef ActiveMessageShortNoReply<REMOTE_SPARSITY_REQUEST_MSGID,
+                                      RequestArgs,
+                                      handle_request> Message;
+
+    template <int N, typename T>
+    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
+			     bool send_precise, bool send_approx);
+  };
+    
 };
 
 #endif // REALM_PARTITIONS_H

@@ -639,6 +639,7 @@ namespace Realm {
       hcount += RemoteMicroOpMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op AM");
       hcount += RemoteMicroOpCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op Complete AM");
       hcount += RemoteSparsityContribMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Contrib AM");
+      hcount += RemoteSparsityRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Request AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 

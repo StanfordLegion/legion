@@ -529,6 +529,9 @@ namespace Realm {
   template <int N, typename T>
   SparsityMapImpl<N,T>::SparsityMapImpl(SparsityMap<N,T> _me)
     : me(_me), remaining_contributor_count(0)
+    , precise_requested(false), approx_requested(false)
+    , precise_ready_event(Event::NO_EVENT), approx_ready_event(Event::NO_EVENT)
+    , sizeof_precise(0)
   {}
 
   template <int N, typename T>
@@ -542,11 +545,59 @@ namespace Realm {
   template <int N, typename T>
   Event SparsityMapImpl<N,T>::make_valid(bool precise /*= true*/)
   {
-    if(precise)
-      assert(this->entries_valid);
-    else
-      assert(this->approx_valid);
-    return Event::NO_EVENT;
+    // early out
+    if(precise ? this->entries_valid : this->approx_valid)
+      return Event::NO_EVENT;
+
+    // take lock to get/create event cleanly
+    bool request_approx = false;
+    bool request_precise = false;
+    Event e = Event::NO_EVENT;
+    {
+      AutoHSLLock al(mutex);
+
+      if(precise) {
+	if(!this->entries_valid) {
+	  // do we need to request the data?
+	  if((ID(me).node() != gasnet_mynode()) && !precise_requested) {
+	    request_precise = true;
+	    precise_requested = true;
+	    // also get approx while we're at it
+	    request_approx = !(this->approx_valid || approx_requested);
+	    approx_requested = true;
+	  }
+	  // do we have a finish event?
+	  if(precise_ready_event.exists()) {
+	    e = precise_ready_event;
+	  } else {
+	    e = GenEventImpl::create_genevent()->current_event();
+	    precise_ready_event = e;
+	  }
+	}
+      } else {
+	if(!this->approx_valid) {
+	  // do we need to request the data?
+	  if((ID(me).node() != gasnet_mynode()) && !approx_requested) {
+	    request_approx = true;
+	    approx_requested = true;
+	  }
+	  // do we have a finish event?
+	  if(approx_ready_event.exists()) {
+	    e = approx_ready_event;
+	  } else {
+	    e = GenEventImpl::create_genevent()->current_event();
+	    approx_ready_event = e;
+	  }
+	}
+      }
+    }
+    
+    if(request_approx || request_precise)
+      RemoteSparsityRequestMessage::send_request(ID(me).node(), me,
+						 request_approx,
+						 request_precise);
+
+    return e;
   }
 
 
@@ -668,10 +719,17 @@ namespace Realm {
     }
 
     if(last) {
-      int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
-      assert(left >= 0);
-      if(left == 0)
+      if(ID(me).node() == gasnet_mynode()) {
+	// we're the owner, so remaining_contributor_count tracks our expected contributions
+	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+	assert(left >= 0);
+	if(left == 0)
+	  finalize();
+      } else {
+	// this is a remote sparsity map, so sanity check that we requested the data
+	assert(precise_requested);
 	finalize();
+      }
     }
   }
 
@@ -687,7 +745,8 @@ namespace Realm {
 
     // take lock and retest, and register if not ready
     bool registered = false;
-    bool request_data = false;
+    bool request_approx = false;
+    bool request_precise = false;
     {
       AutoHSLLock al(mutex);
 
@@ -695,23 +754,120 @@ namespace Realm {
 	if(!this->entries_valid) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
-	  request_data = ID(me).node() != gasnet_mynode();
+	  // do we need to request the data?
+	  if((ID(me).node() != gasnet_mynode()) && !precise_requested) {
+	    request_precise = true;
+	    precise_requested = true;
+	    // also get approx while we're at it
+	    request_approx = !(this->approx_valid || approx_requested);
+	    approx_requested = true;
+	  }
 	}
       } else {
 	if(!this->approx_valid) {
 	  approx_waiters.push_back(uop);
 	  registered = true;
-	  request_data = ID(me).node() != gasnet_mynode();
+	  // do we need to request the data?
+	  if((ID(me).node() != gasnet_mynode()) && !approx_requested) {
+	    request_approx = true;
+	    approx_requested = true;
+	  }
 	}
       }
     }
 
-    // TODO: requesting data
-    assert(!request_data);
+    if(request_approx || request_precise)
+      RemoteSparsityRequestMessage::send_request(ID(me).node(), me,
+						 request_approx,
+						 request_precise);
 
     return registered;
   }
 
+  template <int N, typename T>
+  void SparsityMapImpl<N,T>::remote_data_request(gasnet_node_t requestor, bool send_precise, bool send_approx)
+  {
+    // first sanity check - we should be the owner of the data
+    assert(ID(me).node() == gasnet_mynode());
+
+    // take the long to determine atomically if we can send data or if we need to register as a listener
+    bool reply_precise = false;
+    bool reply_approx = false;
+    {
+      AutoHSLLock al(mutex);
+
+      // always add the requestor to the sharer list
+      remote_sharers.add(requestor);
+
+      if(send_precise) {
+	if(this->entries_valid)
+	  reply_precise = true;
+	else
+	  remote_precise_waiters.add(requestor);
+      }
+
+      if(send_approx) {
+	if(this->approx_valid)
+	  reply_approx = true;
+	else
+	  remote_approx_waiters.add(requestor);
+      }
+    }
+
+    if(reply_approx || reply_precise)
+      remote_data_reply(requestor, reply_precise, reply_approx);
+  }
+
+  
+  template <int N, typename T>
+  void SparsityMapImpl<N,T>::remote_data_reply(gasnet_node_t requestor, bool reply_precise, bool reply_approx)
+  {
+    if(reply_approx) {
+      // TODO
+      assert(this->approx_valid);
+    }
+
+    if(reply_precise) {
+      log_part.info() << "sending precise data: sparsity=" << me << " target=" << requestor;
+      
+      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      int seq_count = 0;
+
+      // scan the entry list, sending bitmaps first and making a list of rects
+      std::vector<ZRect<N,T> > rects;
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = this->entries.begin();
+	  it != this->entries.end();
+	  it++) {
+	if(it->bitmap) {
+	  // TODO: send bitmap
+	  assert(0);
+	}
+	else if(it->sparsity.exists()) {
+	  // TODO: ?
+	  assert(0);
+	} else {
+	  rects.push_back(it->bounds);
+	}
+      }
+	
+      const ZRect<N,T> *rdata = &rects[0];
+      size_t remaining = rects.size();
+      const size_t max_to_send = 2048 / sizeof(ZRect<N,T>);
+      // send partial messages first
+      while(remaining > max_to_send) {
+	RemoteSparsityContribMessage::send_request<N,T>(requestor, me, seq_id, 0,
+							rdata, max_to_send);
+	seq_count++;
+	remaining -= max_to_send;
+	rdata += max_to_send;
+      }
+      // final message includes the count of all messages (including this one!)
+      RemoteSparsityContribMessage::send_request<N,T>(requestor, me, 
+						      seq_id, seq_count + 1,
+						      rdata, remaining);
+    }
+  }
+  
   template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
@@ -724,18 +880,56 @@ namespace Realm {
 		<< " bitmap=" << this->entries[i].bitmap
 		<< std::endl;
 #endif
+    NodeSet sendto_precise, sendto_approx;
+    Event trigger_precise = Event::NO_EVENT;
+    Event trigger_approx = Event::NO_EVENT;
     {
       AutoHSLLock al(mutex);
 
       assert(!this->entries_valid);
       this->entries_valid = true;
+      precise_requested = false;
+      if(precise_ready_event.exists()) {
+	trigger_precise = precise_ready_event;
+	precise_ready_event = Event::NO_EVENT;
+      }
 
       for(std::vector<PartitioningMicroOp *>::const_iterator it = precise_waiters.begin();
 	  it != precise_waiters.end();
 	  it++)
 	(*it)->sparsity_map_ready(this, true);
       precise_waiters.clear();
+
+      sendto_precise = remote_precise_waiters;
+      remote_precise_waiters.clear();
     }
+
+    if(!sendto_approx.empty()) {
+      for(gasnet_node_t i = 0; (i < gasnet_nodes()) && !sendto_approx.empty(); i++)
+	if(sendto_approx.contains(i)) {
+	  bool also_precise = sendto_precise.contains(i);
+	  if(also_precise)
+	    sendto_precise.remove(i);
+	  remote_data_reply(i, also_precise, true);
+	  sendto_approx.remove(i);
+	}
+    }
+
+    if(!sendto_precise.empty()) {
+      for(gasnet_node_t i = 0; (i < gasnet_nodes()) && !sendto_precise.empty(); i++)
+	if(sendto_precise.contains(i)) {
+	  remote_data_reply(i, true, false);
+	  sendto_precise.remove(i);
+	}
+    }
+
+    if(trigger_approx.exists())
+      get_runtime()->get_genevent_impl(trigger_approx)->trigger(trigger_approx.gen,
+								gasnet_mynode());
+
+    if(trigger_precise.exists())
+      get_runtime()->get_genevent_impl(trigger_precise)->trigger(trigger_precise.gen,
+								 gasnet_mynode());
   }
 
 
@@ -990,7 +1184,15 @@ namespace Realm {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
 
-    // no other dependencies
+    // need valid data for the parent space too
+    if(!parent_space.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+    
     finish_dispatch(op, inline_ok);
   }
 
@@ -1055,6 +1257,7 @@ namespace Realm {
   {
     // for now, one access for the whole instance
     AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
+    //std::cout << "a_data = " << a_data << "\n";
 
     // double iteration - use the instance's space first, since it's probably smaller
     for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
@@ -1138,6 +1341,15 @@ namespace Realm {
       }
     }
 
+    // need valid data for the parent space too
+    if(!parent_space.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+    
     finish_dispatch(op, inline_ok);
   }
 
@@ -1271,7 +1483,7 @@ namespace Realm {
     // instance index spaces should always be valid
     assert(inst_space.is_valid(true /*precise*/));
 
-    // need valid data for each source
+    // need valid data for each target
     for(size_t i = 0; i < targets.size(); i++) {
       if(!targets[i].dense()) {
 	// it's safe to add the count after the registration only because we initialized
@@ -1282,6 +1494,15 @@ namespace Realm {
       }
     }
 
+    // need valid data for the parent space too
+    if(!parent_space.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+    
     finish_dispatch(op, inline_ok);
   }
 
@@ -1800,7 +2021,49 @@ namespace Realm {
     Message::request(target, args, rects, count * sizeof(ZRect<N,T>),
 		     PAYLOAD_COPY);
   }
-  
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteSparsityRequestMessage
+
+  template <int N, typename T>
+  /*static*/ void RemoteSparsityRequestMessage::decode_request(RequestArgs args)
+  {
+    SparsityMap<N,T> sparsity;
+    sparsity.id = args.sparsity_id;
+
+    log_part.info() << "received sparsity request: sparsity=" << sparsity << " precise=" << args.send_precise << " approx=" << args.send_approx;
+    SparsityMapImpl<N,T>::lookup(sparsity)->remote_data_request(args.sender, args.send_precise, args.send_approx);
+  }
+
+  /*static*/ void RemoteSparsityRequestMessage::handle_request(RequestArgs args)
+  {
+    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
+      decode_request<1,int>(args);
+      return;
+    }
+    assert(0);
+  }
+
+  template <int N, typename T>
+  /*static*/ void RemoteSparsityRequestMessage::send_request(gasnet_node_t target,
+							     SparsityMap<N,T> sparsity,
+							     bool send_precise,
+							     bool send_approx)
+  {
+    RequestArgs args;
+
+    args.sender = gasnet_mynode();
+    args.dim = N;
+    args.idxtype = sizeof(T);
+    args.sparsity_id = sparsity.id;
+    args.send_precise = send_precise;
+    args.send_approx = send_approx;
+
+    Message::request(target, args);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
