@@ -8333,6 +8333,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
       }
+      ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
