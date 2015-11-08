@@ -335,6 +335,8 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
+      assert(terralib.issymbol(privilege.region))
+      assert(data.is_tuple(privilege.field_path))
       if region_type == privilege.region.type and
         field_path:starts_with(privilege.field_path)
       then
