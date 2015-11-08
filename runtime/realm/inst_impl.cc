@@ -291,7 +291,9 @@ namespace Realm {
 	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
 	assert(mapping->image_is_dense(preimage));
 	int inst_first_elmt = preimage.lo[0];
-	//printf("adjusting base by %d * %zd\n", inst_first_elmt, stride);
+	//printf("adjusting base by %d * %zd: %p -> %p\n", inst_first_elmt, stride,
+	//       base,
+	//       ((char *)base) - inst_first_elmt * stride);
 	base = ((char *)base) - inst_first_elmt * stride;
       }
 
