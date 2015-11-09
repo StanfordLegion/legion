@@ -3852,7 +3852,9 @@ namespace LegionRuntime {
     void SingleTask::register_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from 
+      // the executing task context
+      //
       // Because of 'remap_region', this method can be called
       // both for inline regions as well as regions which were
       // initally mapped for the task.  Do a quick check to see
@@ -3869,7 +3871,8 @@ namespace LegionRuntime {
     void SingleTask::unregister_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from the
+      // executed task context
       for (std::list<PhysicalRegion>::iterator it = inline_regions.begin();
             it != inline_regions.end(); it++)
       {

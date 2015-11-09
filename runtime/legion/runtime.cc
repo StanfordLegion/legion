@@ -1338,15 +1338,15 @@ namespace LegionRuntime {
     {
       if (!mapped)
         return;
-      // Before unmapping, make sure any previous mappings have finished
-      wait_until_valid();
-      mapped = false;
-      valid = false;
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
-        termination_event.trigger();
+        // Can only do the trigger when we have actually ready
+        Event ref_ready = reference.get_ready_event();
+        termination_event.trigger(Event::merge_events(ready_event,ref_ready));
       }
+      valid = false;
+      mapped = false;
     }
 
     //--------------------------------------------------------------------------
