@@ -2361,7 +2361,7 @@ namespace LegionRuntime {
                                 "operation (ID %lld) in parent task %s "
                                 "(ID %lld) has %ld privilege fields and %ld "
                                 "instance fields.  Copy requirements must "
-                                "have exactly the same number of  privilege "
+                                "have exactly the same number of privilege "
                                 "and instance fields.", idx, 
                                 get_unique_copy_id(), 
                                 parent_ctx->variants->name,
@@ -2778,17 +2778,39 @@ namespace LegionRuntime {
         // wherever the existing physical instance was
         if (dst_restrictions[idx].has_restrictions())
         {
-          dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                    dst_contexts[idx],
-                                                    dst_requirements[idx],
-                                                    src_requirements.size()+idx,
-                                                    dst_versions[idx],
-                                                    local_proc
+          // Little bit of a hack here: if this is a restricted reduction,
+          // we actually want to map to a normal instance, so make it look
+          // like the privileges are read-write while selecting the instance
+          // and then switch back after we are done
+          if (IS_REDUCE(dst_requirements[idx]))
+          {
+            dst_requirements[idx].privilege = READ_WRITE;
+            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
+                                                      dst_contexts[idx],
+                                                      dst_requirements[idx],
+                                                      src_requirements.size()+idx,
+                                                      dst_versions[idx],
+                                                      local_proc
 #ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
+                                                      , get_logging_name()
+                                                      , unique_op_id
 #endif
-                                                    );
+                                                      );
+            // Switch the privileges back
+            dst_requirements[idx].privilege = REDUCE;
+          }
+          else // The normal thing
+            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
+                                                      dst_contexts[idx],
+                                                      dst_requirements[idx],
+                                                      src_requirements.size()+idx,
+                                                      dst_versions[idx],
+                                                      local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                                                      , get_logging_name()
+                                                      , unique_op_id
+#endif
+                                                      );
 #ifdef DEBUG_HIGH_LEVEL
           assert(dst_mapping_refs[idx].has_ref());
 #endif
