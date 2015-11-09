@@ -103,37 +103,14 @@
       height = max_level * thickness;
 
       var helpToggle = false;
-      var helpMessages = {
-        safari: [
-          "Zoom-in (x-axis): Ctrl/⌘  [Shift]  +",
-          "Zoom-out (x-axis): Ctrl/⌘  [Shift]  -",
-          "Reset zoom (x-axis): Ctrl/⌘  0",
-          "Zoom-in (y-axis): Ctrl-Alt/Ctrl-⌘  +",
-          "Zoom-out (y-axis): Ctrl-Alt/Ctrl-⌘  -",
-          "Reset zoom (y-axis): Ctrl-Alt/Ctrl-⌘  0",
-        ],
-        chrome: [
-          "Zoom-in (x-axis): Ctrl  [Shift]  +",
-          "Zoom-out (x-axis): Ctrl  [Shift]  -",
-          "Reset zoom (x-axis): Ctrl  0",
-          "Zoom-in (y-axis): Ctrl-Alt  +",
-          "Zoom-out (y-axis): Ctrl-Alt  -",
-          "Reset zoom (y-axis): Ctrl-Alt  0",
-        ],
-        firefox: [
-          "Zoom-in (x-axis): Ctrl/⌘  [Shift]  +",
-          "Zoom-out (x-axis): Ctrl/⌘  [Shift]  -",
-          "Reset zoom (x-axis): Ctrl/⌘  0",
-          "Zoom-in (y-axis): Ctrl-Alt/Ctrl-⌘  +",
-          "Zoom-out (y-axis): Ctrl-Alt/Ctrl-⌘  -",
-          "Reset zoom (y-axis): Ctrl-Alt/Ctrl-⌘  0",
-        ]
-      };
-      var helpTitles = {
-        safari: "Keyboard Shortcuts (Safari)",
-        chrome: "Keyboard Shortcuts (Chrome)",
-        firefox: "Keyboard Shortcuts (Firefox)"
-      };
+      var helpMessage = [
+				"Zoom-in (x-axis): Ctrl + / 4",
+				"Zoom-out (x-axis): Ctrl - / 3",
+				"Reset zoom (x-axis): Ctrl 0 / 0",
+				"Zoom-in (y-axis): Ctrl-Alt + / 2",
+				"Zoom-out (y-axis): Ctrl-Alt - / 1",
+				"Reset zoom (y-axis): Ctrl-Alt 0 / `",
+      ];
 
       function drawLoaderIcon() {
         var loaderSvg = d3.select("#loader-icon").select("svg");
@@ -266,15 +243,12 @@
         var helpText = helpBoxGroup.append("text")
           .attr("class", "help-box")
           .style("width", helpBoxWidth);
-        var helpTitle = helpTitles[browserName];
-        if (helpTitle === undefined) helpTitle = "Keyboard Shortcuts";
+        var helpTitle = "Keyboard Shortcuts";
         helpText.append("tspan")
           .attr({ x: boxStartX + helpBoxWidth / 2, y: boxStartY + 50})
           .attr("text-anchor", "middle")
           .text(helpTitle);
         var off = 30;
-        var helpMessage = helpMessages[browserName];
-        if (helpMessage === undefined) helpMessage = helpMessages["chrome"];
         for (var i = 0; i < helpMessage.length; ++i) {
           helpText.append("tspan")
             .attr("text-anchor", "start")
@@ -345,9 +319,9 @@
 
       function init() {
         if (document.addEventListener)
-          document.addEventListener("keypress", keypress, false);
+          document.addEventListener("keydown", keydown, false);
         else if (document.attachEvent)
-          document.attachEvent("onkeypress", keypress);
+          document.attachEvent("onkeydown", keydown);
       }
 
       function suppressdefault(e) {
@@ -355,96 +329,99 @@
         if (e.stopPropagation) e.stopPropagation();
       }
 
-      function keypress(e) {
+      var Command = { none : 0, help : 1,
+                      zox : 2, zix : 3, zrx : 4,
+                      zoy : 5, ziy : 6, zry : 7
+                    };
+
+      function keydown(e) {
         if (!e) e = event;
+
+        var code = e.keyCode || e.charCode;
+        var commandType = Command.none;
+        var multiFnKeys = e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey;
+
         if (!(e.ctrlKey || e.metaKey || e.altKey)) {
-          if (e.charCode == 63) {
-            helpToggle = !helpToggle;
-            if (helpToggle) {
-              var timelineSvg = d3.select("#timeline").select("svg");
-              timelineSvg.select("g#timeline").style("opacity", "0.1");
-              $("#timeline").css("overflow-x", "hidden");
-              timelineSvg.select("g#lines").style("opacity", "0.1");
-              timelineSvg.select("g.locator").style("opacity", "0.1");
-              drawHelpBox();
-            }
-            else {
-              var timelineSvg = d3.select("#timeline").select("svg");
-              timelineSvg.select("g.help-box").remove();
-              timelineSvg.select("g#timeline").style("opacity", "1.0");
-              $("#timeline").css("overflow-x", "scroll");
-              timelineSvg.select("g#lines").style("opacity", "1.0");
-              timelineSvg.select("g.locator").style("opacity", "1.0");
-            }
+          if (code == 191) commandType = Command.help;
+          else if (code == 49) commandType = Command.zoy;
+          else if (code == 50) commandType = Command.ziy;
+          else if (code == 51) commandType = Command.zox;
+          else if (code == 52) commandType = Command.zix;
+          else if (code == 48) commandType = Command.zrx;
+          else if (code == 192) commandType = Command.zry;
+        }
+        else {
+          if (code == 61 || code == 187) {
+            if (multiFnKeys) commandType = Command.ziy;
+            else commandType = Command.zix;
           }
-          else return true;
+          else if (code == 189 || code == 173) {
+            if (multiFnKeys) commandType = Command.zoy;
+            else commandType = Command.zox;
+          }
+          else if (code == 48) {
+            if (multiFnKeys) commandType = Command.zry;
+            else commandType = Command.zrx;
+          }
         }
-        if (helpToggle) {
-          suppressdefault(e);
-          return true;
-        }
-        if (e.charCode == 43 || e.charCode == 61) {
-          suppressdefault(e);
-          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
-            showLoaderIcon();
-            adjustThickness(thickness * 2);
-            hideLoaderIcon();
+
+        if (commandType == Command.none) return true;
+
+        suppressdefault(e);
+        if (commandType == Command.help) {
+          helpToggle = !helpToggle;
+          var timelineSvg = d3.select("#timeline").select("svg");
+          if (helpToggle) {
+            timelineSvg.select("g#timeline").style("opacity", "0.1");
+            $("#timeline").css("overflow-x", "hidden");
+            timelineSvg.select("g#lines").style("opacity", "0.1");
+            timelineSvg.select("g.locator").style("opacity", "0.1");
+            drawHelpBox();
           }
           else {
-            var inc = e.shiftKey ? 4.0 : 0.2;
-            if (zoom + inc <= maxZoom) {
-              showLoaderIcon();
-              adjustZoom(zoom + inc, true);
-              hideLoaderIcon();
-            }
+            timelineSvg.select("g.help-box").remove();
+            timelineSvg.select("g#timeline").style("opacity", "1.0");
+            $("#timeline").css("overflow-x", "scroll");
+            timelineSvg.select("g#lines").style("opacity", "1.0");
+            timelineSvg.select("g.locator").style("opacity", "1.0");
           }
-          return false;
         }
-        else if (e.charCode == 0 || e.charCode == 31 || e.charCode == 45 || e.charCode == 95) {
-          suppressdefault(e);
-          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
-            showLoaderIcon();
-            adjustThickness(thickness / 2);
-            hideLoaderIcon();
-          }
+
+        if (helpToggle) return false;
+
+        showLoaderIcon();
+        if (commandType == Command.zix) {
+          var inc = 4.0;
+          if (zoom + inc <= maxZoom)
+            adjustZoom(zoom + inc, true);
+        }
+        else if (commandType == Command.zox) {
+          var dec = 4.0;
+          if (zoom - dec > 0)
+            adjustZoom(zoom - dec, true);
+        }
+        else if (commandType == Command.zrx) {
+          adjustZoom(1.0, false);
+          if ($("#timeline").scrollLeft() != 0)
+            $("#timeline").scrollLeft(0);
           else {
-            var dec = e.shiftKey ? 4.0 : 0.2;
-            if (zoom - dec > 0) {
-              var width = $("#timeline").width();
-              var pos = ($("#timeline").scrollLeft() + width / 2) / zoom;
-              showLoaderIcon();
-              adjustZoom(zoom - dec, true);
-              hideLoaderIcon();
-            }
+            var svg = d3.select("#timeline").select("svg");
+            var timelineGroup = svg.select("g#timeline");
+            var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+            drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
           }
-          return false;
         }
-        else if (e.charCode == 48) {
-          suppressdefault(e);
-          if (e.metaKey && e.ctrlKey || e.altKey && e.ctrlKey) {
-            var height = $(window).height() - margin_bottom;
-            thickness = height / max_level;
-            showLoaderIcon();
-            adjustThickness(thickness);
-            hideLoaderIcon();
-          }
-          else {
-            showLoaderIcon();
-            adjustZoom(1.0, false);
-            if ($("#timeline").scrollLeft() != 0) {
-              $("#timeline").scrollLeft(0);
-            }
-            else {
-              var svg = d3.select("#timeline").select("svg");
-              var timelineGroup = svg.select("g#timeline");
-              var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
-              drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
-            }
-            hideLoaderIcon();
-          }
-          return false;
+        else if (commandType == Command.ziy)
+          adjustThickness(thickness * 2);
+        else if (commandType == Command.zoy)
+          adjustThickness(thickness / 2);
+        else if (commandType == Command.zry) {
+          var height = $(window).height() - margin_bottom;
+          thickness = height / max_level;
+          adjustThickness(thickness);
         }
-        return true;
+        hideLoaderIcon();
+        return false;
       }
     </script>
   </head>
