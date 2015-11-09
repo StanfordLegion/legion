@@ -316,11 +316,16 @@
           .attr("text-anchor", "middle")
           .style("font-size", "20pt")
           .text("Search");
+        var searchInputWidth = searchBoxWidth - 40;
+        var searchInputHeight = 50;
         searchBoxGroup.append("foreignObject")
           .attr({ x: boxStartX + 20, y: boxStartY + 150,
-                  width: searchBoxWidth - 40, height: 50})
+                  width: searchInputWidth, height: searchInputHeight})
           .attr("text-anchor", "middle")
-          .html("<input autofocus type='text' class='search-box' style='height: 50px; width: 440px; font-size: 20pt; font-family: Consolas, monospace;'></input>");
+          .html("<input type='text' class='search-box' style='height: "
+              + searchInputHeight + "px; width: "
+              + searchInputWidth + "px; font-size: 20pt; font-family: Consolas, monospace;'></input>");
+        $("input.search-box").focus();
       }
 
       function drawSearchHistoryBox() {
