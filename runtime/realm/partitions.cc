@@ -367,7 +367,25 @@ namespace Realm {
   template <int N, typename T>
   inline void DenseRectangleList<N,T>::add_point(const ZPoint<N,T>& p)
   {
+    if(rects.empty()) {
+      rects.push_back(ZRect<N,T>(p, p));
+      return;
+    }
+
     if(N == 1) {
+      // optimize for sorted insertion (i.e. stuff at end)
+      {
+	ZRect<N,T> &lr = *rects.rbegin();
+	if(p.x == (lr.hi.x + 1)) {
+	  lr.hi.x = p.x;
+	  return;
+	}
+	if(p.x > (lr.hi.x + 1)) {
+	  rects.push_back(ZRect<N,T>(p, p));
+	  return;
+	}
+      }
+
       int merge_lo = -1;
       int merge_hi = -1;
       for(size_t i = 0; i < rects.size(); i++) {
@@ -434,6 +452,24 @@ namespace Realm {
   template <int N, typename T>
   inline void DenseRectangleList<N,T>::add_rect(const ZRect<N,T>& _r)
   {
+    if(rects.empty()) {
+      rects.push_back(_r);
+      return;
+    }
+
+    if(N == 1) {
+      // try to optimize for sorted insertion (i.e. stuff at end)
+      ZRect<N,T> &lr = *rects.rbegin();
+      if(_r.lo.x == (lr.hi.x + 1)) {
+	lr.hi.x = _r.hi.x;
+	return;
+      }
+      if(_r.lo.x > (lr.hi.x + 1)) {
+	rects.push_back(_r);
+	return;
+      }
+    }
+
     ZRect<N,T> r = _r;
 
     // scan through rectangles, looking for containment (really good),
@@ -1743,6 +1779,43 @@ namespace Realm {
   template <typename BM>
   void IntersectionMicroOp<N,T>::populate_bitmask(BM& bitmask)
   {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-intersection of the two streams
+    if(N == 1) {
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	// can only generate data while both sides have rectangles left
+	while(it_lhs.valid && it_rhs.valid) {
+	  // skip rectangles if they completely preceed the one on the other side
+	  if(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < it_lhs.rect.lo.x) {
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // we have at least partial overlap - add the intersection and then consume whichever
+	  //  rectangle ended first (or both if equal)
+	  bitmask.add_rect(it_lhs.rect.intersection(it_rhs.rect));
+	  T diff = it_lhs.rect.hi.x - it_rhs.rect.hi.x;
+	  if(diff <= 0)
+	    it_lhs.step();
+	  if(diff >= 0)
+	    it_rhs.step();
+	}
+      } else {
+	assert(0);
+      }
+      return;
+    }
+
+    // general version
     // first build the intersection of all the bounding boxes
     ZRect<N,T> bounds = inputs[0].bounds;
     for(size_t i = 1; i < inputs.size(); i++)
@@ -1854,6 +1927,62 @@ namespace Realm {
   template <typename BM>
   void DifferenceMicroOp<N,T>::populate_bitmask(BM& bitmask)
   {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-subtract of the two streams
+    if(N == 1) {
+      ZIndexSpaceIterator<N,T> it_lhs(lhs);
+      ZIndexSpaceIterator<N,T> it_rhs(rhs);
+
+      while(it_lhs.valid) {
+	// throw away any rhs rectangles that come before this one
+	while(it_rhs.valid && (it_rhs.rect.hi.x < it_lhs.rect.lo.x))
+	  it_rhs.step();
+
+	// out of rhs rectangles? just copy over all the rest on the lhs and we're done
+	if(!it_rhs.valid) {
+	  while(it_lhs.valid) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	  }
+	  break;
+	}
+
+	// consume lhs rectangles until we get one that overlaps
+	while(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
+	  bitmask.add_rect(it_lhs.rect);
+	  if(!it_lhs.step()) break;
+	}
+
+	// last case - partial overlap - subtract out rhs rect(s)
+	if(it_lhs.valid) {
+	  ZPoint<N,T> p = it_lhs.rect.lo;
+	  while(it_rhs.valid) {
+	    if(p.x < it_rhs.rect.lo.x) {
+	      // add a partial rect below the rhs
+	      ZPoint<N,T> p2 = it_rhs.rect.lo;
+	      p2.x -= 1;
+	      bitmask.add_rect(ZRect<N,T>(p, p2));
+	    }
+
+	    // if the rhs ends after the lhs, we're done
+	    if(it_rhs.rect.hi.x >= it_lhs.rect.hi.x)
+	      break;
+
+	    // otherwise consume the rhs and update p
+	    p = it_rhs.rect.hi;
+	    p.x += 1;
+	    if(!it_rhs.step()) {
+	      // no rhs left - emit the rest and break out
+	      bitmask.add_rect(ZRect<N,T>(p, it_lhs.rect.hi));
+	      break;
+	    }
+	  }
+	  it_lhs.step();
+	}
+      }
+      return;
+    }
+
     // the basic idea here is to build a list of rectangles from the lhs and clip them
     //  based on the rhs until we're done
     std::deque<ZRect<N,T> > todo;
