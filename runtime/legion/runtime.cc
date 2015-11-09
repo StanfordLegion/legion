@@ -9734,9 +9734,12 @@ namespace LegionRuntime {
       }
 #endif
       // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
+#ifdef LEGION_SPY
+      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
+            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
+#else
       // Mark that we are starting a trace
-      ctx->begin_trace(tid); 
+      ctx->begin_trace(tid);
 #endif
     }
 
