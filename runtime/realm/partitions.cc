@@ -26,7 +26,13 @@ namespace Realm {
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");
 
-  static PartitioningOpQueue *op_queue = 0;
+  namespace {
+    // module-level globals
+
+    PartitioningOpQueue *op_queue = 0;
+
+    FragmentAssembler fragment_assembler;
+  };
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -268,6 +274,57 @@ namespace Realm {
 
     op->deferred_launch(wait_on);
     return e;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class FragmentAssembler
+
+  FragmentAssembler::FragmentAssembler(void)
+    : next_sequence_id(0)
+  {}
+
+  FragmentAssembler::~FragmentAssembler(void)
+  {}
+
+  // returns a sequence ID that may not be unique, but hasn't been used in a 
+  //   long time
+  inline int FragmentAssembler::get_sequence_id(void)
+  {
+    return __sync_fetch_and_add(&next_sequence_id, 1);
+  }
+
+  // adds a fragment to the list, returning true if this is the last one from
+  //  a sequence
+  inline bool FragmentAssembler::add_fragment(gasnet_node_t sender,
+					      int sequence_id,
+					      int sequence_count)
+  {
+    // easy case - a fragment with a sequence_count == 1 is a whole message
+    if(sequence_count == 1) return true;
+
+    // rest of this has to be protected by a lock
+    {
+      AutoHSLLock al(mutex);
+
+      std::map<int, int>& by_sender = fragments[sender];
+
+      std::map<int, int>::iterator it = by_sender.find(sequence_id);
+      if(it != by_sender.end()) {
+	int new_count = it->second + sequence_count - 1;
+	if(new_count == 0) {
+	  // this was the last packet - delete the entry from the map and return true
+	  by_sender.erase(it);
+	  return true;
+	} else 
+	  it->second = new_count;
+      } else {
+	// first packet (we've seen) of new sequence
+	by_sender[sequence_id] = sequence_count - 1;
+      }
+    }
+    return false;
   }
 
 
@@ -614,10 +671,6 @@ namespace Realm {
     __sync_fetch_and_add(&remaining_contributor_count, delta);
   }
 
-  namespace {
-    int remote_contribution_sequence_id = 0;
-  };
-
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
@@ -625,7 +678,7 @@ namespace Realm {
 
     if(owner != gasnet_mynode()) {
       // send (the lack of) data to the owner to collect
-      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      int seq_id = fragment_assembler.get_sequence_id();
       RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 1,
 						      0, 0);
       return;
@@ -644,7 +697,7 @@ namespace Realm {
 
     if(owner != gasnet_mynode()) {
       // send the data to the owner to collect
-      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = 2048 / sizeof(ZRect<N,T>);
       const ZRect<N,T> *rdata = &rects.rects[0];
       int seq_count = 0;
@@ -830,7 +883,7 @@ namespace Realm {
     if(reply_precise) {
       log_part.info() << "sending precise data: sparsity=" << me << " target=" << requestor;
       
-      int seq_id = __sync_fetch_and_add(&remote_contribution_sequence_id, 1);
+      int seq_id = fragment_assembler.get_sequence_id();
       int seq_count = 0;
 
       // scan the entry list, sending bitmaps first and making a list of rects
@@ -1986,10 +2039,12 @@ namespace Realm {
     log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
     size_t count = datalen / sizeof(ZRect<N,T>);
     assert((datalen % sizeof(ZRect<N,T>)) == 0);
-    assert(args.sequence_count == 1); // handle fragments later
+    bool last_fragment = fragment_assembler.add_fragment(args.sender,
+							 args.sequence_id,
+							 args.sequence_count);
     SparsityMapImpl<N,T>::lookup(sparsity)->contribute_raw_rects((const ZRect<N,T> *)data,
 								 count,
-								 true);
+								 last_fragment);
   }
 
   /*static*/ void RemoteSparsityContribMessage::handle_request(RequestArgs args,
@@ -2012,6 +2067,7 @@ namespace Realm {
   {
     RequestArgs args;
 
+    args.sender = gasnet_mynode();
     args.dim = N;
     args.idxtype = sizeof(T);
     args.sparsity_id = sparsity.id;
@@ -2564,8 +2620,8 @@ namespace Realm {
 	    log_part.info() << "worker " << this << " starting op " << p_op;
 	    p_op->mark_started();
 	    p_op->execute();
-	    p_op->mark_finished();
 	    log_part.info() << "worker " << this << " finished op " << p_op;
+	    p_op->mark_finished();
 	    break;
 	  }
 	case MICROOP_PRIORITY:
@@ -2574,8 +2630,8 @@ namespace Realm {
 	    log_part.info() << "worker " << this << " starting uop " << p_uop;
 	    p_uop->mark_started();
 	    p_uop->execute();
-	    p_uop->mark_finished();
 	    log_part.info() << "worker " << this << " starting uop " << p_uop;
+	    p_uop->mark_finished();
 	    break;
 	  }
 	default: assert(0);

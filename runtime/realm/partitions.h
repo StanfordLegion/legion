@@ -534,6 +534,25 @@ namespace Realm {
   //
   // active messages
 
+  class FragmentAssembler {
+  public:
+    FragmentAssembler(void);
+    ~FragmentAssembler(void);
+
+    // returns a sequence ID that may not be unique, but hasn't been used in a 
+    //   long time
+    int get_sequence_id(void);
+
+    // adds a fragment to the list, returning true if this is the last one from
+    //  a sequence
+    bool add_fragment(gasnet_node_t sender, int sequence_id, int sequence_count);
+
+  protected:
+    int next_sequence_id;
+    GASNetHSL mutex; // protects the fragments map
+    std::map<gasnet_node_t, std::map<int, int> > fragments;
+  };
+
   struct RemoteMicroOpMessage {
     struct RequestArgs : public BaseMedium {
       gasnet_node_t sender;
@@ -574,6 +593,7 @@ namespace Realm {
 
   struct RemoteSparsityContribMessage {
     struct RequestArgs : public BaseMedium {
+      gasnet_node_t sender;
       int dim;
       int idxtype;
       id_t sparsity_id;
