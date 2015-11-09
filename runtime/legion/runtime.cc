@@ -1338,15 +1338,15 @@ namespace LegionRuntime {
     {
       if (!mapped)
         return;
-      // Before unmapping, make sure any previous mappings have finished
-      wait_until_valid();
-      mapped = false;
-      valid = false;
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
-        termination_event.trigger();
+        // Can only do the trigger when we have actually ready
+        Event ref_ready = reference.get_ready_event();
+        termination_event.trigger(Event::merge_events(ready_event,ref_ready));
       }
+      valid = false;
+      mapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8333,6 +8333,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
       }
+      ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -9733,9 +9734,12 @@ namespace LegionRuntime {
       }
 #endif
       // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
+#ifdef LEGION_SPY
+      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
+            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
+#else
       // Mark that we are starting a trace
-      ctx->begin_trace(tid); 
+      ctx->begin_trace(tid);
 #endif
     }
 

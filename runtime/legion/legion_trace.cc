@@ -126,20 +126,21 @@ namespace LegionRuntime {
       }
       else
       {
-        // Check for exceeding the trace size
-        if (index >= dependences.size())
-        {
-          log_run.error("Trace violation! Recorded %ld operations in trace "
-                        "%d in task %s (UID %lld) but %d operations have "
-                        "now been issued!", dependences.size(), tid,
-                        ctx->variants->name, ctx->get_unique_task_id(),index+1);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_TRACE_VIOLATION);
-        }
         if (!op->is_close_op())
         {
+          // Check for exceeding the trace size
+          if (index >= dependences.size())
+          {
+            log_run.error("Trace violation! Recorded %ld operations in trace "
+                          "%d in task %s (UID %lld) but %d operations have "
+                          "now been issued!", dependences.size(), tid,
+                          ctx->variants->name, 
+                          ctx->get_unique_task_id(), index+1);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
           // Check to see if the meta-data alignes
           const OperationInfo &info = op_info[index];
           // Check that they are the same kind of operation

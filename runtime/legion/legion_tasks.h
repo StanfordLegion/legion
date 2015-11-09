@@ -161,7 +161,7 @@ namespace LegionRuntime {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void compute_point_region_requirements(MinimalPoint *mp = NULL);
+      bool compute_point_region_requirements(MinimalPoint *mp = NULL);
       bool early_map_regions(std::set<Event> &applied_conditions);
       bool prepare_steal(void);
     protected:
