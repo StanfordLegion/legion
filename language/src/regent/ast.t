@@ -137,6 +137,20 @@ end
 
 function ast_ctor:__call(node)
   assert(type(node) == "table", tostring(self) .. " expected table")
+
+  -- Normally, we assume we can co-opt the incoming table as the
+  -- node. This is not true if the incoming node is itself an
+  -- AST. (ASTs are not supposed to be mutable!) If so, copy the
+  -- fields.
+  if ast.is_node(node) then
+    local copy = {}
+    for k, v in pairs(node) do
+      copy[k] = v
+    end
+    copy["node_type"] = nil
+    node = copy
+  end
+
   for i, f in ipairs(self.expected_fields) do
     if rawget(node, f) == nil then
       error(tostring(self) .. " missing required argument '" .. f .. "'", 2)

@@ -252,6 +252,14 @@ function data.newmap()
   return setmetatable({ __keys_by_hash = {}, __values_by_hash = {} }, data.map)
 end
 
+function data.map_from_table(t)
+  local result = data.newmap()
+  for k, v in pairs(t) do
+    result[k] = v
+  end
+  return result
+end
+
 function data.is_map(x)
   return getmetatable(x) == data.map
 end
@@ -261,8 +269,7 @@ function data.map:__index(k)
 end
 
 function data.map:__newindex(k, v)
-  self.__keys_by_hash[data.hash(k)] = k
-  self.__values_by_hash[data.hash(k)] = v
+  self:put(k, v)
 end
 
 function data.map:get(k)
@@ -294,6 +301,10 @@ function data.map:values()
   return pairs(self.__values_by_hash)
 end
 
+function data.map:is_empty()
+  return next(self.__values_by_hash) == nil
+end
+
 function data.map:copy()
   return self:map(function(k, v) return v end)
 end
@@ -319,6 +330,63 @@ function data.map:__tostring()
     function(k, v)
       return tostring(k) .. "=" .. tostring(v)
     end):mkstring("{", ",", "}")
+end
+
+-- #####################################
+-- ## Default Maps
+-- #################
+
+data.default_map = setmetatable(
+  {
+    -- So, apparently for this to work you must re-list any metamethods.
+    __tostring = data.map.__tostring,
+    __newindex = data.map.__newindex,
+  }, {
+    __index = data.map,
+})
+
+function data.new_default_map(default)
+  return setmetatable(
+    {
+      __keys_by_hash = {},
+      __values_by_hash = {},
+      __default = default,
+    },
+    data.default_map)
+end
+
+local function make_recursive_map(depth)
+  return function()
+    if depth > 0 then
+      return data.new_recursive_map(depth - 1)
+    end
+  end
+end
+
+function data.new_recursive_map(depth)
+  return data.new_default_map(make_recursive_map(depth))
+end
+
+function data.is_default_map(x)
+  return getmetatable(x) == data.default_map
+end
+
+function data.default_map:__index(k)
+  local lookup = data.map.get(self, k) or data.default_map[k]
+  if lookup == nil then
+    lookup = self.__default(k)
+    if lookup ~= nil then self:put(k, lookup) end
+  end
+  return lookup
+end
+
+function data.default_map:get(k)
+  local lookup = data.map.get(self, k)
+  if lookup == nil then
+    lookup = self.__default(k)
+    if lookup ~= nil then self:put(k, lookup) end
+  end
+  return lookup
 end
 
 return data
