@@ -63,7 +63,7 @@ do
   for i in is do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end
-  -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +) -- arrives(...)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +) -- arrives(...)
   copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +) -- arrives(...)
 
   -- awaits(...)
