@@ -53,13 +53,22 @@
       rect.select-block {
         fill: #000;
         opacity: 0.1;
-      };
+      }
+
+      text.select-block {
+        font-size: 15pt;
+        font-family: Consolas, monospace;
+        fill: #000;
+        -webkit-user-select: none; /* Chrome/Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+ */
+      }
 
       line.locator {
         stroke: #000;
-        stroke-width: 0.5px;
+        stroke-width: 1px;
         opacity: 0.5;
-      };
+      }
     </style>
     <script src="http://code.jquery.com/jquery-1.11.3.min.js"></script>
     <script src="http://d3js.org/d3.v3.js"></script>
@@ -85,6 +94,9 @@
       var baseThickness = height / max_level;
       height = max_level * thickness;
 
+      var mouseX = 0;
+      var rangeZoom = true;
+
       var helpToggle = false;
       var helpMessage = [
 				"Zoom-in (x-axis)   : Ctrl + / 4",
@@ -93,6 +105,8 @@
 				"Zoom-in (y-axis)   : Ctrl-Alt + / 2",
 				"Zoom-out (y-axis)  : Ctrl-Alt - / 1",
 				"Reset zoom (y-axis): Ctrl-Alt 0 / `",
+				"Range Zoom-in      : drag-select",
+				"Measure duration   : Alt + drag-select",
 				"Search             : s / S",
 				"Search History     : h / H",
 				"Previous Search    : p / P",
@@ -115,6 +129,128 @@
         $("#timeline").css("overflow-x", "scroll");
         timelineSvg.select("g#lines").style("opacity", "1.0");
         timelineSvg.select("g.locator").style("opacity", "1.0");
+      }
+
+      function mouseMoveHandlerWhenDown() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        var p = d3.mouse(this);
+        var select_block = timelineSvg.select("rect.select-block");
+        var select_text = timelineSvg.select("text.select-block");
+        var newWidth = Math.abs(p[0] - mouseX);
+        select_block.attr("width", newWidth);
+        if (p[0] >= mouseX) {
+          select_block.attr("x", mouseX);
+          select_text.attr("x", mouseX + (p[0] - mouseX) / 2);
+        }
+        else {
+          select_block.attr("x", p[0]);
+          select_text.attr("x", p[0] + (mouseX - p[0]) / 2);
+        }
+        var time = newWidth / zoom / scale;
+        var unit = "us";
+        if (time > 1000) {
+          time = Math.floor(time / 1000);
+          unit = "ms";
+        }
+        else {
+          time = Math.floor(time);
+        }
+        select_text.text(time + " " + unit);
+      }
+
+      function mouseMoveHandlerWhenUp() {
+        var p = d3.mouse(this);
+        var x = parseFloat(p[0]);
+        var scrollLeft = $("#timeline").scrollLeft();
+        var paneWidth = $("#timeline").width();
+        var currentTime = x / zoom / scale;
+        var unit = "us";
+
+        if (paneWidth / zoom / scale >= 100000) {
+          currentTime = Math.floor(currentTime / 1000);
+          unit = "ms";
+        }
+        else {
+          currentTime = Math.floor(currentTime);
+        }
+
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.select("g.locator").remove();
+        var locator = timelineSvg.append("g").attr("class", "locator");
+        locator.append("line")
+          .attr({
+            x1: p[0],
+            y1: 0,
+            x2: p[0],
+            y2: p[1] - thickness / 2,
+            class: "locator",
+          });
+        locator.append("line")
+          .attr({
+            x1: p[0],
+            y1: p[1] + thickness / 2,
+            x2: p[0],
+            y2: height,
+            class: "locator",
+          });
+        var locatorText = locator.append("text");
+        var text = currentTime + " " + unit;
+        locatorText.attr("class", "locator").text(text)
+        if ((x - scrollLeft) < paneWidth - 100) {
+          locatorText.attr({x: x + 2, y: $(window).scrollTop() + 10});
+          locatorText.attr("anchor", "start");
+        }
+        else {
+          locatorText.attr({x: x - 2 - text.length * 7, y: $(window).scrollTop() + 10});
+          locatorText.attr("anchor", "end");
+        }
+      }
+
+      function mouseDownHandler() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.select("g.locator").remove();
+        var p = d3.mouse(this);
+        timelineSvg.append("rect")
+          .attr({
+            x : p[0],
+            y : 0,
+            class : "select-block",
+            width : 0,
+            height : height
+          });
+        timelineSvg.append("text")
+          .attr({
+            x : p[0],
+            y : p[1],
+            class : "select-block",
+            anchor : "middle",
+            "text-anchor" : "middle",
+          }).text("0 us");
+        mouseX = p[0];
+        timelineSvg.on("mousemove", null);
+        timelineSvg.on("mousemove", mouseMoveHandlerWhenDown);
+      }
+
+      function mouseUpHandler() {
+        var p = d3.mouse(this);
+        var timelineSvg = d3.select("#timeline").select("svg");
+        var select_block = timelineSvg.select("rect.select-block");
+        var select_text = timelineSvg.select("text.select-block");
+        var prevZoom = zoom;
+        var selectWidth = parseInt(select_block.attr("width"));
+        var svgWidth = timelineSvg.attr("width");
+        if (rangeZoom && selectWidth > 10 && svgWidth / selectWidth <= maxZoom) {
+          var x = select_block.attr("x");
+          showLoaderIcon();
+          adjustZoom(svgWidth / selectWidth, false);
+          $("#timeline").scrollLeft(x / prevZoom * zoom);
+          hideLoaderIcon();
+        }
+        timelineSvg.selectAll("rect.select-block").remove();
+        timelineSvg.selectAll("text.select-block").remove();
+        mouseX = 0;
+        timelineSvg.on("mousemove", null);
+        timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
       }
 
       function drawLoaderIcon() {
@@ -244,7 +380,7 @@
         var paneHeight = $("#timeline").height();
         var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
         var helpBoxWidth = Math.min(450, paneWidth - 100);
-        var helpBoxHeight = Math.min(400, paneHeight - 100);
+        var helpBoxHeight = Math.min(450, paneHeight - 100);
 
         var timelineWidth = timelineSvg.select("g#timeline").attr("width");
         var timelineHeight = timelineSvg.select("g#timeline").attr("height");
@@ -369,7 +505,7 @@
             var pos = (nextPos + i) %% sizeHistory;
             var regex = searchRegex[pos];
             if (regex != null) {
-              if (pos == currentPos) prefix = ">>> "; 
+              if (pos == currentPos) prefix = ">>> ";
               else prefix = id + " : ";
               historyText.append("tspan")
                 .attr("text-anchor", "start")
@@ -512,7 +648,11 @@
           }
         }
 
-        if (commandType == Command.none) return true;
+        if (commandType == Command.none) {
+          if (e.metaKey || e.altKey)
+            rangeZoom = false;
+          return true;
+        }
 
         suppressdefault(e);
         if (commandType == Command.help) {
@@ -641,8 +781,18 @@
         return false;
       }
 
+
+      function defaultKeyUp(e) {
+        if (!e) e = event;
+        if (!(e.metaKey || e.altKey)) {
+          rangeZoom = true;
+        }
+        return true;
+      }
+
       function init() {
         setKeyHandler(defaultKeydown);
+        $(document).on("keyup", defaultKeyUp);
       }
     </script>
   </head>
@@ -704,99 +854,9 @@
                 hideLoaderIcon();
               }, 100);
           });
-          var isMouseDown = false;
-          var mouseX = 0;
-          timelineSvg.on("mousedown", function() {
-              if (!(helpToggle || searchToggle || searchHistoryToggle)) {
-                timelineSvg.select("g.locator").remove();
-                isMouseDown = true;
-                var p = d3.mouse(this);
-                timelineSvg.append("rect")
-                  .attr({
-                    x : p[0],
-                    y : 0,
-                    class : "select-block",
-                    width : 0,
-                    height : height
-                  });
-                mouseX = p[0];
-              }
-          });
-          timelineSvg.on("mousemove", function() {
-              if (isMouseDown) {
-                var p = d3.mouse(this);
-                var select_block = timelineSvg.select("rect.select-block");
-                if (p[0] >= mouseX) {
-                  select_block.attr("width", p[0] - mouseX);
-                  select_block.attr("x", mouseX);
-                }
-                else {
-                  select_block.attr("width", mouseX - p[0]);
-                  select_block.attr("x", p[0]);
-                }
-              }
-              else {
-                var p = d3.mouse(this);
-                var x = parseFloat(p[0]);
-                var scrollLeft = $("#timeline").scrollLeft();
-                var paneWidth = $("#timeline").width();
-                var currentTime = Math.floor(x / zoom / scale / 1000);
-                timelineSvg.select("g.locator").remove();
-                var locator = timelineSvg.append("g").attr("class", "locator");
-                if (helpToggle || searchToggle || searchHistoryToggle)
-                  locator.style("opacity", "0.1");
-                locator.append("line")
-                  .attr({
-                    x1: p[0],
-                    y1: 0,
-                    x2: p[0],
-                    y2: p[1] - thickness / 2
-                  })
-                  .style("stroke", "#000")
-                  .style("stroke-width", "1px")
-                  .style("opacity", "0.5");
-                locator.append("line")
-                  .attr({
-                    x1: p[0],
-                    y1: p[1] + thickness / 2,
-                    x2: p[0],
-                    y2: height
-                  })
-                  .style("stroke", "#000")
-                  .style("stroke-width", "1px")
-                  .style("opacity", "0.5");
-                var locatorText = locator.append("text");
-                var text = currentTime + " ms";
-                locatorText.attr("class", "locator").text(text)
-                if ((x - scrollLeft) < paneWidth - 100) {
-                  locatorText.attr({x: x + 2, y: $(window).scrollTop() + 10});
-                  locatorText.attr("anchor", "start");
-                }
-                else {
-                  locatorText.attr({x: x - 2 - text.length * 7, y: $(window).scrollTop() + 10});
-                  locatorText.attr("anchor", "end");
-                }
-              }
-          });
-          timelineSvg.on("mouseup", function() {
-              if (isMouseDown) {
-                var p = d3.mouse(this);
-                var select_block = timelineSvg.select("rect.select-block");
-                var prevZoom = zoom;
-                var selectWidth = parseInt(select_block.attr("width"));
-                var svgWidth = timelineSvg.attr("width");
-                if (selectWidth > 10 && svgWidth / selectWidth <= maxZoom) {
-                  var x = select_block.attr("x");
-                  showLoaderIcon();
-                  adjustZoom(svgWidth / selectWidth, false);
-                  $("#timeline").scrollLeft(x / prevZoom * zoom);
-                  hideLoaderIcon();
-                }
-                select_block.remove();
-                isMouseDown = false;
-                mouseX = 0;
-              }
-          });
+          timelineSvg.on("mousedown", mouseDownHandler);
+          timelineSvg.on("mouseup", mouseUpHandler);
+          timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
       });
 
       d3.tsv(%s,
