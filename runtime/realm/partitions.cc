@@ -922,8 +922,16 @@ namespace Realm {
   }
   
   template <int N, typename T>
+  static inline bool non_overlapping_bounds_1d_comp(const SparsityMapEntry<N,T>& lhs,
+						    const SparsityMapEntry<N,T>& rhs)
+  {
+    return lhs.bounds.lo.x < rhs.bounds.lo.x;
+  }
+
+  template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
+//define DEBUG_PARTITIONING
 #ifdef DEBUG_PARTITIONING
     std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
     for(size_t i = 0; i < this->entries.size(); i++)
@@ -933,6 +941,23 @@ namespace Realm {
 		<< " bitmap=" << this->entries[i].bitmap
 		<< std::endl;
 #endif
+
+    // first step is to organize the data a little better - for N=1, this means sorting
+    //  the entries list
+    if(N == 1) {
+      std::sort(this->entries.begin(), this->entries.end(), non_overlapping_bounds_1d_comp<N,T>);
+    }
+
+#ifdef DEBUG_PARTITIONING
+    std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
+    for(size_t i = 0; i < this->entries.size(); i++)
+      std::cout << "  [" << i
+		<< "]: bounds=" << this->entries[i].bounds
+		<< " sparsity=" << this->entries[i].sparsity
+		<< " bitmap=" << this->entries[i].bitmap
+		<< std::endl;
+#endif
+
     NodeSet sendto_precise, sendto_approx;
     Event trigger_precise = Event::NO_EVENT;
     Event trigger_approx = Event::NO_EVENT;

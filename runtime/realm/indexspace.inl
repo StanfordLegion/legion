@@ -389,6 +389,29 @@ namespace Realm {
       return true;
   }
 
+  // helper function that binary searches a (1-D) sparsity map entry list and returns
+  //  the index of the entry that contains the point, or the first one to appear after
+  //  that point
+  template <int N, typename T>
+  static int bsearch_map_entries(const std::vector<SparsityMapEntry<N,T> >& entries,
+				 const ZPoint<N,T>& p)
+  {
+    assert(N == 1);
+    // search range at any given time is [lo, hi)
+    int lo = 0;
+    int hi = entries.size();
+    while(lo < hi) {
+      int mid = (lo + hi) >> 1;  // rounding down keeps up from picking hi
+      if(p.x < entries[mid].bounds.lo.x) 
+	hi = mid;
+      else if(p.x > entries[mid].bounds.hi.x)
+	lo = mid + 1;
+      else
+	return mid;
+    }
+    return lo;
+  }   
+
   // queries for individual points or rectangles
   template <int N, typename T>
   inline bool ZIndexSpace<N,T>::contains(const ZPoint<N,T>& p) const
@@ -403,16 +426,37 @@ namespace Realm {
 
     SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
-    for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
-	it != entries.end();
-	it++) {
-      if(!it->bounds.contains(p)) continue;
-      if(it->sparsity.exists()) {
+    if(N == 1) {
+      // binary search to find the element we want
+      int idx = bsearch_map_entries<N,T>(entries, p);
+      if(idx >= (int)(entries.size())) return false;
+
+      const SparsityMapEntry<N,T>& e = entries[idx];
+
+      // the search guaranteed we're below the upper bound of the returned entry,
+      //  but we might be below the lower bound
+      if(p.x < e.bounds.lo.x)
+	return false;
+
+      if(e.sparsity.exists()) {
 	assert(0);
-      } else if(it->bitmap != 0) {
+      }
+      if(e.bitmap != 0) {
 	assert(0);
-      } else {
-	return true;
+      }
+      return true;
+    } else {
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	  it != entries.end();
+	  it++) {
+	if(!it->bounds.contains(p)) continue;
+	if(it->sparsity.exists()) {
+	  assert(0);
+	} else if(it->bitmap != 0) {
+	  assert(0);
+	} else {
+	  return true;
+	}
       }
     }
 
@@ -805,17 +849,23 @@ namespace Realm {
     } else {
       s_impl = space.sparsity.impl();
       const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
-      // find the first entry that overlaps our restriction
-      for(cur_entry = 0; cur_entry < entries.size(); cur_entry++) {
+      // find the first entry that overlaps our restriction - speed this up with a
+      //  binary search on the low end of the restriction if we're 1-D
+      if(N == 1)
+	cur_entry = bsearch_map_entries(entries, restriction.lo);
+      else
+	cur_entry = 0;
+
+      while(cur_entry < entries.size()) {
 	const SparsityMapEntry<N,T>& e = entries[cur_entry];
 	rect = restriction.intersection(e.bounds);
-	if(rect.empty())
-	  continue;
-
-	assert(!e.sparsity.exists());
-	assert(e.bitmap == 0);
-	valid = true;
-	return;
+	if(!rect.empty()) {
+	  assert(!e.sparsity.exists());
+	  assert(e.bitmap == 0);
+	  valid = true;
+	  return;
+	}
+	cur_entry++;
       }
       // if we fall through, there was no intersection
       valid = false;
@@ -841,8 +891,12 @@ namespace Realm {
     for(cur_entry++; cur_entry < entries.size(); cur_entry++) {
       const SparsityMapEntry<N,T>& e = entries[cur_entry];
       rect = restriction.intersection(e.bounds);
-      if(rect.empty())
+      if(rect.empty()) {
+	// in 1-D, our entries are sorted, so the first one whose bounds fall
+	//   outside our restriction means we're completely done
+	if(N == 1) break;
 	continue;
+      }
 
       assert(!e.sparsity.exists());
       assert(e.bitmap == 0);
