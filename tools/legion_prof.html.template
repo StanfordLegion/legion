@@ -30,8 +30,8 @@
         -ms-user-select: none; /* IE10+ */
       }
 
-      text.help-box {
-        font-size: 20pt;
+      text.help-box, text.search-box, text.history-box {
+        font-size: 15pt;
         font-family: Consolas, monospace;
         text-shadow: 0 2px 3px rgba(0,0,0,.8);
         fill: #fff;
@@ -71,23 +71,6 @@
         visibleRight: 0
       };
 
-      var browserName = (function(){
-          var ua= navigator.userAgent, tem,
-          M= ua.match(/(opera|chrome|safari|firefox|msie|trident(?=\/))\/?\s*(\d+)/i) || [];
-          if(/trident/i.test(M[1])){
-              tem=  /\brv[ :]+(\d+)/g.exec(ua) || [];
-              return 'IE '+(tem[1] || '');
-          }
-          if(M[1]=== 'Chrome'){
-              tem= ua.match(/\b(OPR|Edge)\/(\d+)/);
-              if(tem!= null) return tem.slice(1).join(' ').replace('OPR', 'Opera');
-          }
-          M= M[2]? [M[1], M[2]]: [navigator.appName, navigator.appVersion, '-?'];
-          if((tem= ua.match(/version\/(\d+)/i))!= null) M.splice(1, 1, tem[1]);
-          return M.join(' ');
-      })();
-      browserName = browserName.split(" ")[0].toLowerCase();
-
       var zoom = 1.0;
       var maxZoom = 1000.0
       var margin_left = 400;
@@ -104,13 +87,35 @@
 
       var helpToggle = false;
       var helpMessage = [
-				"Zoom-in (x-axis): Ctrl + / 4",
-				"Zoom-out (x-axis): Ctrl - / 3",
+				"Zoom-in (x-axis)   : Ctrl + / 4",
+				"Zoom-out (x-axis)  : Ctrl - / 3",
 				"Reset zoom (x-axis): Ctrl 0 / 0",
-				"Zoom-in (y-axis): Ctrl-Alt + / 2",
-				"Zoom-out (y-axis): Ctrl-Alt - / 1",
+				"Zoom-in (y-axis)   : Ctrl-Alt + / 2",
+				"Zoom-out (y-axis)  : Ctrl-Alt - / 1",
 				"Reset zoom (y-axis): Ctrl-Alt 0 / `",
+				"Search             : s / S",
+				"Search History     : h / H",
+				"Previous Search    : p / P",
+				"Next Search        : n / N",
+				"Clear Search       : c / C",
+				"Toggle Search      : t / T",
       ];
+
+      function makeTimelineTransparent() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.select("g#timeline").style("opacity", "0.1");
+        $("#timeline").css("overflow-x", "hidden");
+        timelineSvg.select("g#lines").style("opacity", "0.1");
+        timelineSvg.select("g.locator").style("opacity", "0.1");
+      }
+
+      function makeTimelineOpaque() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.select("g#timeline").style("opacity", "1.0");
+        $("#timeline").css("overflow-x", "scroll");
+        timelineSvg.select("g#lines").style("opacity", "1.0");
+        timelineSvg.select("g.locator").style("opacity", "1.0");
+      }
 
       function drawLoaderIcon() {
         var loaderSvg = d3.select("#loader-icon").select("svg");
@@ -166,25 +171,44 @@
             .text(unescape(escape(d.title)));
         };
       }
+
+      var searchEnabled = false;
+      var searchToggle = false;
+      var searchHistoryToggle = false;
+      var sizeHistory = 10;
+      var currentPos;
+      var nextPos;
+      var searchRegex = null;
+
       function drawTimeline(targetSvg, data, zoom, scale, thickness) {
-          var timeline = targetSvg.selectAll("rect")
-            .data(data, function(d) { return d.id; });
-          var mouseOver = getMouseOver(zoom);
+        var timeline = targetSvg.selectAll("rect")
+          .data(data, function(d) { return d.id; });
+        var mouseOver = getMouseOver(zoom);
 
-          timeline
-            .enter().append("rect")
-            .attr("id", function(d) { return "block-" + d.id; })
-            .attr("x", function(d) { return d.start * scale; })
-            .attr("y", function(d) { return d.level * thickness; })
-            //.style("stroke", "#000000")
-            //.style("stroke-width", "0.5px")
-            .style("fill", function(d) { return d.color; })
-            .attr("width", function(d) { return (d.end - d.start) * scale; })
-            .attr("height", thickness)
-            .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
-          timeline.on("mouseover", mouseOver);
+        timeline.enter().append("rect");
 
-          timeline.exit().remove();
+        timeline
+          .attr("id", function(d) { return "block-" + d.id; })
+          .attr("x", function(d) { return d.start * scale; })
+          .attr("y", function(d) { return d.level * thickness; })
+          .style("fill", function(d) {
+            if (!searchEnabled ||
+                searchRegex[currentPos].exec(d.title) == null)
+              return d.color;
+            else return "#ff0000";
+          })
+          .attr("width", function(d) { return (d.end - d.start) * scale; })
+          .attr("height", thickness)
+          .style("opacity", function(d) {
+            if (!searchEnabled ||
+                searchRegex[currentPos].exec(d.title) != null)
+              return 1.0;
+            else return 0.05;
+          })
+          .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
+        timeline.on("mouseover", mouseOver);
+
+        timeline.exit().remove();
       }
 
       function drawProcessors(data) {
@@ -219,8 +243,8 @@
         var paneWidth = $("#timeline").width();
         var paneHeight = $("#timeline").height();
         var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
-        var helpBoxWidth = Math.min(650, paneWidth - 100);
-        var helpBoxHeight = Math.min(350, paneHeight - 100);
+        var helpBoxWidth = Math.min(450, paneWidth - 100);
+        var helpBoxHeight = Math.min(400, paneHeight - 100);
 
         var timelineWidth = timelineSvg.select("g#timeline").attr("width");
         var timelineHeight = timelineSvg.select("g#timeline").attr("height");
@@ -247,14 +271,109 @@
         helpText.append("tspan")
           .attr({ x: boxStartX + helpBoxWidth / 2, y: boxStartY + 50})
           .attr("text-anchor", "middle")
+          .style("font-size", "20pt")
           .text(helpTitle);
-        var off = 30;
+        var off = 15;
         for (var i = 0; i < helpMessage.length; ++i) {
           helpText.append("tspan")
             .attr("text-anchor", "start")
-            .attr({ x: boxStartX + 30, dy: off + 40})
+            .attr({ x: boxStartX + 30, dy: off + 25})
             .text(helpMessage[i]);
           off = 0;
+        }
+      }
+
+      function drawSearchBox() {
+        var paneWidth = $("#timeline").width();
+        var paneHeight = $("#timeline").height();
+        var searchBoxGroup = timelineSvg.append("g").attr("class", "search-box");
+        var searchBoxWidth = Math.min(450, paneWidth - 100);
+        var searchBoxHeight = Math.min(250, paneHeight - 100);
+
+        var timelineWidth = timelineSvg.select("g#timeline").attr("width");
+        var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+        var scrollLeft = $("#timeline").scrollLeft();
+        var scrollTop = $(window).scrollTop();
+
+        var boxStartX = scrollLeft + (paneWidth - searchBoxWidth) / 2;
+        var boxStartY = scrollTop + (paneHeight - searchBoxHeight) / 2 / (thickness / baseThickness);
+
+        searchBoxGroup.append("rect")
+          .attr({
+              rx: 30,
+              ry: 30,
+              x: boxStartX,
+              y: boxStartY,
+              width: searchBoxWidth,
+              height: searchBoxHeight,
+              style: "fill: #222; opacity: 0.8;"
+          });
+        var searchText = searchBoxGroup.append("text")
+          .attr("class", "search-box")
+          .style("width", searchBoxWidth);
+        searchText.append("tspan")
+          .attr({ x: boxStartX + searchBoxWidth / 2, y: boxStartY + 50})
+          .attr("text-anchor", "middle")
+          .style("font-size", "20pt")
+          .text("Search");
+        searchBoxGroup.append("foreignObject")
+          .attr({ x: boxStartX + 20, y: boxStartY + 150,
+                  width: searchBoxWidth - 40, height: 50})
+          .attr("text-anchor", "middle")
+          .html("<input autofocus type='text' class='search-box' style='height: 50px; width: 440px; font-size: 20pt; font-family: Consolas, monospace;'></input>");
+      }
+
+      function drawSearchHistoryBox() {
+        var paneWidth = $("#timeline").width();
+        var paneHeight = $("#timeline").height();
+        var historyBoxGroup = timelineSvg.append("g").attr("class", "history-box");
+        var historyBoxWidth = Math.min(450, paneWidth - 100);
+        var historyBoxHeight = Math.min(350, paneHeight - 100);
+
+        var timelineWidth = timelineSvg.select("g#timeline").attr("width");
+        var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+        var scrollLeft = $("#timeline").scrollLeft();
+        var scrollTop = $(window).scrollTop();
+
+        var boxStartX = scrollLeft + (paneWidth - historyBoxWidth) / 2;
+        var boxStartY = scrollTop + (paneHeight - historyBoxHeight) / 2 / (thickness / baseThickness);
+
+        historyBoxGroup.append("rect")
+          .attr({
+              rx: 30,
+              ry: 30,
+              x: boxStartX,
+              y: boxStartY,
+              width: historyBoxWidth,
+              height: historyBoxHeight,
+              style: "fill: #222; opacity: 0.8;"
+          });
+        var historyText = historyBoxGroup.append("text")
+          .attr("class", "history-box")
+          .style("width", historyBoxWidth);
+        var historyTitle = "Search History";
+        historyText.append("tspan")
+          .attr({ x: boxStartX + historyBoxWidth / 2, y: boxStartY + 50})
+          .attr("text-anchor", "middle")
+          .style("font-size", "20pt")
+          .text(historyTitle);
+        if (searchRegex != null) {
+          var off = 15;
+          var id = 1;
+          for (var i = 0; i < sizeHistory; ++i) {
+            var pos = (nextPos + i) %% sizeHistory;
+            var regex = searchRegex[pos];
+            if (regex != null) {
+              if (pos == currentPos) prefix = ">>> "; 
+              else prefix = id + " : ";
+              historyText.append("tspan")
+                .attr("text-anchor", "start")
+                .attr({ x: boxStartX + 30, dy: off + 25})
+                .text(prefix + regex.source);
+              off = 0;
+              id++;
+            }
+          }
         }
       }
 
@@ -317,24 +436,41 @@
         svg.selectAll("g.locator").remove();
       }
 
-      function init() {
-        if (document.addEventListener)
-          document.addEventListener("keydown", keydown, false);
-        else if (document.attachEvent)
-          document.attachEvent("onkeydown", keydown);
-      }
-
       function suppressdefault(e) {
         if (e.preventDefault) e.preventDefault();
         if (e.stopPropagation) e.stopPropagation();
       }
 
+      function setKeyHandler(handler) {
+        $(document).off("keydown");
+        $(document).on("keydown", handler);
+      }
+
+      function makeModalKeyHandler(keys, callback) {
+        return function(e) {
+          if (!e) e = event;
+          var code = e.keyCode || e.charCode;
+          if (!(e.ctrlKey || e.metaKey || e.altKey)) {
+            for (var i = 0; i < keys.length; ++i) {
+              if (code == keys[i]) {
+                callback(code);
+                return false;
+              }
+            }
+          }
+          return true;
+        }
+      }
+
       var Command = { none : 0, help : 1,
                       zox : 2, zix : 3, zrx : 4,
-                      zoy : 5, ziy : 6, zry : 7
+                      zoy : 5, ziy : 6, zry : 7,
+                      search : 8, clear_search : 9,
+                      toggle_search : 10, search_history : 11,
+                      previous_search : 12, next_search : 13
                     };
 
-      function keydown(e) {
+      function defaultKeydown(e) {
         if (!e) e = event;
 
         var code = e.keyCode || e.charCode;
@@ -349,6 +485,12 @@
           else if (code == 52) commandType = Command.zix;
           else if (code == 48) commandType = Command.zrx;
           else if (code == 192) commandType = Command.zry;
+          else if (code == 83) commandType = Command.search;
+          else if (code == 67) commandType = Command.clear_search;
+          else if (code == 84) commandType = Command.toggle_search;
+          else if (code == 72) commandType = Command.search_history;
+          else if (code == 80) commandType = Command.previous_search;
+          else if (code == 78) commandType = Command.next_search;
         }
         else {
           if (code == 61 || code == 187) {
@@ -369,25 +511,64 @@
 
         suppressdefault(e);
         if (commandType == Command.help) {
-          helpToggle = !helpToggle;
-          var timelineSvg = d3.select("#timeline").select("svg");
-          if (helpToggle) {
-            timelineSvg.select("g#timeline").style("opacity", "0.1");
-            $("#timeline").css("overflow-x", "hidden");
-            timelineSvg.select("g#lines").style("opacity", "0.1");
-            timelineSvg.select("g.locator").style("opacity", "0.1");
-            drawHelpBox();
-          }
-          else {
+          helpToggle = true;
+          makeTimelineTransparent();
+          drawHelpBox();
+          setKeyHandler(makeModalKeyHandler([191, 27], function(code) {
+            helpToggle = false;
+            var timelineSvg = d3.select("#timeline").select("svg");
             timelineSvg.select("g.help-box").remove();
-            timelineSvg.select("g#timeline").style("opacity", "1.0");
-            $("#timeline").css("overflow-x", "scroll");
-            timelineSvg.select("g#lines").style("opacity", "1.0");
-            timelineSvg.select("g.locator").style("opacity", "1.0");
-          }
+            makeTimelineOpaque();
+            setKeyHandler(defaultKeydown);
+          }));
+          return false;
         }
-
-        if (helpToggle) return false;
+        else if (commandType == Command.search) {
+          searchToggle = true;
+          makeTimelineTransparent();
+          drawSearchBox();
+          setKeyHandler(makeModalKeyHandler([13, 27], function(code) {
+            if (code == 13) {
+              var re = $("input.search-box").val();
+              console.log("Search Expression: " + re);
+              if (re.trim() != "") {
+                if (searchRegex == null) {
+                  searchRegex = new Array(sizeHistory);
+                  currentPos = -1;
+                  nextPos = 0;
+                }
+                currentPos = nextPos;
+                nextPos = (nextPos + 1) %% sizeHistory;
+                searchRegex[currentPos] = new RegExp(re);
+                searchEnabled = true;
+              }
+            }
+            searchToggle = false;
+            var timelineSvg = d3.select("#timeline").select("svg");
+            timelineSvg.select("g.search-box").remove();
+            if (searchEnabled) {
+              var timelineGroup = timelineSvg.select("g#timeline");
+              var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+              drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+            }
+            makeTimelineOpaque();
+            setKeyHandler(defaultKeydown);
+          }));
+          return false;
+        }
+        else if (commandType == Command.search_history) {
+          searchHistoryToggle = true;
+          makeTimelineTransparent();
+          drawSearchHistoryBox();
+          setKeyHandler(makeModalKeyHandler([72, 27], function(code) {
+            searchHistoryToggle = false;
+            var timelineSvg = d3.select("#timeline").select("svg");
+            timelineSvg.select("g.history-box").remove();
+            makeTimelineOpaque();
+            setKeyHandler(defaultKeydown);
+          }));
+          return false;
+        }
 
         showLoaderIcon();
         if (commandType == Command.zix) {
@@ -420,8 +601,43 @@
           thickness = height / max_level;
           adjustThickness(thickness);
         }
+        else if (commandType == Command.clear_search) {
+          searchEnabled = false;
+          searchRegex = null;
+          var timelineGroup = timelineSvg.select("g#timeline");
+          var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+          drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+        }
+        else if (commandType == Command.toggle_search) {
+          if (searchRegex != null) {
+            searchEnabled = !searchEnabled;
+            var timelineGroup = timelineSvg.select("g#timeline");
+            var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+            drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+          }
+        }
+        else if (commandType == Command.previous_search ||
+                 commandType == Command.next_search) {
+          if (searchEnabled) {
+            var pos = commandType == Command.previous_search ?
+                      (currentPos - 1 + sizeHistory) %% sizeHistory :
+                      (currentPos + 1) %% sizeHistory;
+            var sentinel = commandType == Command.previous_search ?
+                      (nextPos - 1 + sizeHistory) %% sizeHistory : nextPos;
+            if (pos != sentinel && searchRegex[pos] != null) {
+              currentPos = pos;
+              var timelineGroup = timelineSvg.select("g#timeline");
+              var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+              drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+            }
+          }
+        }
         hideLoaderIcon();
         return false;
+      }
+
+      function init() {
+        setKeyHandler(defaultKeydown);
       }
     </script>
   </head>
@@ -486,7 +702,7 @@
           var isMouseDown = false;
           var mouseX = 0;
           timelineSvg.on("mousedown", function() {
-              if (!helpToggle) {
+              if (!(helpToggle || searchToggle || searchHistoryToggle)) {
                 timelineSvg.select("g.locator").remove();
                 isMouseDown = true;
                 var p = d3.mouse(this);
@@ -522,7 +738,8 @@
                 var currentTime = Math.floor(x / zoom / scale / 1000);
                 timelineSvg.select("g.locator").remove();
                 var locator = timelineSvg.append("g").attr("class", "locator");
-                if (helpToggle) locator.style("opacity", "0.1");
+                if (helpToggle || searchToggle || searchHistoryToggle)
+                  locator.style("opacity", "0.1");
                 locator.append("line")
                   .attr({
                     x1: p[0],
