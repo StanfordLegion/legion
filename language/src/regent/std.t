@@ -2395,7 +2395,7 @@ function std.privilege(privilege, regions_fields)
     end
     assert(terralib.issymbol(region) and terralib.islist(fields))
     for _, field in ipairs(fields) do
-      privileges:insert({
+      privileges:insert(data.map_from_table {
         node_type = "privilege",
         region = region,
         field_path = field,
