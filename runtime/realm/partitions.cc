@@ -386,46 +386,53 @@ namespace Realm {
 	}
       }
 
-      std::cout << "{{";
-      for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
-      std::cout << " }} <- " << p << "\n";
-      int merge_lo = -1;
-      int merge_hi = -1;
-      for(size_t i = 0; i < rects.size(); i++) {
-	if((rects[i].lo.x <= p.x) && (p.x <= rects[i].hi.x))
-	  return;
-	// keep track of adjacent rectangles, if any
-	if(rects[i].lo.x == p.x + 1)
-	  merge_hi = i;
-	if(rects[i].hi.x == p.x - 1)
-	  merge_lo = i;
-      }
+      // maintain sorted order, even at the cost of copying stuff (for lists
+      //  that will get big and aren't sorted well (e.g. images), the HybridRectangleList
+      //  is a better choice)
 
-      // four cases, based on merging
-      if(merge_lo == -1) {
-	if(merge_hi == -1) {
-	  // no merging - add new rectangle
-	  rects.push_back(ZRect<N,T>(p,p));
+      // std::cout << "{{";
+      // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+      // std::cout << " }} <- " << p << "\n";
+      // binary search to find the rectangles above and below our point
+      int lo = 0;
+      int hi = rects.size();
+      while(lo < hi) {
+	int mid = (lo + hi) >> 1;
+	if(p.x < rects[mid].lo.x)
+	  hi = mid;
+	else if(p.x > rects[mid].hi.x)
+	  lo = mid + 1;
+	else {
+	  // we landed right on an existing rectangle - we're done
+	  // std::cout << "{{";
+	  // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+	  // std::cout << " }} INCLUDED\n";
+	  return;
+	}
+      }
+      // when we get here, 'lo' is the first rectangle above us, so check for a merge below first
+      if((lo > 0) && (rects[lo - 1].hi.x == (p.x - 1))) {
+	// merging low
+	if((lo < rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	  // merging high too
+	  rects[lo - 1].hi.x = rects[lo].hi.x;
+	  rects.erase(rects.begin() + lo);
 	} else {
-	  // merge to rectangle covering range above
-	  rects[merge_hi].lo = p;
+	  // just low
+	  rects[lo - 1].hi.x = p.x;
 	}
       } else {
-	if(merge_hi == -1) {
-	  // merge to rectangle below
-	  rects[merge_lo].hi = p;
+	if((lo < rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	  // merging just high
+	  rects[lo].lo.x = p.x;
 	} else {
-	  // merge this point and the high rectangle into the low, delete high
-	  rects[merge_lo].hi = rects[merge_hi].hi;
-	  int last = rects.size() - 1;
-	  if(merge_hi < last)
-	    std::swap(rects[merge_hi], rects[last]);
-	  rects.resize(last);
+	  // no merge - must insert
+	  rects.insert(rects.begin() + lo, ZRect<N,T>(p, p));
 	}
       }
-      std::cout << "{{";
-      for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
-      std::cout << " }}\n";
+      // std::cout << "{{";
+      // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+      // std::cout << " }}\n";
     } else {
       // just treat it as a small rectangle
       add_rect(ZRect<N,T>(p,p));
@@ -573,16 +580,19 @@ namespace Realm {
     assert(!as_map.empty());
     typename std::map<T, T>::iterator it = as_map.lower_bound(p.x);
     if(it == as_map.end()) {
+      //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
       // bigger than everything - see if we can merge with the last guy
       T& last = as_map.rbegin()->second;
       if(last == (p.x - 1))
 	last = p.x;
-      else
+      else if(last < (p.x - 1))
 	as_map[p.x] = p.x;
     } 
     else if(it->first == p.x) {
+      //std::cout << "add " << p << " OVERLAP1 " << it->first << "," << it->second << "\n";
       // we're the beginning of an existing range - nothing to do
     } else if(it == as_map.begin()) {
+      //std::cout << "add " << p << " FIRST " << it->first << "," << it->second << "\n";
       // we're before everything - see if we can merge with the first guy
       if(it->first == (p.x + 1)) {
 	T last = it->second;
@@ -593,6 +603,7 @@ namespace Realm {
       }
     } else {
       typename std::map<T, T>::iterator it2 = it; --it2;
+      //std::cout << "add " << p << " BETWEEN " << it->first << "," << it->second << " / " << it2->first << "," << it2->second << "\n";
       if(it2->second >= p.x) {
 	// range below us includes us - nothing to do
       } else {
@@ -647,6 +658,8 @@ namespace Realm {
       r.hi.x = it->second;
       this->rects.push_back(r);
     }
+    for(size_t i = 1; i < this->rects.size(); i++)
+      assert(this->rects[i-1].hi.x < (this->rects[i].lo.x - 1));
     as_map.clear();
     is_vector = true;
   }
@@ -1565,7 +1578,7 @@ namespace Realm {
 	    ZPoint<N,T> ptr = a_data.read(pir.p);
 
 	    if(parent_space.contains(ptr)) {
-	      std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
+	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
 	      if(!bmpp) bmpp = &bitmasks[i];
 	      if(!*bmpp) *bmpp = new BM;
 	      (*bmpp)->add_point(ptr);
