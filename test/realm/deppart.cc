@@ -143,6 +143,8 @@ public:
       INT_ARG("-bx",   blocks_x);
       INT_ARG("-by",   blocks_y);
       INT_ARG("-bz",   blocks_z);
+      if(!strcmp(argv[i], "-g")) { int v = atoi(argv[++i]); global_x = global_y = global_z = v; continue; }
+      if(!strcmp(argv[i], "-b")) { int v = atoi(argv[++i]); blocks_x = blocks_y = blocks_z = v; continue; }
     }
 #undef INT_ARG
 
@@ -1133,6 +1135,8 @@ public:
       INT_ARG("-nzy",    nzy)
       INT_ARG("-numpcx", numpcx)
       INT_ARG("-numpcy", numpcy)
+      if(!strcmp(argv[i], "-nz")) { int v = atoi(argv[++i]); nzx = nzy = v; continue; }
+      if(!strcmp(argv[i], "-numpc")) { int v = atoi(argv[++i]); numpcx = numpcy = v; continue; }
     }
 #undef INT_ARG
 
