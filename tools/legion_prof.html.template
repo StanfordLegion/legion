@@ -97,7 +97,6 @@
       var mouseX = 0;
       var rangeZoom = true;
 
-      var helpToggle = false;
       var helpMessage = [
 				"Zoom-in (x-axis)   : Ctrl + / 4",
 				"Zoom-out (x-axis)  : Ctrl - / 3",
@@ -229,6 +228,7 @@
         mouseX = p[0];
         timelineSvg.on("mousemove", null);
         timelineSvg.on("mousemove", mouseMoveHandlerWhenDown);
+        $(document).off("keydown");
       }
 
       function mouseUpHandler() {
@@ -250,6 +250,21 @@
         timelineSvg.selectAll("text.select-block").remove();
         mouseX = 0;
         timelineSvg.on("mousemove", null);
+        timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
+        $(document).on("keydown", defaultKeydown);
+      }
+
+      function turnOffMouseHandlers() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.on("mousedown", null);
+        timelineSvg.on("mouseup", null);
+        timelineSvg.on("mousemove", null);
+      }
+
+      function turnOnMouseHandlers() {
+        var timelineSvg = d3.select("#timeline").select("svg");
+        timelineSvg.on("mousedown", mouseDownHandler);
+        timelineSvg.on("mouseup", mouseUpHandler);
         timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
       }
 
@@ -309,8 +324,6 @@
       }
 
       var searchEnabled = false;
-      var searchToggle = false;
-      var searchHistoryToggle = false;
       var sizeHistory = 10;
       var currentPos;
       var nextPos;
@@ -656,20 +669,20 @@
 
         suppressdefault(e);
         if (commandType == Command.help) {
-          helpToggle = true;
+          turnOffMouseHandlers();
           makeTimelineTransparent();
           drawHelpBox();
           setKeyHandler(makeModalKeyHandler([191, 27], function(code) {
-            helpToggle = false;
             var timelineSvg = d3.select("#timeline").select("svg");
             timelineSvg.select("g.help-box").remove();
             makeTimelineOpaque();
             setKeyHandler(defaultKeydown);
+            turnOnMouseHandlers();
           }));
           return false;
         }
         else if (commandType == Command.search) {
-          searchToggle = true;
+          turnOffMouseHandlers();
           makeTimelineTransparent();
           drawSearchBox();
           setKeyHandler(makeModalKeyHandler([13, 27], function(code) {
@@ -688,7 +701,6 @@
                 searchEnabled = true;
               }
             }
-            searchToggle = false;
             var timelineSvg = d3.select("#timeline").select("svg");
             timelineSvg.select("g.search-box").remove();
             if (searchEnabled) {
@@ -698,19 +710,20 @@
             }
             makeTimelineOpaque();
             setKeyHandler(defaultKeydown);
+            turnOnMouseHandlers();
           }));
           return false;
         }
         else if (commandType == Command.search_history) {
-          searchHistoryToggle = true;
+          turnOffMouseHandlers();
           makeTimelineTransparent();
           drawSearchHistoryBox();
           setKeyHandler(makeModalKeyHandler([72, 27], function(code) {
-            searchHistoryToggle = false;
             var timelineSvg = d3.select("#timeline").select("svg");
             timelineSvg.select("g.history-box").remove();
             makeTimelineOpaque();
             setKeyHandler(defaultKeydown);
+            turnOnMouseHandlers();
           }));
           return false;
         }
@@ -854,9 +867,7 @@
                 hideLoaderIcon();
               }, 100);
           });
-          timelineSvg.on("mousedown", mouseDownHandler);
-          timelineSvg.on("mouseup", mouseUpHandler);
-          timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
+          turnOnMouseHandlers();
       });
 
       d3.tsv(%s,
