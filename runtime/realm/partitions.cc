@@ -386,6 +386,9 @@ namespace Realm {
 	}
       }
 
+      std::cout << "{{";
+      for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+      std::cout << " }} <- " << p << "\n";
       int merge_lo = -1;
       int merge_hi = -1;
       for(size_t i = 0; i < rects.size(); i++) {
@@ -420,6 +423,9 @@ namespace Realm {
 	  rects.resize(last);
 	}
       }
+      std::cout << "{{";
+      for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+      std::cout << " }}\n";
     } else {
       // just treat it as a small rectangle
       add_rect(ZRect<N,T>(p,p));
@@ -541,6 +547,108 @@ namespace Realm {
 
       last_merged = merge_with;
     }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class HybridRectangleList<N,T>
+
+  template <typename T>
+  HybridRectangleList<1,T>::HybridRectangleList(void)
+    : is_vector(true)
+  {}
+
+  template <typename T>
+  void HybridRectangleList<1,T>::add_point(const ZPoint<1,T>& p)
+  {
+    if(is_vector) {
+      DenseRectangleList<1,T>::add_point(p);
+      if(this->rects.size() > HIGH_WATER_MARK)
+	convert_to_map();
+      return;
+    }
+
+    // otherwise add to the map
+    assert(!as_map.empty());
+    typename std::map<T, T>::iterator it = as_map.lower_bound(p.x);
+    if(it == as_map.end()) {
+      // bigger than everything - see if we can merge with the last guy
+      T& last = as_map.rbegin()->second;
+      if(last == (p.x - 1))
+	last = p.x;
+      else
+	as_map[p.x] = p.x;
+    } 
+    else if(it->first == p.x) {
+      // we're the beginning of an existing range - nothing to do
+    } else if(it == as_map.begin()) {
+      // we're before everything - see if we can merge with the first guy
+      if(it->first == (p.x + 1)) {
+	T last = it->second;
+	as_map.erase(it);
+	as_map[p.x] = last;
+      } else {
+	as_map[p.x] = p.x;
+      }
+    } else {
+      typename std::map<T, T>::iterator it2 = it; --it2;
+      if(it2->second >= p.x) {
+	// range below us includes us - nothing to do
+      } else {
+	bool merge_above = it->first == (p.x + 1);
+	bool merge_below = it2->second == (p.x - 1);
+
+	if(merge_below) {
+	  if(merge_above) {
+	    it2->second = it->second;
+	    as_map.erase(it);
+	  } else
+	    it2->second = p.x;
+	} else {
+	  T last;
+	  if(merge_above) {
+	    last = it->second;
+	    as_map.erase(it);
+	  } else
+	    last = p.x;
+	  as_map[p.x] = last;
+	}
+      }
+    }
+    // mergers can cause us to drop below LWM
+    if(as_map.size() < LOW_WATER_MARK)
+      convert_to_vector();
+  }
+
+  template <typename T>
+  void HybridRectangleList<1,T>::convert_to_map(void)
+  {
+    if(!is_vector) return;
+    assert(as_map.empty());
+    for(typename std::vector<ZRect<1,T> >::iterator it = this->rects.begin();
+	it != this->rects.end();
+	it++)
+      as_map[it->lo.x] = it->hi.x;
+    this->rects.clear();
+    is_vector = false;
+  }
+
+  template <typename T>
+  void HybridRectangleList<1,T>::convert_to_vector(void)
+  {
+    if(is_vector) return;
+    assert(this->rects.empty());
+    for(typename std::map<T, T>::iterator it = as_map.begin();
+	it != as_map.end();
+	it++) {
+      ZRect<1,T> r;
+      r.lo.x = it->first;
+      r.hi.x = it->second;
+      this->rects.push_back(r);
+    }
+    as_map.clear();
+    is_vector = true;
   }
 
 
@@ -760,49 +868,120 @@ namespace Realm {
   void SparsityMapImpl<N,T>::contribute_raw_rects(const ZRect<N,T>* rects,
 						  size_t count, bool last)
   {
-    {
+    if(count > 0) {
       AutoHSLLock al(mutex);
-      
-      // each new rectangle has to be tested against existing ones for containment, overlap,
-      //  or mergeability
-      // can't use iterators on entry list, since push_back invalidates end()
-      size_t orig_count = this->entries.size();
 
-      for(size_t i = 0; i < count; i++) {
-	const ZRect<N,T>& r = rects[i];
+      if(N == 1) {
+	// demand that our input data is sorted
+	for(size_t i = 1; i < count; i++)
+	  assert(rects[i-1].hi.x < (rects[i].lo.x - 1));
 
-	// index is declared outside for loop so we can detect early exits
-	size_t idx;
-	for(idx = 0; idx < orig_count; idx++) {
-	  SparsityMapEntry<N,T>& e = this->entries[idx];
-	  if(e.bounds.contains(r)) {
-	    // existing entry contains us - still three cases though
-	    if(e.sparsity.exists()) {
+	// do a merge of the new data with the old
+	std::vector<SparsityMapEntry<N,T> > old_data;
+	old_data.swap(this->entries);
+	size_t i = 0;
+	size_t n = 0;
+	typename std::vector<SparsityMapEntry<N,T> >::const_iterator old_it = old_data.begin();
+	while((i < count) && (old_it != old_data.end())) {
+	  if(rects[i].hi.x < (old_it->bounds.lo.x - 1)) {
+	    this->entries.resize(n + 1);
+	    this->entries[n].bounds = rects[i];
+	    this->entries[n].sparsity.id = 0; // no sparsity map
+	    this->entries[n].bitmap = 0;
+	    n++;
+	    i++;
+	    continue;
+	  }
+
+	  if(old_it->bounds.hi.x < (rects[i].lo.x - 1)) {
+	    this->entries.push_back(*old_it);
+	    n++;
+	    old_it++;
+	    continue;
+	  }
+
+	  ZRect<N,T> u = rects[i].union_bbox(old_it->bounds);
+	  // step rects, but not old_it - want sanity checks below to be done
+	  i++;
+	  while(true) {
+	    if((i < count) && (rects[i].lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, rects[i].hi.x);
+	      i++;
+	      continue;
+	    }
+	    if((old_it != old_data.end()) && (old_it->bounds.lo.x <= (u.hi.x + 1))) {
+	      assert(!old_it->sparsity.exists());
+	      assert(old_it->bitmap == 0);
+	      u.hi.x = std::max(u.hi.x, old_it->bounds.hi.x);
+	      old_it++;
+	      continue;
+	    }
+	    // if neither test passed, the chain is broken
+	    break;
+	  }
+	  this->entries.resize(n + 1);
+	  this->entries[n].bounds = u;
+	  this->entries[n].sparsity.id = 0; // no sparsity map
+	  this->entries[n].bitmap = 0;
+	  n++;
+	}
+
+	// leftovers...
+	while(i < count) {
+	  this->entries.resize(n + 1);
+	  this->entries[n].bounds = rects[i];
+	  this->entries[n].sparsity.id = 0; // no sparsity map
+	  this->entries[n].bitmap = 0;
+	  n++;
+	  i++;
+	}
+
+	while(old_it != old_data.end()) {
+	  this->entries.push_back(*old_it);
+	  old_it++;
+	}
+      } else {
+	// each new rectangle has to be tested against existing ones for containment, overlap,
+	//  or mergeability
+	// can't use iterators on entry list, since push_back invalidates end()
+	size_t orig_count = this->entries.size();
+
+	for(size_t i = 0; i < count; i++) {
+	  const ZRect<N,T>& r = rects[i];
+
+	  // index is declared outside for loop so we can detect early exits
+	  size_t idx;
+	  for(idx = 0; idx < orig_count; idx++) {
+	    SparsityMapEntry<N,T>& e = this->entries[idx];
+	    if(e.bounds.contains(r)) {
+	      // existing entry contains us - still three cases though
+	      if(e.sparsity.exists()) {
+		assert(0);
+	      } else if(e.bitmap != 0) {
+		assert(0);
+	      } else {
+		// dense entry containing new one - nothing to do
+		break;
+	      }
+	    }
+	    if(e.bounds.overlaps(r)) {
 	      assert(0);
-	    } else if(e.bitmap != 0) {
-	      assert(0);
-	    } else {
-	      // dense entry containing new one - nothing to do
+	      break;
+	    }
+	    // only worth merging against a dense rectangle
+	    if(can_merge(e.bounds, r) && !e.sparsity.exists() && (e.bitmap == 0)) {
+	      e.bounds = e.bounds.union_bbox(r);
 	      break;
 	    }
 	  }
-	  if(e.bounds.overlaps(r)) {
-	    assert(0);
-	    break;
+	  if(idx == orig_count) {
+	    // no matches against existing stuff, so add a new entry
+	    idx = this->entries.size();
+	    this->entries.resize(idx + 1);
+	    this->entries[idx].bounds = r;
+	    this->entries[idx].sparsity.id = 0; //SparsityMap<N,T>::NO_SPACE;
+	    this->entries[idx].bitmap = 0;
 	  }
-	  // only worth merging against a dense rectangle
-	  if(can_merge(e.bounds, r) && !e.sparsity.exists() && (e.bitmap == 0)) {
-	    e.bounds = e.bounds.union_bbox(r);
-	    break;
-	  }
-	}
-	if(idx == orig_count) {
-	  // no matches against existing stuff, so add a new entry
-	  idx = this->entries.size();
-	  this->entries.resize(idx + 1);
-	  this->entries[idx].bounds = r;
-	  this->entries[idx].sparsity.id = 0; //SparsityMap<N,T>::NO_SPACE;
-	  this->entries[idx].bitmap = 0;
 	}
       }
     }
@@ -982,6 +1161,8 @@ namespace Realm {
     //  the entries list
     if(N == 1) {
       std::sort(this->entries.begin(), this->entries.end(), non_overlapping_bounds_1d_comp<N,T>);
+      for(size_t i = 1; i < this->entries.size(); i++)
+	assert(this->entries[i-1].bounds.hi.x < (this->entries[i].bounds.lo.x - 1));
     }
 
 #ifdef DEBUG_PARTITIONING
@@ -1384,7 +1565,7 @@ namespace Realm {
 	    ZPoint<N,T> ptr = a_data.read(pir.p);
 
 	    if(parent_space.contains(ptr)) {
-	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
+	      std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
 	      if(!bmpp) bmpp = &bitmasks[i];
 	      if(!*bmpp) *bmpp = new BM;
 	      (*bmpp)->add_point(ptr);
@@ -1399,7 +1580,8 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::execute(void)
   {
     TimeStamp ts("ImageMicroOp::execute", true, &log_uop_timing);
-    std::map<int, DenseRectangleList<N,T> *> rect_map;
+    //std::map<int, DenseRectangleList<N,T> *> rect_map;
+    std::map<int, HybridRectangleList<N,T> *> rect_map;
 
     populate_bitmasks(rect_map);
 
@@ -1415,8 +1597,9 @@ namespace Realm {
     //  points found for it)
     for(size_t i = 0; i < sparsity_outputs.size(); i++) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
-      typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
+      typename std::map<int, HybridRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
       if(it2 != rect_map.end()) {
+	it2->second->convert_to_vector();
 	impl->contribute_dense_rect_list(*(it2->second));
 	delete it2->second;
       } else
@@ -1680,9 +1863,250 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  class NWayMerge {
+  public:
+    NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces);
+    ~NWayMerge(void);
+
+    const ZRect<N,T>& operator[](int idx) const;
+    size_t size(void) const;
+
+    // steps an iterator - does not immediately update its position
+    bool step(int idx);
+
+    // called after you call step at least once on a given iterator
+    void update(int idx);
+
+    void print(void) const;
+
+  protected:
+    int n;
+    std::vector<ZIndexSpaceIterator<N,T> > its;
+    std::vector<int> order;
+  };
+
+  template <int N, typename T>
+  NWayMerge<N,T>::NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces)
+    : n(0)
+  {
+    its.resize(spaces.size());
+    order.resize(spaces.size());
+    for(size_t i = 0; i < spaces.size(); i++) {
+      its[i].reset(spaces[i]);
+      if(its[i].valid) {
+	order[n] = i;
+	T lo = its[i].rect.lo.x;
+	for(int j = n; j > 0; j--)
+	  if(its[order[j-1]].rect.lo.x > lo)
+	    std::swap(order[j-1], order[j]);
+	  else
+	    break;
+	n++;
+      }
+    }
+  }
+
+  template <int N, typename T>
+  NWayMerge<N,T>::~NWayMerge(void)
+  {}
+
+  template <int N, typename T>
+  const ZRect<N,T>& NWayMerge<N,T>::operator[](int idx) const
+  {
+    assert(idx < n);
+    return its[order[idx]].rect;
+  }
+
+  template <int N, typename T>
+  size_t NWayMerge<N,T>::size(void) const
+  {
+    return n;
+  }
+
+  // steps an iterator - does not immediately update its position
+  template <int N, typename T>
+  bool NWayMerge<N,T>::step(int idx)
+  {
+    assert(idx < n);
+    return its[order[idx]].step();
+  }
+
+  // called after you call step at least once on a given iterator
+  template <int N, typename T>
+  void NWayMerge<N,T>::update(int idx)
+  {
+    if(its[order[idx]].valid) {
+      // can only move upwards
+      T lo = its[order[idx]].rect.lo;
+      for(int j = idx + 1; j < n; j++)
+	if(its[order[j]].rect.lo < lo)
+	  std::swap(order[j], order[j-1]);
+	else
+	  break;
+    } else {
+      // just delete it
+      order.erase(order.begin() + idx);
+      n--;
+    }
+  }
+
+  template <int N, typename T>
+  void NWayMerge<N,T>::print(void) const
+  {
+    std::cout << "[[";
+    for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+    std::cout << "]]\n";
+  }
+
+  template <int N, typename T>
   template <typename BM>
   void UnionMicroOp<N,T>::populate_bitmask(BM& bitmask)
   {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-union of the two streams
+    if(N == 1) {
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	while(it_lhs.valid && it_rhs.valid) {
+	  // if either side comes completely before the other, emit it and continue
+	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_rhs.rect);
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // new rectangle will be at least the union of these two
+	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  it_lhs.step();
+	  it_rhs.step();
+	  // try to consume even more
+	  while(true) {
+	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
+	      it_lhs.step();
+	      continue;
+	    }
+	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
+	      it_rhs.step();
+	      continue;
+	    }
+	    // if both fail, we're done
+	    break;
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// leftover rects from one side or the other just get added
+	while(it_lhs.valid) {
+	  bitmask.add_rect(it_lhs.rect);
+	  it_lhs.step();
+	}
+	while(it_rhs.valid) {
+	  bitmask.add_rect(it_rhs.rect);
+	  it_rhs.step();
+	}
+      } else {
+	// N-way merge
+	NWayMerge<N,T> nwm(inputs);
+	//nwm.print();
+	while(nwm.size() > 1) {
+	  //nwm.print();
+
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  T lo1 = nwm[1].lo.x;
+	  if(nwm[0].hi.x < (lo1 - 1)) {
+	    while(nwm[0].hi.x < (lo1 - 1)) {
+	      bitmask.add_rect(nwm[0]);
+	      if(!nwm.step(0)) break;
+	    }
+	    nwm.update(0);
+	    continue;
+	  }
+
+	  // at least a little overlap, so start accumulating a value
+	  ZRect<N,T> u = nwm[0];
+	  nwm.step(0); nwm.update(0);
+	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
+	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
+	    nwm.step(0);
+	    nwm.update(0);
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// any stragglers?
+	if(nwm.size() > 0)
+	  do {
+	    bitmask.add_rect(nwm[0]);
+	  } while(nwm.step(0));
+#if 0
+	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<int> order(inputs.size());
+	size_t n = 0;
+	for(size_t i = 0; i < inputs.size(); i++) {
+	  its[i].reset(inputs[i]);
+	  if(its[i].valid) {
+	    order[n] = i;
+	    T lo = its[i].rect.lo.x;
+	    for(size_t j = n; j > 0; j--)
+	      if(its[order[j-1]].rect.lo.x > lo)
+		std::swap(order[j-1], order[j]);
+	      else
+		break;
+	    n++;
+	  }
+	}
+	std::cout << "[[";
+	for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	std::cout << "]]\n";
+	while(n > 1) {
+	  std::cout << "[[";
+	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	  std::cout << "]]\n";
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	      bitmask.add_rect(its[order[0]].rect);
+	      if(!its[order[0]].step()) break;
+	    }
+	    if(its[order[0]].valid) {
+	      for(size_t j = 0; j < n - 1; j++)
+		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		  std::swap(order[j], order[j+1]);
+		else
+		  break;
+	    } else {
+	      order.erase(order.begin());
+	      n--;
+	    }
+	    continue;
+	  }
+
+	  // at least some overlap, switch to consuming and appending to next guy
+	  ZRect<N,T> 
+	  break;
+	}
+
+	// whichever one is left can just emit all its remaining rectangles
+	while(its[order[0]].valid) {
+	  bitmask.add_rect(its[order[0]].rect);
+	  its[order[0]].step();
+	}
+#endif
+      }
+      return;
+    }
+
     // iterate over all the inputs, adding dense (sub)rectangles first
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();

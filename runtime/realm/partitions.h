@@ -70,6 +70,41 @@ namespace Realm {
     std::vector<ZRect<N,T> > rects;
   };
 
+  template <int N, typename T>
+  class HybridRectangleList {
+  public:
+    static const size_t HIGH_WATER_MARK = 64;
+    static const size_t LOW_WATER_MARK = 16;
+
+    HybridRectangleList(void);
+
+    void add_point(const ZPoint<N,T>& p);
+
+    void add_rect(const ZRect<N,T>& r);
+
+    std::vector<ZRect<N,T> > as_vector;
+    std::multimap<T, ZRect<N,T> > as_mmap;
+  };
+
+  template <typename T>
+  class HybridRectangleList<1,T> : public DenseRectangleList<1,T> {
+  public:
+    static const size_t HIGH_WATER_MARK = 64;
+    static const size_t LOW_WATER_MARK = 16;
+
+    HybridRectangleList(void);
+
+    void add_point(const ZPoint<1,T>& p);
+
+    void add_rect(const ZRect<1,T>& r);
+
+    void convert_to_vector(void);
+    void convert_to_map(void);
+
+    bool is_vector;
+    std::map<T, T> as_map;
+  };
+
 
   /////////////////////////////////////////////////////////////////////////
 
