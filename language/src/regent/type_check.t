@@ -1313,11 +1313,7 @@ function type_check.expr_list_cross_product(cx, node)
     log.error(node, "type mismatch: expected a list of regions but got " .. tostring(rhs_type))
   end
   local expr_type = std.list(
-    std.list(
-      std.region(
-        terralib.newsymbol(std.ispace(rhs_type:ispace().index_type)),
-        rhs_type:fspace()),
-      nil, 1),
+    std.list(rhs_type:subregion_dynamic(), nil, 1),
     nil, 1)
 
   std.copy_privileges(cx, rhs_type, expr_type)
