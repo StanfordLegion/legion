@@ -27,6 +27,7 @@ copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
@@ -228,14 +229,21 @@ class TaskRange(TimeRange):
         self.task = task
 
     def emit_svg(self, printer, level):
-        assert self.task.is_task
-        assert self.task.variant is not None
-        title = repr(self.task)
-        if self.task.is_meta:
-            title += (' '+self.task.get_initiation())
-        title += (' '+self.task.get_timing())
-        printer.emit_timing_range(self.task.variant.color, level,
-                                  self.start_time, self.stop_time, title)
+        if self.task.is_task:
+            assert self.task.is_task
+            assert self.task.variant is not None
+            title = repr(self.task)
+            if self.task.is_meta:
+                title += (' '+self.task.get_initiation())
+            title += (' '+self.task.get_timing())
+            printer.emit_timing_range(self.task.variant.color, level,
+                                      self.start_time, self.stop_time, title)
+        else:
+            title = repr(self.task)
+            title += (' '+self.task.get_timing())
+            printer.emit_timing_range("#666666", level,
+                                      self.start_time, self.stop_time, title)
+
         for subrange in self.subranges:
             subrange.emit_svg(printer, level+1)
 
@@ -244,10 +252,14 @@ class TaskRange(TimeRange):
         if self.task.is_meta:
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
+        if not self.task.is_task:
+            color = "#666666"
+        else:
+            color = self.task.variant.color
         tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
-                 self.task.variant.color,title))
+                 color,title))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -256,7 +268,8 @@ class TaskRange(TimeRange):
         for subrange in self.subranges:
             subrange.update_task_stats(stat)
             exec_time -= subrange.total_time()
-        stat.record_task(self.task, exec_time)
+        if self.task.is_task:
+            stat.record_task(self.task, exec_time)
 
     def active_time(self):
         return self.total_time()
@@ -686,6 +699,23 @@ class MetaTask(object):
     def __repr__(self):
         return 'Meta '+self.variant.name
 
+class UserMarker(object):
+    def __init__(self, name):
+        self.name = name
+        self.is_task = False
+        self.is_meta = False
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        return 'User Marker "'+self.name+'"'
+
 class Copy(object):
     def __init__(self, src, dst, op):
         self.src = src
@@ -990,6 +1020,13 @@ class State(object):
                                        read_time(m.group('create')),
                                        read_time(m.group('destroy')))
                     continue
+                m = user_info_pat.match(line)
+                if m is not None:
+                    self.log_user_info(int(m.group('pid'), 16),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')),
+                                       m.group('name'))
+                    continue
                 m = kind_pat.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
@@ -1121,6 +1158,15 @@ class State(object):
             self.last_time = destroy 
         mem.add_instance(inst)
 
+    def log_user_info(self, proc_id, start, stop, name):
+        proc = self.find_processor(proc_id)
+        user = self.create_user_marker(name)
+        user.start = start
+        user.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop 
+        proc.add_task(user)
+
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
@@ -1226,6 +1272,9 @@ class State(object):
 
     def create_instance(self, inst_id, mem, op, size):
         return Instance(inst_id, mem, op, size)
+
+    def create_user_marker(self, name):
+        return UserMarker(name)
 
     def build_time_ranges(self):
         assert self.last_time is not None 

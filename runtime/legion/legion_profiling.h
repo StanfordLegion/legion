@@ -29,6 +29,18 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    class LegionProfMarker {
+      public:
+        LegionProfMarker(const char* name);
+        ~LegionProfMarker();
+        void mark_stop();
+      private:
+        const char* name;
+        bool stopped;
+        Processor proc;
+        unsigned long long start, stop;
+    };
+
     class LegionProfInstance {
     public:
       struct TaskKind {
