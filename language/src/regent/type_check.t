@@ -1404,13 +1404,13 @@ function type_check.expr_copy(cx, node)
       local value_type = std.check_read(cx, value)
       for _, condition_kind in ipairs(condition.conditions) do
         if condition_kind == std.awaits and
-          value_type:list_depth() ~= src_type:list_depth()
+          value_type:list_depth() > dst_type:list_depth()
         then
-          log.error(node, "copy must await list of same depth as source")
+          log.error(node, "copy must await list of same or less depth than destination")
         elseif condition_kind == std.arrives and
-          value_type:list_depth() ~= dst_type:list_depth()
+          value_type:list_depth() > dst_type:list_depth()
         then
-          log.error(node, "copy must arrive list of same depth as destination")
+          log.error(node, "copy must arrive list of same or less depth than destination")
         end
       end
     end

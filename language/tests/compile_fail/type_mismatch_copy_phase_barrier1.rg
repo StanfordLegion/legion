@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_copy_phase_barrier1.rg:24: copy must await list of same depth as source
+-- type_mismatch_copy_phase_barrier1.rg:24: copy must await list of same or less depth than destination
 --   copy(x, y, awaits(z))
 --      ^
 

@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_copy_phase_barrier2.rg:24: copy must arrive list of same depth as destination
+-- type_mismatch_copy_phase_barrier2.rg:24: copy must arrive list of same or less depth than destination
 --   copy(x, y, arrives(z))
 --      ^
 
