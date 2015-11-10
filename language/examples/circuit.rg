@@ -18,9 +18,9 @@ import "regent"
 local ccircuit
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime"
-  local legion_dir = root_dir .. "../../runtime/legion"
-  local mapper_dir = root_dir .. "../../runtime/mappers"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
   local cxx = os.getenv('CXX') or 'c++'
