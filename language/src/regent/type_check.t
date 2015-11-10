@@ -352,13 +352,16 @@ function type_check.expr_condition(cx, node)
   end
   local expr_type = terralib.types.unit
 
-  return ast.typed.expr.Condition {
-    conditions = conditions,
-    values = values,
-    expr_type = expr_type,
-    options = node.options,
-    span = node.span,
-  }
+  return values:map(
+    function(value)
+      return ast.typed.expr.Condition {
+        conditions = conditions,
+        value = value,
+        expr_type = expr_type,
+        options = node.options,
+        span = node.span,
+      }
+    end)
 end
 
 function type_check.conditions(cx, node, params)
@@ -1391,8 +1394,10 @@ function type_check.expr_copy(cx, node)
   local src_type = std.check_read(cx, src)
   local dst = type_check.expr_region_root(cx, node.dst)
   local dst_type = std.check_read(cx, dst)
-  local conditions = node.conditions:map(
-    function(condition) return type_check.expr_condition(cx, condition) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
   local expr_type = terralib.types.unit
 
   if src_type:list_depth() > dst_type:list_depth() then
@@ -1400,18 +1405,17 @@ function type_check.expr_copy(cx, node)
   end
 
   for _, condition in ipairs(conditions) do
-    for _, value in ipairs(condition.values) do
-      local value_type = std.check_read(cx, value)
-      for _, condition_kind in ipairs(condition.conditions) do
-        if condition_kind == std.awaits and
-          value_type:list_depth() > dst_type:list_depth()
-        then
-          log.error(node, "copy must await list of same or less depth than destination")
-        elseif condition_kind == std.arrives and
-          value_type:list_depth() > dst_type:list_depth()
-        then
-          log.error(node, "copy must arrive list of same or less depth than destination")
-        end
+    local value = condition.value
+    local value_type = std.check_read(cx, value)
+    for _, condition_kind in ipairs(condition.conditions) do
+      if condition_kind == std.awaits and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must await list of same or less depth than destination")
+      elseif condition_kind == std.arrives and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must arrive list of same or less depth than destination")
       end
     end
   end
@@ -1504,8 +1508,10 @@ function type_check.expr_fill(cx, node)
   local dst_type = std.check_read(cx, dst)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  local conditions = node.conditions:map(
-    function(condition) return type_check.expr_condition(cx, condition) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
   local expr_type = terralib.types.unit
 
   for i, dst_field in ipairs(dst.fields) do

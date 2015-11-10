@@ -1515,10 +1515,8 @@ function codegen.expr_region_root(cx, node)
 end
 
 function codegen.expr_condition(cx, node)
-  return node.values:map(
-    function(value)
-      return codegen.expr(cx, value):read(cx, std.as_read(value.expr_type))
-  end)
+  return codegen.expr(cx, node.value):read(
+    cx, std.as_read(node.value.expr_type))
 end
 
 function codegen.expr_id(cx, node)
@@ -3258,13 +3256,55 @@ local function get_container_root(cx, container, value)
   end
 end
 
+local function expr_copy_issue_phase_barriers(values, condition_kinds, launcher)
+  local actions = terralib.newlist()
+  for i, value in ipairs(values) do
+    local conditions = condition_kinds[i]
+    for _, condition_kind in ipairs(conditions) do
+      local add_barrier
+      if condition_kind == std.awaits then
+        add_barrier = c.legion_copy_launcher_add_wait_barrier
+      elseif condition_kind == std.arrives then
+        add_barrier = c.legion_copy_launcher_add_arrival_barrier
+      else
+        assert(false)
+      end
+      actions:insert(quote [add_barrier]([launcher], [value].impl) end)
+    end
+  end
+  return actions
+end
+
+local function expr_copy_extract_phase_barriers(index, values, value_types)
+  local actions = terralib.newlist()
+  local result_values = terralib.newlist()
+  local result_types = terralib.newlist()
+  for i, value in ipairs(values) do
+    local value_type = value_types[i]
+
+    local result_type = value_type.element_type
+    local result_value = terralib.newsymbol(result_type, "condition_element")
+    actions:insert(quote
+        var [result_value] = [value_type:data(value)][ [index] ]
+    end)
+    result_values:insert(result_value)
+    result_types:insert(result_types)
+  end
+  return actions, result_values, result_types
+end
+
 local function expr_copy_setup_region(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   assert(std.is_region(src_type) and std.is_region(dst_type))
   assert(std.type_supports_privileges(src_container_type) and
            std.type_supports_privileges(dst_container_type))
+  assert(data.all(condition_types:map(
+                    function(condition_type)
+                      return std.is_phase_barrier(condition_type)
+                    end)))
 
   local add_src_region =
     c.legion_copy_launcher_add_src_region_requirement_logical_region
@@ -3281,6 +3321,12 @@ local function expr_copy_setup_region(
   local src_all_fields = std.flatten_struct_fields(src_type:fspace())
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
   local actions = terralib.newlist()
+
+  local launcher = terralib.newsymbol("launcher")
+  actions:insert(quote
+    var [launcher] = c.legion_copy_launcher_create(
+      c.legion_predicate_true(), 0, 0)
+  end)
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
     local src_copy_fields = data.filter(
@@ -3316,23 +3362,34 @@ local function expr_copy_setup_region(
       end)
     end
   end
+  actions:insertall(
+    expr_copy_issue_phase_barriers(condition_values, condition_kinds, launcher))
+  actions:insert(quote
+    c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
 local function expr_copy_setup_list_one_to_many(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   assert(std.is_region(src_type))
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
     local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol("index")
+    local c_actions, c_values, c_types = expr_copy_extract_phase_barriers(
+      index, condition_values, condition_types)
     return quote
-      for i = 0, [dst_value].__size do
-        var [dst_element] = [dst_type:data(dst_value)][i]
+      for [index] = 0, [dst_value].__size do
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
         [expr_copy_setup_region(
            cx, src_value, src_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds,
            op, launcher)]
       end
     end
@@ -3340,6 +3397,7 @@ local function expr_copy_setup_list_one_to_many(
     return expr_copy_setup_region(
       cx, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds,
       op, launcher)
   end
 end
@@ -3347,20 +3405,26 @@ end
 local function expr_copy_setup_list_one_to_one(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   if std.is_list(src_type) then
     local src_element_type = src_type.element_type
     local src_element = terralib.newsymbol(src_element_type, "src_element")
     local dst_element_type = dst_type.element_type
     local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol("index")
+    local c_actions, c_values, c_types = expr_copy_extract_phase_barriers(
+      index, condition_values, condition_types)
     return quote
       std.assert([src_value].__size == [dst_value].__size, "mismatch in number of regions to copy")
-      for i = 0, [src_value].__size do
-        var [src_element] = [src_type:data(src_value)][i]
-        var [dst_element] = [dst_type:data(dst_value)][i]
+      for [index] = 0, [src_value].__size do
+        var [src_element] = [src_type:data(src_value)][ [index] ]
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
         [expr_copy_setup_list_one_to_one(
            cx, src_element, src_element_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds,
            op, launcher)]
       end
     end
@@ -3368,6 +3432,7 @@ local function expr_copy_setup_list_one_to_one(
     return expr_copy_setup_list_one_to_many(
       cx, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds,
       op, launcher)
   end
 end
@@ -3382,21 +3447,14 @@ function codegen.expr_copy(cx, node)
       return codegen.expr_condition(cx, condition)
     end)
 
-  local launcher = terralib.newsymbol("launcher")
-
   local actions = terralib.newlist()
   actions:insert(src.actions)
   actions:insert(dst.actions)
-  conditions:map(
-    function(condition)
-      actions:insertall(
-        condition:map(function(value) return value.actions end))
-    end)
+  actions:insertall(
+    conditions:map(function(condition) return condition.actions end))
   actions:insert(
     quote
       [emit_debuginfo(node)]
-      var [launcher] = c.legion_copy_launcher_create(
-        c.legion_predicate_true(), 0, 0)
     end)
 
   actions:insert(
@@ -3404,12 +3462,14 @@ function codegen.expr_copy(cx, node)
       [expr_copy_setup_list_one_to_one(
          cx, src.value, src_type, src_type, node.src.fields,
          dst.value, dst_type, dst_type, node.dst.fields,
+         conditions:map(function(condition) return condition.value end),
+         node.conditions:map(
+           function(condition)
+             return std.as_read(condition.value.expr_type)
+         end),
+         node.conditions:map(function(condition) return condition.conditions end),
          node.op, launcher)]
     end)
-
-  actions:insert(quote
-    c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
-  end)
 
   return values.value(expr.just(actions, quote end), terralib.types.unit)
 end
@@ -3498,9 +3558,7 @@ function codegen.expr_fill(cx, node)
     [dst.actions]
     [value.actions]
     [conditions:map(
-       function(condition)
-         return condition:map(function(value) return value.actions end)
-       end)]
+       function(condition) return condition.value.actions end)]
     [emit_debuginfo(node)]
 
     [expr_fill_setup_list(

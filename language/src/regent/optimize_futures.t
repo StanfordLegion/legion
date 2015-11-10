@@ -415,12 +415,9 @@ function optimize_futures.expr_region_root(cx, node)
 end
 
 function optimize_futures.expr_condition(cx, node)
-  local values = node.values:map(
-    function(value)
-      return concretize(optimize_futures.expr(cx, value))
-    end)
+  local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
-    values = values,
+    value = value,
   }
 end
 
