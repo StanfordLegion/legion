@@ -19,6 +19,39 @@
 
 import "regent"
 
+-- Compile and link copy_phase_barrier.cc
+local cmapper
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
+  local mapper_cc = root_dir .. "copy_phase_barrier.cc"
+  local mapper_so = os.tmpname() .. ".so" -- root_dir .. "copy_phase_barrier.so"
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec(
+    "copy_phase_barrier.h",
+    {"-I", root_dir, "-I", runtime_dir, "-I", mapper_dir, "-I", legion_dir})
+end
+
 task mul(r : region(int), y : int, t : phase_barrier)
 where reads writes(r), awaits(t) do
   for x in r do
@@ -59,4 +92,5 @@ end
 task main()
   regentlib.assert(k() == 369, "test failed")
 end
+cmapper.register_mappers()
 regentlib.start(main)
