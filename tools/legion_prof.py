@@ -241,7 +241,7 @@ class TaskRange(TimeRange):
         else:
             title = repr(self.task)
             title += (' '+self.task.get_timing())
-            printer.emit_timing_range("#666666", level,
+            printer.emit_timing_range("#555555", level,
                                       self.start_time, self.stop_time, title)
 
         for subrange in self.subranges:
@@ -253,7 +253,7 @@ class TaskRange(TimeRange):
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
         if not self.task.is_task:
-            color = "#666666"
+            color = "#555555"
         else:
             color = self.task.variant.color
         tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
