@@ -484,10 +484,11 @@ function specialize.condition(cx, node)
 end
 
 function specialize.expr_condition(cx, node)
-  return ast.specialized.Condition {
+  return ast.specialized.expr.Condition {
     conditions = specialize.condition_kinds(cx, node.conditions),
     values = node.values:map(
       function(value) return specialize.expr(cx, value) end),
+    options = node.options,
     span = node.span,
   }
 end

@@ -349,10 +349,14 @@ function type_check.expr_condition(cx, node)
                   tostring(value_type))
     end
   end
+  local expr_type = terralib.types.unit
 
   return ast.typed.expr.Condition {
     conditions = conditions,
     values = values,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
   }
 end
 

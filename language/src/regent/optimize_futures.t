@@ -417,7 +417,7 @@ end
 function optimize_futures.expr_condition(cx, node)
   local values = node.values:map(
     function(value)
-      return concretize(optimize_futures.expr(cx, node.region))
+      return concretize(optimize_futures.expr(cx, value))
     end)
   return node {
     values = values,

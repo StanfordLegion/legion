@@ -358,6 +358,7 @@ function parser.expr_condition(p)
   return ast.unspecialized.expr.Condition {
     conditions = conditions,
     values = values,
+    options = ast.default_options(),
     span = ast.span(start, p),
   }
 end
