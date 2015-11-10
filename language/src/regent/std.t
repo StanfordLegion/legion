@@ -551,6 +551,10 @@ function std.is_list_of_regions(t)
   return std.is_list(t) and t:is_list_of_regions()
 end
 
+function std.is_list_of_phase_barriers(t)
+  return std.is_list(t) and t:is_list_of_phase_barriers()
+end
+
 function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
@@ -2221,6 +2225,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       std.is_list_of_regions(self.element_type)
   end
 
+  function st:is_list_of_phase_barriers()
+    return std.is_phase_barrier(self.element_type) or
+      std.is_list_of_phase_barriers(self.element_type)
+  end
+
   function st:partition()
     return self.partition_type
   end
@@ -2306,6 +2315,11 @@ do
   })
 
   st.is_phase_barrier = true
+
+  -- For API compatibility with std.list:
+  function st:list_depth()
+    return 0
+  end
 end
 
 do

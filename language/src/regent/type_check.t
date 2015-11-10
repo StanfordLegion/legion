@@ -343,7 +343,8 @@ function type_check.expr_condition(cx, node)
   local value_types = values:map(
     function(value) return std.check_read(cx, value) end)
   for _, value_type in ipairs(value_types) do
-    if not std.is_phase_barrier(value_type) then
+    if not (std.is_phase_barrier(value_type) or
+            std.is_list_of_phase_barriers(value_type)) then
       log.error(node, "type mismatch: expected " ..
                   tostring(std.phase_barrier) .. " but got " ..
                   tostring(value_type))
@@ -1396,6 +1397,23 @@ function type_check.expr_copy(cx, node)
 
   if src_type:list_depth() > dst_type:list_depth() then
     log.error(node, "must copy from less-nested to more-nested list")
+  end
+
+  for _, condition in ipairs(conditions) do
+    for _, value in ipairs(condition.values) do
+      local value_type = std.check_read(cx, value)
+      for _, condition_kind in ipairs(condition.conditions) do
+        if condition_kind == std.awaits and
+          value_type:list_depth() ~= src_type:list_depth()
+        then
+          log.error(node, "copy must await list of same depth as source")
+        elseif condition_kind == std.arrives and
+          value_type:list_depth() ~= dst_type:list_depth()
+        then
+          log.error(node, "copy must arrive list of same depth as destination")
+        end
+      end
+    end
   end
 
   if #src.fields ~= #dst.fields then
