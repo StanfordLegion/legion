@@ -1814,6 +1814,7 @@ namespace LegionRuntime {
       RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
                                               SingleTask *remote_parent_ctx); 
       SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
+      void release_remote_context(UniqueID remote_owner_uid);
     public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
@@ -1847,15 +1848,25 @@ namespace LegionRuntime {
       // These are the static methods that become the meta-tasks
       // for performing all the needed runtime operations
       static void initialize_runtime(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void shutdown_runtime(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void high_level_runtime_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void profiling_runtime_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void profiling_mapper_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2117,8 +2128,7 @@ namespace LegionRuntime {
 #endif
     private:
       static int* get_startup_arrivals(void);
-      static Processor::TaskIDTable& get_task_table(
-                                          bool add_runtime_tasks = true);
+      static TaskIDTable& get_task_table(bool add_runtime_tasks = true);
       static std::map<Processor::TaskFuncID,InlineFnptr>& 
                                             get_inline_table(void);
       static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
@@ -2127,7 +2137,7 @@ namespace LegionRuntime {
                                             get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
-      static void register_runtime_tasks(Processor::TaskIDTable &table);
+      static void register_runtime_tasks(TaskIDTable &table);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
 #ifdef SPECIALIZED_UTIL_PROCS

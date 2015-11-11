@@ -58,6 +58,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const char* Operation::get_string_rep(OpKind kind)
+    //--------------------------------------------------------------------------
+    {
+      return op_names[kind];
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::activate_operation(void)
     //--------------------------------------------------------------------------
     {
@@ -123,6 +130,13 @@ namespace LegionRuntime {
         completion_event.trigger();
       if (!commit_event.has_triggered())
         commit_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Operation::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -1682,6 +1696,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t MapOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* MapOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -2340,7 +2361,7 @@ namespace LegionRuntime {
                                 "operation (ID %lld) in parent task %s "
                                 "(ID %lld) has %ld privilege fields and %ld "
                                 "instance fields.  Copy requirements must "
-                                "have exactly the same number of  privilege "
+                                "have exactly the same number of privilege "
                                 "and instance fields.", idx, 
                                 get_unique_copy_id(), 
                                 parent_ctx->variants->name,
@@ -2531,6 +2552,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return COPY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t CopyOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return src_requirements.size() + dst_requirements.size();
     }
 
     //--------------------------------------------------------------------------
@@ -2750,17 +2778,39 @@ namespace LegionRuntime {
         // wherever the existing physical instance was
         if (dst_restrictions[idx].has_restrictions())
         {
-          dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                    dst_contexts[idx],
-                                                    dst_requirements[idx],
-                                                    src_requirements.size()+idx,
-                                                    dst_versions[idx],
-                                                    local_proc
+          // Little bit of a hack here: if this is a restricted reduction,
+          // we actually want to map to a normal instance, so make it look
+          // like the privileges are read-write while selecting the instance
+          // and then switch back after we are done
+          if (IS_REDUCE(dst_requirements[idx]))
+          {
+            dst_requirements[idx].privilege = READ_WRITE;
+            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
+                                                      dst_contexts[idx],
+                                                      dst_requirements[idx],
+                                                      src_requirements.size()+idx,
+                                                      dst_versions[idx],
+                                                      local_proc
 #ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
+                                                      , get_logging_name()
+                                                      , unique_op_id
 #endif
-                                                    );
+                                                      );
+            // Switch the privileges back
+            dst_requirements[idx].privilege = REDUCE;
+          }
+          else // The normal thing
+            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
+                                                      dst_contexts[idx],
+                                                      dst_requirements[idx],
+                                                      src_requirements.size()+idx,
+                                                      dst_versions[idx],
+                                                      local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                                                      , get_logging_name()
+                                                      , unique_op_id
+#endif
+                                                      );
 #ifdef DEBUG_HIGH_LEVEL
           assert(dst_mapping_refs[idx].has_ref());
 #endif
@@ -4043,6 +4093,13 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    size_t CloseOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     void CloseOp::initialize_close(SingleTask *ctx,
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
@@ -4903,6 +4960,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t AcquireOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* AcquireOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -5489,6 +5553,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return RELEASE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReleaseOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
     }
 
     //--------------------------------------------------------------------------
@@ -6929,6 +7000,24 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return MUST_EPOCH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t MustEpochOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      size_t result = 0;
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        result += (*it)->get_region_count();
+      }
+      for (std::vector<IndexTask*>::const_iterator it = 
+            index_tasks.begin(); it != index_tasks.end(); it++)
+      {
+        result += (*it)->get_region_count();
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8435,6 +8524,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t DependentPartitionOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
@@ -8718,6 +8814,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return FILL_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t FillOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
     }
 
     //--------------------------------------------------------------------------
@@ -9170,6 +9273,13 @@ namespace LegionRuntime {
     {
       return ATTACH_OP_KIND;
     }
+
+    //--------------------------------------------------------------------------
+    size_t AttachOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
     
     //--------------------------------------------------------------------------
     void AttachOp::trigger_dependence_analysis(void)
@@ -9541,6 +9651,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return DETACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DetachOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
     }
 
     //--------------------------------------------------------------------------

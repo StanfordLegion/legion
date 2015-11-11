@@ -746,6 +746,32 @@ extern "C" {
                                 legion_logical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_region_color()
+   */
+  legion_color_t
+  legion_logical_region_get_color(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_logical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_parent_logical_partition()
+   */
+  bool
+  legion_logical_region_has_parent_logical_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_partition()
+   */
+  legion_logical_partition_t
+  legion_logical_region_get_parent_logical_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::attach_name()
    */
   void
@@ -821,6 +847,15 @@ extern "C" {
     legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_parent_logical_region(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t handle);
 
   // -----------------------------------------------------------------------
   // Region Requirement Operations
@@ -1663,6 +1698,33 @@ extern "C" {
   void
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
                                    legion_context_t ctx);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   */
+  void
+  legion_runtime_fill_field(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_predicate_t pred /* = legion_predicate_true() */);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   */
+  void
+  legion_runtime_fill_field_future(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t f,
+    legion_predicate_t pred /* = legion_predicate_true() */);
 
   // -----------------------------------------------------------------------
   // Copy Operations

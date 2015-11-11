@@ -457,6 +457,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t TaskOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return regions.size();
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* TaskOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -1529,9 +1536,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_point_region_requirements(MinimalPoint *mp/*= NULL*/)
+    bool TaskOp::compute_point_region_requirements(MinimalPoint *mp/*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      bool all_invalid = true;
       // Update the region requirements for this point
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -1550,10 +1558,10 @@ namespace LegionRuntime {
               if (index_point.get_dim() > 3)
               {
                 log_task.error("Projection ID 0 is invalid for tasks whose "
-                                     "points are larger than three dimensional "
-                                     "unsigned integers.  Points for task %s "
-                                     "have elements of %d dimensions",
-                                  this->variants->name, index_point.get_dim());
+                               "points are larger than three dimensional "
+                               "unsigned integers.  Points for task %s "
+                               "have elements of %d dimensions",
+                                this->variants->name, index_point.get_dim());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
 #endif
@@ -1625,7 +1633,15 @@ namespace LegionRuntime {
         }
         // Always check to see if there are any restrictions
         regions[idx].restricted = has_restrictions(idx, regions[idx].region);
+        // Check to see if the region is a NO_REGION,
+        // if it is then switch the privilege to NO_ACCESS
+        if (regions[idx].region == LogicalRegion::NO_REGION)
+          regions[idx].privilege = NO_ACCESS;
+        else
+          all_invalid = false;
       }
+      // Return true if this point has any valid region requirements
+      return (!all_invalid);
     }
 
     //--------------------------------------------------------------------------
@@ -3846,7 +3862,9 @@ namespace LegionRuntime {
     void SingleTask::register_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from 
+      // the executing task context
+      //
       // Because of 'remap_region', this method can be called
       // both for inline regions as well as regions which were
       // initally mapped for the task.  Do a quick check to see
@@ -3863,7 +3881,8 @@ namespace LegionRuntime {
     void SingleTask::unregister_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from the
+      // executed task context
       for (std::list<PhysicalRegion>::iterator it = inline_regions.begin();
             it != inline_regions.end(); it++)
       {
@@ -6106,7 +6125,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7356,7 +7378,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7929,6 +7954,7 @@ namespace LegionRuntime {
       context = RegionTreeContext();
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
+      is_top_level_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -7945,6 +7971,27 @@ namespace LegionRuntime {
                                                   false/*logical users only*/); 
         }
       }
+      if (!remote_instances.empty())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(is_top_level_context);
+#endif
+        UniqueID local_uid = get_unique_task_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
+        }
+        remote_instances.clear();
+      }
       top_level_regions.clear();
       if (context.exists())
         runtime->free_context(this);
@@ -7954,11 +8001,13 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent)
+    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent,
+                                       bool is_top_level)
     //--------------------------------------------------------------------------
     {
       remote_owner_uid = uid;
       remote_parent_ctx = remote_parent;
+      is_top_level_context = is_top_level;
       runtime->allocate_context(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
@@ -8016,17 +8065,26 @@ namespace LegionRuntime {
     void RemoteTask::record_remote_state(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst,
+    void RemoteTask::record_remote_instance(AddressSpaceID remote_instance,
                                             RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -9577,7 +9635,6 @@ namespace LegionRuntime {
       bool need_trigger = false;
       bool trigger_children_completed = false;
       bool trigger_children_commit = false;
-      Event map_condition = Event::NO_EVENT;
       {
         AutoLock o_lock(op_lock);
         total_points += points;
@@ -9589,11 +9646,6 @@ namespace LegionRuntime {
         if (slice_fraction.is_whole())
         {
           need_trigger = true;
-          if (!map_applied_conditions.empty())
-          {
-            map_condition = Event::merge_events(map_applied_conditions);
-            map_applied_conditions.clear();
-          }
           if ((complete_points == total_points) &&
               !children_complete_invoked)
           {
@@ -9609,7 +9661,30 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-        complete_mapping(map_condition);
+      {
+        // At this point, we know that we are mapped, see if we have
+        // any locally mapped slices which we need to apply changes
+        // Note we do this here while we're not holding the lock
+        if (!locally_mapped_slices.empty())
+        {
+          for (std::deque<SliceTask*>::const_iterator it = 
+                locally_mapped_slices.begin(); it != 
+                locally_mapped_slices.end(); it++)
+          {
+            (*it)->apply_local_version_infos(map_applied_conditions);
+          }
+        }
+        // Get the mapped precondition note we can now access this
+        // without holding the lock because we know we've seen
+        // all the responses so no one else will be mutating it.
+        if (!map_applied_conditions.empty())
+        {
+          Event map_condition = Event::merge_events(map_applied_conditions);
+          complete_mapping(map_condition);
+        }
+        else
+          complete_mapping();
+      }
       if (trigger_children_completed)
         trigger_children_complete();
       if (trigger_children_commit)
@@ -9956,6 +10031,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::apply_local_version_infos(std::set<Event> &map_conditions)
+    //--------------------------------------------------------------------------
+    {
+      // We know we are local
+      AddressSpaceID owner_space = runtime->address_space; 
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        version_infos[idx].apply_mapping(enclosing_contexts[idx].get_id(),
+                                         owner_space, map_conditions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -10231,9 +10319,6 @@ namespace LegionRuntime {
       // Quick check to see if we ended up back on the original node
       if (!is_remote())
       {
-        // Otherwise we can deactivate the remote ctx and use
-        // our original parent context
-        remote_ctx->deactivate();
         parent_ctx = index_owner->parent_ctx;
         // We also have our enclosing contexts
         enclosing_contexts = index_owner->enclosing_contexts;
@@ -10581,8 +10666,20 @@ namespace LegionRuntime {
       }
       if (is_remote())
       {
+        bool has_nonleaf_point = false;
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          if (!points[idx]->is_leaf())
+          {
+            has_nonleaf_point = true;
+            break;
+          }
+        }
+
         // Only need to send something back if this wasn't mapped locally
-        if (!is_locally_mapped())
+        // wclee: also need to send back if there were some non-leaf point tasks
+        // because they haven't recorded themselves as mapped
+        if (!is_locally_mapped() || has_nonleaf_point)
         {
           Serializer rez;
           pack_remote_mapped(rez, applied_condition);

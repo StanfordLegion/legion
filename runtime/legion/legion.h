@@ -3081,7 +3081,7 @@ namespace LegionRuntime {
        * @return handle for the next index partition
        */
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-       Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor, 
+       Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
                                             int part_color = -1);
 
       /**
@@ -4673,7 +4673,7 @@ namespace LegionRuntime {
       /**
        * Issue an operation into the stream to record the current time in 
        * nanoseconds. The resulting future should be interpreted as a 
-       * 'long long' with no fractional seconds. The operation can be
+       * 'long long' with no fractional nanoseconds. The operation can be
        * givien an optional future precondition which will not be interpreted,
        * but ill be used as a precondition to ensure that the measurement
        * will not be taken until the precondition is complete.
