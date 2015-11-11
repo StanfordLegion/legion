@@ -27,6 +27,7 @@
 #include "cmdline.h"
 #include "pri_queue.h"
 #include "nodeset.h"
+#include "interval_tree.h"
 
 // NOTE: all these interfaces are templated, which means partitions.cc is going
 //  to have to somehow know which ones to instantiate - we'll try to have a 
@@ -124,7 +125,7 @@ namespace Realm {
     //  different uops are going to contribute something (or nothing) to
     //  the sparsity map - once all of those contributions arrive, we can
     //  finalize the sparsity map
-    void update_contributor_count(int delta = 1);
+    void set_contributor_count(int count);
 
     void contribute_nothing(void);
     void contribute_dense_rect_list(const DenseRectangleList<N,T>& rects);
@@ -175,6 +176,43 @@ namespace Realm {
     void destroy(void);
   };
 
+  template <int N, typename T>
+  class OverlapTester {
+  public:
+    OverlapTester(void);
+    ~OverlapTester(void);
+
+    void add_index_space(int label, const ZIndexSpace<N,T>& space, bool use_approx = true);
+
+    void construct(void);
+
+    void test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps);
+    void test_overlap(const SparsityMapImpl<N,T> *sparsity, std::set<int>& overlaps);
+
+  protected:
+    std::vector<int> labels;
+    std::vector<ZIndexSpace<N,T> > spaces;
+    std::vector<bool> approxs;
+  };
+
+#if 0
+  template <typename T>
+  class OverlapTester<1,T> {
+  public:
+    OverlapTester(void);
+    ~OverlapTester(void);
+
+    void add_index_space(int label, const ZIndexSpace<1,T>& space, bool use_approx = true);
+
+    void construct(void);
+
+    void test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps);
+    void test_overlap(const SparsityMapImpl<1,T> *sparsity, std::set<int>& overlaps);
+
+  protected:
+    IntervalTree<T,int> interval_tree;
+  };
+#endif
 
   /////////////////////////////////////////////////////////////////////////
 
@@ -261,6 +299,26 @@ namespace Realm {
     FT range_lo, range_hi;
     std::set<FT> value_set;
     std::map<FT, SparsityMap<N,T> > sparsity_outputs;
+  };
+
+  template <int N, typename T>
+  class ComputeOverlapMicroOp : public PartitioningMicroOp {
+  public:
+    // tied to the ImageOperation * - cannot be moved around the system
+    ComputeOverlapMicroOp(PartitioningOperation *_op);
+    virtual ~ComputeOverlapMicroOp(void);
+
+    void add_input_space(const ZIndexSpace<N,T>& input_space);
+    void add_extra_dependency(const ZIndexSpace<N,T>& dep_space);
+
+    virtual void execute(void);
+
+    void dispatch(PartitioningOperation *op, bool inline_ok);
+
+  protected:
+    PartitioningOperation *op;
+    std::vector<ZIndexSpace<N,T> > input_spaces;
+    std::vector<SparsityMapImpl<N,T> *> extra_deps;
   };
 
   template <int N, typename T, int N2, typename T2>
@@ -414,8 +472,12 @@ namespace Realm {
 
     virtual void execute(void) = 0;
 
+    // the type of 'tester' depends on which operation it is, so erase the type here...
+    virtual void set_overlap_tester(void *tester);
+
     void deferred_launch(Event wait_for);
   };
+
 
   template <int N, typename T, typename FT>
   class ByFieldOperation : public PartitioningOperation {
@@ -452,11 +514,14 @@ namespace Realm {
 
     virtual void execute(void);
 
+    //virtual void set_overlap_tester(void *tester);
+
   protected:
     ZIndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > images;
+    OverlapTester<N2,T2> *overlap_tester;
   };
 
   template <int N, typename T, int N2, typename T2>
@@ -472,6 +537,8 @@ namespace Realm {
     ZIndexSpace<N,T> add_target(const ZIndexSpace<N2,T2>& target);
 
     virtual void execute(void);
+
+    //virtual void set_overlap_tester(void *tester);
 
   protected:
     ZIndexSpace<N,T> parent;

@@ -32,6 +32,10 @@ namespace Realm {
     PartitioningOpQueue *op_queue = 0;
 
     FragmentAssembler fragment_assembler;
+
+    int cfg_num_partitioning_workers = 1;
+    bool cfg_disable_intersection_optimization = false;
+    int cfg_max_rects_in_approximation = 32;
   };
 
 
@@ -822,10 +826,14 @@ namespace Realm {
   //  the sparsity map - once all of those contributions arrive, we can
   //  finalize the sparsity map
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::update_contributor_count(int delta /*= 1*/)
+  void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
+    // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
+    //  immediately finalize - the contributions happened before we got here
     // just increment the count atomically
-    __sync_fetch_and_add(&remaining_contributor_count, delta);
+    int v = __sync_add_and_fetch(&remaining_contributor_count, count);
+    if(v == 0)
+      finalize();
   }
 
   template <int N, typename T>
@@ -841,8 +849,8 @@ namespace Realm {
       return;
     }
 
+    // count is allowed to go negative if we get contributions before we know the total expected
     int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
-    assert(left >= 0);
     if(left == 0)
       finalize();
   }
@@ -1002,8 +1010,8 @@ namespace Realm {
     if(last) {
       if(ID(me).node() == gasnet_mynode()) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
+	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
-	assert(left >= 0);
 	if(left == 0)
 	  finalize();
       } else {
@@ -1157,6 +1165,23 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  static void compute_approximation(const std::vector<SparsityMapEntry<N,T> >& entries,
+				    std::vector<ZRect<N,T> >& approx_rects,
+				    int max_rects)
+  {
+    size_t n = entries.size();
+    // ignore max rects for now and just copy bounds over
+    if((n <= max_rects) || true) {
+      approx_rects.resize(n);
+      for(size_t i = 0; i < n; i++)
+	approx_rects[i] = entries[i].bounds;
+      return;
+    }
+    
+    assert(0);
+  }
+
+  template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
 //define DEBUG_PARTITIONING
@@ -1178,6 +1203,13 @@ namespace Realm {
 	assert(this->entries[i-1].bounds.hi.x < (this->entries[i].bounds.lo.x - 1));
     }
 
+    // now that we've got our entries nice and tidy, build a bounded approximation of them
+    if(true /*ID(me).node() == gasnet_mynode()*/) {
+      assert(!this->approx_valid);
+      compute_approximation<N,T>(this->entries, this->approx_rects, cfg_max_rects_in_approximation);
+      this->approx_valid = true;
+    }
+
 #ifdef DEBUG_PARTITIONING
     std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
     for(size_t i = 0; i < this->entries.size(); i++)
@@ -1191,6 +1223,7 @@ namespace Realm {
     NodeSet sendto_precise, sendto_approx;
     Event trigger_precise = Event::NO_EVENT;
     Event trigger_approx = Event::NO_EVENT;
+    std::vector<PartitioningMicroOp *> precise_waiters_copy, approx_waiters_copy;
     {
       AutoHSLLock al(mutex);
 
@@ -1202,15 +1235,22 @@ namespace Realm {
 	precise_ready_event = Event::NO_EVENT;
       }
 
-      for(std::vector<PartitioningMicroOp *>::const_iterator it = precise_waiters.begin();
-	  it != precise_waiters.end();
-	  it++)
-	(*it)->sparsity_map_ready(this, true);
-      precise_waiters.clear();
+      precise_waiters_copy.swap(precise_waiters);
+      approx_waiters_copy.swap(approx_waiters);
 
       sendto_precise = remote_precise_waiters;
       remote_precise_waiters.clear();
     }
+
+    for(std::vector<PartitioningMicroOp *>::const_iterator it = precise_waiters_copy.begin();
+	it != precise_waiters_copy.end();
+	it++)
+      (*it)->sparsity_map_ready(this, true);
+
+    for(std::vector<PartitioningMicroOp *>::const_iterator it = approx_waiters_copy.begin();
+	it != approx_waiters_copy.end();
+	it++)
+      (*it)->sparsity_map_ready(this, false);
 
     if(!sendto_approx.empty()) {
       for(gasnet_node_t i = 0; (i < gasnet_nodes()) && !sendto_approx.empty(); i++)
@@ -1238,6 +1278,47 @@ namespace Realm {
     if(trigger_precise.exists())
       get_runtime()->get_genevent_impl(trigger_precise)->trigger(trigger_precise.gen,
 								 gasnet_mynode());
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class OverlapTester<N,T>
+
+  template <int N, typename T>
+  OverlapTester<N,T>::OverlapTester(void)
+  {}
+
+  template <int N, typename T>
+  OverlapTester<N,T>::~OverlapTester(void)
+  {}
+
+  template <int N, typename T>
+  void OverlapTester<N,T>::add_index_space(int label, const ZIndexSpace<N,T>& space,
+					   bool use_approx /*= true*/)
+  {
+    labels.push_back(label);
+    spaces.push_back(space);
+    approxs.push_back(use_approx);
+  }
+
+  template <int N, typename T>
+  void OverlapTester<N,T>::construct(void)
+  {
+    // nothing special yet
+  }
+
+  template <int N, typename T>
+  void OverlapTester<N,T>::test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps)
+  {
+    for(size_t i = 0; i < labels.size(); i++)
+      if(approxs[i]) {
+	if(space.overlaps_approx(spaces[i]))
+	  overlaps.insert(labels[i]);
+      } else {
+	if(space.overlaps(spaces[i]))
+	  overlaps.insert(labels[i]);
+      }
   }
 
 
@@ -1534,6 +1615,73 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ComputeOverlapMicroOp<N,T>
+
+  template <int N, typename T>
+  ComputeOverlapMicroOp<N,T>::ComputeOverlapMicroOp(PartitioningOperation *_op)
+    : op(_op)
+  {}
+
+  template <int N, typename T>
+  ComputeOverlapMicroOp<N,T>::~ComputeOverlapMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void ComputeOverlapMicroOp<N,T>::add_input_space(const ZIndexSpace<N,T>& input_space)
+  {
+    input_spaces.push_back(input_space);
+  }
+
+  template <int N, typename T>
+  void ComputeOverlapMicroOp<N,T>::add_extra_dependency(const ZIndexSpace<N,T>& dep_space)
+  {
+    if(!dep_space.dense()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(dep_space.sparsity);
+      extra_deps.push_back(impl);
+    }
+  }
+
+  template <int N, typename T>
+  void ComputeOverlapMicroOp<N,T>::execute(void)
+  {
+    TimeStamp ts("ComputeOverlapMicroOp::execute", true, &log_uop_timing);
+
+    OverlapTester<N,T> *overlap_tester = new OverlapTester<N,T>;
+    for(size_t i = 0; i < input_spaces.size(); i++)
+      overlap_tester->add_index_space(i, input_spaces[i]);
+    overlap_tester->construct();
+
+    op->set_overlap_tester(overlap_tester);
+  }
+
+  template <int N, typename T>
+  void ComputeOverlapMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
+  {
+    // need valid data for each input space
+    for(size_t i = 0; i < input_spaces.size(); i++) {
+      if(!input_spaces[i].dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(input_spaces[i].sparsity)->add_waiter(this, 
+											     true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    // add any extra dependencies too
+    for(size_t i = 0; i < extra_deps.size(); i++) {
+      bool registered = extra_deps[i]->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+    }
+
+    finish_dispatch(op, inline_ok);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ImageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
@@ -1762,15 +1910,20 @@ namespace Realm {
 
     // iterate over sparsity outputs and contribute to all (even if we didn't have any
     //  points found for it)
+    int empty_count = 0;
     for(size_t i = 0; i < sparsity_outputs.size(); i++) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
       typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
       if(it2 != rect_map.end()) {
 	impl->contribute_dense_rect_list(*(it2->second));
 	delete it2->second;
-      } else
+      } else {
 	impl->contribute_nothing();
+	empty_count++;
+      }
     }
+    if(empty_count > 0)
+      log_part.info() << empty_count << " empty preimages (out of " << sparsity_outputs.size() << ")";
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -2741,6 +2894,12 @@ namespace Realm {
       EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));
   };
 
+  void PartitioningOperation::set_overlap_tester(void *tester)
+  {
+    // should only be called for ImageOperation and PreimageOperation, which override this
+    assert(0);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -2784,7 +2943,7 @@ namespace Realm {
   void ByFieldOperation<N,T,FT>::execute(void)
   {
     for(size_t i = 0; i < subspaces.size(); i++)
-      SparsityMapImpl<N,T>::lookup(subspaces[i])->update_contributor_count(field_data.size());
+      SparsityMapImpl<N,T>::lookup(subspaces[i])->set_contributor_count(field_data.size());
 
     for(size_t i = 0; i < field_data.size(); i++) {
       ByFieldMicroOp<N,T,FT> *uop = new ByFieldMicroOp<N,T,FT>(parent,
@@ -2811,11 +2970,14 @@ namespace Realm {
     : PartitioningOperation(reqs, _finish_event)
     , parent(_parent)
     , field_data(_field_data)
+    , overlap_tester(0)
   {}
 
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
-  {}
+  {
+    delete overlap_tester;
+  }
 
   template <int N, typename T, int N2, typename T2>
   ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const ZIndexSpace<N2,T2>& source)
@@ -2840,16 +3002,51 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void ImageOperation<N,T,N2,T2>::execute(void)
   {
-    for(size_t i = 0; i < images.size(); i++)
-      SparsityMapImpl<N,T>::lookup(images[i])->update_contributor_count(field_data.size());
+    // build the overlap tester based on the field index spaces - they're more likely to be known and
+    //  denser
+    if(!cfg_disable_intersection_optimization) {
+      overlap_tester = new OverlapTester<N2,T2>;
+      for(size_t i = 0; i < field_data.size(); i++)
+	overlap_tester->add_index_space(i, field_data[i].index_space);
+      overlap_tester->construct();
+    }
+    
+    std::vector<std::set<int> > overlaps_by_field_data(field_data.size());
+    for(size_t i = 0; i < sources.size(); i++) {
+      std::set<int> overlaps_by_source;
+
+      if(cfg_disable_intersection_optimization) {
+	for(size_t j = 0; j < field_data.size(); j++)
+	  overlaps_by_source.insert(j);
+      } else  {
+	overlap_tester->test_overlap(sources[i], overlaps_by_source);
+
+	std::cout << overlaps_by_source.size() << " overlaps for source " << i << "\n";
+      }
+
+      SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(overlaps_by_source.size());
+
+      // now scatter these values into the overlaps_by_field_data
+      for(std::set<int>::const_iterator it = overlaps_by_source.begin();
+	  it != overlaps_by_source.end();
+	  it++)
+	overlaps_by_field_data[*it].insert(i);
+    }
 
     for(size_t i = 0; i < field_data.size(); i++) {
+      size_t n = overlaps_by_field_data[i].size();
+      if(n == 0) continue;
+
       ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
 								 field_data[i].index_space,
 								 field_data[i].inst,
 								 field_data[i].field_offset);
-      for(size_t j = 0; j < sources.size(); j++)
+      for(std::set<int>::const_iterator it = overlaps_by_field_data[i].begin();
+	  it != overlaps_by_field_data[i].end();
+	  it++) {
+	int j = *it;
 	uop->add_sparsity_output(sources[j], images[j]);
+      }
       uop->dispatch(this, true /* ok to run in this thread */);
     }
   }
@@ -2897,7 +3094,7 @@ namespace Realm {
   void PreimageOperation<N,T,N2,T2>::execute(void)
   {
     for(size_t i = 0; i < preimages.size(); i++)
-      SparsityMapImpl<N,T>::lookup(preimages[i])->update_contributor_count(field_data.size());
+      SparsityMapImpl<N,T>::lookup(preimages[i])->set_contributor_count(field_data.size());
 
     for(size_t i = 0; i < field_data.size(); i++) {
       PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
@@ -2978,7 +3175,7 @@ namespace Realm {
   void UnionOperation<N,T>::execute(void)
   {
     for(size_t i = 0; i < outputs.size(); i++) {
-      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
 
       UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(inputs[i]);
       uop->add_sparsity_output(outputs[i]);
@@ -3052,7 +3249,7 @@ namespace Realm {
   void IntersectionOperation<N,T>::execute(void)
   {
     for(size_t i = 0; i < outputs.size(); i++) {
-      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
 
       IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(inputs[i]);
       uop->add_sparsity_output(outputs[i]);
@@ -3102,7 +3299,7 @@ namespace Realm {
   void DifferenceOperation<N,T>::execute(void)
   {
     for(size_t i = 0; i < outputs.size(); i++) {
-      SparsityMapImpl<N,T>::lookup(outputs[i])->update_contributor_count(1);
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
 
       DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(lhss[i], rhss[i]);
       uop->add_sparsity_output(outputs[i]);
@@ -3115,7 +3312,6 @@ namespace Realm {
   //
   // class PartitioningOpQueue
 
-  static int num_partitioning_workers = 1;
   PartitioningOpQueue::PartitioningOpQueue( CoreReservation *_rsrv)
     : shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
   {}
@@ -3130,7 +3326,8 @@ namespace Realm {
   {
     CommandLineParser cp;
 
-    cp.add_option_int("-dp:workers", num_partitioning_workers);
+    cp.add_option_int("-dp:workers", cfg_num_partitioning_workers);
+    cp.add_option_bool("-dp:noisectopt", cfg_disable_intersection_optimization);
 
     cp.parse_command_line(cmdline);
   }
@@ -3142,7 +3339,7 @@ namespace Realm {
 						CoreReservationParameters());
     op_queue = new PartitioningOpQueue(rsrv);
     ThreadLaunchParameters tlp;
-    for(int i = 0; i < num_partitioning_workers; i++) {
+    for(int i = 0; i < cfg_num_partitioning_workers; i++) {
       Thread *t = Thread::create_kernel_thread<PartitioningOpQueue,
 					       &PartitioningOpQueue::worker_thread_loop>(op_queue,
 											 tlp,

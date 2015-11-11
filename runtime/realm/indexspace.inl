@@ -494,6 +494,28 @@ namespace Realm {
     return true;
   }
 
+  template <int N, typename T>
+  inline bool ZIndexSpace<N,T>::overlaps(const ZIndexSpace<N,T>& other) const
+  {
+    if(dense()) {
+      if(other.dense()) {
+	// just test bounding boxes
+	return bounds.overlaps(other.bounds);
+      } else {
+	// have the other guy test against our bounding box
+	return other.contains_any(bounds);
+      }
+    } else {
+      if(other.dense()) {
+	return contains_any(other.bounds);
+      } else {
+	// nasty case - both sparse
+	assert(0);
+	return true;
+      }
+    }
+  }
+
   // actual number of points in index space (may be less than volume of bounding box)
   template <int N, typename T>
   inline size_t ZIndexSpace<N,T>::volume(void) const
@@ -554,12 +576,23 @@ namespace Realm {
     if(!bounds.contains(r))
       return false;
 
-    if(!dense()) {
-      // test against sparsity map too
-      assert(0);
+    // if it's a dense rectangle, no further tests
+    if(dense())
+      return true;
+
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    const std::vector<ZRect<N,T> >& approx_rects = impl->get_approx_rects();
+    for(typename std::vector<ZRect<N,T> >::const_iterator it = approx_rects.begin();
+	it != approx_rects.end();
+	it++) {
+      if(it->contains(r))
+	return true;
+      if(it->overlaps(r))
+	assert(0);
     }
 
-    return true;
+    // no entries matched, so the point is definitely not contained in this space
+    return false;
   }
 
   template <int N, typename T>
@@ -569,12 +602,43 @@ namespace Realm {
     if(!bounds.overlaps(r))
       return false;
 
-    if(!dense()) {
-      // test against sparsity map too
-      assert(0);
+    // if it's a dense rectangle, no further tests
+    if(dense())
+      return true;
+
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    const std::vector<ZRect<N,T> >& approx_rects = impl->get_approx_rects();
+    for(typename std::vector<ZRect<N,T> >::const_iterator it = approx_rects.begin();
+	it != approx_rects.end();
+	it++) {
+      if(it->overlaps(r))
+	return true;
     }
 
-    return true;
+    // no entries matched, so the point is definitely not contained in this space
+    return false;
+  }
+
+  template <int N, typename T>
+  inline bool ZIndexSpace<N,T>::overlaps_approx(const ZIndexSpace<N,T>& other) const
+  {
+    if(dense()) {
+      if(other.dense()) {
+	// just test bounding boxes
+	return bounds.overlaps(other.bounds);
+      } else {
+	// have the other guy test against our bounding box
+	return other.contains_any_approx(bounds);
+      }
+    } else {
+      if(other.dense()) {
+	return contains_any_approx(other.bounds);
+      } else {
+	// nasty case - both sparse
+	assert(0);
+	return true;
+      }
+    }
   }
 
   // approximage number of points in index space (may be less than volume of bounding box, but larger than
