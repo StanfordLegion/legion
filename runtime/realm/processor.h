@@ -30,6 +30,7 @@ namespace Realm {
     typedef unsigned int AddressSpace;
 
     class ProfilingRequestSet;
+    class CodeDescriptor;
 
     class Processor {
     public:
@@ -45,8 +46,9 @@ namespace Realm {
       bool exists(void) const { return id != 0; }
 
       typedef ::legion_lowlevel_task_func_id_t TaskFuncID;
-      typedef void (*TaskFuncPtr)(const void *args, size_t arglen, Processor proc);
-      typedef std::map<TaskFuncID, TaskFuncPtr> TaskIDTable;
+      typedef void (*TaskFuncPtr)(const void *args, size_t arglen,
+				  const void *user_data, size_t user_data_len,
+				  Processor proc);
 
       // Different Processor types
       // Keep this in sync with legion_processor_kind_t in lowlevel_config.h
@@ -86,6 +88,26 @@ namespace Realm {
                   Event wait_on = Event::NO_EVENT, int priority = 0) const;
 
       static Processor get_executing_processor(void);
+
+      // dynamic task registration - this may be done for:
+      //  1) a specific processor/group (anywhere in the system)
+      //  2) for all processors of a given type, either in the local address space/process,
+      //       or globally
+      //
+      // in both cases, an Event is returned, and any tasks launched that expect to use the
+      //  newly-registered task IDs must include that event as a precondition
+
+      Event register_task(TaskFuncID func_id,
+			  const CodeDescriptor& codedesc,
+			  const ProfilingRequestSet& prs,
+			  const void *user_data = 0, size_t user_data_len = 0) const;
+
+      static Event register_task_by_kind(Kind target_kind, bool global,
+					 TaskFuncID func_id,
+					 const CodeDescriptor& codedesc,
+					 const ProfilingRequestSet& prs,
+					 const void *user_data = 0, size_t user_data_len = 0);
+
     };
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }

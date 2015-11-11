@@ -566,7 +566,9 @@ namespace LegionRuntime {
       RegionProjectionTable;
     typedef std::map<ProjectionID,PartitionProjectionFnptr> 
       PartitionProjectionTable;
-    typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
+    typedef void (*LowLevelFnptr)(const void*,size_t,
+				  const void*,size_t,Processor);
+    typedef std::map<Processor::TaskFuncID, LowLevelFnptr> TaskIDTable;
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
                                 Context,Runtime*,void*&,size_t&);
     // A little bit of logic here to figure out the 

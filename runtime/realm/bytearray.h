@@ -23,44 +23,23 @@
 
 namespace Realm {
 
-  class ByteArray {
+  // a ByteArrayRef is a const reference to somebody else's storage (e.g. a
+  //   ByteArray)
+  class ByteArrayRef {
   public:
-    inline ByteArray(void);
-    inline ByteArray(const void *copy_from, size_t copy_size);
-    inline ByteArray(const ByteArray& copy_from);
+    ByteArrayRef(void);
+    ByteArrayRef(const void *ref_base, size_t ref_size);
+    ByteArrayRef(const ByteArrayRef& ref);
 
-    inline ~ByteArray(void);
-
-    // copies the contents of the rhs ByteArray
-    inline ByteArray& operator=(const ByteArray& copy_from);
-
-    // swaps the contents of two ByteArrays - returns a reference to the first one
-    // this allows you to transfer ownership of a byte array to a called function via:
-    //   ByteArray().swap(old_array)
-    inline ByteArray& swap(ByteArray& swap_with);
-
-    // copy raw data in
-    inline ByteArray& set(const void *copy_from, size_t copy_size);
-
-    // give ownership of a buffer to a ByteArray
-    inline ByteArray& attach(void *new_base, size_t new_size);
-
-    // explicitly deallocate any held storage
-    inline void clear(void);
-
-    // extract the pointer from the ByteArray (caller assumes ownership)
-    inline void *detach(void);
+    // change what this ByteArrayRef refers to
+    ByteArrayRef& changeref(const void *ref_base, size_t ref_size);
 
     // access to base pointer and size
-    inline void *base(void);
-    inline const void *base(void) const;
+    const void *base(void) const;
 
-    inline size_t size(void) const;
+    size_t size(void) const;
 
     // helper to access bytes as typed references
-    template <typename T>
-    T& at(size_t offset);
-
     template <typename T>
     const T& at(size_t offset) const;
 
@@ -69,12 +48,63 @@ namespace Realm {
     size_t array_size;
   };
 
+  class ByteArray : public ByteArrayRef {
+  public:
+    ByteArray(void);
+    ByteArray(const void *copy_from, size_t copy_size);
+    ByteArray(const ByteArray& copy_from);
+
+    // not actually a copy constructor!  blech...
+    ByteArray(const ByteArrayRef& copy_from);
+
+    ~ByteArray(void);
+
+    // copies the contents of the rhs ByteArray (again two versions)
+    ByteArray& operator=(const ByteArrayRef& copy_from);
+    ByteArray& operator=(const ByteArray& copy_from);
+
+    // swaps the contents of two ByteArrays - returns a reference to the first one
+    // this allows you to transfer ownership of a byte array to a called function via:
+    //   ByteArray().swap(old_array)
+    ByteArray& swap(ByteArray& swap_with);
+
+    // copy raw data in
+    ByteArray& set(const void *copy_from, size_t copy_size);
+
+    // access to base pointer and size
+    // (const versions are redeclared due to some C++ weirdness)
+    void *base(void);
+    const void *base(void) const;
+
+    // helper to access bytes as typed references
+    template <typename T>
+    T& at(size_t offset);
+
+    template <typename T>
+    const T& at(size_t offset) const;
+
+    // give ownership of a buffer to a ByteArray
+    ByteArray& attach(void *new_base, size_t new_size);
+
+    // explicitly deallocate any held storage
+    void clear(void);
+
+    // extract the pointer from the ByteArray (caller assumes ownership)
+    void *detach(void);
+
+  protected:
+    void make_copy(const void *copy_base, size_t copy_size);
+  };
+
   // support for realm-style serialization
   template <typename S>
-    bool operator<<(S& serdez, const ByteArray& a);
+    bool serialize(S& serdez, const ByteArrayRef& a);
 
   template <typename S>
-    bool operator>>(S& serdez, ByteArray& a);
+    bool serialize(S& serdez, const ByteArray& a);
+
+  template <typename S>
+    bool deserialize(S& serdez, ByteArray& a);
 
 }; // namespace Realm
 

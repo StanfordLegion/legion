@@ -1338,15 +1338,15 @@ namespace LegionRuntime {
     {
       if (!mapped)
         return;
-      // Before unmapping, make sure any previous mappings have finished
-      wait_until_valid();
-      mapped = false;
-      valid = false;
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
-        termination_event.trigger();
+        // Can only do the trigger when we have actually ready
+        Event ref_ready = reference.get_ready_event();
+        termination_event.trigger(Event::merge_events(ready_event,ref_ready));
       }
+      valid = false;
+      mapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4514,7 +4514,7 @@ namespace LegionRuntime {
         IndividualTask *top_task = get_available_individual_task(false);
         // Get a remote task to serve as the top of the top-level task
         RemoteTask *top_context = get_available_remote_task(false);
-        top_context->initialize_remote(0, NULL);
+        top_context->initialize_remote(0, NULL, true/*top*/);
         // Set the executing processor
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Internal::legion_main_id, TaskArgument());
@@ -4557,7 +4557,7 @@ namespace LegionRuntime {
       IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *map_context = get_available_remote_task(false);
-      map_context->initialize_remote(0, NULL);
+      map_context->initialize_remote(0, NULL, true/*top*/);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -8333,6 +8333,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
       }
+      ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -9733,9 +9734,12 @@ namespace LegionRuntime {
       }
 #endif
       // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
+#ifdef LEGION_SPY
+      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
+            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
+#else
       // Mark that we are starting a trace
-      ctx->begin_trace(tid); 
+      ctx->begin_trace(tid);
 #endif
     }
 
@@ -10641,6 +10645,14 @@ namespace LegionRuntime {
     void Internal::send_task(Processor target, TaskOp *task)
     //--------------------------------------------------------------------------
     {
+      if (!target.exists())
+      {
+        log_run.error("Mapper requested invalid NO_PROC as target proc!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_TARGET_PROC);
+      }
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
@@ -10675,6 +10687,14 @@ namespace LegionRuntime {
                                    const std::set<TaskOp*> &tasks)
     //--------------------------------------------------------------------------
     {
+      if (!target.exists())
+      {
+        log_run.error("Mapper requested invalid NO_PROC as target proc!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_TARGET_PROC);
+      }
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
@@ -12125,20 +12145,7 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
-      // First find it and remove it from the table
-      RemoteTask *remote_task;
-      {
-        AutoLock rem_lock(remote_lock);
-        std::map<UniqueID,RemoteTask*>::iterator finder = 
-          remote_contexts.find(remote_owner_uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != remote_contexts.end());
-#endif
-        remote_task = finder->second;
-        remote_contexts.erase(finder);
-      }
-      // Now we can deactivate it
-      remote_task->deactivate();
+      release_remote_context(remote_owner_uid);
     }
 
     //--------------------------------------------------------------------------
@@ -14095,16 +14102,25 @@ namespace LegionRuntime {
         free_remote_task(remote_ctx);
       else
       {
-        remote_ctx->initialize_remote(uid, remote_parent);
-        // Send back the subscription message
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_parent);
-          rez.serialize(remote_ctx);
-        }
+        remote_ctx->initialize_remote(uid, remote_parent, false/*top*/);
         AddressSpaceID target = find_address_space(orig_proc);
-        send_subscribe_remote_context(target, rez);
+        // In some cases we might be asked to temporarily make a
+        // remote task for a task that has been sent back to its
+        // owner node, in which case we don't have to send the
+        // subscription message.
+        if (target != address_space)
+        {
+          // Send back the subscription message
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(remote_parent);
+            rez.serialize(remote_ctx);
+          }
+          send_subscribe_remote_context(target, rez);
+        }
+        else // We're back to being local so we can just notify the parent
+          remote_parent->record_remote_instance(target, result);
       }
       return result;
     }
@@ -14122,6 +14138,25 @@ namespace LegionRuntime {
       if (finder != remote_contexts.end())
         return finder->second;
       return remote_parent_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::release_remote_context(UniqueID remote_owner_uid)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTask *remote_task;
+      {
+        AutoLock rem_lock(remote_lock);
+        std::map<UniqueID,RemoteTask*>::iterator finder = 
+          remote_contexts.find(remote_owner_uid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != remote_contexts.end());
+#endif
+        remote_task = finder->second;
+        remote_contexts.erase(finder);
+      }
+      // Now we can deactivate it
+      remote_task->deactivate();
     }
 
     //--------------------------------------------------------------------------
@@ -14882,9 +14917,9 @@ namespace LegionRuntime {
 
       // register tasks and reduction ops with Realm 
       {
-	const Processor::TaskIDTable& task_table =
+	const TaskIDTable& task_table =
 	  get_task_table(true/*add runtime tasks*/);
-	for(Processor::TaskIDTable::const_iterator it = task_table.begin();
+	for(TaskIDTable::const_iterator it = task_table.begin();
 	    it != task_table.end();
 	    it++)
 	  realm.register_task(it->first, it->second);
@@ -15549,11 +15584,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskIDTable& Internal::get_task_table(
-                                            bool add_runtime_tasks /*= true*/)
+    /*static*/ TaskIDTable& Internal::get_task_table(
+                                              bool add_runtime_tasks /*= true*/)
     //--------------------------------------------------------------------------
     {
-      static Processor::TaskIDTable table;
+      static TaskIDTable table;
       if (add_runtime_tasks)
         Internal::register_runtime_tasks(table); 
       return table;
@@ -15606,8 +15641,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Internal::
-                          register_runtime_tasks(Processor::TaskIDTable &table)
+    /*static*/ void Internal::register_runtime_tasks(TaskIDTable &table)
     //--------------------------------------------------------------------------
     {
       // Check to make sure that nobody has registered any tasks here
@@ -15755,7 +15789,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Internal::initialize_runtime(
-                                  const void *args, size_t arglen, Processor p)
+                                          const void *args, size_t arglen, 
+                                          const void *userdata, size_t userlen,
+                                          Processor p)
     //--------------------------------------------------------------------------
     {
       // Always enable the idle task for any processor 
@@ -15937,8 +15973,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Internal::shutdown_runtime(
-                                  const void *args, size_t arglen, Processor p)
+    /*static*/ void Internal::shutdown_runtime(const void *args, size_t arglen, 
+                              const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
       if (separate_runtime_instances)
@@ -15954,7 +15990,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Internal::high_level_runtime_task(
-                                  const void *args, size_t arglen, Processor p)
+                                  const void *args, size_t arglen, 
+				  const void *userdata, size_t userlen,
+				  Processor p)
     //--------------------------------------------------------------------------
     {
       const char *data = (const char*)args;
@@ -16349,7 +16387,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Internal::profiling_runtime_task(
-                                   const void *args, size_t arglen, Processor p)
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
     //--------------------------------------------------------------------------
     {
       Internal *rt = Internal::get_runtime(p);
@@ -16358,7 +16398,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void Internal::profiling_mapper_task(
-                                   const void *args, size_t arglen, Processor p)
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
     //--------------------------------------------------------------------------
     {
       SingleTask::process_mapper_profiling(args, arglen);

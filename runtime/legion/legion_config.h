@@ -297,6 +297,8 @@ typedef enum legion_error_t {
   ERROR_RESERVED_SERDEZ_ID = 134,
   ERROR_DUPLICATE_SERDEZ_ID = 135,
   ERROR_INVALID_SERDEZ_ID = 136,
+  ERROR_TRACE_VIOLATION = 137,
+  ERROR_INVALID_TARGET_PROC = 138,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

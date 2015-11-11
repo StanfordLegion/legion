@@ -197,7 +197,6 @@ namespace Realm {
     public:
       MachineImpl *machine;
 
-      Processor::TaskIDTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
       std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
 

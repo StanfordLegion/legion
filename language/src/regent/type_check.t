@@ -106,7 +106,7 @@ end
 function type_check.region_bare(cx, node)
   local region = node.symbol
   local region_type = region.type
-  if not std.is_region(region_type) then
+  if not (std.type_supports_privileges(region_type)) then
     log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
   end
   return region
@@ -115,7 +115,7 @@ end
 function type_check.region_root(cx, node)
   local region = type_check.region_bare(cx, node)
   local region_type = region.type
-  local value_type = region_type.fspace_type
+  local value_type = region_type:fspace()
   return {
     region = region,
     fields = type_check.region_fields(
@@ -126,10 +126,10 @@ end
 function type_check.expr_region_root(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
-  if not std.is_region(region_type) then
+  if not std.type_supports_privileges(region_type) then
     log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
   end
-  local value_type = region_type.fspace_type
+  local value_type = region_type:fspace()
   return ast.typed.expr.RegionRoot {
     region = region,
     fields = type_check.region_fields(
@@ -242,7 +242,7 @@ function type_check.coherence(cx, node, result)
     for _, region_field in ipairs(region_fields) do
       local region = region_field.region
       local region_type = region.type
-      assert(std.is_region(region_type))
+      assert(std.type_supports_privileges(region_type))
       if not result[region_type] then
         result[region_type] = data.newmap()
       end
@@ -260,6 +260,50 @@ function type_check.coherence_modes(cx, node)
   local result = data.newmap()
   for _, coherence in ipairs(node) do
     type_check.coherence(cx, coherence, result)
+  end
+  return result
+end
+
+function type_check.flag_kind(cx, node)
+  if node:is(ast.specialized.flag_kind.NoAccessFlag) then
+    return std.no_access_flag
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function type_check.flag_kinds(cx, node)
+  return node:map(function(flag) return type_check.flag_kind(cx, flag) end)
+end
+
+function type_check.flag(cx, node, result)
+  local flags = type_check.flag_kinds(cx, node.flags)
+  local region_fields = type_check.regions(cx, node.regions)
+
+  for _, flag in ipairs(flags) do
+    for _, region_field in ipairs(region_fields) do
+      local region = region_field.region
+      local region_type = region.type
+      assert(std.type_supports_privileges(region_type))
+      if not result[region_type] then
+        result[region_type] = data.newmap()
+      end
+
+      local fields = region_field.fields
+      for _, field in ipairs(fields) do
+        if not result[region_type][field] then
+          result[region_type][field] = data.newmap()
+        end
+        result[region_type][field][flag] = true
+      end
+    end
+  end
+end
+
+function type_check.flags(cx, node)
+  local result = data.newmap()
+  for _, flag in ipairs(node) do
+    type_check.flag(cx, flag, result)
   end
   return result
 end
@@ -299,17 +343,24 @@ function type_check.expr_condition(cx, node)
   local value_types = values:map(
     function(value) return std.check_read(cx, value) end)
   for _, value_type in ipairs(value_types) do
-    if not std.is_phase_barrier(value_type) then
+    if not (std.is_phase_barrier(value_type) or
+            std.is_list_of_phase_barriers(value_type)) then
       log.error(node, "type mismatch: expected " ..
                   tostring(std.phase_barrier) .. " but got " ..
                   tostring(value_type))
     end
   end
 
-  return ast.typed.expr.Condition {
-    conditions = conditions,
-    values = values,
-  }
+  return values:map(
+    function(value)
+      return ast.typed.expr.Condition {
+        conditions = conditions,
+        value = value,
+        expr_type = std.as_read(value.expr_type),
+        options = node.options,
+        span = node.span,
+      }
+    end)
 end
 
 function type_check.conditions(cx, node, params)
@@ -542,7 +593,7 @@ function type_check.expr_index_access(cx, node)
     else
       region_symbol = terralib.newsymbol(value_type)
     end
-    local result_type = std.ref(region_index_type(value_type.fspace_type, region_symbol))
+    local result_type = std.ref(region_index_type(value_type:fspace(), region_symbol))
 
     return ast.typed.expr.IndexAccess {
       value = value,
@@ -552,12 +603,20 @@ function type_check.expr_index_access(cx, node)
       span = node.span,
     }
   elseif std.is_list(value_type) then
-    if not std.validate_implicit_cast(index_type, int) then
-      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    local slice = std.type_eq(index_type, std.list(int))
+    if not (std.validate_implicit_cast(index_type, int) or slice) then
+      log.error(node, "type mismatch: expected " .. tostring(int) .. " or " ..
+                  tostring(std.list(int)) .. " but got " ..
+                  tostring(index_type))
     end
 
     if not value_type:is_list_of_regions() then
       local expr_type = value_type.element_type
+      if slice then
+        for i = 1, value_type:list_depth() do
+          expr_type = std.list(expr_type)
+        end
+      end
       return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
@@ -566,7 +625,21 @@ function type_check.expr_index_access(cx, node)
         span = node.span,
       }
     else
-      assert(false)
+      local expr_type
+      if slice then
+        expr_type = value_type:slice()
+      else
+        expr_type = value_type:subregion_dynamic()
+      end
+      std.copy_privileges(cx, value_type, expr_type)
+      -- FIXME: Copy constraints from list type.
+      return ast.typed.expr.IndexAccess {
+        value = value,
+        index = index,
+        expr_type = expr_type,
+        options = node.options,
+        span = node.span,
+      }
     end
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -722,7 +795,7 @@ function type_check.expr_call(cx, node)
         local privilege_type = privilege.privilege
         local region = privilege.region
         local field_path = privilege.field_path
-        assert(std.is_region(region.type))
+        assert(std.type_supports_privileges(region.type))
         local arg_region = mapping[region.type]
         if not std.check_privilege(cx, privilege_type, arg_region.type, field_path) then
           for i, arg in ipairs(arg_symbols) do
@@ -892,7 +965,7 @@ function type_check.expr_raw_fields(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type.fspace_type)
+  local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
     if std.check_any_privilege(cx, region_type, field_path) then
@@ -914,7 +987,7 @@ function type_check.expr_raw_physical(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type.fspace_type)
+  local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
     if std.check_any_privilege(cx, region_type, field_path) then
@@ -1118,7 +1191,7 @@ function type_check.expr_region(cx, node)
     assert(not std.type_eq(region, other_region))
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
-    if std.type_maybe_eq(region.fspace_type, other_region.fspace_type) then
+    if std.type_maybe_eq(region:fspace(), other_region:fspace()) then
       std.add_constraint(cx, region, other_region, "*", true)
     end
   end
@@ -1195,6 +1268,74 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_list_duplicate_partition(cx, node)
+  local partition = type_check.expr(cx, node.partition)
+  local partition_type = std.check_read(cx, partition)
+  local indices = type_check.expr(cx, node.indices)
+  local indices_type = std.check_read(cx, indices)
+  if not std.is_partition(partition_type) then
+    log.error(node, "type mismatch: expected a partition but got " .. tostring(partition_type))
+  end
+  if not std.validate_implicit_cast(indices_type, std.list(int)) then
+    log.error(node, "type mismatch: expected " .. tostring(std.list(int)) .. " but got " .. tostring(indices_type))
+  end
+  local expr_type = std.list(
+    std.region(
+      terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
+      partition_type:parent_region():fspace()),
+    partition_type)
+
+  std.add_privilege(cx, "reads", expr_type, data.newtuple())
+  std.add_privilege(cx, "writes", expr_type, data.newtuple())
+  -- Freshly created regions are, by definition, disjoint from all
+  -- other regions.
+  for other_region, _ in pairs(cx.region_universe) do
+    assert(not std.type_eq(expr_type, other_region))
+    -- But still, don't bother litering the constraint space with
+    -- trivial constraints.
+    if std.type_maybe_eq(expr_type:fspace(), other_region:fspace()) then
+      std.add_constraint(cx, expr_type, other_region, "*", true)
+    end
+  end
+  cx:intern_region(expr_type)
+
+  return ast.typed.expr.ListDuplicatePartition {
+    partition = partition,
+    indices = indices,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_cross_product(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_read(cx, lhs)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
+  if not std.is_list_of_regions(lhs_type) then
+    log.error(node, "type mismatch: expected a list of regions but got " .. tostring(lhs_type))
+  end
+  if not std.is_list_of_regions(rhs_type) then
+    log.error(node, "type mismatch: expected a list of regions but got " .. tostring(rhs_type))
+  end
+  local expr_type = std.list(
+    std.list(rhs_type:subregion_dynamic(), nil, 1),
+    nil, 1)
+
+  std.copy_privileges(cx, rhs_type, expr_type)
+  -- FIXME: Copy constraints.
+  cx:intern_region(expr_type)
+
+  return ast.typed.expr.ListCrossProduct {
+    lhs = lhs,
+    rhs = rhs,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_range(cx, node)
   local start = type_check.expr(cx, node.start)
   local start_type = std.check_read(cx, start)
@@ -1252,9 +1393,31 @@ function type_check.expr_copy(cx, node)
   local src_type = std.check_read(cx, src)
   local dst = type_check.expr_region_root(cx, node.dst)
   local dst_type = std.check_read(cx, dst)
-  local conditions = node.conditions:map(
-    function(condition) return type_check.expr_condition(cx, condition) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
   local expr_type = terralib.types.unit
+
+  if src_type:list_depth() > dst_type:list_depth() then
+    log.error(node, "must copy from less-nested to more-nested list")
+  end
+
+  for _, condition in ipairs(conditions) do
+    local value = condition.value
+    local value_type = std.check_read(cx, value)
+    for _, condition_kind in ipairs(condition.conditions) do
+      if condition_kind == std.awaits and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must await list of same or less depth than destination")
+      elseif condition_kind == std.arrives and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must arrive list of same or less depth than destination")
+      end
+    end
+  end
 
   if #src.fields ~= #dst.fields then
     log.error(node, "mismatch in number of fields between " .. tostring(#src.fields) ..
@@ -1263,23 +1426,171 @@ function type_check.expr_copy(cx, node)
 
   for i, src_field in ipairs(src.fields) do
     local dst_field = dst.fields[i]
-    local src_type = std.get_field_path(src_type.fspace_type, src_field)
-    local dst_type = std.get_field_path(dst_type.fspace_type, dst_field)
+    local src_type = std.get_field_path(src_type:fspace(), src_field)
+    local dst_type = std.get_field_path(dst_type:fspace(), dst_field)
     if not std.type_eq(src_type, dst_type) then
       log.error(node, "type mismatch between " .. tostring(src_type) ..
                   " and " .. tostring(dst_type))
     end
   end
 
-  print(src.fields:mkstring(" "))
-  print(dst.fields:mkstring(" "))
+  for _, field_path in ipairs(src.fields) do
+    if not std.check_privilege(cx, std.reads, src_type, field_path) then
+      local src_region
+      if node.src.region:is(ast.specialized.expr.ID) then
+        src_region = node.src.region.value
+      else
+        src_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.reads) .. "(" ..
+          (data.newtuple(src_region) .. field_path):mkstring(".") .. ")")
+    end
+  end
+  for _, field_path in ipairs(dst.fields) do
+    if node.op then
+      if not std.check_privilege(cx, std.reduces(node.op), dst_type, field_path)
+      then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node,
+          "invalid privileges in copy: " .. tostring(std.reduces(node.op)) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+    else
+      if not std.check_privilege(cx, std.reads, dst_type, field_path) then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node, "invalid privileges in copy: " .. tostring(std.reads) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+      if not std.check_privilege(cx, std.writes, dst_type, field_path) then
+        local dst_region
+        if node.dst.region:is(ast.specialized.expr.ID) then
+          dst_region = node.dst.region.value
+        else
+          dst_region = terralib.newsymbol()
+        end
+        log.error(
+          node, "invalid privileges in copy: " .. tostring(std.writes) ..
+            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            ")")
+      end
+    end
+  end
 
   return ast.typed.expr.Copy {
     src = src,
     dst = dst,
     op = node.op,
     conditions = conditions,
-    expr_type = terralib.types.unit,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_fill(cx, node)
+  local dst = type_check.expr_region_root(cx, node.dst)
+  local dst_type = std.check_read(cx, dst)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
+  local expr_type = terralib.types.unit
+
+  for i, dst_field in ipairs(dst.fields) do
+    local dst_type = std.get_field_path(dst_type:fspace(), dst_field)
+    if not std.validate_implicit_cast(value_type, dst_type) then
+      log.error(node, "type mismatch between " .. tostring(value_type) ..
+                  " and " .. tostring(dst_type))
+    end
+  end
+
+  for _, field_path in ipairs(dst.fields) do
+    if not std.check_privilege(cx, std.reads, dst_type, field_path) then
+      local dst_region
+      if node.dst.region:is(ast.specialized.expr.ID) then
+        dst_region = node.dst.region.value
+      else
+        dst_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, dst_type, field_path) then
+      local dst_region
+      if node.dst.region:is(ast.specialized.expr.ID) then
+        dst_region = node.dst.region.value
+      else
+        dst_region = terralib.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in copy: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.Fill {
+    dst = dst,
+    value = value,
+    conditions = conditions,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_allocate_scratch_fields(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local expr_type = std.c.legion_field_id_t[#region.fields]
+
+  return ast.typed.expr.AllocateScratchFields {
+    region = region,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_with_scratch_fields(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local field_ids = type_check.expr(cx, node.field_ids)
+  local field_ids_type = std.check_read(cx, field_ids)
+
+  local expr_type = std.region(
+    terralib.newsymbol(region_type:ispace()),
+    region_type:fspace())
+  if std.is_list_of_regions(region_type) then
+    for i = 1, region_type:list_depth() do
+      expr_type = std.list(
+        expr_type, region_type:partition(), region_type.privilege_depth)
+    end
+  end
+
+  std.copy_privileges(cx, region_type, expr_type)
+
+  return ast.typed.expr.WithScratchFields {
+    region = region,
+    field_ids = field_ids,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1484,6 +1795,12 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
 
+  elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
+    return type_check.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListCrossProduct) then
+    return type_check.expr_list_cross_product(cx, node)
+
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)
 
@@ -1495,6 +1812,15 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)
+
+  elseif node:is(ast.specialized.expr.Fill) then
+    return type_check.expr_fill(cx, node)
+
+  elseif node:is(ast.specialized.expr.AllocateScratchFields) then
+    return type_check.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.specialized.expr.WithScratchFields) then
+    return type_check.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.specialized.expr.Unary) then
     return type_check.expr_unary(cx, node)
@@ -1612,8 +1938,10 @@ function type_check.stat_for_list(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not (std.is_ispace(value_type) or std.is_region(value_type)) then
-    log.error(node, "iterator for loop expected ispace or region, got " ..
+  if not (std.is_ispace(value_type) or std.is_region(value_type) or
+            (std.is_list(value_type) and not value_type:is_list_of_regions()))
+  then
+    log.error(node, "iterator for loop expected ispace, region or list, got " ..
                 tostring(value_type))
   end
 
@@ -1629,12 +1957,16 @@ function type_check.stat_for_list(cx, node)
   end
 
   local expected_var_type
-  if std.is_region(value_type) then
-    local index_type = value_type:ispace().index_type
-    expected_var_type = index_type(value_type.fspace_type, bound)
-  else
+  if std.is_ispace(value_type) then
     local index_type = value_type.index_type
     expected_var_type = index_type(bound)
+  elseif std.is_region(value_type) then
+    local index_type = value_type:ispace().index_type
+    expected_var_type = index_type(value_type:fspace(), bound)
+  elseif std.is_list(value_type) then
+    expected_var_type = value_type.element_type
+  else
+    assert(false)
   end
 
   local var_type = node.symbol.type
@@ -1992,7 +2324,7 @@ function type_check.stat_task(cx, node)
       local privilege_type = privilege.privilege
       local region = privilege.region
       local field_path = privilege.field_path
-      assert(std.is_region(region.type))
+      assert(std.type_supports_privileges(region.type))
       std.add_privilege(cx, privilege_type, region.type, field_path)
       cx:intern_region(region.type)
     end
@@ -2001,6 +2333,9 @@ function type_check.stat_task(cx, node)
 
   local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
   prototype:set_coherence_modes(coherence_modes)
+
+  local flags = type_check.flags(cx, node.flags)
+  prototype:set_flags(flags)
 
   local conditions = type_check.conditions(cx, node.conditions, params)
   prototype:set_conditions(conditions)
@@ -2038,6 +2373,8 @@ function type_check.stat_task(cx, node)
     return_type = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     config_options = ast.TaskConfigOptions {

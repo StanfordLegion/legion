@@ -54,7 +54,8 @@ void sigalrm_handler(int sig)
   exit(1);
 }
 
-void child_task(const void *args, size_t arglen, Processor p)
+void child_task(const void *args, size_t arglen, 
+		const void *userdata, size_t userlen, Processor p)
 {
   assert(arglen == sizeof(ChildTaskArgs));
   const ChildTaskArgs& child_args = *(const ChildTaskArgs *)args;
@@ -99,7 +100,8 @@ void child_task(const void *args, size_t arglen, Processor p)
   printf("ending child task %zd on processor " IDFMT "\n", child_args.index, p.id);
 }
 
-void check_task(const void *args, size_t arglen, Processor p)
+void check_task(const void *args, size_t arglen, 
+		const void *userdata, size_t userlen, Processor p)
 {
   assert(arglen == sizeof(ChildTaskArgs));
   const ChildTaskArgs& child_args = *(const ChildTaskArgs *)args;
@@ -120,7 +122,8 @@ void check_task(const void *args, size_t arglen, Processor p)
   }
 }
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen, 
+		    const void *userdata, size_t userlen, Processor p)
 {
   printf("top level task - getting machine and list of CPUs\n");
 

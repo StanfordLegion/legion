@@ -20,6 +20,7 @@
 #include "logging.h"
 #include "serialize.h"
 #include "profiling.h"
+#include "utils.h"
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -36,8 +37,9 @@ GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
 
 namespace Realm {
 
-  Logger log_proc("proc");
-
+  extern Logger log_task;  // defined in tasks.cc
+  extern Logger log_util;  // defined in tasks.cc
+  Logger log_taskreg("taskreg");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -167,6 +169,183 @@ namespace Realm {
       return ID(id).index();
     }
 
+    Event Processor::register_task(TaskFuncID func_id,
+				   const CodeDescriptor& codedesc,
+				   const ProfilingRequestSet& prs,
+				   const void *user_data /*= 0*/,
+				   size_t user_data_len /*= 0*/) const
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      // TODO: special case - registration on a local processor with a raw function pointer and no
+      //  profiling requests - can be done immediately and return NO_EVENT
+
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+
+      TaskRegistration *tro = new TaskRegistration(codedesc, 
+						   ByteArrayRef(user_data, user_data_len),
+						   finish_event, prs);
+      tro->mark_ready();
+      tro->mark_started();
+
+      std::vector<Processor> local_procs;
+      std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
+      // is the target a single processor or a group?
+      if(ID(*this).type() == ID::ID_PROCESSOR) {
+	gasnet_node_t n = ID(*this).node();
+	if(n == gasnet_mynode())
+	  local_procs.push_back(*this);
+	else
+	  remote_procs[n].push_back(*this);
+      } else {
+	// assume we're a group
+	ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
+	std::vector<Processor> members;
+	grp->get_group_members(members);
+	for(std::vector<Processor>::const_iterator it = members.begin();
+	    it != members.end();
+	    it++) {
+	  Processor p = *it;
+	  gasnet_node_t n = ID(p).node();
+	  if(n == gasnet_mynode())
+	    local_procs.push_back(p);
+	  else
+	    remote_procs[n].push_back(p);
+	}
+      }
+
+      // remote processors need a portable implementation available
+      if(!remote_procs.empty()) {
+	if(!tro->codedesc.has_portable_implementations()) {
+	  // try converting a function pointer into a DSO reference
+	  const FunctionPointerImplementation *fpi = tro->codedesc.find_impl<FunctionPointerImplementation>();
+	  if(!fpi) {
+	    log_taskreg.fatal() << "remote proc needs portable code: no function pointer available either";
+	    assert(0);
+	  }
+	  DSOReferenceImplementation *dso = cvt_fnptr_to_dsoref(fpi);
+	  if(!dso) {
+	    log_taskreg.fatal() << "couldn't generate DSO reference for remote task registration";
+	    assert(0);
+	  }
+	  tro->codedesc.add_implementation(dso);
+	}
+      }
+	 
+      // local processor(s) can be called directly
+      if(!local_procs.empty()) {
+	// for now, always need a function pointer implementation
+	if(!tro->codedesc.find_impl<FunctionPointerImplementation>()) {
+	  // try to make one from a dso reference, if available
+	  const DSOReferenceImplementation *dso = tro->codedesc.find_impl<DSOReferenceImplementation>();
+	  if(!dso) {
+	    log_taskreg.fatal() << "local task registration needs fnptr or DSO reference!";
+	    assert(0);
+	  }
+	  FunctionPointerImplementation *fpi = cvt_dsoref_to_fnptr(dso);
+	  if(!fpi) {
+	    log_taskreg.fatal() << "failed to convert DSO reference to function pointer";
+	    assert(0);
+	  }
+	}
+
+	for(std::vector<Processor>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++) {
+	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
+	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	}
+      }
+
+      if(!remote_procs.empty()) {
+	// TODO: remote proc case
+	assert(0);
+      }
+
+      tro->mark_finished();
+      return finish_event;
+    }
+
+    /*static*/ Event Processor::register_task_by_kind(Kind target_kind, bool global,
+						      TaskFuncID func_id,
+						      const CodeDescriptor& codedesc,
+						      const ProfilingRequestSet& prs,
+						      const void *user_data /*= 0*/,
+						      size_t user_data_len /*= 0*/)
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      // TODO: special case - registration on local processord with a raw function pointer and no
+      //  profiling requests - can be done immediately and return NO_EVENT
+
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+
+      TaskRegistration *tro = new TaskRegistration(codedesc, 
+						   ByteArrayRef(user_data, user_data_len),
+						   finish_event, prs);
+      tro->mark_ready();
+      tro->mark_started();
+
+      // do local processors first
+      std::set<Processor> local_procs;
+      get_runtime()->machine->get_local_processors_by_kind(local_procs, target_kind);
+      if(!local_procs.empty()) {
+	// for now, always need a function pointer implementation
+	if(!tro->codedesc.find_impl<FunctionPointerImplementation>()) {
+	  // try to make one from a dso reference, if available
+	  const DSOReferenceImplementation *dso = tro->codedesc.find_impl<DSOReferenceImplementation>();
+	  if(!dso) {
+	    log_taskreg.fatal() << "local task registration needs fnptr or DSO reference!";
+	    assert(0);
+	  }
+	  FunctionPointerImplementation *fpi = cvt_dsoref_to_fnptr(dso);
+	  if(!fpi) {
+	    log_taskreg.fatal() << "failed to convert DSO reference to function pointer";
+	    assert(0);
+	  }
+	}
+
+	for(std::set<Processor>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++) {
+	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
+	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	}
+      }
+
+      if(global) {
+	// remote processors need a portable implementation available
+	if(!tro->codedesc.has_portable_implementations()) {
+	  // try converting a function pointer into a DSO reference
+	  const FunctionPointerImplementation *fpi = tro->codedesc.find_impl<FunctionPointerImplementation>();
+	  if(!fpi) {
+	    log_taskreg.fatal() << "remote proc needs portable code: no function pointer available either";
+	    assert(0);
+	  }
+	  DSOReferenceImplementation *dso = cvt_fnptr_to_dsoref(fpi);
+	  if(!dso) {
+	    log_taskreg.fatal() << "couldn't generate DSO reference for remote task registration";
+	    assert(0);
+	  }
+	  tro->codedesc.add_implementation(dso);
+	}
+
+	// TODO: remote proc case
+	assert(0);
+      }
+
+      tro->mark_finished();
+      return finish_event;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -184,6 +363,21 @@ namespace Realm {
 
     void ProcessorImpl::shutdown(void)
     {
+    }
+
+    void ProcessorImpl::execute_task(Processor::TaskFuncID func_id,
+				     const ByteArrayRef& task_args)
+    {
+      // should never be called
+      assert(0);
+    }
+
+    void ProcessorImpl::register_task(Processor::TaskFuncID func_id,
+				      const CodeDescriptor& codedesc,
+				      const ByteArrayRef& user_data)
+    {
+      // should never be called
+      assert(0);
     }
 
 
@@ -311,7 +505,7 @@ namespace Realm {
     finish_event.id = args.finish_id;
     finish_event.gen = args.finish_gen;
 
-    log_proc.debug() << "received remote spawn request:"
+    log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
 		     << " proc=" << args.proc
 		     << " finish=" << finish_event;
@@ -396,7 +590,7 @@ namespace Realm {
 				     Event start_event, Event finish_event,
 				     int priority)
     {
-      log_proc.debug() << "sending remote spawn request:"
+      log_task.debug() << "sending remote spawn request:"
 		       << " func=" << func_id
 		       << " proc=" << me
 		       << " finish=" << finish_event;
@@ -481,6 +675,52 @@ namespace Realm {
     }
   }
 
+  void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
+					 const CodeDescriptor& codedesc,
+					 const ByteArrayRef& user_data)
+  {
+    // first, make sure we haven't seen this task id before
+    assert(task_table.count(func_id) == 0);
+
+    // next, get see if we have a function pointer to register
+    Processor::TaskFuncPtr fnptr;
+    const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+    if(fpi) {
+      fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+    } else {
+      assert(0);
+    }
+
+    log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << fnptr;
+
+    TaskTableEntry &tte = task_table[func_id];
+    tte.fnptr = fnptr;
+    tte.user_data = user_data;
+  }
+
+  void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
+					const ByteArrayRef& task_args)
+  {
+    std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
+    if(it == task_table.end()) {
+      // TODO: remove this hack once the tools are available to the HLR to call these directly
+      if(func_id < Processor::TASK_ID_FIRST_AVAILABLE) {
+	log_taskreg.warning() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
+	return;
+      }
+      log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+      assert(0);
+    }
+
+    const TaskTableEntry& tte = it->second;
+
+    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << tte.fnptr;
+
+    (tte.fnptr)(task_args.base(), task_args.size(),
+		tte.user_data.base(), tte.user_data.size(),
+		me);
+  }
+
   // blocks until things are cleaned up
   void LocalTaskProcessor::shutdown(void)
   {
@@ -502,15 +742,6 @@ namespace Realm {
     sched->shutdown();
   }
   
-
-  class stringbuilder {
-  public:
-    operator std::string(void) const { return ss.str(); }
-    template <typename T>
-    stringbuilder& operator<<(T data) { ss << data; return *this; }
-  protected:
-    std::stringstream ss;
-  };
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -616,6 +847,19 @@ namespace Realm {
   {
     delete core_rsrv;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TaskRegistration
+  //
+
+  TaskRegistration::TaskRegistration(const CodeDescriptor& _codedesc,
+				     const ByteArrayRef& _userdata,
+				     Event _finish_event, const ProfilingRequestSet &_requests)
+    : Operation(_finish_event, _requests)
+    , codedesc(_codedesc), userdata(_userdata)
+  {}
 
 
 }; // namespace Realm
