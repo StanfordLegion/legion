@@ -10646,6 +10646,14 @@ namespace LegionRuntime {
     void Internal::send_task(Processor target, TaskOp *task)
     //--------------------------------------------------------------------------
     {
+      if (!target.exists())
+      {
+        log_run.error("Mapper requested invalid NO_PROC as target proc!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_TARGET_PROC);
+      }
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
@@ -10680,6 +10688,14 @@ namespace LegionRuntime {
                                    const std::set<TaskOp*> &tasks)
     //--------------------------------------------------------------------------
     {
+      if (!target.exists())
+      {
+        log_run.error("Mapper requested invalid NO_PROC as target proc!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_TARGET_PROC);
+      }
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
