@@ -1739,6 +1739,89 @@ namespace LegionRuntime {
       bool fold;
     };
 
+    class RemoteSerdezMempairCopier : public MemPairCopier {
+    public:
+      RemoteSerdezMempairCopier(Memory _src_mem, Memory _dst_mem,
+				CustomSerdezID _serdez_id)
+      {
+	src_mem = get_runtime()->get_memory_impl(_src_mem);
+	src_base = (const char *)(src_mem->get_direct_ptr(0, src_mem->size));
+	assert(src_base);
+
+	dst_mem = get_runtime()->get_memory_impl(_dst_mem);
+
+	serdez_id = _serdez_id;
+	serdez_op = get_runtime()->custom_serdez_table[serdez_id];
+
+	sequence_id = __sync_fetch_and_add(&rdma_sequence_no, 1);
+	num_writes = 0;
+      }
+
+      virtual ~RemoteSerdezMempairCopier(void)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<RemoteSerdezMempairCopier>(this, src_inst,
+								      dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("remote write of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
+
+#ifdef DEBUG_REMOTE_WRITES
+	printf("remote serdez of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+#endif
+	num_writes += do_remote_serdez(dst_mem->me, dst_offset, serdez_id,
+				       src_base + src_offset, sequence_id);
+
+        record_bytes(bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+	// TODO: figure out 2D coalescing for reduction case (sizes may not match)
+	//if((src_stride == bytes) && (dst_stride == bytes)) {
+	//  copy_span(src_offset, dst_offset, bytes * lines);
+	//  return;
+	//}
+
+	// default is to unroll the lines here
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
+	  src_offset += src_stride;
+	  dst_offset += dst_stride;
+	}
+      }
+
+      virtual void flush(DmaRequest *req)
+      {
+        // if we did any remote writes, we need a fence, and the DMA request
+	//  needs to know about it
+        if(total_reqs > 0) {
+          Realm::RemoteWriteFence *fence = new Realm::RemoteWriteFence(req);
+          req->add_async_work_item(fence);
+          do_remote_fence(dst_mem->me, sequence_id, num_writes, fence);
+        }
+
+        MemPairCopier::flush(req);
+      }
+
+    protected:
+      MemoryImpl *src_mem, *dst_mem;
+      const char *src_base;
+      unsigned sequence_id, num_writes;
+      CustomSerdezID serdez_id;
+      const CustomSerdezUntyped *serdez_op;
+    };
+
     // MemPairCopier from disk memory to cpu memory
     class DisktoCPUMemPairCopier : public MemPairCopier {
     public:
@@ -1886,6 +1969,7 @@ namespace LegionRuntime {
 
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem,
 						ReductionOpID redop_id /*= 0*/,
+						CustomSerdezID serdez_id /*= 0*/,
 						bool fold /*= false*/)
     {
       // try to use new DMA channels first
@@ -1919,6 +2003,17 @@ namespace LegionRuntime {
       log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
       if(redop_id == 0) {
+        if (serdez_id != 0) {
+          // handle serdez cases, for now we only support remote serdez case
+          if((dst_kind == MemoryImpl::MKIND_REMOTE) ||
+             (dst_kind == MemoryImpl::MKIND_RDMA)) {
+              assert(src_kind != MemoryImpl::MKIND_REMOTE);
+              return new RemoteSerdezMemPairCopier(src_mem, dst_mem, serdez_id, fold);
+          }
+          log_dma.warning("Unsupported serdez transfer case (" IDFMT " -> " IDFMT ")",
+                          src_mem.id, dst_mem.id);
+          assert(0);
+        }
 	// can we perform simple memcpy's?
 	if(((src_kind == MemoryImpl::MKIND_SYSMEM) || (src_kind == MemoryImpl::MKIND_ZEROCOPY)) &&
 	   ((dst_kind == MemoryImpl::MKIND_SYSMEM) || (dst_kind == MemoryImpl::MKIND_ZEROCOPY))) {
@@ -2214,8 +2309,10 @@ namespace LegionRuntime {
       // create a copier for the memory used by all of these instance pairs
       Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
       Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-
-      MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
+      CustomSerdezID serdez_id = oas_by_inst->begin()->second.serdez_id;
+      // for now we launches an individual copy request for every serdez copy
+      assert(serdez_id == 0 || oas_by_inst.size() == 1);
+      MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, 0, serdez_id);
 
       switch(domain.get_dim()) {
       case 0:
@@ -3764,6 +3861,8 @@ namespace Realm {
 	std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
 	unsigned src_suboffset = 0;
 	unsigned dst_suboffset = 0;
+	std::set<Event> finish_events;
+
 	while((src_it != srcs.end()) && (dst_it != dsts.end())) {
 	  InstPair ip(src_it->inst, dst_it->inst);
 	  MemPair mp(get_runtime()->get_instance_impl(src_it->inst)->memory,
@@ -3789,6 +3888,27 @@ namespace Realm {
 	  oas.src_offset = src_it->offset + src_suboffset;
 	  oas.dst_offset = dst_it->offset + dst_suboffset;
 	  oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
+	  oas.serdez_id = src_it->srcdez_id;
+	  // <SERDEZ_DMA>
+	  // This is a little bit of hack: if serdez_id != 0 we directly create a
+	  // CopyRequest instead of inserting it into ''oasvec''
+	  if (oas.serdez_id != 0) {
+	    OASByInst* oas_by_inst = new OASByInst;
+	    (*oas_by_inst)[ip].push_back(oas);
+        Event ev = GenEventImpl::create_genevent()->current_event();
+        int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
+        assert(dma_node == gasnet_mynode());
+        int priority = 0; // always have priority zero
+  	    log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
+        CopyRequest *r = new CopyRequest(*this, oas_by_inst,
+  					   wait_on, ev, priority, requests);
+        log_dma.info("performing serdez copy on local node");
+        r->check_readiness(false, dma_queue);
+        finish_events.insert(ev);
+	  }
+	  else
+	  // </SERDEZ_DMA>
+
 	  oasvec.push_back(oas);
 
 	  src_suboffset += oas.size;
@@ -3807,9 +3927,6 @@ namespace Realm {
 	// make sure we used up both
 	assert(src_it == srcs.end());
 	assert(dst_it == dsts.end());
-
-	// now do a copy for each memory pair
-	std::set<Event> finish_events;
 
 	log_dma.info("copy: %zd distinct src/dst mem pairs, is=" IDFMT "", oas_by_mem.size(), is_id);
 

@@ -1158,6 +1158,71 @@ namespace Realm {
     }
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteSerdezMessage
+  //
+  /*static*/ void RemoteSerdezMessage::handle_request(RequestArgs args,
+                                                      const void *data,
+                                                      size_t datalen)
+  {
+    CustomSerdezID serdez_id;
+    log_copy.debug() << "received remote serdez request: mem=" << args.mem
+		     << ", offset=" << args.offset << ", size=" << datalen
+		     << ", seq=" << args.sender << '/' << args.sequence_id;
+
+    const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
+    size_t field_size = serdez_op->sizeof_field_type;
+    char* *pos = get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset);
+    const char* buffer = (const char*) data;
+    while (datalen > 0) {
+      size_t elemnt_size = serdez_op->deserialize(pos, buffer);
+      buffer += element_size;
+      pos+= field_size;
+      datalen -= element_size;
+    }
+
+    // track the sequence ID to know when the full RDMA is done
+    if(args.sequence_id > 0) {
+      PartialWriteKey key;
+      key.sender = args.sender;
+      key.sequence_id = args.sequence_id;
+      partial_remote_writes_lock.lock();
+      PartialWriteMap::iterator it = partial_remote_writes.find(key);
+      if(it == partial_remote_writes.end()) {
+	// first reference to this one
+	PartialWriteEntry entry;
+	entry.fence = 0;
+	entry.remaining_count = -1;
+	partial_remote_writes[key] = entry;
+#ifdef DEBUG_PWT
+	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
+	       gasnet_mynode(), key.sender, key.sequence_id,
+	       entry.fence, entry.remaining_count);
+#endif
+      } else {
+	// have an existing entry (either another write or the fence)
+	PartialWriteEntry& entry = it->second;
+#ifdef DEBUG_PWT
+	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
+	       gasnet_mynode(), key.sender, key.sequence_id,
+	       entry.fence,
+	       entry.remaining_count, entry.remaining_count - 1);
+#endif
+	entry.remaining_count--;
+	if(entry.remaining_count == 0) {
+	  // we're the last write, and we've already got the fence, so
+	  //  respond
+          RemoteWriteFenceAckMessage::send_request(args.sender,
+                                                   entry.fence);
+	  partial_remote_writes.erase(it);
+	  partial_remote_writes_lock.unlock();
+	  return;
+	}
+      }
+      partial_remote_writes_lock.unlock();
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1647,6 +1712,52 @@ namespace Realm {
 	
 	return 1;
       }
+    }
+
+    unsigned do_remote_serdez(Memory mem, off_t offset,
+                             CustomSerdezID serdez_id,
+                             const void *data, size_t count,
+                             unsigned sequence_id)
+    {
+      const CustomSerdezUntyped *serdez_op = get_runtime()->register_custom_serdez(serdez_id);
+      size_t field_size = serdez_op->sizeof_field_type;
+      log_copy_debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
+                     mem.id, offset, field_size, count, serdez_id);
+      size_t max_xfer_size = get_lmb_size(ID(mem).node());
+      // create a intermediate buf with same size as max_xfer_size
+      char* buffer_start = (char*) malloc(max_xfer_size);
+      const char *pos = (const char *)data;
+      unsigned xfers = 0;
+      while (count > 0) {
+        size_t cur_size = 0;
+        char* buffer = buffer_start;
+        off_t new_offset = offset;
+        while (count > 0) {
+          size_t elemnt_size = serdez_op->serialized_size(pos);
+          // break if including this element exceeds max_xfer_size
+          if (elemnt_size + cur_size > max_xfer_size)
+            break;
+          count--;
+          serdez_op->serialize(pos, buffer);
+          pos += field_size;
+          new_offset += field_size;
+          buffer += element_size;
+          cur_size += element_size;
+        }
+        assert(cur_size > 0);
+        RemoteSerdezMessage::RequestArgs args;
+        args.mem = mem;
+        args.offset = offset;
+        offset = new_offset;
+        args.serdez_id = serdez_id;
+        args.sender = gasnet_mynode();
+        args.sequence_id = sequence_id;
+        RemoteSerdezMessage::Message::request(ID(mem).node(), args,
+                                              buffer_start, cur_size, true);
+        xfers ++;
+      }
+      free(buffer);
+      return xfers;
     }
 
     unsigned do_remote_reduce(Memory mem, off_t offset,

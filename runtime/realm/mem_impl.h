@@ -479,6 +479,25 @@ namespace Realm {
       // no simple send_request method here - see below
     };
 
+    struct RemoteSerdezMessage {
+      struct RequestArgs : public BaseMedium {
+        Memory mem;
+        off_t offset;
+        int stride;
+        CustomSerdezID serdez_id;
+        unsigned sender;
+        unsigned sequence_id;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<REMOTE_SERDEZ_MSGID,
+                                         RequestArgs,
+                                         handle_request> Message;
+
+      // no simple send_request method here - see below
+    };
+
     struct RemoteReduceMessage {
       struct RequestArgs : public BaseMedium {
 	Memory mem;
