@@ -43,7 +43,7 @@
       div.scrollable {
         overflow-x: scroll;
         overflow-y: scroll;
-        margin-left: 400px;
+        margin-left: 300px;
       }
 
       div.fixed-left {
@@ -82,7 +82,7 @@
 
       var zoom = 1.0;
       var maxZoom = 1000.0
-      var margin_left = 400;
+      var margin_left = 300;
       var margin_bottom = 50;
       var width = $(window).width() - margin_left;
       var height = $(window).height() - margin_bottom;
@@ -364,14 +364,30 @@
         var svg = d3.select("#processors").append("svg")
           .attr("width", margin_left)
           .attr("height", height);
-        svg.selectAll(".processors")
+
+        var names = svg.selectAll(".processors")
           .data(data)
-          .enter().append("text")
-          .attr("text-anchor", "start")
+          .enter().append("text");
+
+        names.attr("text-anchor", "start")
           .attr("class", "processor")
           .attr("x", 0)
-          .attr("y", function(d) { return d.level * thickness + thickness; })
-          .text(function(d) { return d.processor; });
+          .attr("y", function(d) { return d.level * thickness + thickness; });
+
+        names.each(function(d) {
+          var text = d3.select(this);
+          var tokens = d.processor.split(" to ");
+          if (tokens.length == 1)
+            text.append("tspan").text(d.processor);
+          else {
+            var source = tokens[0];
+            var target = tokens[1].replace(" Channel", "");
+            text.append("tspan").text(source)
+              .attr({x : 0, dy : -10});
+            text.append("tspan").text("==> " + target)
+              .attr({x : 0, dy : 10});
+          }
+        });
 
         var lines = timelineSvg
           .append("g")

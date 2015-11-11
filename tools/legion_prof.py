@@ -516,6 +516,7 @@ class Channel(object):
     def emit_tsv(self, tsv_file, base_level):
         max_levels = self.max_live_copies + 1
         if max_levels > 1:
+            max_levels = max(4, max_levels)
             for copy in self.copies:
                 assert copy.level is not None
                 assert copy.start is not None
