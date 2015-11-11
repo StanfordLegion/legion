@@ -3288,7 +3288,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types)
         var [result_value] = [value_type:data(value)][ [index] ]
     end)
     result_values:insert(result_value)
-    result_types:insert(result_types)
+    result_types:insert(result_type)
   end
   return actions, result_values, result_types
 end
