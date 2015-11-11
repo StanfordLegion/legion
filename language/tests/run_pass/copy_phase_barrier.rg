@@ -13,43 +13,15 @@
 -- limitations under the License.
 
 -- runs-with:
--- []
-
 -- [["-ll:cpu", "2"]]
 
 import "regent"
 
--- Compile and link copy_phase_barrier.cc
-local cmapper
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../../runtime/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local mapper_cc = root_dir .. "copy_phase_barrier.cc"
-  local mapper_so = os.tmpname() .. ".so" -- root_dir .. "copy_phase_barrier.so"
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
+task inc(r : region(int), y : int, t : phase_barrier)
+where reads writes(r), awaits(t) do
+  for x in r do
+    @x += y
   end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 mapper_cc .. " -o " .. mapper_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. mapper_cc)
-    assert(false)
-  end
-  terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec(
-    "copy_phase_barrier.h",
-    {"-I", root_dir, "-I", runtime_dir, "-I", mapper_dir, "-I", legion_dir})
 end
 
 task mul(r : region(int), y : int, t : phase_barrier)
@@ -62,13 +34,15 @@ end
 task f(r : region(int), s : region(int), t : phase_barrier)
 where reads writes simultaneous(r, s), no_access_flag(s) do
   copy(r, s, arrives(t))
+  var t2 = advance(advance(t))
+  inc(r, 7, t2)
 end
 
 task g(r : region(int), s : region(int), t : phase_barrier)
 where reads writes simultaneous(r, s), no_access_flag(r) do
   var t1 = advance(t)
-  mul(s, 2, t1)
-  copy(s, r, +, awaits(t1)) -- redundant, but need to test
+  mul(s, 20, t1)
+  copy(s, r, arrives(t1))
 end
 
 task k() : int
@@ -90,7 +64,6 @@ task k() : int
 end
 
 task main()
-  regentlib.assert(k() == 369, "test failed")
+  regentlib.assert(k() == 2467, "test failed")
 end
-cmapper.register_mappers()
 regentlib.start(main)
