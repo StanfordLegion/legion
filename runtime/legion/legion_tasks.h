@@ -932,7 +932,8 @@ namespace LegionRuntime {
     public:
       RemoteTask& operator=(const RemoteTask &rhs);
     public:
-      void initialize_remote(UniqueID uid, SingleTask *remote_parent);
+      void initialize_remote(UniqueID uid, SingleTask *remote_parent,
+                             bool is_top_level);
       void unpack_parent_task(Deserializer &derez);
     public:
       virtual void activate(void);
@@ -959,6 +960,9 @@ namespace LegionRuntime {
     protected:
       UniqueID remote_owner_uid;
       SingleTask *remote_parent_ctx; // Never a valid pointer
+    protected:
+      bool is_top_level_context;
+      std::map<AddressSpaceID,RemoteTask*> remote_instances;
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
     protected:
       Event remote_legion_spy_completion;

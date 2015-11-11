@@ -4514,7 +4514,7 @@ namespace LegionRuntime {
         IndividualTask *top_task = get_available_individual_task(false);
         // Get a remote task to serve as the top of the top-level task
         RemoteTask *top_context = get_available_remote_task(false);
-        top_context->initialize_remote(0, NULL);
+        top_context->initialize_remote(0, NULL, true/*top*/);
         // Set the executing processor
         top_context->set_executing_processor(proc);
         TaskLauncher launcher(Internal::legion_main_id, TaskArgument());
@@ -4557,7 +4557,7 @@ namespace LegionRuntime {
       IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *map_context = get_available_remote_task(false);
-      map_context->initialize_remote(0, NULL);
+      map_context->initialize_remote(0, NULL, true/*top*/);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -12142,20 +12142,7 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
-      // First find it and remove it from the table
-      RemoteTask *remote_task;
-      {
-        AutoLock rem_lock(remote_lock);
-        std::map<UniqueID,RemoteTask*>::iterator finder = 
-          remote_contexts.find(remote_owner_uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != remote_contexts.end());
-#endif
-        remote_task = finder->second;
-        remote_contexts.erase(finder);
-      }
-      // Now we can deactivate it
-      remote_task->deactivate();
+      release_remote_context(remote_owner_uid);
     }
 
     //--------------------------------------------------------------------------
@@ -14112,16 +14099,25 @@ namespace LegionRuntime {
         free_remote_task(remote_ctx);
       else
       {
-        remote_ctx->initialize_remote(uid, remote_parent);
-        // Send back the subscription message
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_parent);
-          rez.serialize(remote_ctx);
-        }
+        remote_ctx->initialize_remote(uid, remote_parent, false/*top*/);
         AddressSpaceID target = find_address_space(orig_proc);
-        send_subscribe_remote_context(target, rez);
+        // In some cases we might be asked to temporarily make a
+        // remote task for a task that has been sent back to its
+        // owner node, in which case we don't have to send the
+        // subscription message.
+        if (target != address_space)
+        {
+          // Send back the subscription message
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(remote_parent);
+            rez.serialize(remote_ctx);
+          }
+          send_subscribe_remote_context(target, rez);
+        }
+        else // We're back to being local so we can just notify the parent
+          remote_parent->record_remote_instance(target, result);
       }
       return result;
     }
@@ -14139,6 +14135,25 @@ namespace LegionRuntime {
       if (finder != remote_contexts.end())
         return finder->second;
       return remote_parent_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::release_remote_context(UniqueID remote_owner_uid)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTask *remote_task;
+      {
+        AutoLock rem_lock(remote_lock);
+        std::map<UniqueID,RemoteTask*>::iterator finder = 
+          remote_contexts.find(remote_owner_uid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != remote_contexts.end());
+#endif
+        remote_task = finder->second;
+        remote_contexts.erase(finder);
+      }
+      // Now we can deactivate it
+      remote_task->deactivate();
     }
 
     //--------------------------------------------------------------------------

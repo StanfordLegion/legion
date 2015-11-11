@@ -1811,6 +1811,7 @@ namespace LegionRuntime {
       RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
                                               SingleTask *remote_parent_ctx); 
       SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
+      void release_remote_context(UniqueID remote_owner_uid);
     public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);

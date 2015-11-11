@@ -6124,7 +6124,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7374,7 +7377,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7947,6 +7953,7 @@ namespace LegionRuntime {
       context = RegionTreeContext();
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
+      is_top_level_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -7963,6 +7970,27 @@ namespace LegionRuntime {
                                                   false/*logical users only*/); 
         }
       }
+      if (!remote_instances.empty())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(is_top_level_context);
+#endif
+        UniqueID local_uid = get_unique_task_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
+        }
+        remote_instances.clear();
+      }
       top_level_regions.clear();
       if (context.exists())
         runtime->free_context(this);
@@ -7972,11 +8000,13 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent)
+    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent,
+                                       bool is_top_level)
     //--------------------------------------------------------------------------
     {
       remote_owner_uid = uid;
       remote_parent_ctx = remote_parent;
+      is_top_level_context = is_top_level;
       runtime->allocate_context(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
@@ -8034,17 +8064,26 @@ namespace LegionRuntime {
     void RemoteTask::record_remote_state(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst,
+    void RemoteTask::record_remote_instance(AddressSpaceID remote_instance,
                                             RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -10279,9 +10318,6 @@ namespace LegionRuntime {
       // Quick check to see if we ended up back on the original node
       if (!is_remote())
       {
-        // Otherwise we can deactivate the remote ctx and use
-        // our original parent context
-        remote_ctx->deactivate();
         parent_ctx = index_owner->parent_ctx;
         // We also have our enclosing contexts
         enclosing_contexts = index_owner->enclosing_contexts;
