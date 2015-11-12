@@ -865,12 +865,17 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
-    //  immediately finalize - the contributions happened before we got here
-    // just increment the count atomically
-    int v = __sync_add_and_fetch(&remaining_contributor_count, count);
-    if(v == 0)
-      finalize();
+    if(ID(me).node() == gasnet_mynode()) {
+      // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
+      //  immediately finalize - the contributions happened before we got here
+      // just increment the count atomically
+      int v = __sync_add_and_fetch(&remaining_contributor_count, count);
+      if(v == 0)
+	finalize();
+    } else {
+      // send the contributor count to the owner node
+      SetContribCountMessage::send_request(ID(me).node(), me, count);
+    }
   }
 
   template <int N, typename T>
@@ -2489,6 +2494,20 @@ namespace Realm {
   template <int N, typename T>
   void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();
@@ -2503,6 +2522,25 @@ namespace Realm {
     }
 
     finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool UnionMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << inputs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t _requestor,
+				  AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> inputs) &&
+	       (s >> sparsity_output));
+    assert(ok);
   }
 
 
@@ -2620,6 +2658,20 @@ namespace Realm {
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // need valid data for each input
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();
@@ -2634,6 +2686,25 @@ namespace Realm {
     }
 
     finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool IntersectionMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << inputs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t _requestor,
+						AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> inputs) &&
+	       (s >> sparsity_output));
+    assert(ok);
   }
 
 
@@ -2821,6 +2892,20 @@ namespace Realm {
   template <int N, typename T>
   void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).node();
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
     // need valid data for each source
     if(!lhs.dense()) {
       // it's safe to add the count after the registration only because we initialized
@@ -2839,6 +2924,27 @@ namespace Realm {
     }
 
     finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool DifferenceMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << lhs) &&
+	   (s << rhs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t _requestor,
+					    AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> lhs) &&
+	       (s >> rhs) &&
+	       (s >> sparsity_output));
+    assert(ok);
   }
 
 
@@ -2874,6 +2980,30 @@ namespace Realm {
 	PreimageMicroOp<N,T,N,T> *uop = new PreimageMicroOp<N,T,N,T>(args.sender,
 								     args.async_microop,
 								     fbd);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_UNION:
+      {
+	UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(args.sender,
+						       args.async_microop,
+						       fbd);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_INTERSECTION:
+      {
+	IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(args.sender,
+								     args.async_microop,
+								     fbd);
+	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_DIFFERENCE:
+      {
+	DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(args.sender,
+								 args.async_microop,
+								 fbd);
 	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
 	break;
       }
@@ -3082,6 +3212,45 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class SetContribCountMessage
+
+  template <int N, typename T>
+  /*static*/ void SetContribCountMessage::decode_request(RequestArgs args)
+  {
+    SparsityMap<N,T> sparsity;
+    sparsity.id = args.sparsity_id;
+
+    log_part.info() << "received contributor count: sparsity=" << sparsity << " count=" << args.count;
+    SparsityMapImpl<N,T>::lookup(sparsity)->set_contributor_count(args.count);
+  }
+
+  /*static*/ void SetContribCountMessage::handle_request(RequestArgs args)
+  {
+    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
+      decode_request<1,int>(args);
+      return;
+    }
+    assert(0);
+  }
+
+  template <int N, typename T>
+  /*static*/ void SetContribCountMessage::send_request(gasnet_node_t target,
+						       SparsityMap<N,T> sparsity,
+						       int count)
+  {
+    RequestArgs args;
+
+    args.dim = N;
+    args.idxtype = sizeof(T);
+    args.sparsity_id = sparsity.id;
+    args.count = count;
+
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class PartitioningOperation
 
   class DeferredPartitioningOp : public EventWaiter {
@@ -3144,8 +3313,15 @@ namespace Realm {
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> subspace;
     subspace.bounds = parent.bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node = ID(field_data[colors.size() % field_data.size()].inst).node();
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
     subspace.sparsity = sparsity;
 
     colors.push_back(color);
@@ -3201,8 +3377,20 @@ namespace Realm {
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> image;
     image.bounds = parent.bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+
+    // if the source has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(!source.dense())
+      target_node = ID(source.sparsity).node();
+    else
+      target_node = ID(field_data[sources.size() % field_data.size()].inst).node();
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
     sources.push_back(source);
@@ -3319,8 +3507,20 @@ namespace Realm {
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> preimage;
     preimage.bounds = parent.bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(!target.dense())
+      target_node = ID(target.sparsity).node();
+    else
+      target_node = ID(field_data[targets.size() % field_data.size()].inst).node();
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
 
     targets.push_back(target);
@@ -3492,8 +3692,35 @@ namespace Realm {
     // otherwise create a new index space whose bounds can fit both lhs and rhs
     ZIndexSpace<N,T> output;
     output.bounds = lhs.bounds.union_bbox(rhs.bounds);
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+
+    // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(lhs.dense()) {
+      if(rhs.dense()) {
+	target_node = gasnet_mynode();  // operation will be cheap anyway
+      } else {
+	target_node = ID(rhs.sparsity).node();
+      }
+    } else {
+      if(rhs.dense()) {
+	target_node = ID(lhs.sparsity).node();
+      } else {
+	int lhs_node = ID(lhs.sparsity).node();
+	int rhs_node = ID(rhs.sparsity).node();
+	//if(lhs_node != rhs_node)
+	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
+	// if they're different, and lhs is us, choose rhs to load-balance maybe
+	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+      }
+    }
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
     std::vector<ZIndexSpace<N,T> > ops(2);
@@ -3519,8 +3746,27 @@ namespace Realm {
       }
 
     if(!all_empty) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      // try to assign sparsity ID near the input sparsity maps (if present)
+      int target_node = gasnet_mynode();
+      int node_count = 0;
+      for(size_t i = 0; i < ops.size(); i++)
+	if(!ops[i].dense()) {
+	  int node = ID(ops[i].sparsity).node();
+	  if(node_count == 0) {
+	    node_count = 1;
+	    target_node = node;
+	  } else if((node_count == 1) && (node != target_node)) {
+	    //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
+	    target_node = gasnet_mynode();
+	    break;
+	  }
+	}
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       inputs.push_back(ops);
@@ -3565,8 +3811,34 @@ namespace Realm {
     output.bounds = lhs.bounds.intersection(rhs.bounds);
     
     if(!output.bounds.empty()) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+      // if the target has a sparsity map, use the same node - otherwise
+      // get a sparsity ID by round-robin'ing across the nodes that have field data
+      int target_node;
+      if(lhs.dense()) {
+	if(rhs.dense()) {
+	  target_node = gasnet_mynode();  // operation will be cheap anyway
+	} else {
+	  target_node = ID(rhs.sparsity).node();
+	}
+      } else {
+	if(rhs.dense()) {
+	  target_node = ID(lhs.sparsity).node();
+	} else {
+	  int lhs_node = ID(lhs.sparsity).node();
+	  int rhs_node = ID(rhs.sparsity).node();
+	  //if(lhs_node != rhs_node)
+	  //  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
+	  // if they're different, and lhs is us, choose rhs to load-balance maybe
+	  target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+	}
+      }
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       std::vector<ZIndexSpace<N,T> > ops(2);
@@ -3593,8 +3865,27 @@ namespace Realm {
       output.bounds = output.bounds.intersection(ops[i].bounds);
 
     if(!output.bounds.empty()) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      // try to assign sparsity ID near the input sparsity maps (if present)
+      int target_node = gasnet_mynode();
+      int node_count = 0;
+      for(size_t i = 0; i < ops.size(); i++)
+	if(!ops[i].dense()) {
+	  int node = ID(ops[i].sparsity).node();
+	  if(node_count == 0) {
+	    node_count = 1;
+	    target_node = node;
+	  } else if((node_count == 1) && (node != target_node)) {
+	    //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
+	    target_node = gasnet_mynode();
+	    break;
+	  }
+	}
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       inputs.push_back(ops);
@@ -3643,8 +3934,35 @@ namespace Realm {
     // otherwise the difference is no larger than the lhs
     ZIndexSpace<N,T> output;
     output.bounds = lhs.bounds;
-    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+
+    // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(lhs.dense()) {
+      if(rhs.dense()) {
+	target_node = gasnet_mynode();  // operation will be cheap anyway
+      } else {
+	target_node = ID(rhs.sparsity).node();
+      }
+    } else {
+      if(rhs.dense()) {
+	target_node = ID(lhs.sparsity).node();
+      } else {
+	int lhs_node = ID(lhs.sparsity).node();
+	int rhs_node = ID(rhs.sparsity).node();
+	//if(lhs_node != rhs_node)
+	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
+	// if they're different, and lhs is us, choose rhs to load-balance maybe
+	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+      }
+    }
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
     lhss.push_back(lhs);

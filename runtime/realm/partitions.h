@@ -413,6 +413,11 @@ namespace Realm {
   template <int N, typename T>
   class UnionMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+
+    static const Opcode OPCODE = UOPCODE_UNION;
+
     UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     UnionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~UnionMicroOp(void);
@@ -424,6 +429,14 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
+    friend struct RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    UnionMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
@@ -434,6 +447,11 @@ namespace Realm {
   template <int N, typename T>
   class IntersectionMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+
+    static const Opcode OPCODE = UOPCODE_INTERSECTION;
+
     IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     IntersectionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~IntersectionMicroOp(void);
@@ -445,6 +463,14 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
+    friend struct RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    IntersectionMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
@@ -455,6 +481,11 @@ namespace Realm {
   template <int N, typename T>
   class DifferenceMicroOp : public PartitioningMicroOp {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+
+    static const Opcode OPCODE = UOPCODE_DIFFERENCE;
+
     DifferenceMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
 
@@ -465,6 +496,14 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
+    friend struct RemoteMicroOpMessage;
+    template <typename S>
+    bool serialize_params(S& s) const;
+
+    // construct from received packet
+    template <typename S>
+    DifferenceMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
@@ -779,6 +818,27 @@ namespace Realm {
     template <int N, typename T>
     static void send_request(gasnet_node_t target, intptr_t output_op, int output_index,
 			     const ZRect<N,T> *rects, size_t count);
+  };
+    
+  struct SetContribCountMessage {
+    struct RequestArgs {
+      int dim;
+      int idxtype;
+      id_t sparsity_id;
+      int count;
+    };
+
+    template <int N, typename T>
+    static void decode_request(RequestArgs args);
+
+    static void handle_request(RequestArgs args);
+
+    typedef ActiveMessageShortNoReply<SET_CONTRIB_COUNT_MSGID,
+                                      RequestArgs,
+                                      handle_request> Message;
+
+    template <int N, typename T>
+    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity, int count);
   };
     
 };

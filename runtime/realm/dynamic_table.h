@@ -81,6 +81,10 @@ namespace Realm {
       ET *alloc_entry(void);
       void free_entry(ET *entry);
 
+      // allocates a range of IDs that can be given to a remote node for remote allocation
+      // these entries do not go on the local free list unless they are deleted after being used
+      void alloc_range(int requested, IT& first_id, IT& last_id);
+
       DynamicTable<ALLOCATOR>& table;
       int owner;
       LT lock;

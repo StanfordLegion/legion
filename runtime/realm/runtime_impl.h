@@ -125,6 +125,25 @@ namespace Realm {
       DynamicTable<SparsityMapTableAllocator> sparsity_maps;
     };
 
+    class RemoteIDAllocator {
+    public:
+      RemoteIDAllocator(void);
+      ~RemoteIDAllocator(void);
+
+      void set_request_size(ID::ID_Types id_type, int batch_size, int low_water_mark);
+      void make_initial_requests(void);
+
+      ID::IDType get_remote_id(gasnet_node_t target, ID::ID_Types id_type);
+
+      void add_id_range(gasnet_node_t target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
+
+    protected:
+      GASNetHSL mutex;
+      std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
+      std::map<ID::ID_Types, std::set<gasnet_node_t> > reqs_in_flight;
+      std::map<ID::ID_Types, std::map<gasnet_node_t, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
+    };
+
     // the "core" module provides the basic memories and processors used by Realm
     class CoreModule : public Module {
     public:
@@ -215,6 +234,7 @@ namespace Realm {
       IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
       SparsityMapTableAllocator::FreeList *local_sparsity_map_free_list;
+      RemoteIDAllocator remote_id_allocator;
 
       pthread_t *background_pthread;
 #ifdef DEADLOCK_TRACE
@@ -256,6 +276,39 @@ namespace Realm {
     inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
 
     // active messages
+
+    struct RemoteIDRequestMessage {
+      struct RequestArgs {
+	gasnet_node_t sender;
+	ID::ID_Types id_type;
+	int count;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_ID_REQUEST_MSGID,
+				        RequestArgs,
+				        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, ID::ID_Types id_type, int count);
+    };
+
+    struct RemoteIDResponseMessage {
+      struct RequestArgs {
+	gasnet_node_t responder;
+	ID::ID_Types id_type;
+	ID::IDType first_id, last_id;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_ID_RESPONSE_MSGID,
+				        RequestArgs,
+				        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, ID::ID_Types id_type,
+			       ID::IDType first_id, ID::IDType last_id);
+    };
 
     struct RuntimeShutdownMessage {
       struct RequestArgs {
