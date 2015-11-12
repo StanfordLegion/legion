@@ -6436,9 +6436,18 @@ namespace LegionRuntime {
                                                        version_info,
                                                        restrict_infos[*it],
                                                        privilege_paths[*it]);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(rerun_analysis_requirements.empty());
-#endif
+          // If we still have re-run requirements, then we have
+          // interfering region requirements so warn the user
+          if (!rerun_analysis_requirements.empty())
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  rerun_analysis_requirements.begin(); it2 != 
+                  rerun_analysis_requirements.end(); it2++)
+            {
+              report_interfering_requirements(*it, *it2);
+            }
+            rerun_analysis_requirements.clear();
+          }
         }
       }
       end_dependence_analysis();
@@ -6517,7 +6526,7 @@ namespace LegionRuntime {
       log_run.error("Aliased region requirements for individual tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are aliased.", idx1, idx2, variants->name,
+                          "are interfering.", idx1, idx2, variants->name,
                           get_unique_task_id(), parent_ctx->variants->name,
                           parent_ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -6526,12 +6535,12 @@ namespace LegionRuntime {
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
       log_run.warning("Region requirements %d and %d of individual task "
-                            "%s (UID %lld) in parent task %s (UID %lld) are "
-                            "aliased.  This behavior is currently undefined. "
-                            "You better really know what you are doing.",
-                            idx1, idx2, variants->name, get_unique_task_id(),
-                            parent_ctx->variants->name, 
-                            parent_ctx->get_unique_task_id());
+                      "%s (UID %lld) in parent task %s (UID %lld) are "
+                      "interfering.  This behavior is currently "
+                      "undefined. You better really know what you are "
+                      "doing.", idx1, idx2, variants->name, 
+                      get_unique_task_id(), parent_ctx->variants->name, 
+                      parent_ctx->get_unique_task_id());
 #endif
     }
 
@@ -8876,9 +8885,18 @@ namespace LegionRuntime {
                                                        version_info,
                                                        restrict_infos[*it],
                                                        privilege_paths[*it]);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(rerun_analysis_requirements.empty());
-#endif
+          // If we still have re-run requirements, then we have
+          // interfering region requirements so warn the user
+          if (!rerun_analysis_requirements.empty())
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  rerun_analysis_requirements.begin(); it2 != 
+                  rerun_analysis_requirements.end(); it2++)
+            {
+              report_interfering_requirements(*it, *it2);
+            }
+            rerun_analysis_requirements.clear();
+          }
         }
       }
       end_dependence_analysis();
@@ -8930,7 +8948,7 @@ namespace LegionRuntime {
       log_run.error("Aliased region requirements for index tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are aliased.", idx1, idx2, variants->name,
+                          "are interfering.", idx1, idx2, variants->name,
                           get_unique_task_id(), parent_ctx->variants->name,
                           parent_ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -8939,12 +8957,12 @@ namespace LegionRuntime {
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
       log_run.warning("Region requirements %d and %d of index task "
-                            "%s (UID %lld) in parent task %s (UID %lld) are "
-                            "aliased.  This behavior is currently undefined. "
-                            "You better really know what you are doing.",
-                            idx1, idx2, variants->name, get_unique_task_id(),
-                            parent_ctx->variants->name, 
-                            parent_ctx->get_unique_task_id());
+                      "%s (UID %lld) in parent task %s (UID %lld) are "
+                      "interfering.  This behavior is currently undefined. "
+                      "You better really know what you are doing.",
+                      idx1, idx2, variants->name, get_unique_task_id(),
+                      parent_ctx->variants->name, 
+                      parent_ctx->get_unique_task_id());
 #endif
     }
 
