@@ -2939,6 +2939,9 @@ namespace LegionRuntime {
                                                    src_versions[idx],
                                                    dst_requirements[idx],
                                                    dst_ref, sync_precondition));
+            // Only need to apply our changes to the destination state
+            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
+                                runtime->address_space, applied_conditions);
           }
           else
           {
