@@ -389,6 +389,7 @@ namespace LegionRuntime {
 	  oas.src_offset = *idata++;
 	  oas.dst_offset = *idata++;
 	  oas.size = *idata++;
+          oas.serdez_id = *idata++;
 	  oasvec.push_back(oas);
 	}
       }
@@ -455,7 +456,7 @@ namespace LegionRuntime {
       result += sizeof(IDType); // number of requests;
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
         OASVec& oasvec = it2->second;
-        result += (3 + oasvec.size() * 3) * sizeof(IDType);
+        result += (3 + oasvec.size() * 4) * sizeof(IDType);
       }
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
@@ -485,6 +486,7 @@ namespace LegionRuntime {
 	  *msgptr++ = it3->src_offset;
 	  *msgptr++ = it3->dst_offset;
 	  *msgptr++ = it3->size;
+          *msgptr++ = it3->serdez_id;
 	}
       }
       // TODO: unbreak once the serialization stuff is repaired
@@ -1770,6 +1772,7 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
+        printf("CP#1: src_off = %ld, dst_off = %ld, bytes = %lu\n", src_offset, dst_offset, bytes);
 	//printf("remote write of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #ifdef TIME_REMOTE_WRITES
         unsigned long long start = TimeStamp::get_current_time_in_micros();
@@ -2001,7 +2004,7 @@ namespace LegionRuntime {
       MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
       log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
-
+      printf("redop_id = %d, serdez_id = %d\n", redop_id, serdez_id);
       if(redop_id == 0) {
         if (serdez_id != 0) {
           // handle serdez cases, for now we only support remote serdez case
@@ -3874,16 +3877,6 @@ namespace Realm {
 	  //        src_it->offset, src_it->size, 
 	  //        dst_it->offset, dst_it->size);
 
-	  OASByInst *oas_by_inst;
-	  OASByMem::iterator it = oas_by_mem.find(mp);
-	  if(it != oas_by_mem.end()) {
-	    oas_by_inst = it->second;
-	  } else {
-	    oas_by_inst = new OASByInst;
-	    oas_by_mem[mp] = oas_by_inst;
-	  }
-	  OASVec& oasvec = (*oas_by_inst)[ip];
-
 	  OffsetsAndSize oas;
 	  oas.src_offset = src_it->offset + src_suboffset;
 	  oas.dst_offset = dst_it->offset + dst_suboffset;
@@ -3897,21 +3890,52 @@ namespace Realm {
 	    OASByInst* oas_by_inst = new OASByInst;
 	    (*oas_by_inst)[ip].push_back(oas);
 	    Event ev = GenEventImpl::create_genevent()->current_event();
-	    int dma_node = select_dma_node(mp.first, mp.second, redop_id, red_fold);
-	    assert(dma_node == gasnet_mynode());
 	    int priority = 0; // always have priority zero
-  	    log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", mp.first.id, mp.second.id, dma_node);
 	    CopyRequest *r = new CopyRequest(*this, oas_by_inst,
   					     wait_on, ev, priority, requests);
-	    log_dma.info("performing serdez copy on local node");
- 	    r->check_readiness(false, dma_queue);
-	    finish_events.insert(ev);
+            // ask which node should perform the copy
+            int dma_node = select_dma_node(mp.first, mp.second, redop_id, red_fold);
+            log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", mp.first.id, mp.second.id, dma_node);
+
+            if(((unsigned)dma_node) == gasnet_mynode()) {
+              log_dma.info("performing serdez on local node");
+              r->check_readiness(false, dma_queue);
+              finish_events.insert(ev);
+            } else {
+              RemoteCopyArgs args;
+              args.redop_id = 0;
+              args.red_fold = false;
+              args.before_copy = wait_on;
+              args.after_copy = ev;
+              args.priority = priority;
+
+              size_t msglen = r->compute_size();
+              void *msgdata = malloc(msglen);
+
+              r->serialize(msgdata);
+
+              log_dma.info("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+              RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
+
+              finish_events.insert(ev);
+              // done with the local copy of the request
+              delete r;
+            }
 	  }
-	  else
+	  else {
 	  // </SERDEZ_DMA>
+	    OASByInst *oas_by_inst;
+	    OASByMem::iterator it = oas_by_mem.find(mp);
+	    if(it != oas_by_mem.end()) {
+	      oas_by_inst = it->second;
+	    } else {
+	      oas_by_inst = new OASByInst;
+	      oas_by_mem[mp] = oas_by_inst;
+	    }
+	    OASVec& oasvec = (*oas_by_inst)[ip];
 
-	  oasvec.push_back(oas);
-
+	    oasvec.push_back(oas);
+          }
 	  src_suboffset += oas.size;
 	  assert(src_suboffset <= src_it->size);
 	  if(src_suboffset == src_it->size) {
