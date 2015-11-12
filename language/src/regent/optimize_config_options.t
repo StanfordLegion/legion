@@ -49,6 +49,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.Copy) or

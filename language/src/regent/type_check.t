@@ -1336,6 +1336,57 @@ function type_check.expr_list_cross_product(cx, node)
   }
 end
 
+function type_check.expr_list_phase_barriers(cx, node)
+  local product = type_check.expr(cx, node.product)
+  local product_type = std.check_read(cx, product)
+  if not std.is_list_of_regions(product_type) or product_type:list_depth() ~= 2
+  then
+    log.error(node, "type mismatch: expected a list cross-product but got " ..
+                tostring(product_type))
+  end
+  local expr_type = std.list(std.list(std.phase_barrier))
+
+  return ast.typed.expr.ListPhaseBarriers {
+    product = product,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_invert(cx, node)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
+  local product = type_check.expr(cx, node.product)
+  local product_type = std.check_read(cx, product)
+  local barriers = type_check.expr(cx, node.barriers)
+  local barriers_type = std.check_read(cx, barriers)
+  if not std.is_list_of_regions(rhs_type) or rhs_type:list_depth() ~= 1 then
+    log.error(node, "type mismatch: expected a list of regions but got " ..
+                tostring(product_type))
+  end
+  if not std.is_list_of_regions(product_type) or product_type:list_depth() ~= 2
+  then
+    log.error(node, "type mismatch: expected a list cross-product but got " ..
+                tostring(product_type))
+  end
+  if not std.type_eq(barriers_type, std.list(std.list(std.phase_barrier))) then
+    log.error(node, "type mismatch: expected " ..
+                tostring(std.list(std.list(std.phase_barrier))) ..
+                " but got " .. tostring(barriers_type))
+  end
+  local expr_type = barriers_type
+
+  return ast.typed.expr.ListInvert {
+    rhs = rhs,
+    product = product,
+    barriers = barriers,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_range(cx, node)
   local start = type_check.expr(cx, node.start)
   local start_type = std.check_read(cx, start)
@@ -1800,6 +1851,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListCrossProduct) then
     return type_check.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
+    return type_check.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListInvert) then
+    return type_check.expr_list_invert(cx, node)
 
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)
