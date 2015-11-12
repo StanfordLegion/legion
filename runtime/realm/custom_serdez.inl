@@ -73,7 +73,7 @@ namespace Realm {
   template <typename T> 
   inline CustomSerdezWrapper<T>::CustomSerdezWrapper(void)
   {
-    sizeof_field_type = sizeof(T);
+    sizeof_field_type = sizeof(typename T::FIELD_TYPE);
   }
 
   template <typename T> 

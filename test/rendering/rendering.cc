@@ -86,6 +86,7 @@ public:
     bool ret = DefaultMapper::map_task(task);
     std::set<Memory> vis_mems;
     std::vector<Memory> sys_mem;
+    printf("task_idx = %d, target_proc = %d\n", task->index_point.point_data[0], task->target_proc.id);
     machine.get_visible_memories(task->target_proc, vis_mems);
     for (std::set<Memory>::iterator it = vis_mems.begin(); it != vis_mems.end(); it++) {
       if (it->kind() == Memory::SYSTEM_MEM)
@@ -98,11 +99,11 @@ public:
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
       assert(task->regions[idx].virtual_map == false);
       task->regions[idx].virtual_map = false;
-      task->regions[idx].enable_WAR_optimization = false;
-      task->regions[idx].reduction_list = false;
+      //task->regions[idx].enable_WAR_optimization = false;
+      //task->regions[idx].reduction_list = false;
       // Make everything SOA
-      task->regions[idx].blocking_factor =
-        task->regions[idx].max_blocking_factor;
+      //task->regions[idx].blocking_factor =
+        //task->regions[idx].max_blocking_factor;
     }
     return ret;
   }

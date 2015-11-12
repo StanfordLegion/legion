@@ -1166,12 +1166,11 @@ namespace Realm {
                                                       const void *data,
                                                       size_t datalen)
   {
-    CustomSerdezID serdez_id;
     log_copy.debug() << "received remote serdez request: mem=" << args.mem
 		     << ", offset=" << args.offset << ", size=" << datalen
 		     << ", seq=" << args.sender << '/' << args.sequence_id;
 
-    const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
+    const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[args.serdez_id];
     size_t field_size = serdez_op->sizeof_field_type;
     char* pos = (char*)get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset, args.count * serdez_op->sizeof_field_type);
     const char* buffer = (const char*) data;
@@ -1736,13 +1735,11 @@ namespace Realm {
         off_t new_offset = offset;
         while (count > 0) {
           size_t elemnt_size = serdez_op->serialized_size(pos);
-          printf("elemnt_size = %lu\n", elemnt_size);
           // break if including this element exceeds max_xfer_size
           if (elemnt_size + cur_size > max_xfer_size)
             break;
           count--;
           cur_count++;
-          memcpy(buffer, *((char**)pos), elemnt_size);
           serdez_op->serialize(pos, buffer); 
           pos += field_size;
           new_offset += field_size;
@@ -1759,7 +1756,7 @@ namespace Realm {
         args.sender = gasnet_mynode();
         args.sequence_id = sequence_id;
         RemoteSerdezMessage::Message::request(ID(mem).node(), args,
-                                              buffer_start, cur_size, true);
+                                              buffer_start, cur_size, PAYLOAD_COPY);
         xfers ++;
       }
       free(buffer_start);
