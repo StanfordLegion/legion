@@ -1739,9 +1739,9 @@ namespace LegionRuntime {
       bool fold;
     };
 
-    class RemoteSerdezMempairCopier : public MemPairCopier {
+    class RemoteSerdezMemPairCopier : public MemPairCopier {
     public:
-      RemoteSerdezMempairCopier(Memory _src_mem, Memory _dst_mem,
+      RemoteSerdezMemPairCopier(Memory _src_mem, Memory _dst_mem,
 				CustomSerdezID _serdez_id)
       {
 	src_mem = get_runtime()->get_memory_impl(_src_mem);
@@ -1757,14 +1757,14 @@ namespace LegionRuntime {
 	num_writes = 0;
       }
 
-      virtual ~RemoteSerdezMempairCopier(void)
+      virtual ~RemoteSerdezMemPairCopier(void)
       {
       }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
                                         OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<RemoteSerdezMempairCopier>(this, src_inst,
+	return new SpanBasedInstPairCopier<RemoteSerdezMemPairCopier>(this, src_inst,
 								      dst_inst, oas_vec);
       }
 
@@ -1779,7 +1779,7 @@ namespace LegionRuntime {
 	printf("remote serdez of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #endif
 	num_writes += do_remote_serdez(dst_mem->me, dst_offset, serdez_id,
-				       src_base + src_offset, sequence_id);
+				       src_base + src_offset, bytes / serdez_op->sizeof_field_type, sequence_id);
 
         record_bytes(bytes);
       }
@@ -2008,7 +2008,7 @@ namespace LegionRuntime {
           if((dst_kind == MemoryImpl::MKIND_REMOTE) ||
              (dst_kind == MemoryImpl::MKIND_RDMA)) {
               assert(src_kind != MemoryImpl::MKIND_REMOTE);
-              return new RemoteSerdezMemPairCopier(src_mem, dst_mem, serdez_id, fold);
+              return new RemoteSerdezMemPairCopier(src_mem, dst_mem, serdez_id);
           }
           log_dma.warning("Unsupported serdez transfer case (" IDFMT " -> " IDFMT ")",
                           src_mem.id, dst_mem.id);
@@ -2309,9 +2309,9 @@ namespace LegionRuntime {
       // create a copier for the memory used by all of these instance pairs
       Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
       Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-      CustomSerdezID serdez_id = oas_by_inst->begin()->second.serdez_id;
+      CustomSerdezID serdez_id = oas_by_inst->begin()->second.begin()->serdez_id;
       // for now we launches an individual copy request for every serdez copy
-      assert(serdez_id == 0 || oas_by_inst.size() == 1);
+      assert(serdez_id == 0 || (oas_by_inst->size() == 1 && oas_by_inst->begin()->second.size() == 1));
       MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, 0, serdez_id);
 
       switch(domain.get_dim()) {
@@ -3888,23 +3888,23 @@ namespace Realm {
 	  oas.src_offset = src_it->offset + src_suboffset;
 	  oas.dst_offset = dst_it->offset + dst_suboffset;
 	  oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
-	  oas.serdez_id = src_it->srcdez_id;
+	  oas.serdez_id = src_it->serdez_id;
 	  // <SERDEZ_DMA>
 	  // This is a little bit of hack: if serdez_id != 0 we directly create a
 	  // CopyRequest instead of inserting it into ''oasvec''
 	  if (oas.serdez_id != 0) {
 	    OASByInst* oas_by_inst = new OASByInst;
 	    (*oas_by_inst)[ip].push_back(oas);
-        Event ev = GenEventImpl::create_genevent()->current_event();
-        int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
-        assert(dma_node == gasnet_mynode());
-        int priority = 0; // always have priority zero
-  	    log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
-        CopyRequest *r = new CopyRequest(*this, oas_by_inst,
-  					   wait_on, ev, priority, requests);
-        log_dma.info("performing serdez copy on local node");
-        r->check_readiness(false, dma_queue);
-        finish_events.insert(ev);
+	    Event ev = GenEventImpl::create_genevent()->current_event();
+	    int dma_node = select_dma_node(mp.first, mp.second, redop_id, red_fold);
+	    assert(dma_node == gasnet_mynode());
+	    int priority = 0; // always have priority zero
+  	    log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", mp.first.id, mp.second.id, dma_node);
+	    CopyRequest *r = new CopyRequest(*this, oas_by_inst,
+  					     wait_on, ev, priority, requests);
+	    log_dma.info("performing serdez copy on local node");
+ 	    r->check_readiness(false, dma_queue);
+	    finish_events.insert(ev);
 	  }
 	  else
 	  // </SERDEZ_DMA>

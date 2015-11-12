@@ -53,7 +53,7 @@ namespace Realm {
 
     // serializes 'val' into the provided buffer - no size is provided (serialized_size will be called first),
     //  but the function should return the bytes used
-    virtual size_t serialize(const void *field_ptr, void *buffer);
+    virtual size_t serialize(const void *field_ptr, void *buffer) const;
     virtual size_t serialize(const void *field_ptr, ptrdiff_t stride, size_t count,
 			     void *buffer);
 
@@ -61,12 +61,12 @@ namespace Realm {
     //  will have already been "destroyed" if this copy is overwriting previously valid data - this call
     //  should return the number of bytes consumed - note that the size of the buffer is not supplied (this
     //  means the serialization format must have some internal way of knowing how much to read)
-    virtual size_t deserialize(void *field_ptr, const void *buffer);
+    virtual size_t deserialize(void *field_ptr, const void *buffer) const;
     virtual size_t deserialize(void *field_ptr, ptrdiff_t stride, size_t count,
 			       const void *buffer);
 
     // destroys the contents of a field
-    virtual void destroy(void *field_ptr);
+    virtual void destroy(void *field_ptr) const;
     virtual void destroy(void *field_ptr, ptrdiff_t stride, size_t count);
   };
 
@@ -96,7 +96,7 @@ namespace Realm {
   // serializes 'val' into the provided buffer - no size is provided (serialized_size will be called first),
   //  but the function should return the bytes used
   template <typename T> 
-  inline size_t CustomSerdezWrapper<T>::serialize(const void *field_ptr, void *buffer)
+  inline size_t CustomSerdezWrapper<T>::serialize(const void *field_ptr, void *buffer) const
   {
     return T::serialize(*(const typename T::FIELD_TYPE *)field_ptr, buffer);
   }
@@ -120,7 +120,7 @@ namespace Realm {
   //  should return the number of bytes consumed - note that the size of the buffer is not supplied (this
   //  means the serialization format must have some internal way of knowing how much to read)
   template <typename T> 
-  inline size_t CustomSerdezWrapper<T>::deserialize(void *field_ptr, const void *buffer)
+  inline size_t CustomSerdezWrapper<T>::deserialize(void *field_ptr, const void *buffer) const
   {
     return T::deserialize(*(typename T::FIELD_TYPE *)field_ptr, buffer);
   }
@@ -141,7 +141,7 @@ namespace Realm {
 
   // destroys the contents of a field
   template <typename T> 
-  inline void CustomSerdezWrapper<T>::destroy(void *field_ptr)
+  inline void CustomSerdezWrapper<T>::destroy(void *field_ptr) const
   {
     T::destroy(*(typename T::FIELD_TYPE *)field_ptr);
   }

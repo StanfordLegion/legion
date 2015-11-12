@@ -67,6 +67,31 @@ namespace Realm {
     static void destroy(FIELD_TYPE& val);
   };
 #endif
+  template<typename T>
+  class SerdezObject {
+  public:
+    typedef T* FIELD_TYPE;
+
+    static size_t serialized_size(const FIELD_TYPE& val) {
+      return sizeof(T);
+    }
+
+    static size_t serialize(const FIELD_TYPE& val, void *buffer) {
+      memcpy(buffer, val, sizeof(T));
+      return sizeof(T);
+    }
+
+    static size_t deserialize(FIELD_TYPE& val, const void *buffer) {
+      val = new T;
+      memcpy(val, buffer, sizeof(T));
+      return sizeof(T);
+    }
+
+    static void destroy(FIELD_TYPE& val) {
+      delete val;
+    }
+  };
+
 
   // as a useful example, here's a templated serdez that works for anything that supports Realm's serialization
   //  framework
@@ -123,7 +148,7 @@ namespace Realm {
 
     // serializes 'val' into the provided buffer - no size is provided (serialized_size will be called first),
     //  but the function should return the bytes used
-    virtual size_t serialize(const void *field_ptr, void *buffer) = 0;
+    virtual size_t serialize(const void *field_ptr, void *buffer) const = 0;
     virtual size_t serialize(const void *field_ptr, ptrdiff_t stride, size_t count,
 			     void *buffer) = 0;
 
@@ -131,12 +156,12 @@ namespace Realm {
     //  will have already been "destroyed" if this copy is overwriting previously valid data - this call
     //  should return the number of bytes consumed - note that the size of the buffer is not supplied (this
     //  means the serialization format must have some internal way of knowing how much to read)
-    virtual size_t deserialize(void *field_ptr, const void *buffer) = 0;
+    virtual size_t deserialize(void *field_ptr, const void *buffer) const = 0;
     virtual size_t deserialize(void *field_ptr, ptrdiff_t stride, size_t count,
 			       const void *buffer) = 0;
 
     // destroys the contents of a field
-    virtual void destroy(void *field_ptr) = 0;
+    virtual void destroy(void *field_ptr) const = 0;
     virtual void destroy(void *field_ptr, ptrdiff_t stride, size_t count) = 0;
   };
 

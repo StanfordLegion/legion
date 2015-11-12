@@ -1173,14 +1173,15 @@ namespace Realm {
 
     const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
     size_t field_size = serdez_op->sizeof_field_type;
-    char* *pos = get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset);
+    char* pos = (char*)get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset, args.count * serdez_op->sizeof_field_type);
     const char* buffer = (const char*) data;
-    while (datalen > 0) {
+    for(size_t i = 0; i < args.count; i++) {
       size_t elemnt_size = serdez_op->deserialize(pos, buffer);
-      buffer += element_size;
+      buffer += elemnt_size;
       pos+= field_size;
-      datalen -= element_size;
+      datalen -= elemnt_size;
     }
+    assert(datalen == 0);
 
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
@@ -1719,9 +1720,9 @@ namespace Realm {
                              const void *data, size_t count,
                              unsigned sequence_id)
     {
-      const CustomSerdezUntyped *serdez_op = get_runtime()->register_custom_serdez(serdez_id);
+      const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
       size_t field_size = serdez_op->sizeof_field_type;
-      log_copy_debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
+      log_copy.debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
                      mem.id, offset, field_size, count, serdez_id);
       size_t max_xfer_size = get_lmb_size(ID(mem).node());
       // create a intermediate buf with same size as max_xfer_size
@@ -1730,6 +1731,7 @@ namespace Realm {
       unsigned xfers = 0;
       while (count > 0) {
         size_t cur_size = 0;
+        size_t cur_count = 0;
         char* buffer = buffer_start;
         off_t new_offset = offset;
         while (count > 0) {
@@ -1738,17 +1740,19 @@ namespace Realm {
           if (elemnt_size + cur_size > max_xfer_size)
             break;
           count--;
+          cur_count++;
           serdez_op->serialize(pos, buffer);
           pos += field_size;
           new_offset += field_size;
-          buffer += element_size;
-          cur_size += element_size;
+          buffer += elemnt_size;
+          cur_size += elemnt_size;
         }
         assert(cur_size > 0);
         RemoteSerdezMessage::RequestArgs args;
         args.mem = mem;
         args.offset = offset;
         offset = new_offset;
+        args.count = cur_count;
         args.serdez_id = serdez_id;
         args.sender = gasnet_mynode();
         args.sequence_id = sequence_id;
@@ -1756,7 +1760,7 @@ namespace Realm {
                                               buffer_start, cur_size, true);
         xfers ++;
       }
-      free(buffer);
+      free(buffer_start);
       return xfers;
     }
 
