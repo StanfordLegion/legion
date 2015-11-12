@@ -6578,6 +6578,9 @@ namespace LegionRuntime {
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
+#ifdef INORDER_EXECUTION
+      Event term_event = part_op->get_completion_event();
+#endif
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -6631,6 +6634,9 @@ namespace LegionRuntime {
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
+#ifdef INORDER_EXECUTION
+      Event term_event = part_op->get_completion_event();
+#endif
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -6686,6 +6692,9 @@ namespace LegionRuntime {
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
+#ifdef INORDER_EXECUTION
+      Event term_event = part_op->get_completion_event();
+#endif
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -6741,6 +6750,9 @@ namespace LegionRuntime {
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
+#ifdef INORDER_EXECUTION
+      Event term_event = part_op->get_completion_event();
+#endif
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -6797,6 +6809,9 @@ namespace LegionRuntime {
 #endif
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
+#ifdef INORDER_EXECUTION
+      Event term_event = part_op->get_completion_event();
+#endif
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -8470,8 +8485,19 @@ namespace LegionRuntime {
           unmapped_regions[idx].impl->unmap_region();
         }
       }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
       {
@@ -8509,14 +8535,6 @@ namespace LegionRuntime {
         }
 #endif
       }
-#ifdef INORDER_EXECUTION
-      if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
-        term_event.wait();
-        post_wait(proc);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8564,8 +8582,19 @@ namespace LegionRuntime {
           unmapped_regions[idx].impl->unmap_region();
         }
       }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
       {
@@ -8603,14 +8632,6 @@ namespace LegionRuntime {
         }
 #endif
       }
-#ifdef INORDER_EXECUTION
-      if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
-        term_event.wait();
-        post_wait(proc);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8660,8 +8681,19 @@ namespace LegionRuntime {
           unmapped_regions[idx].impl->unmap_region();
         }
       }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
       {
@@ -8699,14 +8731,6 @@ namespace LegionRuntime {
         }
 #endif
       }
-#ifdef INORDER_EXECUTION
-      if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
-        term_event.wait();
-        post_wait(proc);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8755,8 +8779,19 @@ namespace LegionRuntime {
           unmapped_regions[idx].impl->unmap_region();
         }
       }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
       {
@@ -8794,14 +8829,6 @@ namespace LegionRuntime {
         }
 #endif
       }
-#ifdef INORDER_EXECUTION
-      if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
-        term_event.wait();
-        post_wait(proc);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8874,7 +8901,7 @@ namespace LegionRuntime {
       }
       add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
 #ifdef INORDER_EXECUTION
-      if (program_order_executiong)
+      if (program_order_execution)
         result.wait_until_valid();
 #endif
       return result;
@@ -8972,6 +8999,14 @@ namespace LegionRuntime {
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, copy_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
       {
@@ -9009,14 +9044,6 @@ namespace LegionRuntime {
         }
 #endif
       }
-#ifdef INORDER_EXECUTION
-      if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
-        term_event.wait();
-        post_wait(proc);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14950,7 +14977,8 @@ namespace LegionRuntime {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
-        // We always turn this on as the Legion Spy will now understand how to handle it.
+        // We always turn this on as the Legion Spy will 
+        // now understand how to handle it.
         dynamic_independence_tests = true;
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
