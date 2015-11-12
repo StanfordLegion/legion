@@ -62,13 +62,16 @@ namespace Realm {
   template <int N, typename T>
   class DenseRectangleList {
   public:
-    DenseRectangleList(void);
+    DenseRectangleList(size_t _max_rects = 0);
 
     void add_point(const ZPoint<N,T>& p);
 
     void add_rect(const ZRect<N,T>& r);
 
+    void merge_rects(size_t upper_bound);
+
     std::vector<ZRect<N,T> > rects;
+    size_t max_rects;
   };
 
   template <int N, typename T>
@@ -186,6 +189,7 @@ namespace Realm {
 
     void construct(void);
 
+    void test_overlap(const ZRect<N,T>* rects, size_t count, std::set<int>& overlaps);
     void test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps);
     void test_overlap(const SparsityMapImpl<N,T> *sparsity, std::set<int>& overlaps);
 
@@ -336,6 +340,7 @@ namespace Realm {
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(ZIndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
+    void add_approx_output(int index, PartitioningOperation *op);
 
     virtual void execute(void);
 
@@ -353,12 +358,17 @@ namespace Realm {
     template <typename BM>
     void populate_bitmasks(std::map<int, BM *>& bitmasks);
 
+    template <typename BM>
+    void populate_approx_bitmask(BM& bitmask);
+
     ZIndexSpace<N,T> parent_space;
     ZIndexSpace<N2,T2> inst_space;
     RegionInstance inst;
     size_t field_offset;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
+    int approx_output_index;
+    intptr_t approx_output_op;
   };
 
   template <int N, typename T, int N2, typename T2>
@@ -514,14 +524,13 @@ namespace Realm {
 
     virtual void execute(void);
 
-    //virtual void set_overlap_tester(void *tester);
+    virtual void set_overlap_tester(void *tester);
 
   protected:
     ZIndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > images;
-    OverlapTester<N2,T2> *overlap_tester;
   };
 
   template <int N, typename T, int N2, typename T2>
@@ -538,13 +547,21 @@ namespace Realm {
 
     virtual void execute(void);
 
-    //virtual void set_overlap_tester(void *tester);
+    virtual void set_overlap_tester(void *tester);
+
+    void provide_sparse_image(int index, const ZRect<N,T> *rects, size_t count);
 
   protected:
     ZIndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > > field_data;
     std::vector<ZIndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > preimages;
+    GASNetHSL mutex;
+    OverlapTester<N2,T2> *overlap_tester;
+    std::map<int, std::vector<ZRect<N2,T2> > > pending_sparse_images;
+    int remaining_sparse_images;
+    std::vector<int> contrib_counts;
+    AsyncMicroOp *dummy_overlap_uop;
   };
 
   template <int N, typename T>
@@ -740,6 +757,28 @@ namespace Realm {
     template <int N, typename T>
     static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
 			     bool send_precise, bool send_approx);
+  };
+
+  struct ApproxImageResponseMessage {
+    struct RequestArgs : public BaseMedium {
+      int dim;
+      int idxtype;
+      intptr_t approx_output_op;
+      int approx_output_index;
+    };
+
+    template <int N, typename T>
+    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+
+    static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+    typedef ActiveMessageMediumNoReply<APPROX_IMAGE_RESPONSE_MSGID,
+                                       RequestArgs,
+                                       handle_request> Message;
+
+    template <int N, typename T>
+    static void send_request(gasnet_node_t target, intptr_t output_op, int output_index,
+			     const ZRect<N,T> *rects, size_t count);
   };
     
 };
