@@ -834,7 +834,7 @@ namespace Realm {
       // doesn't make any calls between gasnet_init and gasnet_attach
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
 
-      remote_id_allocator.set_request_size(ID::ID_SPARSITY, 256, 128);
+      remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
       remote_id_allocator.make_initial_requests();
 
 #ifdef DEADLOCK_TRACE
