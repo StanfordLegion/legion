@@ -476,6 +476,7 @@ namespace LegionRuntime {
       bool invoke_mapper_pre_map_task(TaskOp *task);
       void invoke_mapper_select_variant(TaskOp *task);
       bool invoke_mapper_map_task(TaskOp *task);
+      void invoke_mapper_post_map_task(TaskOp *task);
       void invoke_mapper_failed_mapping(Mappable *mappable);
       void invoke_mapper_notify_result(Mappable *mappable);
       void invoke_mapper_slice_domain(TaskOp *task,
@@ -1627,6 +1628,7 @@ namespace LegionRuntime {
       bool invoke_mapper_pre_map_task(Processor target, TaskOp *task);
       void invoke_mapper_select_variant(Processor target, TaskOp *task);
       bool invoke_mapper_map_task(Processor target, SingleTask *task);
+      void invoke_mapper_post_map_task(Processor target, TaskOp *task);
       void invoke_mapper_failed_mapping(Processor target, Mappable *mappable);
       void invoke_mapper_notify_result(Processor target, Mappable *mappable);
       void invoke_mapper_slice_domain(Processor target, MultiTask *task,

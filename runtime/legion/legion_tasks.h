@@ -442,6 +442,7 @@ namespace LegionRuntime {
     protected:
       bool map_all_regions(Processor target, Event user_event, 
                            bool mapper_invoked); 
+      void perform_post_mapping(Processor target);
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<UserEvent> &unmap_events,

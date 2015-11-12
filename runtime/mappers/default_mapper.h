@@ -59,6 +59,7 @@ namespace LegionRuntime {
       virtual bool pre_map_task(Task *task);
       virtual void select_task_variant(Task *task);
       virtual bool map_task(Task *task);
+      virtual void post_map_task(Task *task);
       virtual bool map_copy(Copy *copy);
       virtual bool map_inline(Inline *inline_operation);
       virtual bool map_must_epoch(const std::vector<Task*> &tasks,

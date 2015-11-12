@@ -215,6 +215,7 @@ namespace LegionRuntime {
       rez.serialize(spawn_task);
       rez.serialize(map_locally);
       rez.serialize(profile_task);
+      rez.serialize(post_map_task);
       rez.serialize(task_priority);
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceRef>::iterator it = 
@@ -316,6 +317,7 @@ namespace LegionRuntime {
       derez.deserialize(spawn_task);
       derez.deserialize(map_locally);
       derez.deserialize(profile_task);
+      derez.deserialize(post_map_task);
       derez.deserialize(task_priority);
       size_t num_early;
       derez.deserialize(num_early);
@@ -395,6 +397,7 @@ namespace LegionRuntime {
       spawn_task = false;
       map_locally = false;
       profile_task = false;
+      post_map_task = false;
       task_priority = 0;
       start_time = 0;
       stop_time = 0;
@@ -1493,6 +1496,7 @@ namespace LegionRuntime {
       this->spawn_task = stealable; // set spawn to stealable
       this->map_locally = rhs->map_locally;
       this->profile_task = rhs->profile_task;
+      this->post_map_task = rhs->post_map_task;
       this->task_priority = rhs->task_priority;
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -4575,6 +4579,9 @@ namespace LegionRuntime {
         executing_processor = target;
         if (notify)
           runtime->invoke_mapper_notify_result(current_proc, this);
+        // See if we are supposed to post-map this task
+        if (post_map_task)
+          perform_post_mapping(target);
       }
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
@@ -4583,6 +4590,50 @@ namespace LegionRuntime {
 #endif
       return map_success;
     }  
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_post_mapping(Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // Clear out all the region requirements
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        regions[idx].initialize_mapping_fields();
+      // Invoke the mapper
+      runtime->invoke_mapper_post_map_task(current_proc, this); 
+      // Iterate over the regions and see if we need to make any instances
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+        if (req.target_ranking.empty() || has_restrictions(idx, req.region))
+          continue;
+        VersionInfo &version_info = get_version_info(idx);
+        // Otherwise we need to do to make an instance and issue the copy
+        MappingRef ref = runtime->forest->map_physical_region(
+                                              enclosing_contexts[idx], req,
+                                              idx, version_info,
+                                              this, current_proc, target
+#ifdef DEBUG_HIGH_LEVEL
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+        // If we failed the mapping, then just assert for now
+        if (!ref.has_ref())
+          assert(false);
+        // Now do the registration, but with a NO_EVENT for the termination
+        // event since there won't actually be anyone immediately using
+        // the result
+        runtime->forest->register_physical_region(
+                                              enclosing_contexts[idx], ref,
+                                              req, idx, version_info, this,
+                                              current_proc, Event::NO_EVENT
+#ifdef DEBUG_HIGH_LEVEL
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+      }
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(

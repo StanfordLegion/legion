@@ -1981,6 +1981,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ProcessorManager::invoke_mapper_post_map_task(TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+      MapperContinuation1NoRet<Task*,&Mapper::post_map_task,true/*block*/>
+                                      continuation(this, task->map_id, task);
+      continuation.perform_mapping();
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorManager::invoke_mapper_failed_mapping(Mappable *mappable)
     //--------------------------------------------------------------------------
     {
@@ -12510,6 +12519,16 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       return proc_managers[proc]->invoke_mapper_map_task(task);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::invoke_mapper_post_map_task(Processor proc, TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+      return proc_managers[proc]->invoke_mapper_post_map_task(task);
     }
 
     //--------------------------------------------------------------------------
