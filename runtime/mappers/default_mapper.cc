@@ -520,6 +520,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::post_map_task(Task *task)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Post map task in default mapper for task %s "
+                      "(ID %lld) for processor " IDFMT "",
+                      task->variants->name,
+                      task->get_unique_task_id(), local_proc.id);
+      // Do nothing for now
+    }
+
+    //--------------------------------------------------------------------------
     bool DefaultMapper::map_copy(Copy *copy)
     //--------------------------------------------------------------------------
     {

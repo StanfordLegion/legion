@@ -3121,13 +3121,13 @@ namespace LegionRuntime {
       unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
       unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
       log_run.error("Aliased region requirements for copy operations "
-                          "are not permitted. Region requirement %d of %s "
-                          "requirements and %d of %s requirements aliased for "
-                          "copy operation (UID %lld) in task %s (UID %lld).",
-                          actual_idx1, is_src1 ? "source" : "destination",
-                          actual_idx2, is_src2 ? "source" : "destination",
-                          unique_op_id, parent_ctx->variants->name,
-                          parent_ctx->get_unique_task_id());
+                    "are not permitted. Region requirement %d of %s "
+                    "requirements and %d of %s requirements interfering for "
+                    "copy operation (UID %lld) in task %s (UID %lld).",
+                    actual_idx1, is_src1 ? "source" : "destination",
+                    actual_idx2, is_src2 ? "source" : "destination",
+                    unique_op_id, parent_ctx->variants->name,
+                    parent_ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
 #endif
