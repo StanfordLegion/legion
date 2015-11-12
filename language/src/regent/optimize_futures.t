@@ -160,6 +160,12 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListInvert) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListRange) then
     return nil
 
@@ -605,6 +611,24 @@ function optimize_futures.expr_list_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_list_phase_barriers(cx, node)
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  return node {
+    product = product,
+  }
+end
+
+function optimize_futures.expr_list_invert(cx, node)
+  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  local barriers = concretize(optimize_futures.expr(cx, node.barriers))
+  return node {
+    rhs = rhs,
+    product = product,
+    barriers = barriers,
+  }
+end
+
 function optimize_futures.expr_list_range(cx, node)
   local start = concretize(optimize_futures.expr(cx, node.start))
   local stop = concretize(optimize_futures.expr(cx, node.stop))
@@ -785,6 +809,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return optimize_futures.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
+    return optimize_futures.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.typed.expr.ListInvert) then
+    return optimize_futures.expr_list_invert(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return optimize_futures.expr_list_range(cx, node)

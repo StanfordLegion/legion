@@ -610,7 +610,7 @@ function parser.expr_prefix(p)
   elseif p:nextif("list_duplicate_partition") then
     p:expect("(")
     local partition = p:expr()
-    p:nextif(",")
+    p:expect(",")
     local indices = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.ListDuplicatePartition {
@@ -623,7 +623,7 @@ function parser.expr_prefix(p)
   elseif p:nextif("list_cross_product") then
     p:expect("(")
     local lhs = p:expr()
-    p:nextif(",")
+    p:expect(",")
     local rhs = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.ListCrossProduct {
@@ -633,10 +633,36 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_phase_barriers") then
+    p:expect("(")
+    local product = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListPhaseBarriers {
+      product = product,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_invert") then
+    p:expect("(")
+    local rhs = p:expr()
+    p:expect(",")
+    local product = p:expr()
+    p:expect(",")
+    local barriers = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListInvert {
+      rhs = rhs,
+      product = product,
+      barriers = barriers,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("list_range") then
     p:expect("(")
     local range_start = p:expr()
-    p:nextif(",")
+    p:expect(",")
     local range_stop = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.ListRange {

@@ -642,6 +642,9 @@ namespace LegionRuntime {
         {
           unsigned index;
           derez.deserialize(index);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(index < infos.size());
+#endif
           infos[index].unpack_info(derez, source, runtime->forest);
         }
       }
@@ -5743,6 +5746,7 @@ namespace LegionRuntime {
       }
       // Take ownership of all the points
       rhs->assign_points(this, d);
+      this->restrict_infos = rhs->restrict_infos;
       // Copy over the version infos that we need, we can skip this if
       // we are remote and locally mapped
       if (!is_remote() || !is_locally_mapped())

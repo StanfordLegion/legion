@@ -96,6 +96,12 @@ task main()
   copy(r_private, rs_private)
   copy(r_ghost, rs_ghost)
   var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
+  var rs_ghost_empty_in = list_phase_barriers(rs_ghost_product)
+  var rs_ghost_empty_out = list_invert(
+    rs_ghost, rs_ghost_product, rs_ghost_empty_in)
+  var rs_ghost_full_in = list_phase_barriers(rs_ghost_product)
+  var rs_ghost_full_out = list_invert(
+    rs_ghost, rs_ghost_product, rs_ghost_full_in)
   must_epoch
     for i = lo, hi, stride do
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)

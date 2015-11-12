@@ -227,6 +227,12 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return 1
 
@@ -880,6 +886,24 @@ function specialize.expr_list_cross_product(cx, node)
   }
 end
 
+function specialize.expr_list_phase_barriers(cx, node)
+  return ast.specialized.expr.ListPhaseBarriers {
+    product = specialize.expr(cx, node.product),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_invert(cx, node)
+  return ast.specialized.expr.ListInvert {
+    rhs = specialize.expr(cx, node.rhs),
+    product = specialize.expr(cx, node.product),
+    barriers = specialize.expr(cx, node.barriers),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_list_range(cx, node)
   return ast.specialized.expr.ListRange {
     start = specialize.expr(cx, node.start),
@@ -1042,6 +1066,12 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
     return specialize.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return specialize.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return specialize.expr_list_invert(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return specialize.expr_list_range(cx, node)
