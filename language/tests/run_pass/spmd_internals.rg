@@ -44,7 +44,11 @@ end
 task shard(is : regentlib.list(int),
            rs_private : regentlib.list(region(elt)),
            rs_ghost : regentlib.list(region(elt)),
-           rs_ghost_product : regentlib.list(regentlib.list(region(elt))))
+           rs_ghost_product : regentlib.list(regentlib.list(region(elt))),
+           empty_in : regentlib.list(regentlib.list(phase_barrier)),
+           empty_out : regentlib.list(regentlib.list(phase_barrier)),
+           full_in : regentlib.list(regentlib.list(phase_barrier)),
+           full_out : regentlib.list(regentlib.list(phase_barrier)))
 where
   reads writes(rs_private, rs_ghost, rs_ghost_product),
   simultaneous(rs_ghost, rs_ghost_product),
@@ -59,17 +63,23 @@ do
   end
 
   -- Zero the reduction fields:
-  fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0) -- awaits(...)
+  fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0)
   for i in is do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end
-  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +) -- arrives(...)
-  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +) -- arrives(...)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +,
+       awaits(empty_out), arrives(full_out))
 
-  -- awaits(...)
+  -- awaits(advance(full_in)), arrives(empty_in)
   for i in is do
     phase3(rs_private[i], rs_ghost[i])
   end
+
+  empty_in = advance(empty_in)
+  empty_out = advance(empty_out)
+  full_in = advance(full_in)
+  full_out = advance(full_out)
 end
 
 -- x : regentlib.list(regentlib.list(region(...))) = list_cross_product(y, z)
@@ -112,7 +122,11 @@ task main()
       var rs_p = rs_private[is]
       var rs_g = rs_ghost[is]
       var rs_g_p = rs_ghost_product[is]
-      shard(iis, rs_p, rs_g, rs_g_p)
+      var rs_g_e_i = rs_ghost_empty_in[is]
+      var rs_g_e_o = rs_ghost_empty_out[is]
+      var rs_g_f_i = rs_ghost_full_in[is]
+      var rs_g_f_o = rs_ghost_full_out[is]
+      shard(iis, rs_p, rs_g, rs_g_p, rs_g_e_i, rs_g_e_o, rs_g_f_i, rs_g_f_o)
     end
   end
 end

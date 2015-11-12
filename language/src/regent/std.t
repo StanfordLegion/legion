@@ -2242,6 +2242,13 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return 1 + self.element_type:list_depth()
   end
 
+  function st:leaf_element_type()
+    if std.is_list(self.element_type) then
+      return self.element_type:leaf_element_type()
+    end
+    return self.element_type
+  end
+
   function st:region()
     assert(std.is_list_of_regions(self))
     if std.is_list(self.element_type) then

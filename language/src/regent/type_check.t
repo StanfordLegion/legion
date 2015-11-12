@@ -611,7 +611,7 @@ function type_check.expr_index_access(cx, node)
     end
 
     if not value_type:is_list_of_regions() then
-      local expr_type = value_type.element_type
+      local expr_type = value_type:leaf_element_type()
       if slice then
         for i = 1, value_type:list_depth() do
           expr_type = std.list(expr_type)
@@ -1427,13 +1427,16 @@ end
 function type_check.expr_advance(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  if not std.validate_implicit_cast(value_type, std.phase_barrier) then
+  if not (std.validate_implicit_cast(value_type, std.phase_barrier) or
+            std.is_list_of_phase_barriers(value_type))
+  then
     log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(value_type))
   end
+  local expr_type = value_type
 
   return ast.typed.expr.Advance {
     value = value,
-    expr_type = std.phase_barrier,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }

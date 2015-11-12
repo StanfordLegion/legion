@@ -3363,6 +3363,40 @@ function codegen.expr_phase_barrier(cx, node)
     expr_type)
 end
 
+local function expr_advance_phase_barrier(cx, value, value_type)
+  assert(std.is_phase_barrier(value_type))
+  return quote end, `(value_type {
+    impl = c.legion_phase_barrier_advance(
+      [cx.runtime], [cx.context], [value].impl),
+  })
+end
+
+local function expr_advance_list(cx, value, value_type)
+  if std.is_list(value_type) then
+    local result = terralib.newsymbol(value_type, "result")
+    local element = terralib.newsymbol(value_type.element_type, "element")
+    local inner_actions, inner_value = expr_advance_list(
+      cx, element, value_type.element_type)
+    local actions = quote
+      var data = c.malloc(
+        terralib.sizeof([value_type.element_type]) * [value].__size)
+      regentlib.assert(data ~= nil, "malloc failed in index_access")
+      var [result] = [value_type] {
+        __size = [value].__size,
+        __data = data
+      }
+      for i = 0, [value].__size do
+        var [element] = [value_type:data(value)][i]
+        [inner_actions]
+        [value_type:data(result)][i] = [inner_value]
+      end
+    end
+    return actions, result
+  else
+    return expr_advance_phase_barrier(cx, value, value_type)
+  end
+end
+
 function codegen.expr_advance(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local value = codegen.expr(cx, node.value):read(cx, value_type)
@@ -3372,13 +3406,14 @@ function codegen.expr_advance(cx, node)
     [emit_debuginfo(node)]
   end
 
+  local result_actions, result = expr_advance_list(cx, value.value, value_type)
+  actions = quote
+    [actions];
+    [result_actions]
+  end
+
   return values.value(
-    expr.once_only(
-      actions,
-      `(expr_type {
-          impl = c.legion_phase_barrier_advance(
-            [cx.runtime], [cx.context], [value.value].impl),
-        })),
+    expr.once_only(result_actions, result),
     expr_type)
 end
 
