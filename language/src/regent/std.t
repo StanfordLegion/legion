@@ -1877,6 +1877,10 @@ function std.partition(disjointness, region)
     return region
   end
 
+  function st:fspace()
+    return self:parent_region():fspace()
+  end
+
   function st:subregions_constant()
     return self.subregions
   end
