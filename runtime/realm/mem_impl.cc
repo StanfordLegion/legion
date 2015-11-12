@@ -1736,12 +1736,14 @@ namespace Realm {
         off_t new_offset = offset;
         while (count > 0) {
           size_t elemnt_size = serdez_op->serialized_size(pos);
+          printf("elemnt_size = %lu\n", elemnt_size);
           // break if including this element exceeds max_xfer_size
           if (elemnt_size + cur_size > max_xfer_size)
             break;
           count--;
           cur_count++;
-          serdez_op->serialize(pos, buffer);
+          memcpy(buffer, *((char**)pos), elemnt_size);
+          serdez_op->serialize(pos, buffer); 
           pos += field_size;
           new_offset += field_size;
           buffer += elemnt_size;

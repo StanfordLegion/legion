@@ -2313,7 +2313,7 @@ namespace LegionRuntime {
       // for now we launches an individual copy request for every serdez copy
       assert(serdez_id == 0 || (oas_by_inst->size() == 1 && oas_by_inst->begin()->second.size() == 1));
       MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, 0, serdez_id);
-
+      log_dma.info("mpc created");
       switch(domain.get_dim()) {
       case 0:
 	{
@@ -3889,6 +3889,7 @@ namespace Realm {
 	  oas.dst_offset = dst_it->offset + dst_suboffset;
 	  oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
 	  oas.serdez_id = src_it->serdez_id;
+          printf("serdez_id = %d\n", oas.serdez_id);
 	  // <SERDEZ_DMA>
 	  // This is a little bit of hack: if serdez_id != 0 we directly create a
 	  // CopyRequest instead of inserting it into ''oasvec''

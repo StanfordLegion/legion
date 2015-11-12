@@ -41,9 +41,9 @@ enum SerdezIDs {
   SERDEZ_ID = 123
 };
 
-class ReadWriteMapper : public DefaultMapper {
+class RenderingMapper : public DefaultMapper {
 public:
-  ReadWriteMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
+  RenderingMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
     : DefaultMapper(machine, runtime, local)
   {
     std::set<Memory> all_mem;
@@ -56,7 +56,6 @@ public:
     printf("num sys_mem = %lu\n", sys_mem.size());
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
-    scheduler_cpu_proc = Processor::NO_PROC;
     for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
       if (it->kind() == Processor::LOC_PROC) {
         worker_cpu_procs.push_back(*it);
@@ -68,20 +67,34 @@ public:
   virtual void select_task_options(Task *task)
   {
     DefaultMapper::select_task_options(task);
-    task->inline_task = false;
-    task->spawn_task = false;
+    //task->inline_task = false;
+    //task->spawn_task = false;
+    //assert(task->map_locally == true);
     task->map_locally = true;
-    task->profile_task = false;
+    //task->profile_task = false;
     //if (task->task_id == TOP_LEVEL_TASK_ID
      //|| task->task_id == MAIN_TASK_ID
      //|| task->task_id == INIT_TASK_ID);
     if (task->task_id == WORKER_TASK_ID) {
-      task->target_proc = worker_cpu_procs[task->index_point[0] % worker_cpu_procs.size()];
+      int idx = task->index_point.point_data[0];
+      //task->target_proc = worker_cpu_procs[idx % worker_cpu_procs.size()];
+      printf("index = %d, proc ID = %d/%u\n", idx, gasnet_mynode(), task->target_proc.id);
+    }
+  }
+
+  virtual void select_task_variant(Task *task)
+  {
+    DefaultMapper::select_task_variant(task);
+    if (task->task_id == WORKER_TASK_ID) {
+      int idx = task->index_point.point_data[0];
+      //task->target_proc = worker_cpu_procs[idx % worker_cpu_procs.size()];
+      printf("stv: idx = %d, proc ID = %d/%u\n", idx, gasnet_mynode(), task->target_proc.id);
     }
   }
 
   virtual bool map_task(Task *task)
   {
+    bool ret = DefaultMapper::map_task(task);
     std::set<Memory> vis_mems;
     std::vector<Memory> sys_mem;
     machine.get_visible_memories(task->target_proc, vis_mems);
@@ -92,7 +105,9 @@ public:
     assert(sys_mem.size() == 1);
     for (unsigned idx = 0; idx < task->regions.size(); idx++)
     {
+      task->regions[idx].target_ranking.clear();
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
+      assert(task->regions[idx].virtual_map == false);
       task->regions[idx].virtual_map = false;
       task->regions[idx].enable_WAR_optimization = false;
       task->regions[idx].reduction_list = false;
@@ -100,12 +115,10 @@ public:
       task->regions[idx].blocking_factor =
         task->regions[idx].max_blocking_factor;
     }
-    return true;
+    return ret;
   }
 public:
-  int read_only_task_idx;
   std::vector<Processor> worker_cpu_procs;
-  Processor scheduler_cpu_proc;
 };
 
 static void update_mappers(Machine machine, HighLevelRuntime *rt,
@@ -114,7 +127,7 @@ static void update_mappers(Machine machine, HighLevelRuntime *rt,
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    rt->replace_default_mapper(new ReadWriteMapper(machine, rt, *it), *it);
+    rt->replace_default_mapper(new RenderingMapper(machine, rt, *it), *it);
   }
 }
 
@@ -184,10 +197,7 @@ void top_level_task(const Task *task,
         npar = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running graph rendering with nsize = %d\n", nsize);
-  printf("Generating iterations = %d\n", niter);
-  printf("Num of partitions = %d\n", npar);
-
+  
   Rect<1> rect_A(Point<1>(0), Point<1>(nsize - 1));
   IndexSpace is_A = runtime->create_index_space(ctx,
                           Domain::from_rect<1>(rect_A));
@@ -196,6 +206,7 @@ void top_level_task(const Task *task,
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs_A);
     allocator.allocate_field(sizeof(Object*), FID_VAL, SERDEZ_ID);
+    //allocator.allocate_field(sizeof(Object*), FID_VAL);
   }
   LogicalRegion lr_A = runtime->create_logical_region(ctx, is_A, fs_A);
 
@@ -261,6 +272,9 @@ void main_task(const Task *task,
   Domain dom = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
   Rect<1> rect_A = dom.get_rect<1>();
+  printf("Running graph rendering with nsize = %lu\n", rect_A.volume());
+  printf("Generating iterations = %d\n", niter);
+  printf("Num of partitions = %d\n", npar);
 
   Rect<1> color_bounds(Point<1>(0),Point<1>(npar-1));
   Domain color_domain = Domain::from_rect<1>(color_bounds);
@@ -308,7 +322,7 @@ void worker_task(const Task *task,
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
-
+  printf("worker_task: node = %d, idx = %d\n", gasnet_mynode(), task->index_point.point_data[0]);
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
 
   RegionAccessor<AccessorType::Generic, Object*> acc_A =
@@ -334,7 +348,7 @@ int main(int argc, char **argv)
       Processor::LOC_PROC, true/*single*/, false/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(false/*leaf task*/), "main_task");
   HighLevelRuntime::register_legion_task<worker_task>(WORKER_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      Processor::LOC_PROC, true/*single*/, true/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf task*/), "worker_task");
 
   // Register custom mappers
