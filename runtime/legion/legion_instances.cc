@@ -366,6 +366,7 @@ namespace LegionRuntime {
           rez.serialize(it->second);
           rez.serialize(finder->second.offset);
           rez.serialize(finder->second.size);
+          rez.serialize(finder->second.serdez_id);
         }
       }
     }
@@ -382,15 +383,14 @@ namespace LegionRuntime {
         derez.deserialize(fid);
         unsigned index = owner->get_field_index(fid);
         field_indexes[index] = fid;
-        unsigned offset, size;
-        derez.deserialize(offset);
-        derez.deserialize(size);
-        field_infos[fid] = 
-          Domain::CopySrcDstField(PhysicalInstance::NO_INST, offset, size);
+        Domain::CopySrcDstField &info = field_infos[fid];
+        derez.deserialize(info.offset);
+        derez.deserialize(info.size);
+        derez.deserialize(info.serdez_id);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(offset_size_map.find(offset) == offset_size_map.end());
+        assert(offset_size_map.find(info.offset) == offset_size_map.end());
 #endif
-        offset_size_map[offset] = size;
+        offset_size_map[info.offset] = info.size;
       }
     }
 
