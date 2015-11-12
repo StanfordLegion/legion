@@ -73,11 +73,26 @@ namespace Realm {
     struct TreeNode {
       IT split_val;
       TreeNode *left, *right;
-      std::vector<IT> start_vals, end_vals;
-      std::vector<LT> start_labels, end_labels;
+      std::vector<IT> starts, ends;
+      std::vector<LT> labels;
+      std::vector<int> sorted_by_start, sorted_by_end;
 
       TreeNode(IT _split_val);
       ~TreeNode(void);
+
+      static TreeNode *build_tree(const std::vector<IT>& pending_starts,
+				  const std::vector<IT>& pending_ends,
+				  const std::vector<LT>& pending_labels);
+
+      template <typename MARKER>
+      void test_interval(IT iv_start, IT iv_end, MARKER& marker) const;
+				  
+      template <typename IR, typename MARKER>
+      void test_sorted_intervals(const IR& iv_ranges,
+				 int pos, int count,
+				 MARKER& marker) const;
+				  
+      void repopulate_pending(IntervalTree<IT,LT> *tree);
     };
 
   protected:

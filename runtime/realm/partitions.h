@@ -190,8 +190,8 @@ namespace Realm {
     void construct(void);
 
     void test_overlap(const ZRect<N,T>* rects, size_t count, std::set<int>& overlaps);
-    void test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps);
-    void test_overlap(const SparsityMapImpl<N,T> *sparsity, std::set<int>& overlaps);
+    void test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps, bool approx);
+    void test_overlap(const SparsityMapImpl<N,T> *sparsity, std::set<int>& overlaps, bool approx);
 
   protected:
     std::vector<int> labels;
@@ -199,7 +199,6 @@ namespace Realm {
     std::vector<bool> approxs;
   };
 
-#if 0
   template <typename T>
   class OverlapTester<1,T> {
   public:
@@ -210,13 +209,14 @@ namespace Realm {
 
     void construct(void);
 
-    void test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps);
-    void test_overlap(const SparsityMapImpl<1,T> *sparsity, std::set<int>& overlaps);
+    void test_overlap(const ZRect<1,T>* rects, size_t count, std::set<int>& overlaps);
+    void test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps, bool approx);
+    void test_overlap(const SparsityMapImpl<1,T> *sparsity, std::set<int>& overlaps, bool approx);
 
   protected:
     IntervalTree<T,int> interval_tree;
   };
-#endif
+
 
   /////////////////////////////////////////////////////////////////////////
 

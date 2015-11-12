@@ -941,12 +941,25 @@ namespace Realm {
 
 	// fast case - all these rectangles are after all the ones we have now
 	if(this->entries.empty() || (this->entries.rbegin()->bounds.hi.x < rects[0].lo.x)) {
+	  // special case when merging occurs with the last entry from before
 	  size_t n = this->entries.size();
-	  this->entries.resize(n + count);
-	  for(size_t i = 0; i < count; i++) {
-	    this->entries[n + i].bounds = rects[i];
-	    this->entries[n + i].sparsity.id = 0; // no sparsity map
-	    this->entries[n + i].bitmap = 0;
+	  if((n > 0) && (this->entries.rbegin()->bounds.hi.x == (rects[0].lo.x - 1))) {
+	    this->entries.resize(n + count - 1);
+	    assert(!this->entries[n - 1].sparsity.exists());
+	    assert(this->entries[n - 1].bitmap == 0);
+	    this->entries[n - 1].bounds.hi = rects[0].lo;
+	    for(size_t i = 1; i < count; i++) {
+	      this->entries[n - 1 + i].bounds = rects[i];
+	      this->entries[n - 1 + i].sparsity.id = 0; // no sparsity map
+	      this->entries[n - 1 + i].bitmap = 0;
+	    }
+	  } else {
+	    this->entries.resize(n + count);
+	    for(size_t i = 0; i < count; i++) {
+	      this->entries[n + i].bounds = rects[i];
+	      this->entries[n + i].sparsity.id = 0; // no sparsity map
+	      this->entries[n + i].bitmap = 0;
+	    }
 	  }
 	} else {
 	  // do a merge of the new data with the old
@@ -1432,16 +1445,91 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void OverlapTester<N,T>::test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps)
+  void OverlapTester<N,T>::test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps,
+					bool approx)
   {
     for(size_t i = 0; i < labels.size(); i++)
-      if(approxs[i]) {
+      if(approxs[i] && approx) {
 	if(space.overlaps_approx(spaces[i]))
 	  overlaps.insert(labels[i]);
       } else {
 	if(space.overlaps(spaces[i]))
 	  overlaps.insert(labels[i]);
       }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class OverlapTester<1,T>
+
+  template <typename T>
+  OverlapTester<1,T>::OverlapTester(void)
+  {}
+
+  template <typename T>
+  OverlapTester<1,T>::~OverlapTester(void)
+  {}
+
+  template <typename T>
+  class RectListAdapter {
+  public:
+    RectListAdapter(const std::vector<ZRect<1,T> >& _rects)
+      : rects(&_rects[0]), count(_rects.size()) {}
+    RectListAdapter(const ZRect<1,T> *_rects, size_t _count)
+      : rects(_rects), count(_count) {}
+    size_t size(void) const { return count; }
+    T start(size_t idx) const { return rects[idx].lo.x; }
+    T end(size_t idx) const { return rects[idx].hi.x; }
+  protected:
+    const ZRect<1,T> *rects;
+    size_t count;
+  };
+
+  template <typename T>
+  void OverlapTester<1,T>::add_index_space(int label, const ZIndexSpace<1,T>& space,
+					   bool use_approx /*= true*/)
+  {
+    if(use_approx) {
+      if(space.dense())
+	interval_tree.add_interval(space.bounds.lo.x, space.bounds.hi.x,label);
+      else {
+	SparsityMapImpl<1,T> *impl = SparsityMapImpl<1,T>::lookup(space.sparsity);
+	interval_tree.add_intervals(RectListAdapter<T>(impl->get_approx_rects()), label);
+      }
+    } else {
+      for(ZIndexSpaceIterator<1,T> it(space); it.valid; it.step())
+	interval_tree.add_interval(it.rect.lo.x, it.rect.hi.x, label);
+    }
+  }
+
+  template <typename T>
+  void OverlapTester<1,T>::construct(void)
+  {
+    interval_tree.construct_tree();
+  }
+
+  template <typename T>
+  void OverlapTester<1,T>::test_overlap(const ZRect<1,T> *rects, size_t count, std::set<int>& overlaps)
+  {
+    interval_tree.test_sorted_intervals(RectListAdapter<T>(rects, count), overlaps);
+  }
+
+  template <typename T>
+  void OverlapTester<1,T>::test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps,
+					bool approx)
+  {
+    if(space.dense()) {
+      interval_tree.test_interval(space.bounds.lo.x, space.bounds.hi.x, overlaps);
+    } else {
+      if(approx) {
+	SparsityMapImpl<1,T> *impl = SparsityMapImpl<1,T>::lookup(space.sparsity);
+	interval_tree.test_sorted_intervals(RectListAdapter<T>(impl->get_approx_rects()), overlaps);
+      } else {
+	for(ZIndexSpaceIterator<1,T> it(space); it.valid; it.step())
+	  interval_tree.test_interval(it.rect.lo.x, it.rect.hi.x, overlaps);
+      }
+    }
   }
 
 
@@ -3444,9 +3532,9 @@ namespace Realm {
     for(size_t i = 0; i < sources.size(); i++) {
       std::set<int> overlaps_by_source;
 
-      overlap_tester->test_overlap(sources[i], overlaps_by_source);
+      overlap_tester->test_overlap(sources[i], overlaps_by_source, true /*approx*/);
 
-      //std::cout << overlaps_by_source.size() << " overlaps for source " << i << "\n";
+      log_part.info() << overlaps_by_source.size() << " overlaps for source " << i << "\n";
 
       SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(overlaps_by_source.size());
 
