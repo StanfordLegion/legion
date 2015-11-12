@@ -13918,10 +13918,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != children.end());
 #endif
-          // Check to see if we have any overlapping fields
-          FieldMask overlap = finder->second.child_fields & close_op_mask;
-          if (!overlap)
-            continue;
           LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
             &child_users = finder->second.child_users;
           // A tricky case here.  We know the current operation is
@@ -13937,7 +13933,7 @@ namespace LegionRuntime {
                                         current.op, current.gen);
           // Remove any overlapping fields, we know they won't
           // be used in any other close operations
-          finder->second.child_fields -= overlap;
+          finder->second.child_fields -= close_op_mask;
           // If we've checked against all our fields then we are done
           if (!finder->second.child_fields)
           {
