@@ -13918,6 +13918,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != children.end());
 #endif
+          // Check to see if we have any overlapping fields
+          FieldMask overlap = finder->second.child_fields & close_op_mask;
+          if (!overlap)
+            continue;
           LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
             &child_users = finder->second.child_users;
           // A tricky case here.  We know the current operation is
@@ -13925,14 +13929,18 @@ namespace LegionRuntime {
           // so we can't have the close operation register depencnes
           // on any other users from the same op as the current one
           // we are doing the analysis for (e.g. other region reqs)
-          if (!child_users.empty())
+          RegionTreeNode::perform_dependence_checks<CLOSE_LOGICAL_ALLOC,
+            false/*record*/, true/*has skip*/, false/*track dom*/>(
+                                        op_it->second, child_users,
+                                        close_op_mask, open_below,
+                                        false/*validates*/,
+                                        current.op, current.gen);
+          // Remove any overlapping fields, we know they won't
+          // be used in any other close operations
+          finder->second.child_fields -= overlap;
+          // If we've checked against all our fields then we are done
+          if (!finder->second.child_fields)
           {
-            RegionTreeNode::perform_dependence_checks<CLOSE_LOGICAL_ALLOC,
-              false/*record*/, true/*has skip*/, false/*track dom*/>(
-                                          op_it->second, child_users,
-                                          close_op_mask, open_below,
-                                          false/*validates*/,
-                                          current.op, current.gen);
             // We own mapping references on each one of the users so 
             // we need to remove them once we are done
             for (LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::
@@ -13941,7 +13949,7 @@ namespace LegionRuntime {
             {
               it->op->remove_mapping_reference(it->gen);
             }
-            child_users.clear();
+            children.erase(finder);
           }
         }
         // Next do checks against any operations above in the tree which
