@@ -53,7 +53,7 @@ public:
       if (it->kind() == Memory::SYSTEM_MEM)
         sys_mem.push_back(*it);
     }
-    printf("num sys_mem = %lu\n", sys_mem.size());
+    //printf("num sys_mem = %lu\n", sys_mem.size());
     std::set<Processor> all_procs;
     machine.get_all_processors(all_procs);
     for (std::set<Processor>::iterator it = all_procs.begin(); it != all_procs.end(); it++) {
@@ -61,7 +61,7 @@ public:
         worker_cpu_procs.push_back(*it);
       }
     }
-    printf("cpu size = %lu\n", worker_cpu_procs.size());
+    //printf("cpu size = %lu\n", worker_cpu_procs.size());
   }
 
   virtual void select_task_options(Task *task)
@@ -69,26 +69,15 @@ public:
     DefaultMapper::select_task_options(task);
     //task->inline_task = false;
     //task->spawn_task = false;
-    //assert(task->map_locally == true);
-    task->map_locally = true;
-    //task->profile_task = false;
+    //task->map_locally = true;
+    task->profile_task = false;
     //if (task->task_id == TOP_LEVEL_TASK_ID
      //|| task->task_id == MAIN_TASK_ID
      //|| task->task_id == INIT_TASK_ID);
     if (task->task_id == WORKER_TASK_ID) {
-      int idx = task->index_point.point_data[0];
+      //int idx = task->index_point.point_data[0];
       //task->target_proc = worker_cpu_procs[idx % worker_cpu_procs.size()];
-      printf("index = %d, proc ID = %d/%u\n", idx, gasnet_mynode(), task->target_proc.id);
-    }
-  }
-
-  virtual void select_task_variant(Task *task)
-  {
-    DefaultMapper::select_task_variant(task);
-    if (task->task_id == WORKER_TASK_ID) {
-      int idx = task->index_point.point_data[0];
-      //task->target_proc = worker_cpu_procs[idx % worker_cpu_procs.size()];
-      printf("stv: idx = %d, proc ID = %d/%u\n", idx, gasnet_mynode(), task->target_proc.id);
+      //printf("index = %d, proc ID = %d/%u\n", idx, gasnet_mynode(), task->target_proc.id);
     }
   }
 
@@ -181,8 +170,8 @@ void top_level_task(const Task *task,
 {
   srand(123456);
   int nsize = 1024;
-  int niter = 4;
-  int npar = 1;
+  int niter = 1;
+  int npar = 4;
 
   // Check for any command line arguments
   {
