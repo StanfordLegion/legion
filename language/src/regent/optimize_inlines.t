@@ -174,6 +174,13 @@ local function analyze_usage_node(cx)
     elseif node:is(ast.typed.expr.Fill) then
       local dst_type = std.as_read(node.dst.expr_type)
       return uses(cx, dst_type, remote)
+    elseif node:is(ast.typed.expr.Region) then
+      return uses(cx, node.expr_type, inline)
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      local base_type = std.as_read(node.value.expr_type)
+      if std.is_region(base_type) then
+        return uses(cx, base_type, inline)
+      end
     elseif node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.Deref)
     then
