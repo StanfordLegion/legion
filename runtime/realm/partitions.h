@@ -754,7 +754,7 @@ namespace Realm {
       gasnet_node_t sender;
       int dim;
       int idxtype;
-      id_t sparsity_id;
+      ID::IDType sparsity_id;
       int sequence_id;
       int sequence_count;
     };
@@ -779,7 +779,7 @@ namespace Realm {
       gasnet_node_t sender;
       int dim;
       int idxtype;
-      id_t sparsity_id;
+      ID::IDType sparsity_id;
       bool send_precise;
       bool send_approx;
     };
@@ -824,7 +824,7 @@ namespace Realm {
     struct RequestArgs {
       int dim;
       int idxtype;
-      id_t sparsity_id;
+      ID::IDType sparsity_id;
       int count;
     };
 
