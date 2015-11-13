@@ -3197,6 +3197,10 @@ namespace LegionRuntime {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
+#ifdef LEGION_PROF_MESSAGES
+        unsigned long long start = 
+          Realm::Clock::current_time_in_microseconds();
+#endif
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -3635,6 +3639,12 @@ namespace LegionRuntime {
           default:
             assert(false); // should never get here
         }
+#ifdef LEGION_PROF_MESSAGES
+        unsigned long long stop = 
+          Realm::Clock::current_time_in_microseconds();
+        if (runtime->profiler != NULL)
+          runtime->profiler->record_message(kind, start, stop);
+#endif
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -4254,6 +4264,10 @@ namespace LegionRuntime {
                                       hlr_task_descriptions, 
                                       Operation::LAST_OP_KIND, 
                                       Operation::op_names); 
+#ifdef LEGION_PROF_MESSAGES
+        HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
+        profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
+#endif
         // We also have to register any statically registered task
         // variants here since the profiler didn't exist before
         const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
