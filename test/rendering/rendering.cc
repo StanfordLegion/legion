@@ -67,10 +67,10 @@ public:
   virtual void select_task_options(Task *task)
   {
     DefaultMapper::select_task_options(task);
-    //task->inline_task = false;
-    //task->spawn_task = false;
-    //task->map_locally = true;
-    //task->profile_task = false;
+    task->inline_task = false;
+    task->spawn_task = false;
+    task->map_locally = true;
+    task->profile_task = false;
     //if (task->task_id == TOP_LEVEL_TASK_ID
      //|| task->task_id == MAIN_TASK_ID
      //|| task->task_id == INIT_TASK_ID);
@@ -95,6 +95,12 @@ public:
     assert(sys_mem.size() == 1);
     for (unsigned idx = 0; idx < task->regions.size(); idx++)
     {
+      if (task->task_id == WORKER_TASK_ID) {
+        for (std::map<Memory,bool>::iterator it = task->regions[idx].current_instances.begin(); it != task->regions[idx].current_instances.end(); it++) {
+          printf("idx = %d, mem = %x, has = %d\n", task->index_point.point_data[0], it->first.id, it->second);
+        }
+        printf("final dec = %x\n", sys_mem[0].id);
+      }
       task->regions[idx].target_ranking.clear();
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
       assert(task->regions[idx].virtual_map == false);
@@ -127,13 +133,14 @@ struct RGB {
 
 class Object {
 public:
+  enum {dim_size = 512};
   Object(void) {
-    for (int i = 0; i < 512 * 512;i++) {
+    for (int i = 0; i < dim_size * dim_size;i++) {
       texture[i].r = texture[i].g = texture[i].b = 1;
     }
   }
 public:
-  RGB texture[512 * 512];
+  RGB texture[dim_size * dim_size];
 };
 
 /*template<typename T>
@@ -163,6 +170,7 @@ public:
 
 struct Config {
   int nsize, niter, npar;
+  bool cache_optimization;
 };
 
 void top_level_task(const Task *task,
@@ -173,7 +181,7 @@ void top_level_task(const Task *task,
   int nsize = 1024;
   int niter = 1;
   int npar = 4;
-
+  bool cache_optimization = false;
   // Check for any command line arguments
   {
     const InputArgs &command_args = HighLevelRuntime::get_input_args();
@@ -185,6 +193,8 @@ void top_level_task(const Task *task,
         niter = atoi(command_args.argv[++i]);
       else if (!strcmp(command_args.argv[i],"-p"))
         npar = atoi(command_args.argv[++i]);
+      else if (!strcmp(command_args.argv[i],"-c"))
+        cache_optimization = true;
     }
   }
   
@@ -212,10 +222,11 @@ void top_level_task(const Task *task,
   config.nsize = nsize;
   config.niter = niter;
   config.npar = npar;
+  config.cache_optimization = cache_optimization;
   TaskLauncher main_launcher(MAIN_TASK_ID,
                              TaskArgument(&config, sizeof(config)));
   main_launcher.add_region_requirement(
-      RegionRequirement(lr_A, READ_WRITE,
+      RegionRequirement(lr_A, READ_ONLY,
                         SIMULTANEOUS, lr_A));
   main_launcher.add_field(0, FID_VAL);
   runtime->execute_task(ctx, main_launcher);
@@ -242,6 +253,12 @@ void init_task(const Task *task,
   Rect<1> rect_A = dom.get_rect<1>();
   for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
     Object* new_rect = new Object();
+    for (int x = 0; x < Object::dim_size; x++)
+      for (int y = 0; y < Object::dim_size; y++) {
+        new_rect->texture[x * Object::dim_size + y].r = 1;
+        new_rect->texture[x * Object::dim_size + y].g = 0;
+        new_rect->texture[x * Object::dim_size + y].b = 0;
+      }
     acc_A.write(DomainPoint::from_point<1>(pir.p), new_rect);
   }
 }
@@ -270,9 +287,12 @@ void main_task(const Task *task,
   Domain color_domain = Domain::from_rect<1>(color_bounds);
   DomainColoring coloring;
   for (int color = 0; color < npar; color ++) {
-    coloring[color] = Domain::from_rect<1>(rect_A);
+    int left = color * (rect_A.volume() / npar);
+    int right = left + rect_A.volume() / npar - 1;
+    Rect<1> sub_rect(make_point(left), make_point(right));
+    coloring[color] = Domain::from_rect<1>(sub_rect);
   }
-  IndexPartition ip = runtime->create_index_partition(ctx, lr_A.get_index_space(), color_domain, coloring, false);
+  IndexPartition ip = runtime->create_index_partition(ctx, lr_A.get_index_space(), color_domain, coloring, true);
   LogicalPartition lp =
     runtime->get_logical_partition(ctx, lr_A, ip);
 
@@ -280,11 +300,17 @@ void main_task(const Task *task,
   struct timespec ts_start, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
   // Acquire the logical reagion so that we can launch sub-operations that make copies
-  AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
-  acquire_launcher.add_field(FID_VAL);
-  runtime->issue_acquire(ctx, acquire_launcher);
-
+  if (config.cache_optimization) {
+    AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+    acquire_launcher.add_field(FID_VAL);
+    runtime->issue_acquire(ctx, acquire_launcher);
+  }
   for (int iter = 0; iter < niter; iter++) {
+    if (!config.cache_optimization) {
+      AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+      acquire_launcher.add_field(FID_VAL);
+      runtime->issue_acquire(ctx, acquire_launcher);
+    }
     ArgumentMap arg_map;
     IndexLauncher index_launcher(WORKER_TASK_ID, color_domain, TaskArgument(NULL, 0), arg_map);
     index_launcher.add_region_requirement(
@@ -292,12 +318,18 @@ void main_task(const Task *task,
     index_launcher.add_field(0, FID_VAL); 
     FutureMap future_map = runtime->execute_index_space(ctx, index_launcher);
     future_map.wait_all_results();
+    if (!config.cache_optimization) {
+      ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+      release_launcher.add_field(FID_VAL);
+      runtime->issue_release(ctx, release_launcher);
+    }
   }
   //Release the attached physicalregion
-  ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
-  release_launcher.add_field(FID_VAL);
-  runtime->issue_release(ctx, release_launcher);
- 
+  if (config.cache_optimization) {
+    ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+    release_launcher.add_field(FID_VAL);
+    runtime->issue_release(ctx, release_launcher);
+  }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
   double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
@@ -320,9 +352,17 @@ void worker_task(const Task *task,
   Domain dom = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
   Rect<1> rect_A = dom.get_rect<1>();
+  RGB* bg = (RGB*) calloc(Object::dim_size * Object::dim_size, sizeof(RGB));
   for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
-    acc_A.read(DomainPoint::from_point<1>(pir.p));
+    Object* obj = acc_A.read(DomainPoint::from_point<1>(pir.p));
+    for (int x = 0; x < Object::dim_size; x++)
+      for (int y = 0; y < Object::dim_size; y++) {
+        bg[x * Object::dim_size + y].r += obj->texture[x * Object::dim_size + y].r;
+        bg[x * Object::dim_size + y].g += obj->texture[x * Object::dim_size + y].g;
+        bg[x * Object::dim_size + y].b += obj->texture[x * Object::dim_size + y].b;
+      }
   } 
+  free(bg);
 }
 
 int main(int argc, char **argv)

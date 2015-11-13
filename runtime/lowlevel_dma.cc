@@ -1772,7 +1772,6 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
-        printf("CP#1: src_off = %ld, dst_off = %ld, bytes = %lu\n", src_offset, dst_offset, bytes);
 	//printf("remote write of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #ifdef TIME_REMOTE_WRITES
         unsigned long long start = TimeStamp::get_current_time_in_micros();
@@ -2004,7 +2003,6 @@ namespace LegionRuntime {
       MemoryImpl::MemoryKind dst_kind = dst_impl->kind;
 
       log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
-      printf("redop_id = %d, serdez_id = %d\n", redop_id, serdez_id);
       if(redop_id == 0) {
         if (serdez_id != 0) {
           // handle serdez cases, for now we only support remote serdez case
@@ -3882,7 +3880,6 @@ namespace Realm {
 	  oas.dst_offset = dst_it->offset + dst_suboffset;
 	  oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
 	  oas.serdez_id = src_it->serdez_id;
-          printf("serdez_id = %d\n", oas.serdez_id);
 	  // <SERDEZ_DMA>
 	  // This is a little bit of hack: if serdez_id != 0 we directly create a
 	  // CopyRequest instead of inserting it into ''oasvec''
