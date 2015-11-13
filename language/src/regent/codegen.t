@@ -3416,7 +3416,7 @@ function codegen.expr_advance(cx, node)
   end
 
   return values.value(
-    expr.once_only(result_actions, result),
+    expr.once_only(actions, result),
     expr_type)
 end
 
