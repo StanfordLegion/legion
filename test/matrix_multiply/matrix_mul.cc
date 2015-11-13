@@ -237,7 +237,25 @@ void main_task(const Task *task,
     allocator.allocate_field(sizeof(ElementType),FID_VAL);
   }
   LogicalRegion lr_B = runtime->create_logical_region(ctx, is_B, fs_B);
-
+  
+  // Initialize lr_B
+  {
+    RegionRequirement req(lr_B, WRITE_DISCARD, EXCLUSIVE, lr_B);
+    req.add_field(FID_VAL);
+    InlineLauncher input_launcher(req);
+    PhysicalRegion pr_B = runtime->map_region(ctx, input_launcher);
+    pr_B.wait_until_valid();
+    RegionAccessor<AccessorType::Generic, ElementType> acc =
+      pr_B.get_field_accessor(FID_VAL).typeify<ElementType>();
+    for (GenericPointInRectIterator<1> pir(rect_B); pir; pir++) {
+      acc.write(DomainPoint::from_point<1>(pir.p), 1);
+    }
+    runtime->unmap_region(ctx, pr_B);
+  }
+  
+  // Start Computation
+  struct timespec ts_start, ts_end, ts_mid;
+  clock_gettime(CLOCK_MONOTONIC, &ts_start);
   PhysicalRegion pr_A;
   if (mode == ATTACH) {
     std::vector<FieldID> field_vec;
@@ -254,6 +272,7 @@ void main_task(const Task *task,
     global_fd = open(input_file, O_RDONLY | O_DIRECT, 00777);
     assert(global_fd != 0);
   } else {
+    global_fd = open(input_file, O_RDONLY | O_DIRECT, 00777);
     assert(mode == NONE);
     // Initialize lr_A
     RegionRequirement req(lr_A, WRITE_DISCARD, EXCLUSIVE, lr_A);
@@ -263,30 +282,46 @@ void main_task(const Task *task,
     pr_A.wait_until_valid();
     RegionAccessor<AccessorType::Generic, ElementType> acc =
       pr_A.get_field_accessor(FID_VAL).typeify<ElementType>();
-    for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
-      acc.write(DomainPoint::from_point<1>(pir.p), 1);
+    for (int region = 0; region < nregions; region++) {
+      ElementType* arr_A = (ElementType*) calloc(nsize * nsize, sizeof(ElementType));
+      off_t offset = nsize * nsize * region;
+      aio_context_t ctx;
+      struct iocb cb;
+      struct iocb *cbs[1];
+      struct io_event events[1];
+      ctx = 0;
+      int ret = io_setup(1, &ctx);
+      assert(ret >= 0);
+      memset(&cb, 0, sizeof(cb));
+      cb.aio_lio_opcode = IOCB_CMD_PREAD;
+      cb.aio_fildes = global_fd;
+      cb.aio_buf = (uint64_t)(arr_A);
+      cb.aio_nbytes = nsize * nsize * sizeof(ElementType);
+      cb.aio_offset = cb.aio_nbytes * region;
+      // printf("aio_offset = %lld, aio_nbytes = %llu\n", cb.aio_offset, cb.aio_nbytes);
+      cbs[0] = &cb;
+      ret = io_submit(ctx, 1, cbs);
+      if (ret < 0) {
+        perror("io_submit error");
+      }
+      int nr = io_getevents(ctx, 1, 1, events, NULL);
+      if (nr < 0)
+        perror("io_getevents error");
+      assert(nr == 1);
+      assert(events[0].res == (int64_t) cb.aio_nbytes);
+      io_destroy(ctx);
+      for (int i = 0; i < nsize * nsize; i++) {
+        acc.write(ptr_t(offset + i), arr_A[i]);
+      }
     }
+    close(global_fd);
     runtime->unmap_region(ctx, pr_A);
+    clock_gettime(CLOCK_MONOTONIC, &ts_mid);
+    double exec_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
+                       (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
+    printf("LOAD TIME = %7.3f s\n", exec_time);
   }
 
-  // Initialize lr_B
-  {
-    RegionRequirement req(lr_B, WRITE_DISCARD, EXCLUSIVE, lr_B);
-    req.add_field(FID_VAL);
-    InlineLauncher input_launcher(req);
-    PhysicalRegion pr_B = runtime->map_region(ctx, input_launcher);
-    pr_B.wait_until_valid();
-    RegionAccessor<AccessorType::Generic, ElementType> acc =
-      pr_B.get_field_accessor(FID_VAL).typeify<ElementType>();
-    for (GenericPointInRectIterator<1> pir(rect_B); pir; pir++) {
-      acc.write(DomainPoint::from_point<1>(pir.p), 1);
-    }
-    runtime->unmap_region(ctx, pr_B);
-  }
-
-  // Start Computation
-  struct timespec ts_start, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_start);
   Rect<1> color_bounds(Point<1>(0),Point<1>(nregions-1));
   Domain color_domain = Domain::from_rect<1>(color_bounds);
 
@@ -589,14 +624,17 @@ void compute_from_file_task(const Task *task,
   assert(nr == 1);
   assert(events[0].res == (int64_t) cb.aio_nbytes);
   io_destroy(ctx);
-
+  
+  for (int k = 0; k < nsize; k++)
+    for (int i = 0; i < nsize; i++) {
+      acc_A.write(ptr_t(offset + k * nsize + i), arr_A[k * nsize + i]);
+    }
   int sum = 0;
   int times = 0;
   for (times = 0; times < 5; times++)
   for (int k = 0; k < nsize; k++)
     for (int i = 0; i < nsize; i++) {
-      ElementType x = arr_A[k * nsize + i];
-      acc_A.read(ptr_t(offset + k * nsize + i));
+      ElementType x = acc_A.read(ptr_t(offset + k * nsize + i));
       ElementType y = acc_B.read(ptr_t(i));
       sum += x * y;
     }

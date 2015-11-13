@@ -97,7 +97,7 @@ public:
     {
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
       task->regions[idx].virtual_map = false;
-      task->regions[idx].enable_WAR_optimization = false;
+      task->regions[idx].enable_WAR_optimization = true;
       task->regions[idx].reduction_list = false;
       // Make everything SOA
       task->regions[idx].blocking_factor =
@@ -214,13 +214,13 @@ void top_level_task(const Task *task,
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
   runtime->unmap_region(ctx, pr_A);
+  // Acquire the logical reagion so that we can launch sub-operations that make copies
+  AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+  acquire_launcher.add_field(FID_VAL);
+  runtime->issue_acquire(ctx, acquire_launcher);
+
   int read_only_idx = 0;
   for (int iter = 0; iter < ntask; iter++) {
-    // Acquire the logical reagion so that we can launch sub-operations that make copies
-    AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
-    acquire_launcher.add_field(FID_VAL);
-    runtime->issue_acquire(ctx, acquire_launcher);
-
     Future future;
     // Perform task
     if (drand48() < ratio) {
@@ -245,13 +245,12 @@ void top_level_task(const Task *task,
     if(iter == ntask - 1) {
       future.get_void_result();
     }
-
-    //Release the attached physicalregion
-    ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
-    release_launcher.add_field(FID_VAL);
-    runtime->issue_release(ctx, release_launcher);
   }
-
+  //Release the attached physicalregion
+  ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+  release_launcher.add_field(FID_VAL);
+  runtime->issue_release(ctx, release_launcher);
+ 
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
   runtime->remap_region(ctx, pr_A);
