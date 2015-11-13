@@ -2704,6 +2704,10 @@ function task:make_variant()
   variant_task:settaskid(self:gettaskid())
   variant_task:settype(self:gettype())
   variant_task:setprivileges(self:getprivileges())
+  variant_task:set_coherence_modes(self:get_coherence_modes())
+  variant_task:set_conditions(self:get_conditions())
+  variant_task:set_param_constraints(self:get_param_constraints())
+  variant_task:set_flags(self:get_flags())
   variant_task:set_constraints(self:get_constraints())
   variant_task:set_source_variant(self)
   return variant_task
@@ -2995,15 +2999,19 @@ function std.start(main_task)
     end)
   if std.config["cuda"] then
     cudahelper.link_driver_library()
+    local all_kernels = {}
     tasks:map(function(task)
       if task:getcuda() then
         local kernels = task:getcudakernels()
         if kernels ~= nil then
-          print("JIT compiling CUDA kernels in task " .. task.name)
-          cudahelper.jit_compile_kernels_and_register(kernels)
+          for k, v in pairs(kernels) do
+            all_kernels[k] = v
+          end
         end
       end
     end)
+    print("JIT compiling CUDA kernels")
+    cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local reduction_registrations = terralib.newlist()
