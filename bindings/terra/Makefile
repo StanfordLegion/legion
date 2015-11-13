@@ -36,6 +36,10 @@ GEN_SRC		:= \
   # .cc files
 GEN_GPU_SRC	:=		# .cu files
 
+ifeq ($(strip $(USE_CUDA)),1)
+GEN_SRC += legion_terra_cudart_hijack.cc
+endif
+
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=

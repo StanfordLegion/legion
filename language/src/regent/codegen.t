@@ -4562,7 +4562,7 @@ function codegen.stat_for_list(cx, node)
 
     local cuda_opts = cx.task_meta:getcuda()
     -- wrap for-loop body as a terra function
-    local N = cuda_opts.unrolling_factor
+    local N = 1 --cuda_opts.unrolling_factor
     local T = 32
     local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
     local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
@@ -4651,6 +4651,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         block = node.orig_block,
         vectorize = false,
         span = node.span,
+        options = node.options,
       })
   end
   local symbol = node.symbol
@@ -5892,16 +5893,14 @@ function codegen.stat_top(cx, node)
       std.register_task(cpu_task)
       return cpu_task
     else
-      local cuda_opts = node.cuda
       local cpu_task = codegen.stat_task(
         cx,
         node {
           options = node.options {
             cuda = ast.options.Forbid { value = false } } })
       local cuda_task = cpu_task:make_variant()
-      cuda_task:setcuda(cuda_opts)
+      cuda_task:setcuda(true)
       local new_node = node {
-        cuda = cuda_opts,
         prototype = cuda_task,
       }
       cuda_task = codegen.stat_task(cx, new_node)
