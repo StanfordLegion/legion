@@ -86,7 +86,7 @@ public:
     bool ret = DefaultMapper::map_task(task);
     std::set<Memory> vis_mems;
     std::vector<Memory> sys_mem;
-    printf("task_idx = %d, target_proc = %d\n", task->index_point.point_data[0], task->target_proc.id);
+    //printf("task_idx = %d, target_proc = %d\n", task->index_point.point_data[0], task->target_proc.id);
     machine.get_visible_memories(task->target_proc, vis_mems);
     for (std::set<Memory>::iterator it = vis_mems.begin(); it != vis_mems.end(); it++) {
       if (it->kind() == Memory::SYSTEM_MEM)
@@ -97,9 +97,9 @@ public:
     {
       if (task->task_id == WORKER_TASK_ID) {
         for (std::map<Memory,bool>::iterator it = task->regions[idx].current_instances.begin(); it != task->regions[idx].current_instances.end(); it++) {
-          printf("idx = %d, mem = %x, has = %d\n", task->index_point.point_data[0], it->first.id, it->second);
+          //printf("idx = %d, mem = %x, has = %d\n", task->index_point.point_data[0], it->first.id, it->second);
         }
-        printf("final dec = %x\n", sys_mem[0].id);
+        //printf("final dec = %x\n", sys_mem[0].id);
       }
       task->regions[idx].target_ranking.clear();
       task->regions[idx].target_ranking.push_back(sys_mem[0]);
@@ -306,6 +306,8 @@ void main_task(const Task *task,
     runtime->issue_acquire(ctx, acquire_launcher);
   }
   for (int iter = 0; iter < niter; iter++) {
+    struct timespec sub_ts_start, sub_ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &sub_ts_start);
     if (!config.cache_optimization) {
       AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
       acquire_launcher.add_field(FID_VAL);
@@ -323,6 +325,10 @@ void main_task(const Task *task,
       release_launcher.add_field(FID_VAL);
       runtime->issue_release(ctx, release_launcher);
     }
+    clock_gettime(CLOCK_MONOTONIC, &sub_ts_end);
+    double exec_time = ((1.0 * (sub_ts_end.tv_sec - sub_ts_start.tv_sec)) +
+                       (1e-9 * (sub_ts_end.tv_nsec - sub_ts_start.tv_nsec)));
+    printf("time(%d) = %7.3f s\n", iter, exec_time);
   }
   //Release the attached physicalregion
   if (config.cache_optimization) {
@@ -344,7 +350,7 @@ void worker_task(const Task *task,
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
-  printf("worker_task: node = %d, idx = %d\n", gasnet_mynode(), task->index_point.point_data[0]);
+  //printf("worker_task: node = %d, idx = %d\n", gasnet_mynode(), task->index_point.point_data[0]);
   FieldID fid_A = *(task->regions[0].privilege_fields.begin());
 
   RegionAccessor<AccessorType::Generic, Object*> acc_A =
@@ -355,6 +361,7 @@ void worker_task(const Task *task,
   RGB* bg = (RGB*) calloc(Object::dim_size * Object::dim_size, sizeof(RGB));
   for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
     Object* obj = acc_A.read(DomainPoint::from_point<1>(pir.p));
+    for (int times = 0; times < 10; times++)
     for (int x = 0; x < Object::dim_size; x++)
       for (int y = 0; y < Object::dim_size; y++) {
         bg[x * Object::dim_size + y].r += obj->texture[x * Object::dim_size + y].r;
