@@ -103,7 +103,7 @@ namespace Realm {
       // unsafe to subtract and test against zero - compare first
       size_t total_x;
       if(bounds.lo.x <= bounds.hi.x)
-        total_x = bounds.hi.x - bounds.lo.x + 1;
+        total_x = ((long long)bounds.hi.x) - ((long long)bounds.lo.x) + 1;
       else
         total_x = 0;
       subspaces.reserve(count);
