@@ -2066,17 +2066,22 @@ end
 
 function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, add_field,
-    requirement_args, launcher)
+    region, parent, field_paths, add_requirement, get_requirement,
+    add_field, has_field, requirement_args, launcher)
   return quote
     var [region] = [raise_privilege_depth(cx, `([value].impl), param_type)]
     var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type)]
-    var requirement = [add_requirement]([requirement_args])
+    var requirement = [get_requirement]([launcher], [region])
+    if requirement == [uint32](-1) then
+      requirement = [add_requirement]([requirement_args])
+    end
     [field_paths:map(
        function(field_path)
          local field_id = cx:list_of_regions(container_type):field_id(field_path)
          return quote
-           [add_field]([launcher], requirement, [field_id], true)
+           if not [has_field]([launcher], requirement, [field_id]) then
+             [add_field]([launcher], requirement, [field_id], true)
+           end
          end
        end)]
     end
@@ -2084,8 +2089,8 @@ end
 
 function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, add_field,
-    requirement_args, launcher)
+    region, parent, field_paths, add_requirement, get_requirement,
+    add_field, has_field, requirement_args, launcher)
   local element = terralib.newsymbol()
   if std.is_list(value_type.element_type) then
     return quote
@@ -2093,8 +2098,8 @@ function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_list(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, add_field,
-           requirement_args, launcher)]
+           region, parent, field_paths, add_requirement, get_requirement,
+           add_field, has_field, requirement_args, launcher)]
       end
     end
   else
@@ -2103,8 +2108,8 @@ function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_region(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, add_field,
-           requirement_args, launcher)]
+           region, parent, field_paths, add_requirement, get_requirement,
+           add_field, has_field, requirement_args, launcher)]
       end
     end
   end
@@ -2121,6 +2126,11 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
   local add_field = c.legion_task_launcher_add_field
   if index then
     add_field = c.legion_index_launcher_add_field
+  end
+
+  local has_field = c.legion_terra_task_launcher_has_field
+  if index then
+    assert(false)
   end
 
   for i, privilege in ipairs(privileges) do
@@ -2157,6 +2167,14 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
     end
     assert(add_requirement)
 
+    local get_requirement
+    if index then
+      assert(false)
+    else
+      get_requirement = c.legion_terra_task_launcher_get_region_requirement_logical_region
+    end
+    assert(get_requirement)
+
     local list = cx:list_of_regions(arg_type).list_of_logical_regions
 
     local region = terralib.newsymbol("region")
@@ -2176,8 +2194,8 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
     args_setup:insert(
       setup_list_of_regions_add_list(
         cx, param_type, arg_type, arg_type, list,
-        region, parent, field_paths, add_requirement, add_field,
-        requirement_args, launcher))
+        region, parent, field_paths, add_requirement, get_requirement,
+        add_field, has_field, requirement_args, launcher))
   end
 end
 
