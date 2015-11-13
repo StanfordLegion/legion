@@ -132,6 +132,10 @@ public:
   std::vector<int> xsplit, ysplit, zsplit;  // cut planes
   std::vector<int> cells_per_block, faces_per_block;
 
+  // can't do 64-bit index types right now, so at least get most of our 32-bit space
+  typedef int INDEXTYPE;
+  static const INDEXTYPE FIRST_INDEX = -2000000000;  // easier to read than INT_MIN+1
+
   MiniAeroTest(int argc, const char *argv[])
   {
 #define INT_ARG(s, v) if(!strcmp(argv[i], s)) { v = atoi(argv[++i]); continue; }
@@ -207,8 +211,8 @@ public:
 				const std::vector<Processor>& procs)
   {
     // top level index spaces
-    is_cells = ZRect<1>(0, n_cells - 1);
-    is_faces = ZRect<1>(0, n_faces - 1);
+    is_cells = ZRect<1>(FIRST_INDEX, FIRST_INDEX + n_cells - 1);
+    is_faces = ZRect<1>(FIRST_INDEX, FIRST_INDEX + n_faces - 1);
 
     // weighted partitions based on the distribution we already computed
     std::vector<ZIndexSpace<1> > ss_cells_w;
@@ -296,7 +300,7 @@ public:
 
   ZPoint<1> global_cell_pointer(int cx, int cy, int cz)
   {
-    int p = 0;
+    INDEXTYPE p = FIRST_INDEX;
 
     // out of range?  return -1
     if((cx < 0) || (cx >= global_x) ||
@@ -1127,6 +1131,10 @@ public:
   std::vector<int> zxbound, zybound; // x and y split points between submeshes
   std::vector<int> lz, ls, lp;  // number of zones, sides, and points in each submesh
 
+  // can't do 64-bit index types right now, so at least get most of our 32-bit space
+  typedef int INDEXTYPE;
+  static const INDEXTYPE FIRST_INDEX = -2000000000;  // easier to read than INT_MIN+1
+
   PennantTest(int argc, const char *argv[])
   {
 #define INT_ARG(s, v) if(!strcmp(argv[i], s)) { v = atoi(argv[++i]); continue; }
@@ -1208,9 +1216,9 @@ public:
 				const std::vector<Processor>& procs)
   {
     // top level index spaces
-    is_zones = ZRect<1>(0, nz - 1);
-    is_sides = ZRect<1>(0, ns - 1);
-    is_points = ZRect<1>(0, np - 1);
+    is_zones = ZRect<1>(FIRST_INDEX, FIRST_INDEX + nz - 1);
+    is_sides = ZRect<1>(FIRST_INDEX, FIRST_INDEX + ns - 1);
+    is_points = ZRect<1>(FIRST_INDEX, FIRST_INDEX + np - 1);
 
     // weighted partitions based on the distribution we already computed
     std::vector<ZIndexSpace<1> > ss_zones_w;
@@ -1306,7 +1314,7 @@ public:
 
   ZPoint<1> global_point_pointer(int py, int px) const
   {
-    int pp = 0;
+    int pp = FIRST_INDEX;
 
     // start by steping over whole y slabs - again be careful that the extra slab belongs to pcy == 0
     int dy;
