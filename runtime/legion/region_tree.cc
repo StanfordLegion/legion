@@ -3219,7 +3219,7 @@ namespace LegionRuntime {
         log_region.error("Unable to find top-level tree entry for "
                                "region tree %d.  This is either a runtime "
                                "bug or requires Legion fences if names are "
-                               "being returned out fo the context in which"
+                               "being returned out of the context in which"
                                "they are being created.", tid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);

@@ -693,6 +693,8 @@ namespace LegionRuntime {
                            const void *args, size_t arglen);
     public:
       Event notify_pending_shutdown(void);
+      bool has_recent_messages(void) const;
+      void clear_recent_messages(void);
     private:
       Reservation send_lock;
       char *const sending_buffer;
@@ -709,6 +711,7 @@ namespace LegionRuntime {
       unsigned receiving_index;
       size_t receiving_buffer_size;
       unsigned received_messages;
+      bool observed_recent;
     }; 
 
     /**
@@ -740,6 +743,8 @@ namespace LegionRuntime {
       MessageManager& operator=(const MessageManager &rhs);
     public:
       Event notify_pending_shutdown(void);
+      bool has_recent_messages(void) const;
+      void clear_recent_messages(void);
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush);
@@ -752,6 +757,49 @@ namespace LegionRuntime {
       // State for sending messages
       Processor target;
       VirtualChannel *const channels; 
+    };
+
+    /**
+     * \class ShutdownManager
+     * A class for helping to manage the shutdown of the 
+     * runtime after the application has finished
+     */
+    class ShutdownManager {
+    public:
+      struct NotificationArgs {
+      public:
+        HLRTaskID hlr_id;
+        MessageManager *manager;
+      };
+      struct ResponseArgs {
+      public:
+        HLRTaskID hlr_id;
+        MessageManager *target;
+        bool result;
+      };
+    public:
+      ShutdownManager(Internal *rt, AddressSpaceID source, MessageManager *man);
+      ShutdownManager(const ShutdownManager &rhs);
+      ~ShutdownManager(void);
+    public:
+      ShutdownManager& operator=(const ShutdownManager &rhs);
+    public:
+      bool has_managers(void) const;
+      void add_manager(AddressSpaceID target, MessageManager *manager);
+    public:
+      void send_notifications(void);
+      void send_response(void);
+      bool handle_response(AddressSpaceID sender, bool result);
+      void finalize(void);
+    public:
+      Internal *const runtime;
+      const AddressSpaceID source; 
+      MessageManager *const source_manager;
+    protected:
+      Reservation shutdown_lock;
+      std::map<AddressSpaceID,MessageManager*> managers;
+      unsigned observed_responses;
+      bool result;
     };
 
     /**
@@ -1592,6 +1640,8 @@ namespace LegionRuntime {
                                             AddressSpaceID source);
       void handle_remote_creation_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez);
+      void handle_shutdown_notification(AddressSpaceID source);
+      void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1712,7 +1762,7 @@ namespace LegionRuntime {
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
-      void initiate_runtime_shutdown(void);
+      void initiate_runtime_shutdown(AddressSpaceID source);
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -1885,6 +1935,8 @@ namespace LegionRuntime {
       const bool has_explicit_utility_procs;
     protected:
       unsigned outstanding_top_level_tasks;
+      ShutdownManager *shutdown_manager;
+      Reservation shutdown_lock;
 #ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;

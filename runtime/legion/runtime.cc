@@ -2973,7 +2973,7 @@ namespace LegionRuntime {
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, size_t max_message_size)
       : sending_buffer((char*)malloc(max_message_size)), 
-        sending_buffer_size(max_message_size)
+        sending_buffer_size(max_message_size), observed_recent(false)
     //--------------------------------------------------------------------------
     {
       send_lock = Reservation::create_reservation();
@@ -3181,9 +3181,13 @@ namespace LegionRuntime {
       {
         // Pull off the message kind and the size of the message
 #ifdef DEBUG_HIGH_LEVEL
-        assert(arglen > (sizeof(MessageKind)+sizeof(size_t)));
+        assert(arglen >= (sizeof(MessageKind)+sizeof(size_t)));
 #endif
         MessageKind kind = *((const MessageKind*)args);
+        // Any message that is not a shutdown message needs to be recorded
+        if (!observed_recent && (kind != SEND_SHUTDOWN_NOTIFICATION) &&
+            (kind != SEND_SHUTDOWN_RESPONSE))
+          observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
         size_t message_size = *((const size_t*)args);
@@ -3618,6 +3622,16 @@ namespace LegionRuntime {
               runtime->handle_logical_state_return(derez);
               break;
             }
+          case SEND_SHUTDOWN_NOTIFICATION:
+            {
+              runtime->handle_shutdown_notification(remote_address_space);
+              break;
+            }
+          case SEND_SHUTDOWN_RESPONSE:
+            {
+              runtime->handle_shutdown_response(derez, remote_address_space);
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -3666,6 +3680,20 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return last_message_event;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualChannel::has_recent_messages(void) const
+    //--------------------------------------------------------------------------
+    {
+      return observed_recent;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::clear_recent_messages(void)
+    //--------------------------------------------------------------------------
+    {
+      observed_recent = false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3753,6 +3781,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool MessageManager::has_recent_messages(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+      {
+        if (channels[idx].has_recent_messages())
+          return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::clear_recent_messages(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+        channels[idx].clear_recent_messages();
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
                                       VirtualChannelKind channel, bool flush)
     //--------------------------------------------------------------------------
@@ -3771,6 +3819,158 @@ namespace LegionRuntime {
       arglen -= sizeof(channel);
       channels[channel].process_message(buffer, arglen, runtime, 
                                         remote_address_space);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Shutdown Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShutdownManager::ShutdownManager(Internal *rt, AddressSpaceID s,
+                                     MessageManager *m)
+      : runtime(rt), source(s), source_manager(m),
+        shutdown_lock(Reservation::create_reservation()), 
+        observed_responses(0), result(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShutdownManager::ShutdownManager(const ShutdownManager &rhs)
+      : runtime(NULL), source(0), source_manager(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShutdownManager::~ShutdownManager(void)
+    //--------------------------------------------------------------------------
+    {
+      shutdown_lock.destroy_reservation();
+      shutdown_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    ShutdownManager& ShutdownManager::operator=(const ShutdownManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShutdownManager::has_managers(void) const
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock
+      return !managers.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShutdownManager::add_manager(AddressSpaceID target, 
+                                      MessageManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(target != source);
+      assert(managers.find(target) == managers.end());
+#endif
+      managers[target] = manager;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShutdownManager::send_notifications(void)
+    //--------------------------------------------------------------------------
+    {
+      NotificationArgs args;
+      args.hlr_id = HLR_SHUTDOWN_NOTIFICATION_TASK_ID;
+      // Clean out our managers and then send the messages
+      for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
+            managers.begin(); it != managers.end(); it++)
+      {
+        log_shutdown.info("Sending notification from node %d to %d",
+                          runtime->address_space, it->first);
+        it->second->clear_recent_messages();
+        Event precondition = it->second->notify_pending_shutdown();
+        args.manager = it->second;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
+                                         NULL, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShutdownManager::send_response(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(source_manager != NULL);
+#endif
+      log_shutdown.info("Sending response from node %d to %d",
+                        runtime->address_space, source);
+      ResponseArgs args;
+      args.hlr_id = HLR_SHUTDOWN_RESPONSE_TASK_ID;
+      args.target = source_manager;
+      args.result = result;
+      Event precondition = source_manager->notify_pending_shutdown();
+      runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                       HLR_SHUTDOWN_RESPONSE_TASK_ID, NULL,
+                                       precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShutdownManager::handle_response(AddressSpaceID sender, bool res)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(managers.find(sender) != managers.end());
+#endif
+      log_shutdown.info("Received response on node %d from %d",
+                        runtime->address_space, sender);
+      AutoLock shut(shutdown_lock);
+      if (!res)
+        result = false;
+      observed_responses++;
+      return (observed_responses == managers.size());
+    }
+
+    //--------------------------------------------------------------------------
+    void ShutdownManager::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      if (result)
+      {
+        // Check our managers for messages
+        for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
+              managers.begin(); it != managers.end(); it++)
+        {
+          if (it->second->has_recent_messages())
+          {
+            result = false;
+            break;
+          }
+        }
+      }
+      // No need for the lock here
+      if (source != runtime->address_space)
+      {
+        send_response();
+      }
+      else if (result)
+      {
+        // We succeeded so shutdown Realm
+        RealmRuntime::get_runtime().shutdown();
+      }
+      else
+      {
+        // We failed, so try again
+        runtime->initiate_runtime_shutdown(runtime->address_space);
+        log_shutdown.info("FAILED!  Trying again...");
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3887,7 +4087,8 @@ namespace LegionRuntime {
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
-        outstanding_top_level_tasks(1),
+        outstanding_top_level_tasks(1), shutdown_manager(NULL),
+        shutdown_lock(Reservation::create_reservation()),
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
 #endif
@@ -4163,6 +4364,8 @@ namespace LegionRuntime {
       future_lock = Reservation::NO_RESERVATION;
       remote_lock.destroy_reservation();
       remote_lock = Reservation::NO_RESERVATION;
+      shutdown_lock.destroy_reservation();
+      shutdown_lock = Reservation::NO_RESERVATION;
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -12244,6 +12447,32 @@ namespace LegionRuntime {
       RegionTreeNode::handle_logical_state_return(forest, derez);
     }
 
+    //--------------------------------------------------------------------------
+    void Internal::handle_shutdown_notification(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      initiate_runtime_shutdown(source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_shutdown_response(Deserializer &derez, 
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      bool result;
+      derez.deserialize(result);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(shutdown_manager != NULL);
+#endif
+      if (shutdown_manager->handle_response(source, result))
+      {
+        ShutdownManager *local = shutdown_manager;
+        shutdown_manager = NULL;
+        local->finalize();
+        delete local;
+      }
+    }
+
 #ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
     Processor Internal::get_cleanup_proc(Processor p) const
@@ -13223,15 +13452,19 @@ namespace LegionRuntime {
 #endif
       // If there was only one left before, we're now at zero so we're done
       if (previous == 1)
-        initiate_runtime_shutdown();
+      {
+        log_run.spew("Computation has terminated. "
+                     "Shutting down the Legion runtime...");
+        initiate_runtime_shutdown(address_space);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void Internal::initiate_runtime_shutdown(void)
+    void Internal::initiate_runtime_shutdown(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      log_run.spew("Computation has terminated. "
-                         "Shutting down the Legion runtime...");
+      log_shutdown.info("Received notification on node %d from node %d",
+                        address_space, source);
       // Tell all the processor managers that there is a pending shutdown
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -13240,22 +13473,61 @@ namespace LegionRuntime {
       }
       // Launch our last garbage collection epoch and wait for it to
       // finish so that we know all messages have been enqueued
-      Event gc_done = current_gc_epoch->launch(0/*priority*/);
-      gc_done.wait();
-      // Make sure any messages that we have sent anywhere are handled
-      std::set<Event> shutdown_preconditions;
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      Event gc_done = Event::NO_EVENT;
       {
-        if (message_managers[idx] != NULL)
+        AutoLock gc(gc_epoch_lock);
+        if (current_gc_epoch != NULL)
         {
-          Event last_event = message_managers[idx]->notify_pending_shutdown();
-          shutdown_preconditions.insert(last_event);
+          gc_done = current_gc_epoch->launch(0/*priority*/);
+          current_gc_epoch = NULL;
         }
       }
-      Event shutdown_precondition = Event::merge_events(shutdown_preconditions);
-      shutdown_precondition.wait();
-      // Finally shutdown the low-level runtime
-      RealmRuntime::get_runtime().shutdown();
+      if (!gc_done.has_triggered())
+        gc_done.wait();
+      // Count the number of valid message managers
+      ShutdownManager *local_manager = 
+        new ShutdownManager(this, source, message_managers[source]);
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (idx == source)
+          continue;
+        if (message_managers[idx] != NULL)
+          local_manager->add_manager(idx, message_managers[idx]);
+      }
+      // Check to see if we have any remote nodes
+      if (local_manager->has_managers())
+      {
+        // Make a shutdown manager and see if we can register it
+        bool already_marked = false;
+        // Don't need to make a shutdown manager if we only have
+        // one incoming direction from the source
+        {
+          AutoLock shut(shutdown_lock);
+          if (shutdown_manager == NULL)
+            shutdown_manager = local_manager;
+          else
+            already_marked = true;
+        }
+        // If we were already marked we can send the response now
+        if (already_marked)
+        {
+          local_manager->send_response();
+          delete local_manager;
+        }
+        else
+        {
+          local_manager->send_notifications();
+        }
+      }
+      else
+      {
+        // Check to see if we are on the owner node or not
+        if (source != address_space)
+          local_manager->send_response();
+        else // local node so just shutdown now
+          RealmRuntime::get_runtime().shutdown();
+        delete local_manager;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16385,6 +16657,27 @@ namespace LegionRuntime {
               (PartitionNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
                           req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_SHUTDOWN_NOTIFICATION_TASK_ID:
+          {
+            ShutdownManager::NotificationArgs *notification_args = 
+              (ShutdownManager::NotificationArgs*)args;
+            Serializer rez;
+            notification_args->manager->send_message(rez, 
+                SEND_SHUTDOWN_NOTIFICATION, 
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/); 
+            break;
+          }
+        case HLR_SHUTDOWN_RESPONSE_TASK_ID:
+          {
+            ShutdownManager::ResponseArgs *response_args = 
+              (ShutdownManager::ResponseArgs*)args;
+            Serializer rez;
+            rez.serialize(response_args->result);
+            response_args->target->send_message(rez,
+                SEND_SHUTDOWN_RESPONSE,
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
             break;
           }
         default:

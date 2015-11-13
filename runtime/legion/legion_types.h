@@ -148,6 +148,8 @@ namespace LegionRuntime {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
+      HLR_SHUTDOWN_RESPONSE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -200,6 +202,8 @@ namespace LegionRuntime {
         "Field Semantic Request"                                  \
         "Region Semantic Request"                                 \
         "Partition Semantic Request"                              \
+        "Shutdown Notification"                                   \
+        "Shutdown Response"                                       \
       };
 
     enum VirtualChannelKind {
@@ -291,6 +295,8 @@ namespace LegionRuntime {
       SEND_REDUCTION_CREATION,
       SEND_CREATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
+      SEND_SHUTDOWN_NOTIFICATION,
+      SEND_SHUTDOWN_RESPONSE,
     };
 
     // Forward declarations for user level objects
@@ -761,7 +767,8 @@ namespace LegionRuntime {
     extern Logger::Category log_allocation;       \
     extern Logger::Category log_prof;             \
     extern Logger::Category log_garbage;          \
-    extern Logger::Category log_spy;
+    extern Logger::Category log_spy;              \
+    extern Logger::Category log_shutdown;
 
     // Timing events
     enum {
