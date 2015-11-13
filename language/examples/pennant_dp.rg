@@ -193,6 +193,7 @@ local config_fields_cmd = terralib.newlist({
   {field = "compact", type = bool, default_value = true},
   {field = "stripsize", type = int64, default_value = 128},
   {field = "spansize", type = int64, default_value = 512},
+  {field = "nocheck", type = bool, default_value = false},
 })
 
 local config_fields_all = terralib.newlist()
@@ -1935,6 +1936,11 @@ terra read_config()
     conf.warmup = [bool](c.atoll(warmup))
   end
 
+  var nocheck = get_optional_arg("-nocheck")
+  if nocheck ~= nil then
+    conf.nocheck = [bool](c.atoll(nocheck))
+  end
+
   var compact = get_optional_arg("-compact")
   if compact ~= nil then
     conf.compact = [bool](c.atoll(compact))
@@ -2680,12 +2686,16 @@ task test()
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   c.printf("Elapsed time = %.6e\n", stop_time - start_time)
 
-  validate_output(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  if conf.nocheck then
+    c.printf("Skipping result validation due to -nocheck\n")
+  else
+    validate_output(
+      __runtime(), __context(),
+      __physical(rz_all), __fields(rz_all),
+      __physical(rp_all), __fields(rp_all),
+      __physical(rs_all), __fields(rs_all),
+      conf)
+  end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
