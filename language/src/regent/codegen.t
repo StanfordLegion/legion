@@ -3030,13 +3030,13 @@ function codegen.expr_list_duplicate_partition(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   local parent_region = partition_type:parent_region()
   assert(cx:has_region(parent_region))
 
   cx:add_list_of_regions(
-    expr_type, list,
+    expr_type, result,
     cx:region(parent_region).field_paths,
     cx:region(parent_region).privilege_field_paths,
     cx:region(parent_region).field_privileges,
@@ -3048,7 +3048,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
       __partition = [partition.value].impl,
@@ -3059,12 +3059,12 @@ function codegen.expr_list_duplicate_partition(cx, node)
         [cx.runtime], [cx.context], [partition.value].impl, color)
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
-      [expr_type:data(list)][i] = [expr_type.element_type] { impl = r }
+      [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3080,12 +3080,12 @@ function codegen.expr_list_cross_product(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   assert(cx:has_list_of_regions(lhs_type))
 
   cx:add_list_of_regions(
-    expr_type, list,
+    expr_type, result,
     cx:list_of_regions(lhs_type).field_paths,
     cx:list_of_regions(lhs_type).privilege_field_paths,
     cx:list_of_regions(lhs_type).field_privileges,
@@ -3107,7 +3107,7 @@ function codegen.expr_list_cross_product(cx, node)
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [lhs.value].__size,
       __data = data,
     }
@@ -3140,7 +3140,7 @@ function codegen.expr_list_cross_product(cx, node)
       var subdata = c.malloc(
         terralib.sizeof([expr_type.element_type.element_type]) * subsize)
       regentlib.assert(subdata ~= nil, "malloc failed in list_duplicate_partition")
-      [expr_type:data(list)][i] = [expr_type.element_type] {
+      [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
       }
@@ -3161,7 +3161,7 @@ function codegen.expr_list_cross_product(cx, node)
           [cx.runtime], [cx.context], is)
         var nonempty = c.legion_index_iterator_has_next(it)
         if nonempty then
-          [expr_type.element_type:data(`([expr_type:data(list)][i]))][subslot] =
+          [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
             [expr_type.element_type.element_type] {
               impl = c.legion_logical_region_t {
                 tree_id = [rhs_type:data(rhs.value)][j].impl.tree_id,
@@ -3176,7 +3176,7 @@ function codegen.expr_list_cross_product(cx, node)
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3189,7 +3189,7 @@ function codegen.expr_list_phase_barriers(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   actions = quote
     [actions]
@@ -3197,7 +3197,7 @@ function codegen.expr_list_phase_barriers(cx, node)
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [product.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [product.value].__size,
       __data = data,
     }
@@ -3208,14 +3208,14 @@ function codegen.expr_list_phase_barriers(cx, node)
       var subdata = c.malloc(
         terralib.sizeof([expr_type.element_type.element_type]) * subsize)
       regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
-      [expr_type:data(list)][i] = [expr_type.element_type] {
+      [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
       }
 
       -- Fill sublist.
       for j = 0, subsize do
-        [expr_type.element_type:data(`([expr_type:data(list)][i]))][j] =
+        [expr_type.element_type:data(`([expr_type:data(result)][i]))][j] =
           [expr_type.element_type.element_type] {
             impl = c.legion_phase_barrier_create([cx.runtime], [cx.context], 1)
           }
@@ -3224,7 +3224,7 @@ function codegen.expr_list_phase_barriers(cx, node)
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3243,19 +3243,21 @@ function codegen.expr_list_invert(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   actions = quote
     [actions]
 
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
-    var [list] = expr_type {
+    regentlib.assert(data ~= nil, "malloc failed in list_invert")
+    var [result] = expr_type {
       __size = [rhs.value].__size,
       __data = data,
     }
     for i = 0, [rhs.value].__size do
+      var rhs_ = [rhs_type:data(rhs.value)][i].impl
+
       var rhs_color = c.legion_logical_region_get_color(
         [cx.runtime], [cx.context],
         [rhs_type:data(rhs.value)][i].impl)
@@ -3280,8 +3282,8 @@ function codegen.expr_list_invert(cx, node)
       -- Allocate sublist.
       var subdata = c.malloc(
         terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
-      [expr_type:data(list)][i] = [expr_type.element_type] {
+      regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
+      [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
       }
@@ -3299,9 +3301,10 @@ function codegen.expr_list_invert(cx, node)
           var color = c.legion_logical_region_get_color(
             [cx.runtime], [cx.context], parent)
           if color == rhs_color then
-            [expr_type.element_type:data(`([expr_type:data(list)][i]))][j] =
+            std.assert(subslot < subsize, "overflowed sublist in list_invert")
+            [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
               [barriers_type.element_type:data(
-                 `([barriers_type:data(list)][j]))][k]
+                 `([barriers_type:data(barriers.value)][j]))][k]
             subslot = subslot + 1
           end
         end
@@ -3310,7 +3313,7 @@ function codegen.expr_list_invert(cx, node)
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3321,7 +3324,7 @@ function codegen.expr_list_range(cx, node)
   local stop = codegen.expr(cx, node.stop):read(cx, stop_type)
   local expr_type = std.as_read(node.expr_type)
 
-  local list = terralib.newsymbol("list")
+  local result = terralib.newsymbol("result")
   local actions = quote
     [start.actions]
     [stop.actions]
@@ -3330,17 +3333,17 @@ function codegen.expr_list_range(cx, node)
       terralib.sizeof([expr_type.element_type]) *
         ([stop.value] - [start.value]))
     regentlib.assert(data ~= nil, "malloc failed in list_range")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [stop.value] - [start.value],
       __data = data
     }
     for i = [start.value], [stop.value] do
-      [expr_type:data(list)][i - [start.value] ] = i
+      [expr_type:data(result)][i - [start.value] ] = i
     end
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 

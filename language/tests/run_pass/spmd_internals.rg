@@ -91,15 +91,44 @@ task main()
   var lo, hi, stride = 0, 10, 3
 
   var r_private = region(ispace(ptr, hi-lo), elt)
-  var r_ghost = region(ispace(ptr, hi-lo), elt)
+  var x0 = new(ptr(elt, r_private))
+  var x1 = new(ptr(elt, r_private))
+  var x2 = new(ptr(elt, r_private))
+  var x3 = new(ptr(elt, r_private))
 
-  var rc = c.legion_coloring_create()
+  var cp = c.legion_coloring_create()
   for i = lo, hi do
-    c.legion_coloring_ensure_color(rc, i)
+    c.legion_coloring_ensure_color(cp, i)
   end
-  var p_private = partition(disjoint, r_private, rc)
-  var p_ghost = partition(aliased, r_ghost, rc)
-  c.legion_coloring_destroy(rc)
+  c.legion_coloring_add_point(cp, 0, __raw(x0))
+  c.legion_coloring_add_point(cp, 1, __raw(x1))
+  c.legion_coloring_add_point(cp, 2, __raw(x2))
+  c.legion_coloring_add_point(cp, 3, __raw(x3))
+  var p_private = partition(disjoint, r_private, cp)
+  c.legion_coloring_destroy(cp)
+
+  var r_ghost = region(ispace(ptr, hi-lo), elt)
+  var y0 = new(ptr(elt, r_ghost))
+  var y1 = new(ptr(elt, r_ghost))
+  var y2 = new(ptr(elt, r_ghost))
+  var y3 = new(ptr(elt, r_ghost))
+
+  var cg = c.legion_coloring_create()
+  for i = lo, hi do
+    c.legion_coloring_ensure_color(cg, i)
+  end
+  c.legion_coloring_add_point(cg, 0, __raw(y0))
+  c.legion_coloring_add_point(cg, 0, __raw(y1))
+  c.legion_coloring_add_point(cg, 1, __raw(y0))
+  c.legion_coloring_add_point(cg, 1, __raw(y1))
+  c.legion_coloring_add_point(cg, 1, __raw(y2))
+  c.legion_coloring_add_point(cg, 2, __raw(y1))
+  c.legion_coloring_add_point(cg, 2, __raw(y2))
+  c.legion_coloring_add_point(cg, 2, __raw(y3))
+  c.legion_coloring_add_point(cg, 3, __raw(y2))
+  c.legion_coloring_add_point(cg, 3, __raw(y3))
+  var p_ghost = partition(aliased, r_ghost, cg)
+  c.legion_coloring_destroy(cg)
 
   var rs_private = list_duplicate_partition(p_private, list_range(lo, hi))
   var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
