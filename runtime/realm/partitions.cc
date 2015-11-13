@@ -100,14 +100,25 @@ namespace Realm {
     if(dense()) {
       // always split in x dimension for now
       assert(count >= 1);
-      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, 0);
+      // unsafe to subtract and test against zero - compare first
+      size_t total_x;
+      if(bounds.lo.x <= bounds.hi.x)
+        total_x = bounds.hi.x - bounds.lo.x + 1;
+      else
+        total_x = 0;
       subspaces.reserve(count);
       T px = bounds.lo.x;
       size_t cum_weight = 0;
       for(size_t i = 0; i < count; i++) {
 	ZIndexSpace<N,T> ss(*this);
 	cum_weight += weights[i];
-	T nx = bounds.lo.x + (total_x * cum_weight / total_weight);
+        // if the total_weight cleanly divides into the total x, use
+        //  that ratio to avoid overflow problems
+        T nx;
+        if((total_x % total_weight) == 0)
+          nx = bounds.lo.x + cum_weight * (total_x / total_weight);
+        else
+	  nx = bounds.lo.x + (total_x * cum_weight / total_weight);
 	ss.bounds.lo.x = px;
 	ss.bounds.hi.x = nx - 1;
 	subspaces.push_back(ss);
@@ -123,6 +134,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename FT>
+  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
 						    const std::vector<FT>& colors,
 						    std::vector<ZIndexSpace<N,T> >& subspaces,
@@ -144,6 +156,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
+  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 							   const std::vector<ZIndexSpace<N2,T2> >& sources,
 							   std::vector<ZIndexSpace<N,T> >& images,
@@ -164,6 +177,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
+  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
 						       const std::vector<ZIndexSpace<N2,T2> >& targets,
 						       std::vector<ZIndexSpace<N,T> >& preimages,
@@ -183,6 +197,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  __attribute__ ((noinline))
   /*static*/ Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
 						    const std::vector<ZIndexSpace<N,T> >& rhss,
 						    std::vector<ZIndexSpace<N,T> >& results,
@@ -206,6 +221,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  __attribute__ ((noinline))
   /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
 							   const std::vector<ZIndexSpace<N,T> >& rhss,
 							   std::vector<ZIndexSpace<N,T> >& results,
@@ -229,6 +245,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  __attribute__ ((noinline))
   /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
 							 const std::vector<ZIndexSpace<N,T> >& rhss,
 							 std::vector<ZIndexSpace<N,T> >& results,
@@ -252,6 +269,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  __attribute__ ((noinline))
   /*static*/ Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
 						   ZIndexSpace<N,T>& result,
 						   const ProfilingRequestSet &reqs,
@@ -267,6 +285,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  __attribute__ ((noinline))
   /*static*/ Event ZIndexSpace<N,T>::compute_intersection(const std::vector<ZIndexSpace<N,T> >& subspaces,
 							  ZIndexSpace<N,T>& result,
 							  const ProfilingRequestSet &reqs,
@@ -444,7 +463,7 @@ namespace Realm {
       // when we get here, 'lo' is the first rectangle above us, so check for a merge below first
       if((lo > 0) && (rects[lo - 1].hi.x == (p.x - 1))) {
 	// merging low
-	if((lo < rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	if((lo < (int)rects.size()) && rects[lo].lo.x == (p.x + 1)) {
 	  // merging high too
 	  rects[lo - 1].hi.x = rects[lo].hi.x;
 	  rects.erase(rects.begin() + lo);
@@ -453,7 +472,7 @@ namespace Realm {
 	  rects[lo - 1].hi.x = p.x;
 	}
       } else {
-	if((lo < rects.size()) && rects[lo].lo.x == (p.x + 1)) {
+	if((lo < (int)rects.size()) && rects[lo].lo.x == (p.x + 1)) {
 	  // merging just high
 	  rects[lo].lo.x = p.x;
 	} else {
@@ -771,6 +790,7 @@ namespace Realm {
 
   // call actual implementation - inlining makes this cheaper than a virtual method
   template <int N, typename T>
+  __attribute__ ((noinline))
   Event SparsityMapPublicImpl<N,T>::make_valid(bool precise /*= true*/)
   {
     return static_cast<SparsityMapImpl<N,T> *>(this)->make_valid(precise);
@@ -1252,11 +1272,11 @@ namespace Realm {
 				    std::vector<ZRect<1,T> >& approx_rects,
 				    int max_rects)
   {
-    size_t n = entries.size();
+    int n = entries.size();
     // if we have few enough entries, just copy things over
     if(n <= max_rects) {
       approx_rects.resize(n);
-      for(size_t i = 0; i < n; i++)
+      for(int i = 0; i < n; i++)
 	approx_rects[i] = entries[i].bounds;
       return;
     }
@@ -1265,12 +1285,12 @@ namespace Realm {
     //  are the ones we'll keep
     std::vector<T> gap_sizes(max_rects - 1, 0);
     std::vector<int> gap_idxs(max_rects - 1, -1);
-    for(size_t i = 1; i < n; i++) {
+    for(int i = 1; i < n; i++) {
       T gap = entries[i].bounds.lo.x - entries[i - 1].bounds.hi.x;
       if(gap <= gap_sizes[0])
 	continue;
       // the smallest gap is discarded and we insertion-sort this new value in
-      size_t j = 0;
+      int j = 0;
       while((j < (max_rects - 2) && (gap > gap_sizes[j+1]))) {
 	gap_sizes[j] = gap_sizes[j+1];
 	gap_idxs[j] = gap_idxs[j+1];
@@ -1287,7 +1307,7 @@ namespace Realm {
     std::sort(gap_idxs.begin(), gap_idxs.end());
     approx_rects.resize(max_rects);
     approx_rects[0].lo = entries[0].bounds.lo;
-    for(size_t i = 0; i < max_rects - 1; i++) {
+    for(int i = 0; i < max_rects - 1; i++) {
       approx_rects[i].hi = entries[gap_idxs[i] - 1].bounds.hi;
       approx_rects[i+1].lo = entries[gap_idxs[i]].bounds.lo;
     }
@@ -1587,6 +1607,9 @@ namespace Realm {
 
   void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op, bool inline_ok)
   {
+    // make sure we generate work that other threads can help with
+    if(cfg_num_partitioning_workers > 1)
+      inline_ok = false;
     // if there were no registrations by caller (or if they're really fast), the count will be 2
     //  and we can execute this microop inline
     int left1 = __sync_sub_and_fetch(&wait_count, 1);
@@ -3696,7 +3719,7 @@ namespace Realm {
       // if these were the last sparse images, we can now set the contributor counts
       int v = __sync_sub_and_fetch(&remaining_sparse_images, 1);
       if(v == 0) {
-	for(int j = 0; j < preimages.size(); j++) {
+	for(size_t j = 0; j < preimages.size(); j++) {
 	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
 	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
 	}
@@ -3745,7 +3768,7 @@ namespace Realm {
       // if these were the last sparse images, we can now set the contributor counts
       int v = __sync_sub_and_fetch(&remaining_sparse_images, pending.size());
       if(v == 0) {
-	for(int j = 0; j < preimages.size(); j++) {
+	for(size_t j = 0; j < preimages.size(); j++) {
 	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
 	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
 	}
