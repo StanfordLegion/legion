@@ -488,7 +488,7 @@ namespace Realm {
     for(size_t i = 0; i < iv_ranges.size(); i++)
       test_interval(iv_ranges.start(i), iv_ranges.end(i), marker);
 #else
-    if(root)
+    if(root && (iv_ranges.size() > 0))
       root->test_sorted_intervals(iv_ranges, 0, iv_ranges.size(), marker);
 #endif
   }
