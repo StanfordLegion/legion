@@ -1573,7 +1573,7 @@ namespace Realm {
     ZRect<N,T> dbg_bounds;
 #endif
     intptr_t base;
-    ZPoint<N,T> strides;
+    ZPoint<N, ptrdiff_t> strides;
   };
 
   template <typename FT, int N, typename T>

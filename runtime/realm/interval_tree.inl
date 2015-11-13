@@ -81,7 +81,8 @@ namespace Realm {
 
     // quick version: pick a value that is sort of in the middle
     size_t j = count >> 1;
-    IT cut = (sorted_ends[j] + sorted_starts[count - 1 - j]) / 2;
+    // careful!  can't average by sum/2 without getting overflow
+    IT cut = sorted_ends[j] + (sorted_starts[count - 1 - j] - sorted_ends[j]) / 2;
 #ifdef DEBUG_INTERVALS
     std::cout << "CUT = " << cut << " (" << j << ")\n";
 #endif
