@@ -16,6 +16,17 @@
 
 local parser = require("bishop/parser")
 local specialize = require("bishop/specialize")
+local codegen = require("bishop/codegen")
+local std = require("bishop/std")
+
+-- Add Language Builtins to Global Environment
+
+local function add_builtin(k, v)
+  assert(rawget(_G, k) == nil, "Builtin " .. tostring(k) .. " already defined")
+  rawset(_G, k, v)
+end
+
+add_builtin("bishoplib", std)
 
 local language = {
   name = "bishop",
@@ -45,6 +56,8 @@ local language = {
 function language:statement(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
+    node = specialize.rules(node)
+    node = codegen.rules(node)
     return node
   end
   return ctor, {"__bishop__"}

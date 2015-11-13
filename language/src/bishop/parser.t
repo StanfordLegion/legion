@@ -25,23 +25,21 @@ function parser.value(p)
     local token = p:next(p.number)
     local pos = ast.save(p)
     value = ast.unspecialized.expr.Constant {
-      constant = token.value,
-      type = token.valuetype,
+      value = token.value,
       position = pos,
     }
   elseif p:nextif("$") then
     local token = p:next(p.name)
     local pos = ast.save(p)
     value = ast.unspecialized.expr.Variable {
-      id = "$" .. token.value,
+      value = token.value,
       position = pos,
     }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
     local pos = ast.save(p)
-    value = ast.unspecialized.expr.Constant {
-      constant = token.value,
-      type = "keyword",
+    value = ast.unspecialized.expr.Keyword {
+      value = token.value,
       position = pos,
     }
   else
@@ -57,9 +55,9 @@ function parser.expr(p)
       if p:matches(p.name) and p:lookahead("=") then
         local constraints = p:constraints()
         local pos = ast.save(p)
-        expr = ast.unspecialized.expr.Index {
+        expr = ast.unspecialized.expr.Filter {
           value = expr,
-          index = constraints,
+          constraints = constraints,
           position = pos,
         }
       else
@@ -110,14 +108,22 @@ end
 
 function parser.constraint(p)
   local pos = ast.save(p)
-  local field = p:next(p.name)
+  local field = p:next(p.name).value
   p:expect("=")
   local value = p:expr()
-  return ast.unspecialized.Constraint {
-    field = field.value,
-    value = value,
-    position = pos,
-  }
+  if value:is(ast.unspecialized.expr.Variable) then
+    return ast.unspecialized.PatternMatch {
+      field = field,
+      binder = value.value,
+      position = pos,
+    }
+  else
+    return ast.unspecialized.Constraint {
+      field = field,
+      value = value,
+      position = pos,
+    }
+  end
 end
 
 function parser.constraints(p)
@@ -133,17 +139,21 @@ function parser.constraints(p)
 end
 
 function parser.element(p)
-  local element
+  local ctor
+  local tbl = {}
   if p:nextif("task") then
-    element = "task"
+    ctor = ast.unspecialized.element.Task
   elseif p:nextif("region") then
-    element = "region"
-  elseif p:nextif("for") then
-    element = "for"
-  elseif p:nextif("while") then
-    element = "while"
-  elseif p:nextif("do") then
-    element = "do"
+    ctor = ast.unspecialized.element.Region
+  --elseif p:nextif("for") then
+  --  ctor = ast.unspecialized.element.BlockElement
+  --  tbl = { type = "for" }
+  --elseif p:nextif("while") then
+  --  ctor = ast.unspecialized.element.BlockElement
+  --  tbl = { type = "while" }
+  --elseif p:nextif("do") then
+  --  ctor = ast.unspecialized.element.BlockElement
+  --  tbl = { type = "do" }
   else
     p:error("unexpected element name")
   end
@@ -169,13 +179,17 @@ function parser.element(p)
     end
   end
 
-  return ast.unspecialized.Element {
-    type = element,
-    name = name,
-    classes = classes,
-    constraints = constraints,
-    position = pos,
-  }
+  tbl.name = name
+  tbl.classes = classes
+  tbl.constraints = terralib.newlist()
+  tbl.patterns = terralib.newlist()
+  constraints:map(function(c)
+    if c:is(ast.unspecialized.Constraint) then tbl.constraints:insert(c)
+    else assert(c:is(ast.unspecialized.PatternMatch)) tbl.patterns:insert(c) end
+  end)
+  tbl.position = pos
+
+  return ctor(tbl)
 end
 
 function parser.selector(p)

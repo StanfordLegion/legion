@@ -53,7 +53,7 @@ function ast.is_node(node)
   return type(node) == "table" and getmetatable(node) == ast_node
 end
 
-local function ast_node_tostring(node, indent)
+local function ast_node_tostring(node, indent, pretty)
   local newline = "\n"
   local spaces = string.rep("  ", indent)
   local spaces1 = string.rep("  ", indent + 1)
@@ -66,9 +66,10 @@ local function ast_node_tostring(node, indent)
     end
     local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
-      if k ~= "node_type" and k~= "unparse" then
+      if k ~= "node_type" and k ~= "unparse" and
+        (not pretty or k ~= "position") then
         str = str .. spaces1 .. k .. " = " ..
-          ast_node_tostring(v, indent + 1) .. "," .. newline
+          ast_node_tostring(v, indent + 1, pretty) .. "," .. newline
       end
     end
     return str .. spaces .. ")"
@@ -76,7 +77,7 @@ local function ast_node_tostring(node, indent)
     local str = "{" .. newline
     for i, v in ipairs(node) do
       str = str .. spaces1 ..
-        ast_node_tostring(v, indent + 1) .. "," .. newline
+        ast_node_tostring(v, indent + 1, pretty) .. "," .. newline
     end
     return str .. spaces .. "}"
   elseif type(node) == "string" then
@@ -91,7 +92,7 @@ function ast_node:__tostring()
 end
 
 function ast_node:printpretty()
-  print(tostring(self))
+  print(ast_node_tostring(self, 0, true))
 end
 
 function ast_node:unparse()
@@ -245,6 +246,10 @@ end
 
 -- Node Types (Unspecialized)
 
+local function unparse_all(list)
+  return list:map(function(e) return e:unparse() end)
+end
+
 ast:inner("unspecialized", { "position" })
 
 ast.unspecialized:leaf("Rules", { "rules" })
@@ -278,9 +283,10 @@ function ast.unspecialized.Selector:unparse()
   return str
 end
 
-ast.unspecialized:leaf("Element", { "type", "name", "classes", "constraints" })
-function ast.unspecialized.Element:unparse()
-  local str = self.type
+ast.unspecialized:inner("element", { "name", "classes", "constraints",
+                                     "patterns" })
+function ast.unspecialized.element:unparse()
+  local str = ""
   for i = 1, #self.name do
     str = str .. "#" .. self.name[i]
   end
@@ -288,14 +294,25 @@ function ast.unspecialized.Element:unparse()
     str = str .. "." .. self.classes[i]
   end
   if #self.constraints > 0 then
-    str = str .. "["
-    str = str .. self.constraints[1]:unparse()
-    for i = 2, #self.constraints do
-      str = str .. " and " .. self.constraints[i]:unparse()
-    end
-    str = str .. "]"
+    local const_str = table.concat(unparse_all(self.constraints), " and ")
+    str = str .. "[" .. const_str .. "]"
+  end
+  if #self.patterns > 0 then
+    local pat_str = table.concat(unparse_all(self.patterns), " and ")
+    str = str .. "[" .. pat_str .. "]"
   end
   return str
+end
+
+ast.unspecialized.element:leaf("Task", {})
+function ast.unspecialized.element.Task:unparse()
+  local str = "task"
+  return str .. ast.unspecialized.element.unparse(self)
+end
+ast.unspecialized.element:leaf("Region", {})
+function ast.unspecialized.element.Region:unparse()
+  local str = "region"
+  return str .. ast.unspecialized.element.unparse(self)
 end
 
 ast.unspecialized:leaf("Property", { "field", "value" })
@@ -308,32 +325,96 @@ function ast.unspecialized.Constraint:unparse()
   return self.field .. " = " .. self.value:unparse()
 end
 
+ast.unspecialized:leaf("PatternMatch", { "field", "binder" })
+function ast.unspecialized.PatternMatch:unparse()
+  return self.field .. " = " .. self.binder
+end
+
 ast.unspecialized:inner("expr")
 ast.unspecialized.expr:leaf("Index", { "value", "index" })
 function ast.unspecialized.expr.Index:unparse()
-  if terralib.islist(self.index) then
-    local index_str = self.index[1]:unparse()
-    for i = 2, #self.index do
-      index_str = index_str .. " and " .. self.index[i]:unparse()
-    end
-    return self.value:unparse() .. "[" .. index_str .. "]"
-  else
-    return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
-  end
+  return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
 end
+
+ast.unspecialized.expr:leaf("Filter", { "value", "constraints" })
+function ast.unspecialized.expr.Filter:unparse()
+  local const_str = table.concat(unparse_all(self.constraints), " and ")
+  return self.value:unparse() .. "[" .. const_str .. "]"
+end
+
 ast.unspecialized.expr:leaf("Field", { "value", "field" })
 function ast.unspecialized.expr.Field:unparse()
   return self.value:unparse() .. "." .. self.field
 end
 
-ast.unspecialized.expr:leaf("Constant", { "constant", "type" })
+ast.unspecialized.expr:leaf("Constant", { "value" })
 function ast.unspecialized.expr.Constant:unparse()
-  if self.type == "keyword" then return self.constant
-  else assert(type(self.constant) == "number") return tostring(self.constant) end
+  return tostring(self.value)
 end
-ast.unspecialized.expr:leaf("Variable", { "id" })
+ast.unspecialized.expr:leaf("Variable", { "value" })
 function ast.unspecialized.expr.Variable:unparse()
-  return self.id
+  return self.value
 end
+ast.unspecialized.expr:leaf("Keyword", { "value" })
+function ast.unspecialized.expr.Keyword:unparse()
+  return self.value
+end
+
+ast:inner("specialized", { "position" })
+
+ast.specialized:leaf("Rules", { "task_rules", "region_rules" })
+
+ast.specialized:inner("rule", { "selector", "properties" })
+ast.specialized.rule:leaf("Task", {})
+ast.specialized.rule:leaf("Region", {})
+
+ast.specialized:leaf("Selector", { "type", "elements", "constraints" })
+function ast.specialized.Selector:unparse()
+  return table.concat(unparse_all(self.elements), " ")
+end
+
+ast.specialized:inner("element", { "name", "classes", "patterns" })
+function ast.specialized.element:unparse()
+  local str = ""
+  if #self.name > 0 then str = str .. "#" .. self.name[1] end
+  return str
+end
+ast.specialized.element:leaf("Task", {})
+function ast.specialized.element.Task:unparse()
+  return "task" .. ast.specialized.element.unparse(self)
+end
+ast.specialized.element:leaf("Region", {})
+function ast.specialized.element.Region:unparse()
+  return "region" .. ast.specialized.element.unparse(self)
+end
+
+ast.specialized:leaf("Property", { "field", "value" })
+ast.specialized:leaf("Constraint", { "lhs", "rhs" })
+ast.specialized:leaf("FilterConstraint", { "field", "value" })
+function ast.specialized.FilterConstraint:unparse()
+  return self.field .. "=" .. self.value:unparse()
+end
+ast.specialized:leaf("PatternMatch", { "field", "binder" })
+
+ast.specialized:inner("expr")
+ast.specialized.expr:leaf("Index", { "value", "index" })
+function ast.specialized.expr.Index:unparse()
+  return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
+end
+ast.specialized.expr:leaf("Filter", { "value", "constraints" })
+function ast.specialized.expr.Filter:unparse()
+  local const_str = table.concat(unparse_all(self.constraints), " and ")
+  return self.value:unparse() .. "[" .. const_str .. "]"
+end
+ast.specialized.expr:leaf("Field", { "value", "field" })
+function ast.specialized.expr.Field:unparse()
+  return self.value:unparse() .. "." .. self.field
+end
+ast.specialized.expr:leaf("Constant", { "value" })
+ast.specialized.expr.Constant.unparse = ast.unspecialized.expr.Constant.unparse
+ast.specialized.expr:leaf("Variable", { "value" })
+ast.specialized.expr.Variable.unparse = ast.unspecialized.expr.Variable.unparse
+ast.specialized.expr:leaf("Keyword", { "value" })
+ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
 
 return ast

@@ -2512,6 +2512,32 @@ legion_task_get_target_proc(legion_task_t task_)
   return CObjectWrapper::wrap(task->target_proc);
 }
 
+const char *
+legion_task_get_name(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return task->variants->name;
+}
+
+void
+legion_task_set_target_proc(legion_task_t task_, legion_processor_t proc_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  task->target_proc = proc;
+}
+
+void
+legion_task_add_additional_proc(legion_task_t task_, legion_processor_t proc_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  task->additional_procs.insert(proc);
+}
+
 // -----------------------------------------------------------------------
 // Inline Operations
 // -----------------------------------------------------------------------
