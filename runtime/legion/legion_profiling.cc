@@ -228,7 +228,7 @@ namespace LegionRuntime {
 
 #ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_message(MessageKind kind, 
+    void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
                                             unsigned long long start,
                                             unsigned long long stop)
     //--------------------------------------------------------------------------
@@ -238,6 +238,7 @@ namespace LegionRuntime {
       info.kind = kind;
       info.start = start;
       info.stop = stop;
+      info.proc = proc;
     }
 #endif
 
@@ -307,8 +308,8 @@ namespace LegionRuntime {
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
-        log_prof.info("Prof Message Info %u %llu %llu",
-                      it->kind, it->start, it->stop);
+        log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
+                      it->kind, it->proc.id, it->start, it->stop);
       }
 #endif
       task_kinds.clear();
@@ -783,7 +784,7 @@ namespace LegionRuntime {
 #endif
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
-      instances[local_id]->record_message(kind, start, stop);
+      instances[local_id]->record_message(current, kind, start, stop);
     }
 #endif
 

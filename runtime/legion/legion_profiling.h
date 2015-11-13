@@ -103,6 +103,7 @@ namespace LegionRuntime {
       public:
         MessageKind kind;
         unsigned long long start, stop;
+        Processor proc;
       };
 #endif
     public:
@@ -135,7 +136,8 @@ namespace LegionRuntime {
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
 #ifdef LEGION_PROF_MESSAGES
     public:
-      void record_message(MessageKind kind, unsigned long long start,
+      void record_message(Processor proc, MessageKind kind, 
+                          unsigned long long start,
                           unsigned long long stop);
 #endif
     public:
