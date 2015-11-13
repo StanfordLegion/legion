@@ -297,9 +297,13 @@ end
 function std.meet_privilege(a, b)
   if a == b then
     return a
-  elseif not a or a == "none" then
+  elseif not a then
     return b
-  elseif not b or b == "none" then
+  elseif not b then
+    return a
+  elseif a == "none" then
+    return b
+  elseif b == "none" then
     return a
   else
     return "reads_writes"
@@ -331,6 +335,8 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
+      assert(terralib.issymbol(privilege.region))
+      assert(data.is_tuple(privilege.field_path))
       if region_type == privilege.region.type and
         field_path:starts_with(privilege.field_path)
       then
@@ -543,6 +549,10 @@ end
 
 function std.is_list_of_regions(t)
   return std.is_list(t) and t:is_list_of_regions()
+end
+
+function std.is_list_of_phase_barriers(t)
+  return std.is_list(t) and t:is_list_of_phase_barriers()
 end
 
 function std.is_phase_barrier(t)
@@ -1703,7 +1713,7 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
-  assert(not std.is_list(fspace_type),
+  assert(not std.is_list_of_regions(fspace_type),
          "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
@@ -1865,6 +1875,10 @@ function std.partition(disjointness, region)
              std.is_region(region),
            "Parition type requires region")
     return region
+  end
+
+  function st:fspace()
+    return self:parent_region():fspace()
   end
 
   function st:subregions_constant()
@@ -2215,12 +2229,32 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       std.is_list_of_regions(self.element_type)
   end
 
+  function st:is_list_of_phase_barriers()
+    return std.is_phase_barrier(self.element_type) or
+      std.is_list_of_phase_barriers(self.element_type)
+  end
+
   function st:partition()
     return self.partition_type
   end
 
   function st:list_depth()
     return 1 + self.element_type:list_depth()
+  end
+
+  function st:leaf_element_type()
+    if std.is_list(self.element_type) then
+      return self.element_type:leaf_element_type()
+    end
+    return self.element_type
+  end
+
+  function st:region()
+    assert(std.is_list_of_regions(self))
+    if std.is_list(self.element_type) then
+      return self.element_type:region()
+    end
+    return self.element_type
   end
 
   function st:ispace()
@@ -2231,6 +2265,24 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   function st:fspace()
     assert(std.is_list_of_regions(self))
     return self.element_type:fspace()
+  end
+
+  function st:subregion_dynamic()
+    assert(std.is_list_of_regions(self))
+    local ispace = terralib.newsymbol(
+      std.ispace(self:ispace().index_type),
+      self:region().ispace_symbol.displayname)
+    return std.region(ispace, self:fspace())
+  end
+
+  function st:slice()
+    assert(std.is_list_of_regions(self))
+    local slice_type = self:subregion_dynamic()
+    for i = 1, self:list_depth() do
+      slice_type = std.list(
+        slice_type, self:partition(), self.privilege_depth)
+    end
+    return slice_type
   end
 
   -- FIXME: Make the compiler manage cleanups, including lists.
@@ -2274,6 +2326,11 @@ do
   })
 
   st.is_phase_barrier = true
+
+  -- For API compatibility with std.list:
+  function st:list_depth()
+    return 0
+  end
 end
 
 do
@@ -2363,7 +2420,7 @@ function std.privilege(privilege, regions_fields)
     end
     assert(terralib.issymbol(region) and terralib.islist(fields))
     for _, field in ipairs(fields) do
-      privileges:insert({
+      privileges:insert(data.map_from_table {
         node_type = "privilege",
         region = region,
         field_path = field,

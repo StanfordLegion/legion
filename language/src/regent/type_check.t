@@ -343,17 +343,24 @@ function type_check.expr_condition(cx, node)
   local value_types = values:map(
     function(value) return std.check_read(cx, value) end)
   for _, value_type in ipairs(value_types) do
-    if not std.is_phase_barrier(value_type) then
+    if not (std.is_phase_barrier(value_type) or
+            std.is_list_of_phase_barriers(value_type)) then
       log.error(node, "type mismatch: expected " ..
                   tostring(std.phase_barrier) .. " but got " ..
                   tostring(value_type))
     end
   end
 
-  return ast.typed.expr.Condition {
-    conditions = conditions,
-    values = values,
-  }
+  return values:map(
+    function(value)
+      return ast.typed.expr.Condition {
+        conditions = conditions,
+        value = value,
+        expr_type = std.as_read(value.expr_type),
+        options = node.options,
+        span = node.span,
+      }
+    end)
 end
 
 function type_check.conditions(cx, node, params)
@@ -604,7 +611,7 @@ function type_check.expr_index_access(cx, node)
     end
 
     if not value_type:is_list_of_regions() then
-      local expr_type = value_type.element_type
+      local expr_type = value_type:leaf_element_type()
       if slice then
         for i = 1, value_type:list_depth() do
           expr_type = std.list(expr_type)
@@ -618,13 +625,11 @@ function type_check.expr_index_access(cx, node)
         span = node.span,
       }
     else
-      local ispace = terralib.newsymbol(std.ispace(value_type:ispace().index_type))
-      local expr_type = std.region(ispace, value_type:fspace())
+      local expr_type
       if slice then
-        for i = 1, value_type:list_depth() do
-          expr_type = std.list(
-            expr_type, value_type:partition(), value_type.privilege_depth)
-        end
+        expr_type = value_type:slice()
+      else
+        expr_type = value_type:subregion_dynamic()
       end
       std.copy_privileges(cx, value_type, expr_type)
       -- FIXME: Copy constraints from list type.
@@ -1315,11 +1320,7 @@ function type_check.expr_list_cross_product(cx, node)
     log.error(node, "type mismatch: expected a list of regions but got " .. tostring(rhs_type))
   end
   local expr_type = std.list(
-    std.list(
-      std.region(
-        terralib.newsymbol(std.ispace(rhs_type:ispace().index_type)),
-        rhs_type:fspace()),
-      nil, 1),
+    std.list(rhs_type:subregion_dynamic(), nil, 1),
     nil, 1)
 
   std.copy_privileges(cx, rhs_type, expr_type)
@@ -1329,6 +1330,57 @@ function type_check.expr_list_cross_product(cx, node)
   return ast.typed.expr.ListCrossProduct {
     lhs = lhs,
     rhs = rhs,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_phase_barriers(cx, node)
+  local product = type_check.expr(cx, node.product)
+  local product_type = std.check_read(cx, product)
+  if not std.is_list_of_regions(product_type) or product_type:list_depth() ~= 2
+  then
+    log.error(node, "type mismatch: expected a list cross-product but got " ..
+                tostring(product_type))
+  end
+  local expr_type = std.list(std.list(std.phase_barrier))
+
+  return ast.typed.expr.ListPhaseBarriers {
+    product = product,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_invert(cx, node)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
+  local product = type_check.expr(cx, node.product)
+  local product_type = std.check_read(cx, product)
+  local barriers = type_check.expr(cx, node.barriers)
+  local barriers_type = std.check_read(cx, barriers)
+  if not std.is_list_of_regions(rhs_type) or rhs_type:list_depth() ~= 1 then
+    log.error(node, "type mismatch: expected a list of regions but got " ..
+                tostring(product_type))
+  end
+  if not std.is_list_of_regions(product_type) or product_type:list_depth() ~= 2
+  then
+    log.error(node, "type mismatch: expected a list cross-product but got " ..
+                tostring(product_type))
+  end
+  if not std.type_eq(barriers_type, std.list(std.list(std.phase_barrier))) then
+    log.error(node, "type mismatch: expected " ..
+                tostring(std.list(std.list(std.phase_barrier))) ..
+                " but got " .. tostring(barriers_type))
+  end
+  local expr_type = barriers_type
+
+  return ast.typed.expr.ListInvert {
+    rhs = rhs,
+    product = product,
+    barriers = barriers,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1375,13 +1427,16 @@ end
 function type_check.expr_advance(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  if not std.validate_implicit_cast(value_type, std.phase_barrier) then
+  if not (std.validate_implicit_cast(value_type, std.phase_barrier) or
+            std.is_list_of_phase_barriers(value_type))
+  then
     log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(value_type))
   end
+  local expr_type = value_type
 
   return ast.typed.expr.Advance {
     value = value,
-    expr_type = std.phase_barrier,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1392,12 +1447,30 @@ function type_check.expr_copy(cx, node)
   local src_type = std.check_read(cx, src)
   local dst = type_check.expr_region_root(cx, node.dst)
   local dst_type = std.check_read(cx, dst)
-  local conditions = node.conditions:map(
-    function(condition) return type_check.expr_condition(cx, condition) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
   local expr_type = terralib.types.unit
 
   if src_type:list_depth() > dst_type:list_depth() then
     log.error(node, "must copy from less-nested to more-nested list")
+  end
+
+  for _, condition in ipairs(conditions) do
+    local value = condition.value
+    local value_type = std.check_read(cx, value)
+    for _, condition_kind in ipairs(condition.conditions) do
+      if condition_kind == std.awaits and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must await list of same or less depth than destination")
+      elseif condition_kind == std.arrives and
+        value_type:list_depth() > dst_type:list_depth()
+      then
+        log.error(node, "copy must arrive list of same or less depth than destination")
+      end
+    end
   end
 
   if #src.fields ~= #dst.fields then
@@ -1488,8 +1561,10 @@ function type_check.expr_fill(cx, node)
   local dst_type = std.check_read(cx, dst)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  local conditions = node.conditions:map(
-    function(condition) return type_check.expr_condition(cx, condition) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
   local expr_type = terralib.types.unit
 
   for i, dst_field in ipairs(dst.fields) do
@@ -1557,6 +1632,12 @@ function type_check.expr_with_scratch_fields(cx, node)
   local expr_type = std.region(
     terralib.newsymbol(region_type:ispace()),
     region_type:fspace())
+  if std.is_list_of_regions(region_type) then
+    for i = 1, region_type:list_depth() do
+      expr_type = std.list(
+        expr_type, region_type:partition(), region_type.privilege_depth)
+    end
+  end
 
   std.copy_privileges(cx, region_type, expr_type)
 
@@ -1773,6 +1854,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListCrossProduct) then
     return type_check.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
+    return type_check.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListInvert) then
+    return type_check.expr_list_invert(cx, node)
 
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)
@@ -2347,6 +2434,7 @@ function type_check.stat_task(cx, node)
     privileges = privileges,
     coherence_modes = coherence_modes,
     flags = flags,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     config_options = ast.TaskConfigOptions {

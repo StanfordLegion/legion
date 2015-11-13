@@ -1631,11 +1631,12 @@ namespace LegionRuntime {
       // interface for description of these fields.
       Processor                           target_proc;
       std::set<Processor>                 additional_procs;
+      TaskPriority                        task_priority;
       bool                                inline_task;
       bool                                spawn_task;
       bool                                map_locally;
       bool                                profile_task;
-      TaskPriority                        task_priority;
+      bool                                post_map_task;
     public:
       // Options for configuring this task's context
       int                                 max_window_size;
@@ -2301,6 +2302,22 @@ namespace LegionRuntime {
        * @return should the runtime notify the mapper of a successful mapping
        */
       virtual bool map_task(Task *task) = 0;
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Post-Map Task 
+       * ----------------------------------------------------------------------
+       *  This is a temporary addition to the mapper interface that will
+       *  change significantly in the new mapper interface. If the 
+       *  'post_map_task' flag is set for a task in select_task_options
+       *  mapper call then this call will be invoked after map_task succeeds.
+       *  It works very similar to map_task in that the mapper can ask
+       *  for the creation of new instances for region requirements to be
+       *  done after the task has completed by filling in the target_ranking
+       *  field of a region requirement with memories in which to place 
+       *  additional instances after the task has finished executing. 
+       */
+      virtual void post_map_task(Task *task) = 0;
 
       /**
        * ----------------------------------------------------------------------

@@ -40,7 +40,10 @@ namespace Realm {
 
       bool init(int *argc, char ***argv);
 
+      // this is now just a wrapper around Processor::register_task - consider switching to
+      //  that
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
+
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
 
       // there are three potentially interesting ways to start the initial

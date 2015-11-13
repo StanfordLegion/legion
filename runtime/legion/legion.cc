@@ -37,6 +37,7 @@ namespace LegionRuntime {
     Logger::Category log_allocation("allocation");
     Logger::Category log_prof("legion_prof");
     Logger::Category log_garbage("legion_gc");
+    Logger::Category log_shutdown("shutdown");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");

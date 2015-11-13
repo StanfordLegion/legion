@@ -30,6 +30,7 @@
 
 #include "tasks.h"
 #include "threads.h"
+#include "codedesc.h"
 
 namespace Realm {
 
@@ -54,6 +55,16 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
+      virtual void register_task(Processor::TaskFuncID func_id,
+				 const CodeDescriptor& codedesc,
+				 const ByteArrayRef& user_data);
+
+    protected:
+      friend class Task;
+
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				const ByteArrayRef& task_args);
+
     public:
       Processor me;
       Processor::Kind kind;
@@ -74,6 +85,10 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority);
 
+      virtual void register_task(Processor::TaskFuncID func_id,
+				 const CodeDescriptor& codedesc,
+				 const ByteArrayRef& user_data);
+
       // blocks until things are cleaned up
       virtual void shutdown(void);
 
@@ -84,6 +99,16 @@ namespace Realm {
 
       ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
+
+      struct TaskTableEntry {
+	Processor::TaskFuncPtr fnptr;
+	ByteArray user_data;
+      };
+
+      std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
+
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				const ByteArrayRef& task_args);
     };
 
     // three simple subclasses for:
@@ -162,7 +187,6 @@ namespace Realm {
 			      Event start_event, Event finish_event,
                               int priority);
 
-
     public: //protected:
       bool members_valid;
       bool members_requested;
@@ -192,6 +216,18 @@ namespace Realm {
     protected:
       ProcessorImpl *proc;
       Task *task;
+    };
+
+    // a task registration can take a while if remote processors and/or JITs are
+    //  involved
+    class TaskRegistration : public Operation {
+    public:
+      TaskRegistration(const CodeDescriptor& _codedesc,
+		       const ByteArrayRef& _userdata,
+		       Event _finish_event, const ProfilingRequestSet &_requests);
+
+      CodeDescriptor codedesc;
+      ByteArray userdata;
     };
 
     // active messages

@@ -149,10 +149,13 @@ namespace LegionRuntime {
       Operation(Internal *rt);
       virtual ~Operation(void);
     public:
+      static const char* get_string_rep(OpKind kind);
+    public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
       // Base call
@@ -562,6 +565,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -616,6 +620,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -811,6 +816,7 @@ namespace LegionRuntime {
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual bool is_close_op(void) const { return true; }
     public:
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
@@ -963,6 +969,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void); 
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1017,6 +1024,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1255,6 +1263,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1684,6 +1693,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
@@ -1738,6 +1748,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1796,6 +1807,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1841,6 +1853,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);

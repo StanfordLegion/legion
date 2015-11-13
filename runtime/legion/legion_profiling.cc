@@ -26,6 +26,32 @@ namespace LegionRuntime {
     extern Logger::Category log_prof;
 
     //--------------------------------------------------------------------------
+    LegionProfMarker::LegionProfMarker(const char* _name)
+      : name(_name), stopped(false)
+    //--------------------------------------------------------------------------
+    {
+      proc = Realm::Processor::get_executing_processor();
+      start = Realm::Clock::current_time_in_nanoseconds();
+    }
+
+    //--------------------------------------------------------------------------
+    LegionProfMarker::~LegionProfMarker()
+    //--------------------------------------------------------------------------
+    {
+      if (!stopped) mark_stop();
+      log_prof.info("Prof User Info " IDFMT " %llu %llu %s", proc.id,
+          start, stop, name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfMarker::mark_stop()
+    //--------------------------------------------------------------------------
+    {
+      stop = Realm::Clock::current_time_in_nanoseconds();
+      stopped = true;
+    }
+
+    //--------------------------------------------------------------------------
     LegionProfInstance::LegionProfInstance(LegionProfiler *own)
       : owner(own)
     //--------------------------------------------------------------------------

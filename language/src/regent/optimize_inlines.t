@@ -60,6 +60,7 @@ local function uses(cx, region_type, polarity)
   -- mapped, but codegen will be able to do the right thing by
   -- ignoring anything that isn't a root in the region forest.
 
+  assert(std.type_supports_privileges(region_type))
   local usage = { [region_type] = polarity }
   for other_region_type, _ in pairs(cx.region_universe) do
     local constraint = {
@@ -177,7 +178,7 @@ local function analyze_usage_node(cx)
       node:is(ast.typed.expr.Deref)
     then
       local ptr_type = std.as_read(node.value.expr_type)
-      if std.is_bounded_type(std.as_read(ptr_type)) then
+      if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
         return data.reduce(
           usage_meet,
           ptr_type:bounds():map(
@@ -188,6 +189,7 @@ local function analyze_usage_node(cx)
 end
 
 local function analyze_usage(cx, node)
+  assert(node)
   return ast.mapreduce_node_postorder(
     analyze_usage_node(cx),
     usage_meet,
@@ -384,7 +386,7 @@ function optimize_inlines.stat_index_launch(cx, node)
 end
 
 function optimize_inlines.stat_var(cx, node)
-  local usage = analyze_usage(node)
+  local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 

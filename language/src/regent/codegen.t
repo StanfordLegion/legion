@@ -1515,10 +1515,8 @@ function codegen.expr_region_root(cx, node)
 end
 
 function codegen.expr_condition(cx, node)
-  return node.values:map(
-    function(value)
-      return codegen.expr(cx, value):read(cx, std.as_read(value.expr_type))
-  end)
+  return codegen.expr(cx, node.value):read(
+    cx, std.as_read(node.value.expr_type))
 end
 
 function codegen.expr_id(cx, node)
@@ -3032,13 +3030,13 @@ function codegen.expr_list_duplicate_partition(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   local parent_region = partition_type:parent_region()
   assert(cx:has_region(parent_region))
 
   cx:add_list_of_regions(
-    expr_type, list,
+    expr_type, result,
     cx:region(parent_region).field_paths,
     cx:region(parent_region).privilege_field_paths,
     cx:region(parent_region).field_privileges,
@@ -3050,7 +3048,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
       __partition = [partition.value].impl,
@@ -3061,14 +3059,12 @@ function codegen.expr_list_duplicate_partition(cx, node)
         [cx.runtime], [cx.context], [partition.value].impl, color)
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
-      [expr_type:data(list)][i] = [expr_type.element_type] { impl = r }
+      [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
 
-
-
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3084,12 +3080,12 @@ function codegen.expr_list_cross_product(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local list = terralib.newsymbol(expr_type, "list")
+  local result = terralib.newsymbol(expr_type, "result")
 
   assert(cx:has_list_of_regions(lhs_type))
 
   cx:add_list_of_regions(
-    expr_type, list,
+    expr_type, result,
     cx:list_of_regions(lhs_type).field_paths,
     cx:list_of_regions(lhs_type).privilege_field_paths,
     cx:list_of_regions(lhs_type).field_privileges,
@@ -3107,31 +3103,31 @@ function codegen.expr_list_cross_product(cx, node)
     var product = c.legion_terra_index_cross_product_create(
       [cx.runtime], [cx.context], [rhs_partition], [lhs_partition])
 
+    -- *BUT*, the list is still indexed by lhs first.
     var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
+      terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
-    var [list] = expr_type {
-      __size = [rhs.value].__size,
+    var [result] = expr_type {
+      __size = [lhs.value].__size,
       __data = data,
     }
-    for i = 0, [rhs.value].__size do
-      var root = [rhs_type:data(rhs.value)][i]
-      var color = c.legion_logical_region_get_color(
+    for i = 0, [lhs.value].__size do
+      var lhs_color = c.legion_logical_region_get_color(
         [cx.runtime], [cx.context],
-        [rhs_type:data(rhs.value)][i].impl)
-      var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
-        [cx.runtime], [cx.context],
-        product, color)
+        [lhs_type:data(lhs.value)][i].impl)
 
       -- Count non-empty subspaces.
       var subsize = 0
-      for j = 0, [lhs.value].__size do
-        var subcolor = c.legion_logical_region_get_color(
+      for j = 0, [rhs.value].__size do
+        var rhs_color = c.legion_logical_region_get_color(
           [cx.runtime], [cx.context],
-          [rhs_type:data(rhs.value)][i].impl)
+          [rhs_type:data(rhs.value)][j].impl)
+        var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
+          [cx.runtime], [cx.context],
+          product, rhs_color)
 
         var is = c.legion_index_partition_get_index_subspace(
-          [cx.runtime], [cx.context], product_ip1, subcolor)
+          [cx.runtime], [cx.context], product_ip1, lhs_color)
         var it = c.legion_index_iterator_create(
           [cx.runtime], [cx.context], is)
         var nonempty = c.legion_index_iterator_has_next(it)
@@ -3144,30 +3140,33 @@ function codegen.expr_list_cross_product(cx, node)
       var subdata = c.malloc(
         terralib.sizeof([expr_type.element_type.element_type]) * subsize)
       regentlib.assert(subdata ~= nil, "malloc failed in list_duplicate_partition")
-      [expr_type:data(list)][i] = [expr_type.element_type] {
+      [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
       }
 
       -- Fill sublist.
       var subslot = 0
-      for j = 0, [lhs.value].__size do
-        var subcolor = c.legion_logical_region_get_color(
+      for j = 0, [rhs.value].__size do
+        var rhs_color = c.legion_logical_region_get_color(
           [cx.runtime], [cx.context],
-          [rhs_type:data(rhs.value)][i].impl)
+          [rhs_type:data(rhs.value)][j].impl)
+        var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
+          [cx.runtime], [cx.context],
+          product, rhs_color)
 
         var is = c.legion_index_partition_get_index_subspace(
-          [cx.runtime], [cx.context], product_ip1, subcolor)
+          [cx.runtime], [cx.context], product_ip1, lhs_color)
         var it = c.legion_index_iterator_create(
           [cx.runtime], [cx.context], is)
         var nonempty = c.legion_index_iterator_has_next(it)
         if nonempty then
-          [expr_type.element_type:data(`([expr_type:data(list)][i]))][subslot] =
+          [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
             [expr_type.element_type.element_type] {
               impl = c.legion_logical_region_t {
-                tree_id = root.impl.tree_id,
+                tree_id = [rhs_type:data(rhs.value)][j].impl.tree_id,
                 index_space = is,
-                field_space = root.impl.field_space,
+                field_space = [rhs_type:data(rhs.value)][j].impl.field_space,
               }
             }
           subslot = subslot + 1
@@ -3177,7 +3176,144 @@ function codegen.expr_list_cross_product(cx, node)
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_list_phase_barriers(cx, node)
+  local product_type = std.as_read(node.product.expr_type)
+  local product = codegen.expr(cx, node.product):read(cx, product_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [product.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local result = terralib.newsymbol(expr_type, "result")
+
+  actions = quote
+    [actions]
+
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [product.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
+    var [result] = expr_type {
+      __size = [product.value].__size,
+      __data = data,
+    }
+    for i = 0, [product.value].__size do
+      var subsize = [product_type:data(product.value)][i].__size
+
+      -- Allocate sublist.
+      var subdata = c.malloc(
+        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+      regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
+      [expr_type:data(result)][i] = [expr_type.element_type] {
+        __size = subsize,
+        __data = subdata,
+      }
+
+      -- Fill sublist.
+      for j = 0, subsize do
+        [expr_type.element_type:data(`([expr_type:data(result)][i]))][j] =
+          [expr_type.element_type.element_type] {
+            impl = c.legion_phase_barrier_create([cx.runtime], [cx.context], 1)
+          }
+      end
+    end
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_list_invert(cx, node)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local rhs = codegen.expr(cx, node.rhs):read(cx, rhs_type)
+  local product_type = std.as_read(node.product.expr_type)
+  local product = codegen.expr(cx, node.product):read(cx, product_type)
+  local barriers_type = std.as_read(node.barriers.expr_type)
+  local barriers = codegen.expr(cx, node.barriers):read(cx, barriers_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [rhs.actions]
+    [product.actions]
+    [barriers.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local result = terralib.newsymbol(expr_type, "result")
+
+  actions = quote
+    [actions]
+
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_invert")
+    var [result] = expr_type {
+      __size = [rhs.value].__size,
+      __data = data,
+    }
+    for i = 0, [rhs.value].__size do
+      var rhs_ = [rhs_type:data(rhs.value)][i].impl
+
+      var rhs_color = c.legion_logical_region_get_color(
+        [cx.runtime], [cx.context],
+        [rhs_type:data(rhs.value)][i].impl)
+
+      var subsize = 0
+      for j = 0, [product.value].__size do
+        for k = 0, [product_type:data(product.value)][j].__size do
+          var leaf = [product_type.element_type:data(
+                        `([product_type:data(product.value)][j]))][k].impl
+          var part = c.legion_logical_region_get_parent_logical_partition(
+            [cx.runtime], [cx.context], leaf)
+          var parent = c.legion_logical_partition_get_parent_logical_region(
+            [cx.runtime], [cx.context], part)
+          var color = c.legion_logical_region_get_color(
+            [cx.runtime], [cx.context], parent)
+          if color == rhs_color then
+            subsize = subsize + 1
+          end
+        end
+      end
+
+      -- Allocate sublist.
+      var subdata = c.malloc(
+        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+      regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
+      [expr_type:data(result)][i] = [expr_type.element_type] {
+        __size = subsize,
+        __data = subdata,
+      }
+
+      -- Fill sublist.
+      var subslot = 0
+      for j = 0, [product.value].__size do
+        for k = 0, [product_type:data(product.value)][j].__size do
+          var leaf = [product_type.element_type:data(
+                        `([product_type:data(product.value)][j]))][k].impl
+          var part = c.legion_logical_region_get_parent_logical_partition(
+            [cx.runtime], [cx.context], leaf)
+          var parent = c.legion_logical_partition_get_parent_logical_region(
+            [cx.runtime], [cx.context], part)
+          var color = c.legion_logical_region_get_color(
+            [cx.runtime], [cx.context], parent)
+          if color == rhs_color then
+            std.assert(subslot < subsize, "overflowed sublist in list_invert")
+            [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
+              [barriers_type.element_type:data(
+                 `([barriers_type:data(barriers.value)][j]))][k]
+            subslot = subslot + 1
+          end
+        end
+      end
+    end
+  end
+
+  return values.value(
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3188,7 +3324,7 @@ function codegen.expr_list_range(cx, node)
   local stop = codegen.expr(cx, node.stop):read(cx, stop_type)
   local expr_type = std.as_read(node.expr_type)
 
-  local list = terralib.newsymbol("list")
+  local result = terralib.newsymbol("result")
   local actions = quote
     [start.actions]
     [stop.actions]
@@ -3197,17 +3333,17 @@ function codegen.expr_list_range(cx, node)
       terralib.sizeof([expr_type.element_type]) *
         ([stop.value] - [start.value]))
     regentlib.assert(data ~= nil, "malloc failed in list_range")
-    var [list] = expr_type {
+    var [result] = expr_type {
       __size = [stop.value] - [start.value],
       __data = data
     }
     for i = [start.value], [stop.value] do
-      [expr_type:data(list)][i - [start.value] ] = i
+      [expr_type:data(result)][i - [start.value] ] = i
     end
   end
 
   return values.value(
-    expr.just(actions, list),
+    expr.just(actions, result),
     expr_type)
 end
 
@@ -3230,6 +3366,40 @@ function codegen.expr_phase_barrier(cx, node)
     expr_type)
 end
 
+local function expr_advance_phase_barrier(cx, value, value_type)
+  assert(std.is_phase_barrier(value_type))
+  return quote end, `(value_type {
+    impl = c.legion_phase_barrier_advance(
+      [cx.runtime], [cx.context], [value].impl),
+  })
+end
+
+local function expr_advance_list(cx, value, value_type)
+  if std.is_list(value_type) then
+    local result = terralib.newsymbol(value_type, "result")
+    local element = terralib.newsymbol(value_type.element_type, "element")
+    local inner_actions, inner_value = expr_advance_list(
+      cx, element, value_type.element_type)
+    local actions = quote
+      var data = c.malloc(
+        terralib.sizeof([value_type.element_type]) * [value].__size)
+      regentlib.assert(data ~= nil, "malloc failed in index_access")
+      var [result] = [value_type] {
+        __size = [value].__size,
+        __data = data
+      }
+      for i = 0, [value].__size do
+        var [element] = [value_type:data(value)][i]
+        [inner_actions]
+        [value_type:data(result)][i] = [inner_value]
+      end
+    end
+    return actions, result
+  else
+    return expr_advance_phase_barrier(cx, value, value_type)
+  end
+end
+
 function codegen.expr_advance(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local value = codegen.expr(cx, node.value):read(cx, value_type)
@@ -3239,13 +3409,14 @@ function codegen.expr_advance(cx, node)
     [emit_debuginfo(node)]
   end
 
+  local result_actions, result = expr_advance_list(cx, value.value, value_type)
+  actions = quote
+    [actions];
+    [result_actions]
+  end
+
   return values.value(
-    expr.once_only(
-      actions,
-      `(expr_type {
-          impl = c.legion_phase_barrier_advance(
-            [cx.runtime], [cx.context], [value.value].impl),
-        })),
+    expr.once_only(actions, result),
     expr_type)
 end
 
@@ -3260,13 +3431,55 @@ local function get_container_root(cx, container, value)
   end
 end
 
+local function expr_copy_issue_phase_barriers(values, condition_kinds, launcher)
+  local actions = terralib.newlist()
+  for i, value in ipairs(values) do
+    local conditions = condition_kinds[i]
+    for _, condition_kind in ipairs(conditions) do
+      local add_barrier
+      if condition_kind == std.awaits then
+        add_barrier = c.legion_copy_launcher_add_wait_barrier
+      elseif condition_kind == std.arrives then
+        add_barrier = c.legion_copy_launcher_add_arrival_barrier
+      else
+        assert(false)
+      end
+      actions:insert(quote [add_barrier]([launcher], [value].impl) end)
+    end
+  end
+  return actions
+end
+
+local function expr_copy_extract_phase_barriers(index, values, value_types)
+  local actions = terralib.newlist()
+  local result_values = terralib.newlist()
+  local result_types = terralib.newlist()
+  for i, value in ipairs(values) do
+    local value_type = value_types[i]
+
+    local result_type = value_type.element_type
+    local result_value = terralib.newsymbol(result_type, "condition_element")
+    actions:insert(quote
+        var [result_value] = [value_type:data(value)][ [index] ]
+    end)
+    result_values:insert(result_value)
+    result_types:insert(result_type)
+  end
+  return actions, result_values, result_types
+end
+
 local function expr_copy_setup_region(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   assert(std.is_region(src_type) and std.is_region(dst_type))
   assert(std.type_supports_privileges(src_container_type) and
            std.type_supports_privileges(dst_container_type))
+  assert(data.all(condition_types:map(
+                    function(condition_type)
+                      return std.is_phase_barrier(condition_type)
+                    end)))
 
   local add_src_region =
     c.legion_copy_launcher_add_src_region_requirement_logical_region
@@ -3283,6 +3496,12 @@ local function expr_copy_setup_region(
   local src_all_fields = std.flatten_struct_fields(src_type:fspace())
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
   local actions = terralib.newlist()
+
+  local launcher = terralib.newsymbol("launcher")
+  actions:insert(quote
+    var [launcher] = c.legion_copy_launcher_create(
+      c.legion_predicate_true(), 0, 0)
+  end)
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
     local src_copy_fields = data.filter(
@@ -3318,23 +3537,34 @@ local function expr_copy_setup_region(
       end)
     end
   end
+  actions:insertall(
+    expr_copy_issue_phase_barriers(condition_values, condition_kinds, launcher))
+  actions:insert(quote
+    c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
 local function expr_copy_setup_list_one_to_many(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   assert(std.is_region(src_type))
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
     local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol("index")
+    local c_actions, c_values, c_types = expr_copy_extract_phase_barriers(
+      index, condition_values, condition_types)
     return quote
-      for i = 0, [dst_value].__size do
-        var [dst_element] = [dst_type:data(dst_value)][i]
+      for [index] = 0, [dst_value].__size do
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
         [expr_copy_setup_region(
            cx, src_value, src_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds,
            op, launcher)]
       end
     end
@@ -3342,6 +3572,7 @@ local function expr_copy_setup_list_one_to_many(
     return expr_copy_setup_region(
       cx, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds,
       op, launcher)
   end
 end
@@ -3349,20 +3580,26 @@ end
 local function expr_copy_setup_list_one_to_one(
     cx, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds,
     op, launcher)
   if std.is_list(src_type) then
     local src_element_type = src_type.element_type
     local src_element = terralib.newsymbol(src_element_type, "src_element")
     local dst_element_type = dst_type.element_type
     local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol("index")
+    local c_actions, c_values, c_types = expr_copy_extract_phase_barriers(
+      index, condition_values, condition_types)
     return quote
       std.assert([src_value].__size == [dst_value].__size, "mismatch in number of regions to copy")
-      for i = 0, [src_value].__size do
-        var [src_element] = [src_type:data(src_value)][i]
-        var [dst_element] = [dst_type:data(dst_value)][i]
+      for [index] = 0, [src_value].__size do
+        var [src_element] = [src_type:data(src_value)][ [index] ]
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
         [expr_copy_setup_list_one_to_one(
            cx, src_element, src_element_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds,
            op, launcher)]
       end
     end
@@ -3370,6 +3607,7 @@ local function expr_copy_setup_list_one_to_one(
     return expr_copy_setup_list_one_to_many(
       cx, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds,
       op, launcher)
   end
 end
@@ -3384,21 +3622,14 @@ function codegen.expr_copy(cx, node)
       return codegen.expr_condition(cx, condition)
     end)
 
-  local launcher = terralib.newsymbol("launcher")
-
   local actions = terralib.newlist()
   actions:insert(src.actions)
   actions:insert(dst.actions)
-  conditions:map(
-    function(condition)
-      actions:insertall(
-        condition:map(function(value) return value.actions end))
-    end)
+  actions:insertall(
+    conditions:map(function(condition) return condition.actions end))
   actions:insert(
     quote
       [emit_debuginfo(node)]
-      var [launcher] = c.legion_copy_launcher_create(
-        c.legion_predicate_true(), 0, 0)
     end)
 
   actions:insert(
@@ -3406,12 +3637,14 @@ function codegen.expr_copy(cx, node)
       [expr_copy_setup_list_one_to_one(
          cx, src.value, src_type, src_type, node.src.fields,
          dst.value, dst_type, dst_type, node.dst.fields,
+         conditions:map(function(condition) return condition.value end),
+         node.conditions:map(
+           function(condition)
+             return std.as_read(condition.value.expr_type)
+         end),
+         node.conditions:map(function(condition) return condition.conditions end),
          node.op, launcher)]
     end)
-
-  actions:insert(quote
-    c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
-  end)
 
   return values.value(expr.just(actions, quote end), terralib.types.unit)
 end
@@ -3500,9 +3733,7 @@ function codegen.expr_fill(cx, node)
     [dst.actions]
     [value.actions]
     [conditions:map(
-       function(condition)
-         return condition:map(function(value) return value.actions end)
-       end)]
+       function(condition) return condition.value.actions end)]
     [emit_debuginfo(node)]
 
     [expr_fill_setup_list(
@@ -3604,7 +3835,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:list_of_regions(region_type).privilege_field_paths,
       cx:list_of_regions(region_type).field_privileges,
       cx:list_of_regions(region_type).field_types,
-      field_ids)
+      new_field_ids)
   else
     assert(false)
   end
@@ -3640,6 +3871,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       privileges = terralib.newlist(),
       coherence_modes = data.newmap(),
       flags = data.newmap(),
+      conditions = {},
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({
@@ -3725,6 +3957,7 @@ local lift_binary_op_to_futures = terralib.memoize(
       privileges = terralib.newlist(),
       coherence_modes = data.newmap(),
       flags = data.newmap(),
+      conditions = {},
       constraints = terralib.newlist(),
       body = ast.typed.Block {
         stats = terralib.newlist({
@@ -4044,6 +4277,12 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return codegen.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
+    return codegen.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.typed.expr.ListInvert) then
+    return codegen.expr_list_invert(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return codegen.expr_list_range(cx, node)
