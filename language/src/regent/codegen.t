@@ -2053,25 +2053,24 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
   end
 end
 
+function raise_privilege_depth(cx, value, container_type)
+  for i = 1, container_type.privilege_depth do
+    value = `(
+      c.legion_logical_partition_get_parent_logical_region(
+        [cx.runtime], [cx.context],
+        c.legion_logical_region_get_parent_logical_partition(
+          [cx.runtime], [cx.context], [value])))
+  end
+  return value
+end
+
 function setup_list_of_regions_add_region(
-    cx, container_type, value_type, value, region, parent, field_paths,
-    add_requirement, add_field, requirement_args, launcher)
+    cx, param_type, container_type, value_type, value,
+    region, parent, field_paths, add_requirement, add_field,
+    requirement_args, launcher)
   return quote
-    var [region] = [value].impl
-    var [parent] = [value].impl
-    [data.range(container_type.privilege_depth):map(
-       function()
-         return quote
-           std.assert(
-             c.legion_logical_region_has_parent_logical_partition(
-               [cx.runtime], [cx.context], [parent]),
-             "invalid privilege depth for region in list")
-           var partition = c.legion_logical_region_get_parent_logical_partition(
-             [cx.runtime], [cx.context], [parent])
-           [parent] = c.legion_logical_partition_get_parent_logical_region(
-             [cx.runtime], [cx.context], partition)
-         end
-       end)]
+    var [region] = [raise_privilege_depth(cx, `([value].impl), param_type)]
+    var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type)]
     var requirement = [add_requirement]([requirement_args])
     [field_paths:map(
        function(field_path)
@@ -2084,16 +2083,18 @@ function setup_list_of_regions_add_region(
 end
 
 function setup_list_of_regions_add_list(
-    cx, container_type, value_type, value, region, parent, field_paths,
-    add_requirement, add_field, requirement_args, launcher)
+    cx, param_type, container_type, value_type, value,
+    region, parent, field_paths, add_requirement, add_field,
+    requirement_args, launcher)
   local element = terralib.newsymbol()
   if std.is_list(value_type.element_type) then
     return quote
       for i = 0, [value].__size do
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_list(
-           cx, container_type, value_type.element_type, element, region, parent,
-           field_paths, add_requirement, add_field, requirement_args, launcher)]
+           cx, param_type, container_type, value_type.element_type, element,
+           region, parent, field_paths, add_requirement, add_field,
+           requirement_args, launcher)]
       end
     end
   else
@@ -2101,8 +2102,9 @@ function setup_list_of_regions_add_list(
       for i = 0, [value].__size do
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_region(
-           cx, container_type, value_type.element_type, element, region, parent,
-           field_paths, add_requirement, add_field, requirement_args, launcher)]
+           cx, param_type, container_type, value_type.element_type, element,
+           region, parent, field_paths, add_requirement, add_field,
+           requirement_args, launcher)]
       end
     end
   end
@@ -2173,7 +2175,7 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
 
     args_setup:insert(
       setup_list_of_regions_add_list(
-        cx, arg_type, arg_type, list,
+        cx, param_type, arg_type, arg_type, list,
         region, parent, field_paths, add_requirement, add_field,
         requirement_args, launcher))
   end
@@ -3420,12 +3422,14 @@ function codegen.expr_advance(cx, node)
     expr_type)
 end
 
-local function get_container_root(cx, container, value)
-  if std.is_region(container) then
-    assert(cx:has_region(container))
-    return cx:region(cx:region(container).root_region_type).logical_region
-  elseif std.is_list(container) and container:is_list_of_regions() then
-    return value
+local function get_container_root(cx, value, container_type)
+  if std.is_region(container_type) then
+    assert(cx:has_region(container_type))
+    local root = cx:region(
+      cx:region(container_type).root_region_type).logical_region
+    return `([root].impl)
+  elseif std.is_list_of_regions(container_type) then
+    return raise_privilege_depth(cx, value, container_type)
   else
     assert(false)
   end
@@ -3490,8 +3494,10 @@ local function expr_copy_setup_region(
       c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
   end
 
-  local src_parent = get_container_root(cx, src_container_type, src_value)
-  local dst_parent = get_container_root(cx, dst_container_type, dst_value)
+  local src_parent = get_container_root(
+    cx, `([src_value].impl), src_container_type)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type)
 
   local src_all_fields = std.flatten_struct_fields(src_type:fspace())
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
@@ -3526,12 +3532,12 @@ local function expr_copy_setup_region(
       actions:insert(quote
         var src_i = add_src_region(
           [launcher], [src_value].impl, c.READ_ONLY, c.EXCLUSIVE,
-          [src_parent].impl, 0, false)
+          [src_parent], 0, false)
         c.legion_copy_launcher_add_src_field(
           [launcher], src_i, src_field_id, true)
         var dst_i = add_dst_region(
           [launcher], [dst_value].impl, dst_mode, c.EXCLUSIVE,
-          [dst_parent].impl, 0, false)
+          [dst_parent], 0, false)
         c.legion_copy_launcher_add_dst_field(
           [launcher], dst_i, dst_field_id, true)
       end)
@@ -3655,7 +3661,8 @@ local function expr_fill_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_parent = get_container_root(cx, dst_container_type, dst_value)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type)
 
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
   local value_fields, value_field_types
@@ -3689,7 +3696,7 @@ local function expr_fill_setup_region(
       actions:insert(quote
         var buffer : dst_field_type = [fill_value]
         c.legion_runtime_fill_field(
-          [cx.runtime], [cx.context], [dst_value].impl, [dst_parent].impl,
+          [cx.runtime], [cx.context], [dst_value].impl, [dst_parent],
           dst_field_id, &buffer, terralib.sizeof(dst_field_type),
           c.legion_predicate_true())
       end)
