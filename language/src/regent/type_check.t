@@ -243,9 +243,6 @@ function type_check.coherence(cx, node, result)
       local region = region_field.region
       local region_type = region.type
       assert(std.type_supports_privileges(region_type))
-      if not result[region_type] then
-        result[region_type] = data.newmap()
-      end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
@@ -257,7 +254,7 @@ function type_check.coherence(cx, node, result)
 end
 
 function type_check.coherence_modes(cx, node)
-  local result = data.newmap()
+  local result = data.new_recursive_map(1)
   for _, coherence in ipairs(node) do
     type_check.coherence(cx, coherence, result)
   end
@@ -285,15 +282,9 @@ function type_check.flag(cx, node, result)
       local region = region_field.region
       local region_type = region.type
       assert(std.type_supports_privileges(region_type))
-      if not result[region_type] then
-        result[region_type] = data.newmap()
-      end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
-        if not result[region_type][field] then
-          result[region_type][field] = data.newmap()
-        end
         result[region_type][field][flag] = true
       end
     end
@@ -301,7 +292,7 @@ function type_check.flag(cx, node, result)
 end
 
 function type_check.flags(cx, node)
-  local result = data.newmap()
+  local result = data.new_recursive_map(2)
   for _, flag in ipairs(node) do
     type_check.flag(cx, flag, result)
   end

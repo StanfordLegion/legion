@@ -310,6 +310,18 @@ function std.meet_privilege(a, b)
   end
 end
 
+function std.meet_coherence(a, b)
+  if a == b then
+    return a
+  elseif not a then
+    return b
+  elseif not b then
+    return a
+  else
+    assert(false)
+  end
+end
+
 function std.meet_flag(a, b)
   if a == b then
     return a
@@ -389,8 +401,8 @@ end
 function std.find_task_privileges(region_type, privileges, coherence_modes, flags)
   assert(std.type_supports_privileges(region_type))
   assert(privileges)
-  assert(data.is_map(coherence_modes))
-  assert(data.is_map(flags))
+  assert(data.is_default_map(coherence_modes))
+  assert(data.is_default_map(flags))
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
   local grouped_flags = terralib.newlist()
