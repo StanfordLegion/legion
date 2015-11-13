@@ -90,7 +90,7 @@ void split_evenly(T total, T pieces, std::vector<T>& cuts)
 {
   cuts.resize(pieces + 1);
   for(T i = 0; i <= pieces; i++)
-    cuts[i] = (total * i) / pieces;
+    cuts[i] = ((long long)total * i) / pieces;
 }
 
 template <typename T>
@@ -343,9 +343,9 @@ public:
     int by = (i_args.index / blocks_x) % blocks_y;
     int bz = i_args.index / blocks_x / blocks_y;
 
-    int nx = xsplit[bx + 1] - xsplit[bx];
-    int ny = ysplit[by + 1] - ysplit[by];
-    int nz = zsplit[bz + 1] - zsplit[bz];
+    size_t nx = xsplit[bx + 1] - xsplit[bx];
+    size_t ny = ysplit[by + 1] - ysplit[by];
+    size_t nz = zsplit[bz + 1] - zsplit[bz];
 
     size_t c = nx * ny * nz;
     size_t f = (((nx + 1) * ny * nz) +
