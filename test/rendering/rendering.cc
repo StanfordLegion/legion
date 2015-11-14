@@ -169,8 +169,29 @@ public:
 };*/
 
 struct Config {
-  int nsize, niter, npar;
+  int nsize, niter, npar, iters_per_check;
   bool cache_optimization;
+};
+
+class AverageCounter {
+public:
+  AverageCounter() {
+    count = 0;
+    total = 0;
+  }
+  void add(double new_val) {
+    count++;
+    total += new_val;
+  }
+  double result() {
+    if (count == 0)
+      return 0;
+    else
+      return total / count;
+  }
+private:
+  int count;
+  double total;
 };
 
 void top_level_task(const Task *task,
@@ -179,8 +200,9 @@ void top_level_task(const Task *task,
 {
   srand(123456);
   int nsize = 1024;
-  int niter = 1;
+  int niter = 12;
   int npar = 4;
+  int iters_per_check = 4;
   bool cache_optimization = false;
   // Check for any command line arguments
   {
@@ -222,6 +244,7 @@ void top_level_task(const Task *task,
   config.nsize = nsize;
   config.niter = niter;
   config.npar = npar;
+  config.iters_per_check = iters_per_check;
   config.cache_optimization = cache_optimization;
   TaskLauncher main_launcher(MAIN_TASK_ID,
                              TaskArgument(&config, sizeof(config)));
@@ -230,7 +253,7 @@ void top_level_task(const Task *task,
                         SIMULTANEOUS, lr_A));
   main_launcher.add_field(0, FID_VAL);
   runtime->execute_task(ctx, main_launcher);
-    // Clean up our region, index space, and field space
+  // Clean up our region, index space, and field space
   runtime->destroy_logical_region(ctx, lr_A);
   runtime->destroy_field_space(ctx, fs_A);
   runtime->destroy_index_space(ctx, is_A);
@@ -276,6 +299,7 @@ void main_task(const Task *task,
   Config config = *((Config*)task->args);
   int niter = config.niter;
   int npar = config.npar;
+  int iters_per_check = config.iters_per_check;
   Domain dom = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
   Rect<1> rect_A = dom.get_rect<1>();
@@ -298,6 +322,7 @@ void main_task(const Task *task,
 
   // Start Computation
   struct timespec ts_start, ts_end;
+  AverageCounter total_timer, core_timer;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
   // Acquire the logical reagion so that we can launch sub-operations that make copies
   if (config.cache_optimization) {
@@ -309,6 +334,14 @@ void main_task(const Task *task,
     struct timespec sub_ts_start, sub_ts_end;
     clock_gettime(CLOCK_MONOTONIC, &sub_ts_start);
     if (!config.cache_optimization) {
+      AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
+      acquire_launcher.add_field(FID_VAL);
+      runtime->issue_acquire(ctx, acquire_launcher);
+    } else if (iter % iters_per_check == 0) {
+      // release and reacquire
+      ReleaseLauncher release_launcher(lr_A, lr_A, pr_A);
+      release_launcher.add_field(FID_VAL);
+      runtime->issue_release(ctx, release_launcher);
       AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
       acquire_launcher.add_field(FID_VAL);
       runtime->issue_acquire(ctx, acquire_launcher);
@@ -328,6 +361,9 @@ void main_task(const Task *task,
     clock_gettime(CLOCK_MONOTONIC, &sub_ts_end);
     double exec_time = ((1.0 * (sub_ts_end.tv_sec - sub_ts_start.tv_sec)) +
                        (1e-9 * (sub_ts_end.tv_nsec - sub_ts_start.tv_nsec)));
+    if (config.cache_optimization && iter % iters_per_check != 0)
+      core_timer.add(exec_time);
+    total_timer.add(exec_time);
     printf("time(%d) = %7.3f s\n", iter, exec_time);
   }
   //Release the attached physicalregion
@@ -338,9 +374,16 @@ void main_task(const Task *task,
   }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
-  double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
-                     (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
-  printf("ELAPSED TIME = %7.3f s\n", exec_time);
+  //double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
+    //                 (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
+  //printf("ELAPSED TIME = %7.3f s\n", exec_time);
+  if (config.cache_optimization) {
+    printf("Legion+ER Time per Iter = %7.3f s\n", total_timer.result());
+    printf("Computation Time per Iter = %7.3f s\n", core_timer.result());
+  }
+  else {
+    printf("Baseline Time per Iter = %7.3f s\n", total_timer.result());
+  }
 }
 
 void worker_task(const Task *task,
