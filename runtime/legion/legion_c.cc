@@ -668,6 +668,45 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
   runtime->destroy_logical_region(ctx, handle);
 }
 
+legion_color_t
+legion_logical_region_get_color(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->get_logical_region_color(ctx, handle);
+}
+
+bool
+legion_logical_region_has_parent_logical_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->has_parent_logical_partition(ctx, handle);
+}
+
+legion_logical_partition_t
+legion_logical_region_get_parent_logical_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  LogicalPartition p = runtime->get_parent_logical_partition(ctx, handle);
+  return CObjectWrapper::wrap(p);
+}
+
 void
 legion_logical_region_attach_name(legion_runtime_t runtime_,
                                   legion_logical_region_t handle_,
@@ -766,6 +805,20 @@ legion_logical_partition_get_logical_subregion_by_color(
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
 
   LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  return CObjectWrapper::wrap(r);
+}
+
+legion_logical_region_t
+legion_logical_partition_get_parent_logical_region(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+
+  LogicalRegion r = runtime->get_parent_logical_region(ctx, handle);
   return CObjectWrapper::wrap(r);
 }
 
@@ -1811,6 +1864,45 @@ legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
   runtime->unmap_all_regions(ctx);
 }
 
+void
+legion_runtime_fill_field(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_predicate_t pred_ /* = legion_predicate_true() */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  runtime->fill_field(ctx, handle, parent, fid, value, value_size, *pred);
+}
+
+void
+legion_runtime_fill_field_future(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  runtime->fill_field(ctx, handle, parent, fid, *f, *pred);
+}
 
 // -----------------------------------------------------------------------
 // Copy Operations

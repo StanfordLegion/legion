@@ -30,5 +30,6 @@
 #include "realm/machine.h"
 #include "realm/runtime.h"
 #include "realm/indexspace.h"
+#include "realm/codedesc.h"
 
 #endif // ifndef REALM_H

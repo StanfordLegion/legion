@@ -520,6 +520,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::post_map_task(Task *task)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Post map task in default mapper for task %s "
+                      "(ID %lld) for processor " IDFMT "",
+                      task->variants->name,
+                      task->get_unique_task_id(), local_proc.id);
+      // Do nothing for now
+    }
+
+    //--------------------------------------------------------------------------
     bool DefaultMapper::map_copy(Copy *copy)
     //--------------------------------------------------------------------------
     {
@@ -543,10 +554,15 @@ namespace LegionRuntime {
         }
         else
         {
-          assert(copy->src_requirements[idx].current_instances.size() == 1);
-          Memory target = 
-            (copy->src_requirements[idx].current_instances.begin())->first;
-          copy->src_requirements[idx].target_ranking.push_back(target);
+          // There is only one choice anyway, so let the runtime find
+          // it. Currently, the runtime will fail to notify the mapper
+          // of existing instances for reduction copies, so this
+          // assertion may fail spuriously.
+
+          // assert(copy->src_requirements[idx].current_instances.size() == 1);
+          // Memory target =
+          //   (copy->src_requirements[idx].current_instances.begin())->first;
+          // copy->src_requirements[idx].target_ranking.push_back(target);
         }
         copy->dst_requirements[idx].virtual_map = false;
         copy->dst_requirements[idx].early_map = false;
@@ -559,10 +575,15 @@ namespace LegionRuntime {
         }
         else
         {
-          assert(copy->dst_requirements[idx].current_instances.size() == 1);
-          Memory target = 
-            (copy->dst_requirements[idx].current_instances.begin())->first;
-          copy->dst_requirements[idx].target_ranking.push_back(target);
+          // There is only one choice anyway, so let the runtime find
+          // it. Currently, the runtime will fail to notify the mapper
+          // of existing instances for reduction copies, so this
+          // assertion may fail spuriously.
+
+          // assert(copy->dst_requirements[idx].current_instances.size() == 1);
+          // Memory target =
+          //   (copy->dst_requirements[idx].current_instances.begin())->first;
+          // copy->dst_requirements[idx].target_ranking.push_back(target);
         }
         if (local_kind == Processor::LOC_PROC)
         {

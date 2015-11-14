@@ -88,6 +88,17 @@ void
 legion_terra_cached_index_iterator_reset(
   legion_terra_cached_index_iterator_t handle);
 
+unsigned
+legion_terra_task_launcher_get_region_requirement_logical_region(
+  legion_task_launcher_t launcher,
+  legion_logical_region_t region);
+
+bool
+legion_terra_task_launcher_has_field(
+  legion_task_launcher_t launcher,
+  unsigned idx,
+  legion_field_id_t fid);
+
 #ifdef __cplusplus
 }
 #endif

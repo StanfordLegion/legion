@@ -25,6 +25,10 @@
 
 #include "cmdline.h"
 
+#include "codedesc.h"
+
+#include "utils.h"
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -51,7 +55,7 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
-  extern Logger log_proc; // defined in proc_impl.cc
+  extern Logger log_task; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -106,15 +110,32 @@ namespace Realm {
       return ((RuntimeImpl *)impl)->init(argc, argv);
     }
     
+    // this is now just a wrapper around Processor::register_task - consider switching to
+    //  that
     bool Runtime::register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr)
     {
       assert(impl != 0);
 
+      CodeDescriptor codedesc(taskptr);
+      ProfilingRequestSet prs;
+      std::set<Event> events;
+      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[gasnet_mynode()].processors;
+      for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
+	  it != procs.end();
+	  it++) {
+	Event e = (*it)->me.register_task(taskid, codedesc, prs);
+	events.insert(e);
+      }
+
+      Event::merge_events(events).wait();
+      return true;
+#if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
 	return false;
 
       ((RuntimeImpl *)impl)->task_table[taskid] = taskptr;
       return true;
+#endif
     }
 
     bool Runtime::register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
@@ -1022,18 +1043,6 @@ namespace Realm {
       return 0;
     }
 
-    template <typename T>
-    void delete_vector_contents(std::vector<T *>& v, bool clear_vector = true)
-    {
-      for(typename std::vector<T *>::iterator it = v.begin();
-	  it != v.end();
-	  it++)
-	delete (*it);
-
-      if(clear_vector)
-	v.clear();
-    }
-
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -1066,14 +1075,14 @@ namespace Realm {
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
-	log_proc.info("spawning processor init task on local cpus");
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
+	log_task.info("spawning processor init task on local cpus");
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MAX); // runs with max priority
       } else {
-	log_proc.info("no processor init task");
+	log_task.info("no processor init task");
       }
 
       if(task_id != 0 && 
@@ -1151,8 +1160,8 @@ namespace Realm {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
 	  Node& n = nodes[i];
 
-	  delete_vector_contents(n.memories);
-	  delete_vector_contents(n.processors);
+	  delete_container_contents(n.memories);
+	  delete_container_contents(n.processors);
 	}
 	
 	delete[] nodes;
@@ -1164,7 +1173,7 @@ namespace Realm {
 	delete local_proc_group_free_list;
 
 	// delete all the DMA channels that we were given
-	delete_vector_contents(dma_channels);
+	delete_container_contents(dma_channels);
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
@@ -1205,8 +1214,8 @@ namespace Realm {
 
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
-	log_proc.info("spawning processor shutdown task on local cpus");
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+	log_task.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 
@@ -1214,7 +1223,7 @@ namespace Realm {
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
       } else {
-	log_proc.info("no processor shutdown task");
+	log_task.info("no processor shutdown task");
       }
 
       {

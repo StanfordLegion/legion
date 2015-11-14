@@ -148,6 +148,8 @@ namespace LegionRuntime {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
+      HLR_SHUTDOWN_RESPONSE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -194,12 +196,14 @@ namespace LegionRuntime {
         "Window Wait",                                            \
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
-        "Index Space Semantic Request"                            \
-        "Index Partition Semantic Request"                        \
-        "Field Space Semantic Request"                            \
-        "Field Semantic Request"                                  \
-        "Region Semantic Request"                                 \
-        "Partition Semantic Request"                              \
+        "Index Space Semantic Request",                           \
+        "Index Partition Semantic Request",                       \
+        "Field Space Semantic Request",                           \
+        "Field Semantic Request",                                 \
+        "Region Semantic Request",                                \
+        "Partition Semantic Request",                             \
+        "Shutdown Notification",                                  \
+        "Shutdown Response",                                      \
       };
 
     enum VirtualChannelKind {
@@ -291,7 +295,94 @@ namespace LegionRuntime {
       SEND_REDUCTION_CREATION,
       SEND_CREATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
+      SEND_SHUTDOWN_NOTIFICATION,
+      SEND_SHUTDOWN_RESPONSE,
+      LAST_SEND_KIND, // This one must be last
     };
+
+#define HLR_MESSAGE_DESCRIPTIONS(name)                                \
+      const char *name[LAST_SEND_KIND] = {                            \
+        "Task Message",                                               \
+        "Steal Message",                                              \
+        "Advertisement Message",                                      \
+        "Send Index Space Node",                                      \
+        "Send Index Space Request",                                   \
+        "Send Index Space Return",                                    \
+        "Send Index Space Child Request",                             \
+        "Send Index Partition Node",                                  \
+        "Send Index Partition Request",                               \
+        "Send Index Partition Return",                                \
+        "Send Field Space Node",                                      \
+        "Send Field Space Request",                                   \
+        "Send Field Space Return",                                    \
+        "Send Top Level Region Request",                              \
+        "Send Top Level Region Return",                               \
+        "Send Distributed Alloc",                                     \
+        "Send Distributed Upgrade",                                   \
+        "Send Logical Region Node",                                   \
+        "Index Space Destruction",                                    \
+        "Index Partition Destruction",                                \
+        "Field Space Destruction",                                    \
+        "Logical Region Destruction",                                 \
+        "Logical Partition Destruction",                              \
+        "Field Allocation",                                           \
+        "Field Destruction",                                          \
+        "Individual Remote Mapped",                                   \
+        "Individual Remote Complete",                                 \
+        "Individual Remote Commit",                                   \
+        "Slice Remote Mapped",                                        \
+        "Slice Remote Complete",                                      \
+        "Slice Remote Commit",                                        \
+        "Distributed Remote Registration",                            \
+        "Distributed Valid Update",                                   \
+        "Distributed GC Update",                                      \
+        "Distributed Resource Update",                                \
+        "View Remote Registration",                                   \
+        "View Valid Update",                                          \
+        "View GC Update",                                             \
+        "View Resource Update",                                       \
+        "Send Back Atomic",                                           \
+        "Send Materialized View",                                     \
+        "Send Materialized Update",                                   \
+        "Send Composite View",                                        \
+        "Send Fill View",                                             \
+        "Send Deferred Update",                                       \
+        "Send Reduction View",                                        \
+        "Send Reduction Update",                                      \
+        "Send Instance Manager",                                      \
+        "Send Reduction Manager",                                     \
+        "Send Future",                                                \
+        "Send Future Result",                                         \
+        "Send Future Subscription",                                   \
+        "Send Make Persistent",                                       \
+        "Send Unmake Persistent",                                     \
+        "Send Mapper Message",                                        \
+        "Send Mapper Broadcast",                                      \
+        "Send Index Space Semantic Req",                              \
+        "Send Index Partition Semantic Req",                          \
+        "Send Field Space Semantic Req",                              \
+        "Send Field Semantic Req",                                    \
+        "Send Logical Region Semantic Req",                           \
+        "Send Logical Partition Semantic Req",                        \
+        "Send Index Space Semantic Info",                             \
+        "Send Index Partition Semantic Info",                         \
+        "Send Field Space Semantic Info",                             \
+        "Send Field Semantic Info",                                   \
+        "Send Logical Region Semantic Info",                          \
+        "Send Logical Partition Semantic Info",                       \
+        "Send Subscribe Remote Context",                              \
+        "Send Free Remote Context",                                   \
+        "Send Version State Path",                                    \
+        "Send Version State Init",                                    \
+        "Send Version State Request",                                 \
+        "Send Version State Response",                                \
+        "Send Instance Creation",                                     \
+        "Send Reduction Creation",                                    \
+        "Send Creation Response",                                     \
+        "Send Back Logical State",                                    \
+        "Send Shutdown Notification",                                 \
+        "Send Shutdown Response",                                     \
+      };
 
     // Forward declarations for user level objects
     // legion.h
@@ -563,7 +654,9 @@ namespace LegionRuntime {
       RegionProjectionTable;
     typedef std::map<ProjectionID,PartitionProjectionFnptr> 
       PartitionProjectionTable;
-    typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
+    typedef void (*LowLevelFnptr)(const void*,size_t,
+				  const void*,size_t,Processor);
+    typedef std::map<Processor::TaskFuncID, LowLevelFnptr> TaskIDTable;
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
                                 Context,Runtime*,void*&,size_t&);
     // A little bit of logic here to figure out the 
@@ -759,7 +852,8 @@ namespace LegionRuntime {
     extern Logger::Category log_allocation;       \
     extern Logger::Category log_prof;             \
     extern Logger::Category log_garbage;          \
-    extern Logger::Category log_spy;
+    extern Logger::Category log_spy;              \
+    extern Logger::Category log_shutdown;
 
     // Timing events
     enum {

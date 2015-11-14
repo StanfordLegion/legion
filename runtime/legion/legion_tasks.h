@@ -75,6 +75,7 @@ namespace LegionRuntime {
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void) = 0;
@@ -160,7 +161,7 @@ namespace LegionRuntime {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void compute_point_region_requirements(MinimalPoint *mp = NULL);
+      bool compute_point_region_requirements(MinimalPoint *mp = NULL);
       bool early_map_regions(std::set<Event> &applied_conditions);
       bool prepare_steal(void);
     protected:
@@ -441,6 +442,7 @@ namespace LegionRuntime {
     protected:
       bool map_all_regions(Processor target, Event user_event, 
                            bool mapper_invoked); 
+      void perform_post_mapping(Processor target);
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<UserEvent> &unmap_events,
@@ -931,7 +933,8 @@ namespace LegionRuntime {
     public:
       RemoteTask& operator=(const RemoteTask &rhs);
     public:
-      void initialize_remote(UniqueID uid, SingleTask *remote_parent);
+      void initialize_remote(UniqueID uid, SingleTask *remote_parent,
+                             bool is_top_level);
       void unpack_parent_task(Deserializer &derez);
     public:
       virtual void activate(void);
@@ -958,6 +961,9 @@ namespace LegionRuntime {
     protected:
       UniqueID remote_owner_uid;
       SingleTask *remote_parent_ctx; // Never a valid pointer
+    protected:
+      bool is_top_level_context;
+      std::map<AddressSpaceID,RemoteTask*> remote_instances;
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
     protected:
       Event remote_legion_spy_completion;

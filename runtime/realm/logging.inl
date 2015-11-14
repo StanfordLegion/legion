@@ -216,7 +216,7 @@ namespace Realm {
   }
       
   template <typename T>
-  inline LoggerMessage& LoggerMessage::operator<<(T val)
+  inline LoggerMessage& LoggerMessage::operator<<(const T& val)
   {
     // send through to normal ostringstream formatting routines if active
     if(active)

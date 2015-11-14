@@ -224,6 +224,15 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return 1
 
@@ -234,6 +243,9 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Copy) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Fill) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.Unary) then
@@ -430,6 +442,30 @@ function specialize.coherence_modes(cx, node)
     function(coherence) return specialize.coherence(cx, coherence) end)
 end
 
+function specialize.flag_kind(cx, node)
+  if node:is(ast.unspecialized.flag_kind.NoAccessFlag) then
+    return ast.specialized.flag_kind.NoAccessFlag(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.flag_kinds(cx, node)
+  return node:map(function(flag) return specialize.flag_kind(cx, flag) end)
+end
+
+function specialize.flag(cx, node)
+  return ast.specialized.Flag {
+    flags = specialize.flag_kinds(cx, node.flags),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.flags(cx, node)
+  return node:map(function(flag) return specialize.flag(cx, flag) end)
+end
+
 function specialize.condition_kind(cx, node)
   if node:is(ast.unspecialized.condition_kind.Arrives) then
     return ast.specialized.condition_kind.Arrives(node)
@@ -454,10 +490,11 @@ function specialize.condition(cx, node)
 end
 
 function specialize.expr_condition(cx, node)
-  return ast.specialized.Condition {
+  return ast.specialized.expr.Condition {
     conditions = specialize.condition_kinds(cx, node.conditions),
     values = node.values:map(
       function(value) return specialize.expr(cx, value) end),
+    options = node.options,
     span = node.span,
   }
 end
@@ -840,6 +877,33 @@ function specialize.expr_list_duplicate_partition(cx, node)
   }
 end
 
+function specialize.expr_list_cross_product(cx, node)
+  return ast.specialized.expr.ListCrossProduct {
+    lhs = specialize.expr(cx, node.lhs),
+    rhs = specialize.expr(cx, node.rhs),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_phase_barriers(cx, node)
+  return ast.specialized.expr.ListPhaseBarriers {
+    product = specialize.expr(cx, node.product),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_invert(cx, node)
+  return ast.specialized.expr.ListInvert {
+    rhs = specialize.expr(cx, node.rhs),
+    product = specialize.expr(cx, node.product),
+    barriers = specialize.expr(cx, node.barriers),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_list_range(cx, node)
   return ast.specialized.expr.ListRange {
     start = specialize.expr(cx, node.start),
@@ -871,6 +935,33 @@ function specialize.expr_copy(cx, node)
     dst = specialize.expr_region_root(cx, node.dst),
     op = node.op,
     conditions = specialize.expr_conditions(cx, node.conditions),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_fill(cx, node)
+  return ast.specialized.expr.Fill {
+    dst = specialize.expr_region_root(cx, node.dst),
+    value = specialize.expr(cx, node.value),
+    conditions = specialize.expr_conditions(cx, node.conditions),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_allocate_scratch_fields(cx, node)
+  return ast.specialized.expr.AllocateScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_with_scratch_fields(cx, node)
+  return ast.specialized.expr.WithScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    field_ids = specialize.expr(cx, node.field_ids),
     options = node.options,
     span = node.span,
   }
@@ -973,6 +1064,15 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return specialize.expr_list_duplicate_partition(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return specialize.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return specialize.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return specialize.expr_list_invert(cx, node)
+
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return specialize.expr_list_range(cx, node)
 
@@ -984,6 +1084,15 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Copy) then
     return specialize.expr_copy(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Fill) then
+    return specialize.expr_fill(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
+    return specialize.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.WithScratchFields) then
+    return specialize.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)
@@ -1317,6 +1426,7 @@ function specialize.stat_task(cx, node)
   local return_type = node.return_type_expr(cx.env:env())
   local privileges = specialize.privileges(cx, node.privileges)
   local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
+  local flags = specialize.flags(cx, node.flags)
   local conditions = specialize.conditions(cx, node.conditions)
   local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
@@ -1327,6 +1437,7 @@ function specialize.stat_task(cx, node)
     return_type = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
     conditions = conditions,
     constraints = constraints,
     body = body,

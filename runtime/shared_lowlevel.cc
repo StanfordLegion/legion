@@ -229,7 +229,10 @@ namespace LegionRuntime {
     protected:
       friend class Realm::Machine;
       friend class Realm::Runtime;
-      Processor::TaskIDTable task_table;
+    public:
+      typedef std::map<Processor::TaskFuncID, Processor::TaskFuncPtr> TaskTable;
+    protected:
+      TaskTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> redop_table;
       std::set<Processor> procs;
       std::vector<EventImpl*> events;
@@ -614,7 +617,7 @@ namespace LegionRuntime {
     class ProcessorImpl {
     public:
         // For creation of normal processors when there is no utility processors
-        ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table, 
+        ProcessorImpl(pthread_barrier_t *init, const RuntimeImpl::TaskTable &table, 
                       Processor p, size_t stacksize, Processor::Kind kind) 
           : init_bar(init), task_table(table), proc(p), 
             proc_kind(kind), utility_proc(this),
@@ -625,7 +628,7 @@ namespace LegionRuntime {
           initialize_state();
         }
         // For the creation of normal processors when there are utility processors
-        ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table,
+        ProcessorImpl(pthread_barrier_t *init, const RuntimeImpl::TaskTable &table,
                       Processor p, size_t stacksize, ProcessorImpl *util)
           : init_bar(init), task_table(table), proc(p), 
             utility(util->get_utility_processor()), 
@@ -807,7 +810,7 @@ namespace LegionRuntime {
         pthread_attr_t attr; // For setting pthread parameters when starting the thread
     protected:
         pthread_barrier_t *init_bar;
-        const Processor::TaskIDTable& task_table;
+        const RuntimeImpl::TaskTable& task_table;
 	Processor proc;
         Processor utility;
         Processor::Kind proc_kind;
@@ -831,7 +834,7 @@ namespace LegionRuntime {
       static const Processor::id_t FIRST_PROC_GROUP_ID = 1000;
 
       ProcessorGroup(Processor p) 
-	: ProcessorImpl(0 /*init*/, Processor::TaskIDTable(), p, 0 /*stacksize*/, 
+	: ProcessorImpl(0 /*init*/, RuntimeImpl::TaskTable(), p, 0 /*stacksize*/, 
                         Processor::PROC_GROUP), next_target(0)
       {
       }
@@ -2122,7 +2125,7 @@ namespace LegionRuntime {
       {
         if (task->func_id != 0)
         {
-          Processor::TaskIDTable::const_iterator it = 
+          RuntimeImpl::TaskTable::const_iterator it = 
                               task_table.find(task->func_id);
 #ifdef DEBUG_LOW_LEVEL
           assert(it != task_table.end());
@@ -2132,7 +2135,7 @@ namespace LegionRuntime {
             task->timeline.record_start_time();
           if (task->capture_usage)
             task->usage.proc = proc;
-          func(task->args, task->arglen, proc);
+          func(task->args, task->arglen, NULL, 0, proc);
           if (task->capture_timeline)
 	  {
             task->timeline.record_end_time();
@@ -2196,12 +2199,12 @@ namespace LegionRuntime {
       //fprintf(stdout,"This is processor %d\n",proc.id);
       //fflush(stdout);
       // Check to see if there is an initialization task
-      Processor::TaskIDTable::const_iterator it = 
+      RuntimeImpl::TaskTable::const_iterator it = 
         task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
       if (it != task_table.end())
       {	  
         Processor::TaskFuncPtr func = it->second;
-        func(NULL, 0, proc);
+        func(NULL, 0, NULL, 0, proc);
       }
       // Wait for all the processors to be ready to go
 #ifndef __MACH__
@@ -2229,12 +2232,12 @@ namespace LegionRuntime {
     void ProcessorImpl::finalize_processor(void)
     {
       // Check to see if there is a shutdown method
-      Processor::TaskIDTable::const_iterator it = 
+      RuntimeImpl::TaskTable::const_iterator it = 
         task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
       if (it != task_table.end())
       {	  
         Processor::TaskFuncPtr func = it->second;
-        func(NULL, 0, proc);
+        func(NULL, 0, NULL, 0, proc);
       }
     }
     

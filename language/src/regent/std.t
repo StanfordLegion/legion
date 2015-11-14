@@ -94,7 +94,9 @@ end
 -- #################
 
 function std.add_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   if not cx.privileges[privilege] then
     cx.privileges[privilege] = data.newmap()
   end
@@ -104,9 +106,26 @@ function std.add_privilege(cx, privilege, region, field_path)
   cx.privileges[privilege][region][field_path] = true
 end
 
+function std.copy_privileges(cx, from_region, to_region)
+  assert(std.type_supports_privileges(from_region))
+  assert(std.type_supports_privileges(to_region))
+  local privileges_to_copy = terralib.newlist()
+  for privilege, privilege_regions in cx.privileges:items() do
+    local privilege_fields = privilege_regions[from_region]
+    if privilege_fields then
+      for _, field_path in privilege_fields:keys() do
+        privileges_to_copy:insert({privilege, to_region, field_path})
+      end
+    end
+  end
+  for _, privilege in ipairs(privileges_to_copy) do
+    std.add_privilege(cx, unpack(privilege))
+  end
+end
+
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
-  assert(std.is_region(lhs) or std.is_partition(lhs))
-  assert(std.is_region(rhs) or std.is_partition(rhs))
+  assert(std.type_supports_constraints(lhs))
+  assert(std.type_supports_constraints(rhs))
   if not cx.constraints[op] then
     cx.constraints[op] = {}
   end
@@ -148,7 +167,9 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
 end
 
 function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
@@ -159,7 +180,9 @@ function std.search_privilege(cx, privilege, region, field_path, visited)
 end
 
 function std.check_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string" and std.is_region(region) and data.is_tuple(field_path))
+  assert(type(privilege) == "string")
+  assert(std.type_supports_privileges(region))
+  assert(data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
     if std.search_privilege(cx, privilege, region, field_path:slice(1, i), {}) then
       return true
@@ -234,13 +257,13 @@ function std.check_constraint(cx, constraint)
   if terralib.issymbol(lhs) then
     lhs = lhs.type
   end
-  assert(std.is_region(lhs) or std.is_partition(lhs))
+  assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
   if terralib.issymbol(rhs) then
     rhs = rhs.type
   end
-  assert(std.is_region(rhs) or std.is_partition(rhs))
+  assert(std.type_supports_constraints(rhs))
 
   local constraint = {
     lhs = lhs,
@@ -274,12 +297,40 @@ end
 function std.meet_privilege(a, b)
   if a == b then
     return a
-  elseif not a or a == "none" then
+  elseif not a then
     return b
-  elseif not b or b == "none" then
+  elseif not b then
+    return a
+  elseif a == "none" then
+    return b
+  elseif b == "none" then
     return a
   else
     return "reads_writes"
+  end
+end
+
+function std.meet_coherence(a, b)
+  if a == b then
+    return a
+  elseif not a then
+    return b
+  elseif not b then
+    return a
+  else
+    assert(false)
+  end
+end
+
+function std.meet_flag(a, b)
+  if a == b then
+    return a
+  elseif not a or a == "no_flag" then
+    return b
+  elseif not b or b == "no_flag" then
+    return a
+  else
+    assert(false)
   end
 end
 
@@ -291,11 +342,13 @@ function std.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
-local function find_field_privilege(privileges, coherence_modes,
+local function find_field_privilege(privileges, coherence_modes, flags,
                                     region_type, field_path, field_type)
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
+      assert(terralib.issymbol(privilege.region))
+      assert(data.is_tuple(privilege.field_path))
       if region_type == privilege.region.type and
         field_path:starts_with(privilege.field_path)
       then
@@ -310,6 +363,17 @@ local function find_field_privilege(privileges, coherence_modes,
     for prefix, coherence in coherence_modes[region_type]:items() do
       if field_path:starts_with(prefix) then
         coherence_mode = coherence
+      end
+    end
+  end
+
+  local flag = "no_flag"
+  if flags[region_type] then
+    for prefix, flag_fields in flags[region_type]:items() do
+      if field_path:starts_with(prefix) then
+        for _, flag_kind in flag_fields:keys() do
+          flag = std.meet_flag(flag, flag_kind)
+        end
       end
     end
   end
@@ -331,28 +395,32 @@ local function find_field_privilege(privileges, coherence_modes,
     end
   end
 
-  return field_privilege, coherence_mode
+  return field_privilege, coherence_mode, flag
 end
 
-function std.find_task_privileges(region_type, privileges, coherence_modes)
-  assert(std.is_region(region_type) and privileges and data.is_map(coherence_modes))
+function std.find_task_privileges(region_type, privileges, coherence_modes, flags)
+  assert(std.type_supports_privileges(region_type))
+  assert(privileges)
+  assert(data.is_default_map(coherence_modes))
+  assert(data.is_default_map(flags))
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
+  local grouped_flags = terralib.newlist()
   local grouped_field_paths = terralib.newlist()
   local grouped_field_types = terralib.newlist()
 
   local field_paths, field_types = std.flatten_struct_fields(
-    region_type.fspace_type)
+    region_type:fspace())
 
   local privilege_index = data.newmap()
   local privilege_next_index = 1
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
-    local privilege, coherence = find_field_privilege(
-      privileges, coherence_modes, region_type, field_path, field_type)
-    local privilege_coherence = data.newtuple(privilege, coherence)
+    local privilege, coherence, flag = find_field_privilege(
+      privileges, coherence_modes, flags, region_type, field_path, field_type)
+    local mode = data.newtuple(privilege, coherence, flag)
     if privilege ~= "none" then
-      local index = privilege_index[privilege_coherence]
+      local index = privilege_index[mode]
       if not index then
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
@@ -360,11 +428,12 @@ function std.find_task_privileges(region_type, privileges, coherence_modes)
         -- Reduction privileges cannot be grouped, because the Legion
         -- runtime does not know how to handle multi-field reductions.
         if not std.is_reduction_op(privilege) then
-          privilege_index[privilege_coherence] = index
+          privilege_index[mode] = index
         end
 
         grouped_privileges:insert(privilege)
         grouped_coherence_modes:insert(coherence)
+        grouped_flags:insert(flag)
         grouped_field_paths:insert(terralib.newlist())
         grouped_field_types:insert(terralib.newlist())
       end
@@ -377,12 +446,13 @@ function std.find_task_privileges(region_type, privileges, coherence_modes)
   if #grouped_privileges == 0 then
     grouped_privileges:insert("none")
     grouped_coherence_modes:insert("exclusive")
+    grouped_flags:insert("no_flag")
     grouped_field_paths:insert(terralib.newlist())
     grouped_field_types:insert(terralib.newlist())
   end
 
   return grouped_privileges, grouped_field_paths, grouped_field_types,
-    grouped_coherence_modes
+    grouped_coherence_modes, grouped_flags
 end
 
 function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
@@ -421,6 +491,18 @@ local coherence_modes = {
 
 function std.coherence_mode(coherence)
   local mode = coherence_modes[coherence]
+  assert(mode)
+  return mode
+end
+
+local flag_modes = {
+  no_flag         = c.NO_FLAG,
+  verified_flag   = c.VERIFIED_FLAG,
+  no_access_flag  = c.NO_ACCESS_FLAG,
+}
+
+function std.flag_mode(flag)
+  local mode = flag_modes[flag]
   assert(mode)
   return mode
 end
@@ -477,12 +559,29 @@ function std.is_list(t)
   return terralib.types.istype(t) and rawget(t, "is_list")
 end
 
+function std.is_list_of_regions(t)
+  return std.is_list(t) and t:is_list_of_regions()
+end
+
+function std.is_list_of_phase_barriers(t)
+  return std.is_list(t) and t:is_list_of_phase_barriers()
+end
+
 function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
 
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
+end
+
+function std.type_supports_privileges(t)
+  return std.is_region(t) or std.is_list_of_regions(t)
+end
+
+function std.type_supports_constraints(t)
+  return std.is_region(t) or std.is_partition(t) or
+    std.is_list_of_regions(t)
 end
 
 struct std.untyped {}
@@ -680,7 +779,8 @@ local function type_compatible(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or
     (std.is_partition(a) and std.is_partition(b)) or
-    (std.is_cross_product(a) and std.is_cross_product(b))
+    (std.is_cross_product(a) and std.is_cross_product(b)) or
+    (std.is_list_of_regions(a) and std.is_list_of_regions(b))
 end
 
 local function type_isomorphic(param_type, arg_type, check, mapping)
@@ -701,6 +801,10 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
             local param_partition, arg_partition = unpack(pair)
             return check(param_partition, arg_partition, mapping)
       end)))
+  elseif std.is_list_of_regions(param_type) and std.is_list_of_regions(arg_type)
+  then
+    return std.type_eq(
+      param_type.element_type:fspace(), arg_type.element_type:fspace())
   else
     return false
   end
@@ -736,6 +840,9 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
         return param_partition_as_arg_type
     end)
     return std.cross_product(unpack(param_partitions_as_arg_type))
+  elseif std.is_list_of_regions(param_type) then
+    local fspace_type = std.type_sub(param_type.element_type.fspace_type, mapping)
+    return std.list(std.region(fspace_type))
   else
     assert(false)
   end
@@ -1084,8 +1191,8 @@ end
 function std.implicit_cast(from, to, expr)
    assert(not (std.is_ref(from) or std.is_rawref(from)))
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_bounded_type(to) or
-     std.is_fspace_instance(to)
+     std.is_cross_product(to) or std.is_list_of_regions(to) or
+     std.is_bounded_type(to) or std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
   elseif std.is_index_type(to) then
@@ -1097,8 +1204,8 @@ end
 
 function std.explicit_cast(from, to, expr)
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_bounded_type(to) or
-     std.is_fspace_instance(to)
+     std.is_cross_product(to) or std.is_list_of_regions(to) or
+     std.is_bounded_type(to) or std.is_fspace_instance(to)
    then
     return to:force_cast(from, to, expr)
   else
@@ -1134,14 +1241,19 @@ function std.flatten_struct_fields(struct_type)
   return field_paths, field_types
 end
 
-function std.fn_param_regions(fn_type)
+function std.fn_params_with_privileges_by_index(fn_type)
   local params = fn_type.parameters
-  return data.filter(std.is_region, params)
+  return data.filteri(std.type_supports_privileges, params)
 end
 
 function std.fn_param_regions_by_index(fn_type)
   local params = fn_type.parameters
   return data.filteri(std.is_region, params)
+end
+
+function std.fn_param_lists_of_regions_by_index(fn_type)
+  local params = fn_type.parameters
+  return data.filteri(function(t) return std.is_list_of_regions(t) end, params)
 end
 
 -- #####################################
@@ -1613,7 +1725,7 @@ function std.region(ispace_symbol, fspace_type)
          "Region type requires ispace")
   assert(terralib.types.istype(fspace_type),
          "Region type requires fspace type")
-  assert(not std.is_list(fspace_type),
+  assert(not std.is_list_of_regions(fspace_type),
          "Region type requires fspace type to not be a list type")
 
   local st = terralib.types.newstruct("region")
@@ -1631,6 +1743,15 @@ function std.region(ispace_symbol, fspace_type)
              std.is_ispace(ispace),
            "Parition type requires ispace")
     return ispace
+  end
+
+  function st:fspace()
+    return st.fspace_type
+  end
+
+  -- For API compatibility with std.list:
+  function st:list_depth()
+    return 0
   end
 
   -- Region types can have an optional partition. This is used by
@@ -1766,6 +1887,10 @@ function std.partition(disjointness, region)
              std.is_region(region),
            "Parition type requires region")
     return region
+  end
+
+  function st:fspace()
+    return self:parent_region():fspace()
   end
 
   function st:subregions_constant()
@@ -2088,9 +2213,13 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
+  end
+
+  if partition_type and not std.is_partition(partition_type) then
+    error("list expected a partition type as argument 2, got " .. tostring(partition_type))
   end
 
   local st = terralib.types.newstruct("list")
@@ -2098,20 +2227,100 @@ std.list = terralib.memoize(function(element_type)
       { "__size", uint64 }, -- in elements
       { "__data", &opaque },
   })
+  if partition_type then
+    st.entries:insert({ "__partition", c.legion_logical_partition_t })
+  end
 
   st.is_list = true
   st.element_type = element_type
+  st.partition_type = partition_type or false
+  st.privilege_depth = privilege_depth or 0
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
-      (std.is_list(self.element_type) and
-         self.element_type:is_list_of_regions())
+      std.is_list_of_regions(self.element_type)
+  end
+
+  function st:is_list_of_phase_barriers()
+    return std.is_phase_barrier(self.element_type) or
+      std.is_list_of_phase_barriers(self.element_type)
+  end
+
+  function st:partition()
+    return self.partition_type
+  end
+
+  function st:list_depth()
+    return 1 + self.element_type:list_depth()
+  end
+
+  function st:leaf_element_type()
+    if std.is_list(self.element_type) then
+      return self.element_type:leaf_element_type()
+    end
+    return self.element_type
+  end
+
+  function st:region()
+    assert(std.is_list_of_regions(self))
+    if std.is_list(self.element_type) then
+      return self.element_type:region()
+    end
+    return self.element_type
+  end
+
+  function st:ispace()
+    assert(std.is_list_of_regions(self))
+    return self.element_type:ispace()
+  end
+
+  function st:fspace()
+    assert(std.is_list_of_regions(self))
+    return self.element_type:fspace()
+  end
+
+  function st:subregion_dynamic()
+    assert(std.is_list_of_regions(self))
+    local ispace = terralib.newsymbol(
+      std.ispace(self:ispace().index_type),
+      self:region().ispace_symbol.displayname)
+    return std.region(ispace, self:fspace())
+  end
+
+  function st:slice()
+    assert(std.is_list_of_regions(self))
+    local slice_type = self:subregion_dynamic()
+    for i = 1, self:list_depth() do
+      slice_type = std.list(
+        slice_type, self:partition(), self.privilege_depth)
+    end
+    return slice_type
   end
 
   -- FIXME: Make the compiler manage cleanups, including lists.
 
   function st:data(value)
     return `([&self.element_type]([value].__data))
+  end
+
+  function st:hash()
+    return self
+  end
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_list_of_regions(from) and std.is_list_of_regions(to))
+    -- FIXME: This would result in memory corruption if we ever freed
+    -- the original data.
+    if to:partition() then
+      assert(from:partition())
+      return `([to] {
+          __size = [expr].__size,
+          __data = [expr].__data,
+          __partition = [expr].__partition,
+        })
+    else
+      return `([to] { __size = [expr].__size, __data = [expr].__data })
+    end
   end
 
   function st.metamethods.__typename(st)
@@ -2129,6 +2338,11 @@ do
   })
 
   st.is_phase_barrier = true
+
+  -- For API compatibility with std.list:
+  function st:list_depth()
+    return 0
+  end
 end
 
 do
@@ -2218,7 +2432,7 @@ function std.privilege(privilege, regions_fields)
     end
     assert(terralib.issymbol(region) and terralib.islist(fields))
     for _, field in ipairs(fields) do
-      privileges:insert({
+      privileges:insert(data.map_from_table {
         node_type = "privilege",
         region = region,
         field_path = field,
@@ -2237,6 +2451,12 @@ std.exclusive = "exclusive"
 std.atomic = "atomic"
 std.simultaneous = "simultaneous"
 std.relaxed = "relaxed"
+
+-- #####################################
+-- ## Flags
+-- #################
+
+std.no_access_flag = "no_access_flag"
 
 -- #####################################
 -- ## Conditions
@@ -2370,6 +2590,16 @@ function task:get_coherence_modes()
   return self.coherence_modes
 end
 
+function task:set_flags(t)
+  assert(rawget(self, "flags") == nil)
+  self.flags = t
+end
+
+function task:get_flags()
+  assert(rawget(self, "flags") ~= nil)
+  return self.flags
+end
+
 function task:set_conditions(t)
   assert(rawget(self, "conditions") == nil and t)
   self.conditions = t
@@ -2474,6 +2704,10 @@ function task:make_variant()
   variant_task:settaskid(self:gettaskid())
   variant_task:settype(self:gettype())
   variant_task:setprivileges(self:getprivileges())
+  variant_task:set_coherence_modes(self:get_coherence_modes())
+  variant_task:set_conditions(self:get_conditions())
+  variant_task:set_param_constraints(self:get_param_constraints())
+  variant_task:set_flags(self:get_flags())
   variant_task:set_constraints(self:get_constraints())
   variant_task:set_source_variant(self)
   return variant_task
@@ -2765,15 +2999,19 @@ function std.start(main_task)
     end)
   if std.config["cuda"] then
     cudahelper.link_driver_library()
+    local all_kernels = {}
     tasks:map(function(task)
       if task:getcuda() then
         local kernels = task:getcudakernels()
         if kernels ~= nil then
-          print("JIT compiling CUDA kernels in task " .. task.name)
-          cudahelper.jit_compile_kernels_and_register(kernels)
+          for k, v in pairs(kernels) do
+            all_kernels[k] = v
+          end
         end
       end
     end)
+    print("JIT compiling CUDA kernels")
+    cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local reduction_registrations = terralib.newlist()

@@ -42,9 +42,9 @@ local c = regentlib.c
 local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime"
-  local legion_dir = root_dir .. "../../runtime/legion"
-  local mapper_dir = root_dir .. "../../runtime/mappers"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'

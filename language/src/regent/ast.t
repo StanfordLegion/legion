@@ -23,6 +23,7 @@ local function make_factory(name)
       name = name,
       expected_fields = false,
       print_collapsed = false,
+      print_hidden = false,
     },
     ast_factory)
 end
@@ -52,11 +53,13 @@ function ast.is_node(node)
   return type(node) == "table" and getmetatable(node) == ast_node
 end
 
-local function ast_node_tostring(node, indent)
+local function ast_node_tostring(node, indent, hide)
   local newline = "\n"
   local spaces = string.rep("  ", indent)
   local spaces1 = string.rep("  ", indent + 1)
   if ast.is_node(node) then
+    local hidden = node.node_type.print_hidden
+    if hide and hidden then return end
     local collapsed = node.node_type.print_collapsed
     if collapsed then
       newline = ""
@@ -66,16 +69,20 @@ local function ast_node_tostring(node, indent)
     local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
       if k ~= "node_type" then
-        str = str .. spaces1 .. k .. " = " ..
-          ast_node_tostring(v, indent + 1) .. "," .. newline
+        local vstr = ast_node_tostring(v, indent + 1, hide)
+        if vstr then
+          str = str .. spaces1 .. k .. " = " .. vstr .. "," .. newline
+        end
       end
     end
     return str .. spaces .. ")"
   elseif terralib.islist(node) then
     local str = "{" .. newline
     for i, v in ipairs(node) do
-      str = str .. spaces1 ..
-        ast_node_tostring(v, indent + 1) .. "," .. newline
+      local vstr = ast_node_tostring(v, indent + 1, hide)
+      if vstr then
+        str = str .. spaces1 .. vstr .. "," .. newline
+      end
     end
     return str .. spaces .. "}"
   elseif type(node) == "string" then
@@ -86,11 +93,11 @@ local function ast_node_tostring(node, indent)
 end
 
 function ast_node:__tostring()
-  return ast_node_tostring(self, 0)
+  return ast_node_tostring(self, 0, false)
 end
 
-function ast_node:printpretty()
-  print(tostring(self))
+function ast_node:printpretty(hide)
+  print(ast_node_tostring(self, 0, hide))
 end
 
 function ast_node:is(node_type)
@@ -130,6 +137,20 @@ end
 
 function ast_ctor:__call(node)
   assert(type(node) == "table", tostring(self) .. " expected table")
+
+  -- Normally, we assume we can co-opt the incoming table as the
+  -- node. This is not true if the incoming node is itself an
+  -- AST. (ASTs are not supposed to be mutable!) If so, copy the
+  -- fields.
+  if ast.is_node(node) then
+    local copy = {}
+    for k, v in pairs(node) do
+      copy[k] = v
+    end
+    copy["node_type"] = nil
+    node = copy
+  end
+
   for i, f in ipairs(self.expected_fields) do
     if rawget(node, f) == nil then
       error(tostring(self) .. " missing required argument '" .. f .. "'", 2)
@@ -175,13 +196,14 @@ function ast_factory:__index(field)
   error(tostring(self) .. " has no field '" .. field .. "'", 2)
 end
 
-function ast_factory:inner(ctor_name, expected_fields, print_collapsed)
+function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hidden)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
-      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
+      print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_factory)
 
   assert(rawget(self, ctor_name) == nil,
@@ -190,13 +212,14 @@ function ast_factory:inner(ctor_name, expected_fields, print_collapsed)
   return ctor
 end
 
-function ast_factory:leaf(ctor_name, expected_fields, print_collapsed)
+function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hidden)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
       expected_fields = merge_fields(self.expected_fields, expected_fields),
-      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false
+      print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
+      print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_ctor)
 
   assert(rawget(self, ctor_name) == nil,
@@ -285,7 +308,7 @@ end
 
 ast:inner("location")
 ast.location:leaf("Position", {"line", "offset"}, true)
-ast.location:leaf("Span", {"source", "start", "stop"})
+ast.location:leaf("Span", {"source", "start", "stop"}, false, true)
 
 -- Helpers for extracting location from token stream.
 local function position_from_start(token)
@@ -340,7 +363,8 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"})
+ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"},
+                 false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
@@ -380,6 +404,10 @@ ast.unspecialized.coherence_kind:leaf("Simultaneous")
 ast.unspecialized.coherence_kind:leaf("Relaxed")
 ast.unspecialized:leaf("Coherence", {"coherence_modes", "regions"})
 
+ast.unspecialized:inner("flag_kind", {})
+ast.unspecialized.flag_kind:leaf("NoAccessFlag")
+ast.unspecialized:leaf("Flag", {"flags", "regions"})
+
 ast.unspecialized:leaf("ConditionVariable", {"name"})
 ast.unspecialized:inner("condition_kind", {})
 ast.unspecialized.condition_kind:leaf("Arrives")
@@ -413,10 +441,16 @@ ast.unspecialized.expr:leaf("Partition", {"disjointness_expr",
                                           "region_type_expr", "coloring"})
 ast.unspecialized.expr:leaf("CrossProduct", {"arg_type_exprs"})
 ast.unspecialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.unspecialized.expr:leaf("ListPhaseBarriers", {"product"})
+ast.unspecialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.unspecialized.expr:leaf("ListRange", {"start", "stop"})
 ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.unspecialized.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.unspecialized.expr:leaf("AllocateScratchFields", {"region"})
+ast.unspecialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.unspecialized.expr:leaf("RegionRoot", {"region", "fields"})
 ast.unspecialized.expr:leaf("Condition", {"conditions", "values"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
@@ -444,7 +478,7 @@ ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 
 ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
-                                     "privileges", "coherence_modes",
+                                     "privileges", "coherence_modes", "flags",
                                      "conditions", "constraints", "body"})
 ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
@@ -478,6 +512,10 @@ ast.specialized.coherence_kind:leaf("Atomic")
 ast.specialized.coherence_kind:leaf("Simultaneous")
 ast.specialized.coherence_kind:leaf("Relaxed")
 ast.specialized:leaf("Coherence", {"coherence_modes", "regions"})
+
+ast.specialized:inner("flag_kind", {})
+ast.specialized.flag_kind:leaf("NoAccessFlag")
+ast.specialized:leaf("Flag", {"flags", "regions"})
 
 ast.specialized:leaf("ConditionVariable", {"symbol"})
 ast.specialized:inner("condition_kind", {})
@@ -514,10 +552,16 @@ ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                         "expr_type"})
 ast.specialized.expr:leaf("CrossProduct", {"args", "expr_type"})
 ast.specialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.specialized.expr:leaf("ListPhaseBarriers", {"product"})
+ast.specialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.specialized.expr:leaf("ListRange", {"start", "stop"})
 ast.specialized.expr:leaf("PhaseBarrier", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.specialized.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.specialized.expr:leaf("AllocateScratchFields", {"region"})
+ast.specialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.specialized.expr:leaf("RegionRoot", {"region", "fields"})
 ast.specialized.expr:leaf("Condition", {"conditions", "values"})
 ast.specialized.expr:leaf("Function", {"value"})
@@ -547,7 +591,7 @@ ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 
 ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
-                                   "privileges", "coherence_modes",
+                                   "privileges", "coherence_modes", "flags",
                                    "conditions", "constraints", "body",
                                    "prototype"})
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
@@ -584,12 +628,18 @@ ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
 ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
 ast.typed.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
+ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.typed.expr:leaf("ListPhaseBarriers", {"product"})
+ast.typed.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.typed.expr:leaf("ListRange", {"start", "stop"})
 ast.typed.expr:leaf("PhaseBarrier", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
+ast.typed.expr:leaf("Fill", {"dst", "value", "conditions"})
+ast.typed.expr:leaf("AllocateScratchFields", {"region"})
+ast.typed.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.typed.expr:leaf("RegionRoot", {"region", "fields"})
-ast.typed.expr:leaf("Condition", {"conditions", "values"})
+ast.typed.expr:leaf("Condition", {"conditions", "value"})
 ast.typed.expr:leaf("Constant", {"value"})
 ast.typed.expr:leaf("Function", {"value"})
 ast.typed.expr:leaf("Unary", {"op", "rhs"})
@@ -627,9 +677,9 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
 ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
-                             "coherence_modes", "constraints", "body",
-                             "config_options", "region_divergence",
-                             "prototype"})
+                             "coherence_modes", "flags", "conditions",
+                             "constraints", "body", "config_options",
+                             "region_divergence", "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
 ast.typed.stat:leaf("Fspace", {"name", "fspace"})
 

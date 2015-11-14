@@ -1082,6 +1082,8 @@ namespace LegionRuntime {
         // No point in adding this to the version state infos
         // since we already know we just use that to build the PhysicalState
         info.physical_state->add_advance_state(state, mask);
+        // Update the advance mask as we go
+        info.advance_mask |= mask;
       }
     }
     
