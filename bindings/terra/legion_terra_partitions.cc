@@ -183,27 +183,39 @@ create_cross_product(HighLevelRuntime *runtime,
   for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-
-    std::set<ptr_t> lh_points;
-    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
-      lh_points.insert(lh_it.next());
-    }
+    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
+    LowLevel::IndexSpace lh_lspace = lh_domain.get_index_space();
+    const LowLevel::ElementMask &lh_mask = lh_lspace.get_valid_mask();
 
     Coloring lh_coloring;
 
     for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
       Color rh_color = rh_dp.p.get_point<1>()[0];
       IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
+      LowLevel::IndexSpace rh_lspace = rh_domain.get_index_space();
+      const LowLevel::ElementMask &rh_mask = rh_lspace.get_valid_mask();
+
+      LowLevel::ElementMask isect;
+      {
+	//Realm::TimeStamp ts("isect", true);
+	isect = lh_mask & rh_mask;
+      }
 
       // Ensure the color exists.
       lh_coloring[rh_color];
 
-      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
-        ptr_t rh_ptr = rh_it.next();
-
-        if (lh_points.count(rh_ptr)) {
-          lh_coloring[rh_color].points.insert(rh_ptr);
-        }
+      {
+	//Realm::TimeStamp ts("enum", true);
+	LowLevel::ElementMask::Enumerator *e = isect.enumerate_enabled();
+	int pos, len;
+	while(e->get_next(pos, len)) {
+	  if(len > 1)
+	    lh_coloring[rh_color].ranges.insert(std::make_pair(pos, pos + len - 1));
+	  else
+	    lh_coloring[rh_color].points.insert(pos);
+	}
+	delete e;
       }
     }
 
