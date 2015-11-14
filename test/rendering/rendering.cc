@@ -41,6 +41,8 @@ enum SerdezIDs {
   SERDEZ_ID = 123
 };
 
+int num_cpus = 0;
+
 class RenderingMapper : public DefaultMapper {
 public:
   RenderingMapper(Machine machine, HighLevelRuntime *runtime, Processor local)
@@ -61,6 +63,7 @@ public:
         worker_cpu_procs.push_back(*it);
       }
     }
+    num_cpus = worker_cpu_procs.size();
     //printf("cpu size = %lu\n", worker_cpu_procs.size());
   }
 
@@ -200,8 +203,8 @@ void top_level_task(const Task *task,
 {
   srand(123456);
   int nsize = 1024;
-  int niter = 12;
-  int npar = 4;
+  int niter = 20;
+  int npar = num_cpus;
   int iters_per_check = 4;
   bool cache_optimization = false;
   // Check for any command line arguments
@@ -219,6 +222,8 @@ void top_level_task(const Task *task,
         cache_optimization = true;
     }
   }
+  //make sure number of partitions is equal to number of cpus
+  assert(npar == num_cpus);
   
   Rect<1> rect_A(Point<1>(0), Point<1>(nsize - 1));
   IndexSpace is_A = runtime->create_index_space(ctx,
