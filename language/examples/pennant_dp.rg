@@ -2051,6 +2051,7 @@ struct raw_mesh_colors {
   pointspancolors : &int64,
   zonecolors : &int64,
   zonespancolors : &int64,
+  zonesize : &int64,
 }
 
 struct mesh_colorings {
@@ -2258,7 +2259,7 @@ terra read_input(runtime : c.legion_runtime_t,
   c.free(pointpos_x)
   c.free(pointpos_y)
   c.free(zonestart)
-  c.free(zonesize)
+  --c.free(zonesize)
   c.free(zonepoints)
 
   -- package up the raw mesh colors for create_colorings next
@@ -2268,12 +2269,40 @@ terra read_input(runtime : c.legion_runtime_t,
   rawcolors.pointspancolors = pointspancolors
   rawcolors.zonecolors = zonecolors
   rawcolors.zonespancolors = zonespancolors
+  rawcolors.zonesize = zonesize
 
   return rawcolors
 end
 read_input:compile()
 
-terra create_colorings(runtime : c.legion_runtime_t,
+struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_t; }
+
+terra cached_accessor:init(acc : c.legion_accessor_array_t)
+  self.acc = acc  -- for debug
+  var ptr : c.legion_ptr_t
+  ptr.value = 0
+  self.base = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  ptr.value = 1
+  var basep1 : &int8
+  basep1 = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  self.stride = basep1 - self.base
+  --c.printf("got %p + %zd\n", self.base, self.stride)
+end
+
+terra cached_accessor:ref(ptr : c.legion_ptr_t) : &int8
+  var act_ptr : &int8 = self.base + ptr.value * self.stride
+  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_ref(self.acc, ptr))
+  --regentlib.assert(act_ptr == chk_ptr, "ptr mismatch")
+  return act_ptr
+end
+
+terra cache_accessor(acc : c.legion_accessor_array_t) : cached_accessor
+  var ca : cached_accessor
+  ca:init(acc)
+  return ca
+end
+
+terra slow_create_colorings(runtime : c.legion_runtime_t,
 		       ctx : c.legion_context_t,
 		       rz_physical : c.legion_physical_region_t[24],
 		       rz_fields : c.legion_field_id_t[24],
@@ -2328,20 +2357,26 @@ terra create_colorings(runtime : c.legion_runtime_t,
       rs_physical[0], rs_fields[0])
     var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array(
       rs_physical[1], rs_fields[1])
-    var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[3], rs_fields[3])
+    --var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array(
+    --  rs_physical[3], rs_fields[3])
+
+    var crs_mapsz = cache_accessor(rs_mapsz)
+    var crs_mapsp1_ptr = cache_accessor(rs_mapsp1_ptr)
 
     for i = 0, conf.ns do
       var ps = c.legion_ptr_t { value = i }
 
-      var pz = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, ps)) 
-      var pp1 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1_ptr, ps)) 
-      var pp2 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2_ptr, ps)) 
+      --var pz = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, ps)) 
+      var pz = @[&c.legion_ptr_t](crs_mapsz:ref(ps)) 
+      --var pp1 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1_ptr, ps)) 
+      var pp1 = @[&c.legion_ptr_t](crs_mapsp1_ptr:ref(ps)) 
+      --var pp2 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2_ptr, ps)) 
 
       var color = zonecolors[pz.value]
       c.legion_coloring_add_point(result.rs_all_c, color, ps)
 
       var oldcolor = pointfirstcolor[pp1.value]
+
       if oldcolor == -1 then
 	-- first coloring of this point
 	c.legion_coloring_add_point(result.rp_all_private_c, color, pp1)
@@ -2362,7 +2397,7 @@ terra create_colorings(runtime : c.legion_runtime_t,
 
     c.legion_accessor_array_destroy(rs_mapsz)
     c.legion_accessor_array_destroy(rs_mapsp1_ptr)
-    c.legion_accessor_array_destroy(rs_mapsp2_ptr)
+    --c.legion_accessor_array_destroy(rs_mapsp2_ptr)
   end
 
   -- span-related stuff is not used in baseline version
@@ -2395,6 +2430,164 @@ terra create_colorings(runtime : c.legion_runtime_t,
   c.free(rawcolors.pointspancolors)
   c.free(rawcolors.zonecolors)
   c.free(rawcolors.zonespancolors)
+
+  return result
+end
+
+terra create_colorings(runtime : c.legion_runtime_t,
+		       ctx : c.legion_context_t,
+		       rz_physical : c.legion_physical_region_t[24],
+		       rz_fields : c.legion_field_id_t[24],
+		       rp_physical : c.legion_physical_region_t[17],
+		       rp_fields : c.legion_field_id_t[17],
+		       rs_physical : c.legion_physical_region_t[34],
+		       rs_fields : c.legion_field_id_t[34],
+                       rawcolors : raw_mesh_colors,
+		       conf : config)
+
+  -- Create colorings
+  var result : mesh_colorings
+  result.rz_all_c = c.legion_coloring_create()
+  result.rp_all_c = c.legion_coloring_create()
+  result.rp_all_private_c = c.legion_coloring_create()
+  result.rp_all_ghost_c = c.legion_coloring_create()
+  result.rp_all_shared_c = c.legion_coloring_create()
+  result.rs_all_c = c.legion_coloring_create()
+
+  var zonecolors = rawcolors.zonecolors
+  var zonesize = rawcolors.zonesize
+  var pointcolors = rawcolors.pointcolors
+  var pointmcolors = rawcolors.pointmcolors
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rz_all_c, i)
+  end
+  var i = 0
+  while i < conf.nz do
+    var j = i + 1
+    while (j < conf.nz) and (zonecolors[i] == zonecolors[j]) do
+      j = j + 1
+    end
+    c.legion_coloring_add_range(result.rz_all_c, zonecolors[i],
+				c.legion_ptr_t { value = i },
+				c.legion_ptr_t { value = j - 1 })
+    i = j
+  end
+  -- for i = 0, conf.nz do
+  --   c.legion_coloring_add_point(
+  --     result.rz_all_c, zonecolors[i], c.legion_ptr_t { value = i })
+  -- end
+
+  -- for i = 0, nspans_zones do
+  --   c.legion_coloring_ensure_color(result.rz_spans_c, i)
+  -- end
+  -- for i = 0, conf.nz do
+  --   c.legion_coloring_add_point(
+  --     result.rz_spans_c, zonespancolors[i], c.legion_ptr_t { value = i })
+  -- end
+
+  c.legion_coloring_ensure_color(result.rp_all_c, 0)
+  c.legion_coloring_ensure_color(result.rp_all_c, 1)
+  --[[var]] i = 0
+  while i < conf.np do
+    var j = i + 1
+    while (j < conf.np) and (pointcolors[i] == pointcolors[j]) do
+      j = j + 1
+    end
+    c.legion_coloring_add_range(result.rp_all_c, 
+				[c.legion_color_t](pointcolors[i] == cpennant.MULTICOLOR),
+				c.legion_ptr_t { value = i },
+				c.legion_ptr_t { value = j - 1 })
+    i = j
+  end
+  -- for i = 0, conf.np do
+  --   c.legion_coloring_add_point(
+  --     result.rp_all_c,
+  --     [c.legion_color_t](pointcolors[i] == cpennant.MULTICOLOR),
+  --     c.legion_ptr_t { value = i })
+  -- end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_private_c, i)
+  end
+  for i = 0, conf.np do
+    if pointcolors[i] ~= cpennant.MULTICOLOR then
+      c.legion_coloring_add_point(
+        result.rp_all_private_c,
+        pointcolors[i],
+        c.legion_ptr_t { value = i })
+    end
+  end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_ghost_c, i)
+  end
+  for i = 0, conf.np do
+    for color = 0, conf.npieces do
+      var word = i + color/64
+      var bit = color % 64
+
+      if (pointmcolors[word] and (1 << bit)) ~= 0 then
+        c.legion_coloring_add_point(
+          result.rp_all_ghost_c,
+          color,
+          c.legion_ptr_t { value = i })
+      end
+    end
+  end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_shared_c, i)
+  end
+  for i = 0, conf.np do
+    var done = false
+    for color = 0, conf.npieces do
+      var word = i + color/64
+      var bit = color % 64
+
+      if not  done and (pointmcolors[word] and (1 << bit)) ~= 0 then
+        c.legion_coloring_add_point(
+          result.rp_all_shared_c,
+          color,
+          c.legion_ptr_t { value = i })
+        done = true
+      end
+    end
+  end
+
+  -- for i = 0, nspans_points do
+  --   c.legion_coloring_ensure_color(result.rp_spans_c, i)
+  -- end
+  -- for i = 0, conf.np do
+  --   c.legion_coloring_add_point(
+  --     result.rp_spans_c, pointspancolors[i], c.legion_ptr_t { value = i })
+  -- end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rs_all_c, i)
+  end
+  do
+    var sstart = 0
+    for i = 0, conf.nz do
+      var zsize = zonesize[i]
+
+      c.legion_coloring_add_range(
+        result.rs_all_c,
+        zonecolors[i],
+        c.legion_ptr_t { value = sstart },
+        c.legion_ptr_t { value = sstart + zsize - 1 })
+
+      sstart = sstart + zsize
+    end
+  end
+
+  -- Free buffers
+  c.free(rawcolors.pointcolors)
+  c.free(rawcolors.pointmcolors)
+  c.free(rawcolors.pointspancolors)
+  c.free(rawcolors.zonecolors)
+  c.free(rawcolors.zonespancolors)
+  c.free(rawcolors.zonesize)
 
   return result
 end

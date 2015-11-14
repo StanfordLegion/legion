@@ -168,12 +168,32 @@ terra random_element(arr : &c.legion_ptr_t,
   return arr[index]
 end
 
+-- NOTE: assumes array is sorted!
 terra contains_element(arr : &c.legion_ptr_t,
 		       num_elmts : uint,
 		       needle : c.legion_ptr_t)
-  for i = 0, num_elmts do
-     if arr[i].value == needle.value then return true end
+  --for i = 0, num_elmts - 1 do
+  --   regentlib.assert(arr[i].value < arr[i + 1].value, "not sorted")
+  --end
+  --var slow_find = -1
+  --for i = 0, num_elmts do
+  --   if arr[i].value == needle.value then slow_find = i end
+  --end
+  var lo = 0
+  var hi = num_elmts
+  while lo < hi do
+    var mid = (lo + hi) >> 1
+    var v = arr[mid].value
+    if v < needle.value then
+      lo = mid + 1
+    elseif v > needle.value then
+      hi = mid
+    else
+      --regentlib.assert(slow_find >= 0, "mismatch1")
+      return true
+    end
   end
+  --regentlib.assert(slow_find == -1, "mismatch2")
   return false
 end
 
@@ -342,6 +362,37 @@ terra load_circuit(runtime : c.legion_runtime_t,
   c.free(piece_node_ptrs)
 end
 
+struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_t; }
+
+terra cached_accessor:init(acc : c.legion_accessor_array_t)
+  self.acc = acc  -- for debug
+  var ptr : c.legion_ptr_t
+  ptr.value = 0
+  self.base = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  ptr.value = 1
+  var basep1 : &int8
+  basep1 = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  self.stride = basep1 - self.base
+  --c.printf("got %p + %zd\n", self.base, self.stride)
+end
+
+terra cached_accessor:ref(ptr : c.legion_ptr_t) : &int8
+  var act_ptr : &int8 = self.base + ptr.value * self.stride
+  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_ref(self.acc, ptr))
+  --regentlib.assert(act_ptr == chk_ptr, "ptr mismatch")
+  return act_ptr
+end
+
+terra cache_accessor(acc : c.legion_accessor_array_t) : cached_accessor
+  var ca : cached_accessor
+  ca:init(acc)
+  return ca
+end
+
+terra NOW(s : &int8)
+  c.printf("now: %s = %lld\n", s, c.legion_get_current_time_in_micros())
+end
+
 terra create_colorings(runtime : c.legion_runtime_t,
                        ctx : c.legion_context_t,
 		       all_nodes : c.legion_physical_region_t[5],
@@ -366,6 +417,8 @@ terra create_colorings(runtime : c.legion_runtime_t,
   var fa_node_subckt =
     c.legion_physical_region_get_field_accessor_array(all_nodes[4], all_nodes_fields[4])
 
+  var cfa_node_subckt = cache_accessor(fa_node_subckt)
+
   var piece_node_ptrs : &&c.legion_ptr_t =
     [&&c.legion_ptr_t](c.malloc(conf.num_pieces * 8))
 
@@ -381,7 +434,8 @@ terra create_colorings(runtime : c.legion_runtime_t,
         regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var node_ptr = c.legion_index_iterator_next(itr)
 
-        var subckt = @[&int](c.legion_accessor_array_ref(fa_node_subckt, node_ptr))
+        --var subckt = @[&int](c.legion_accessor_array_ref(fa_node_subckt, node_ptr))
+        var subckt = @[&int](cfa_node_subckt:ref(node_ptr))
 	regentlib.assert(subckt == n, "subckt mismatch")
 
         c.legion_coloring_add_point(private_node_map, n, node_ptr)
@@ -399,6 +453,9 @@ terra create_colorings(runtime : c.legion_runtime_t,
   var fa_wire_out_ptr =
     c.legion_physical_region_get_field_accessor_array(all_wires[2], all_wires_fields[2])
 
+  var cfa_wire_in_ptr = cache_accessor(fa_wire_in_ptr)
+  var cfa_wire_out_ptr = cache_accessor(fa_wire_out_ptr)
+
   var first_wires : &c.legion_ptr_t =
     [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
 
@@ -408,34 +465,43 @@ terra create_colorings(runtime : c.legion_runtime_t,
     var itr = c.legion_index_iterator_create(runtime, ctx, all_wires_ispace)
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(ghost_node_map, n)
-      for i = 0, conf.wires_per_piece do
-        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
-        var wire_ptr = c.legion_index_iterator_next(itr)
-        if i == 0 then
-          first_wires[n] = wire_ptr
-        end
+      var i = 0
+      while i < conf.wires_per_piece do
+	var req_count : c.size_t = conf.wires_per_piece - i
+	var act_count : uint64 = 0
+        var wire_ptr = c.legion_index_iterator_next_span(itr, &act_count, req_count)
+	--c.printf("got %d + %d values\n", wire_ptr.value, act_count)
+	for j = 0, act_count do
+	  if i == 0 then
+	    first_wires[n] = wire_ptr
+          end
 
-	var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr))
-	var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr))
+	  --var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr))
+	  var in_ptr = @[&c.legion_ptr_t](cfa_wire_in_ptr:ref(wire_ptr))
+	  --var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr))
+	  var out_ptr = @[&c.legion_ptr_t](cfa_wire_out_ptr:ref(wire_ptr))
 
-	var in_local = contains_element(piece_node_ptrs[n], conf.nodes_per_piece, in_ptr)
-	regentlib.assert(in_local, "in_ptr not local?")
+	  var in_local = contains_element(piece_node_ptrs[n], conf.nodes_per_piece, in_ptr)
+	  regentlib.assert(in_local, "in_ptr not local?")
 
-	var nn = n
-	var out_local = contains_element(piece_node_ptrs[n], conf.nodes_per_piece, out_ptr)
-	if not out_local then
-	  for j = 0, conf.num_pieces do
-	    if contains_element(piece_node_ptrs[j], conf.nodes_per_piece, out_ptr) then
-	      nn = j
-	      break
+	  var nn = n
+	  var out_local = contains_element(piece_node_ptrs[n], conf.nodes_per_piece, out_ptr)
+	  if not out_local then
+	    for j = 0, conf.num_pieces do
+	      if contains_element(piece_node_ptrs[j], conf.nodes_per_piece, out_ptr) then
+		nn = j
+		break
+	      end
 	    end
+	    -- This node is no longer private
+	    c.legion_coloring_delete_point(privacy_map, 0, out_ptr)
+	    c.legion_coloring_add_point(privacy_map, 1, out_ptr)
+	    c.legion_coloring_add_point(ghost_node_map, n, out_ptr)
 	  end
-          -- This node is no longer private
-          c.legion_coloring_delete_point(privacy_map, 0, out_ptr)
-          c.legion_coloring_add_point(privacy_map, 1, out_ptr)
-          c.legion_coloring_add_point(ghost_node_map, n, out_ptr)
-	end
-        c.legion_coloring_add_point(wire_owner_map, n, wire_ptr)
+	  c.legion_coloring_add_point(wire_owner_map, n, wire_ptr)
+          i = i + 1
+	  wire_ptr.value = wire_ptr.value + 1
+        end
       end
     end
     c.legion_index_iterator_destroy(itr)
