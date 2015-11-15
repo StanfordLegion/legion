@@ -9919,7 +9919,9 @@ namespace LegionRuntime {
           // that happened when we recorded dirty fields below. 
           // However, we do need to mark that there is no longer any
           // dirty data below this node for all the closed fields
-          state.dirty_below -= closed_mask;
+
+          // Update the dirty_below and partial close fields
+          closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
@@ -10282,7 +10284,9 @@ namespace LegionRuntime {
           // that happened when we recorded dirty fields below. 
           // However, we do need to mark that there is no longer any
           // dirty data below this node for all the closed fields
-          state.dirty_below -= closed_mask;
+          
+          // Update the dirty below and partial closed fields
+          closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
@@ -10586,6 +10590,9 @@ namespace LegionRuntime {
       // be done by the caller
       // We can mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
+      // These fields are now fully closed
+      if (!!state.partially_closed)
+        state.partially_closed -= closing_mask;
       // We can also clear any outstanding reduction fields
       if (!(state.outstanding_reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
@@ -10653,6 +10660,9 @@ namespace LegionRuntime {
         state.advance_version_numbers(closing_mask);
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
+      // These fields are now fully closed
+      if (!!state.partially_closed)
+        state.partially_closed -= closing_mask;
       // We can also clear any outstanding reduction fields
       if (!(state.outstanding_reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
@@ -11041,6 +11051,7 @@ namespace LegionRuntime {
       bool removed_fields = false;
       if (next_child.is_valid() && are_all_children_disjoint())
       {
+        bool performed_close = false;
         // Check to see if we have anything to close
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
                               state.open_children.find(next_child);
@@ -11067,8 +11078,11 @@ namespace LegionRuntime {
               child_node->close_logical_node(closer, close_mask, 
                                              permit_leave_open);
               if (record_close_operations)
+              {
                 closer.record_closed_child(finder->first, close_mask, 
                                            permit_leave_open, read_only_close);
+                performed_close = true;
+              }
               // Remove the closed fields
               finder->second -= close_mask;
               removed_fields = true;
@@ -11087,6 +11101,28 @@ namespace LegionRuntime {
           // Otherwise disjoint fields, nothing to do
         }
         // Otherwise it's closed so it doesn't matter
+
+        // If we did the close, see if this is the
+        // first partial close for any fields
+        if (performed_close)
+        {
+          FieldMask remaining = closing_mask;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                state.open_children.begin(); it != 
+                state.open_children.end(); it++)
+          {
+            if (it->first == next_child)
+              continue;
+            FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+            closer.record_partial_fields(overlap);
+            remaining -= overlap;
+            // If there are no more fields to check we are done
+            if (!remaining)
+              continue;
+          }
+        }
       }
       else
       {
@@ -11122,7 +11158,13 @@ namespace LegionRuntime {
           // Check for child disjointness
           if (next_child.is_valid() && 
               are_children_disjoint(it->first, next_child))
+          {
+            // If we're recording, note that we are about
+            // to do a partial close
+            if (record_close_operations)
+              closer.record_partial_fields(close_mask);
             continue;
+          }
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
           child_node->close_logical_node(closer, close_mask, permit_leave_open);
@@ -11656,6 +11698,8 @@ namespace LegionRuntime {
           rez.serialize<unsigned>(0);
         FieldMask send_dirty = state.dirty_below & send_mask;
         rez.serialize(send_dirty);
+        FieldMask send_partial = state.partially_closed & send_mask;
+        rez.serialize(send_partial);
         FieldMask send_restricted = state.restricted_fields & send_mask;
         rez.serialize(send_restricted);
       }
@@ -11748,6 +11792,9 @@ namespace LegionRuntime {
       FieldMask dirty_below;
       derez.deserialize(dirty_below);
       state.dirty_below |= dirty_below;
+      FieldMask partial;
+      derez.deserialize(partial);
+      state.partially_closed |= partial;
       FieldMask restricted;
       derez.deserialize(restricted);
       state.restricted_fields |= restricted;

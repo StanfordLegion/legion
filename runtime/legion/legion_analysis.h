@@ -434,6 +434,8 @@ namespace LegionRuntime {
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
+      // Fields that have already undergone at least a partial close
+      FieldMask partially_closed;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask restricted_fields;
@@ -486,6 +488,7 @@ namespace LegionRuntime {
       const FieldMask& get_closed_mask(void) const { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
                                bool leave_open, bool read_only_close);
+      void record_partial_fields(const FieldMask &skipped_fields);
       void record_flush_only_fields(const FieldMask &flush_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
@@ -497,6 +500,7 @@ namespace LegionRuntime {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+      void update_state(CurrentState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
       void record_version_numbers(RegionTreeNode *node, CurrentState &state,
@@ -530,7 +534,7 @@ namespace LegionRuntime {
       const bool capture_users;
       LegionDeque<LogicalUser>::aligned closed_users;
     protected:
-      FieldMask closed_mask, leave_open_mask;
+      FieldMask closed_mask, leave_open_mask, partial_mask;
       LegionMap<ColorPoint,ClosingInfo>::aligned leave_open_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned force_close_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned read_only_children;

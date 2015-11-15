@@ -3364,6 +3364,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::record_partial_fields(const FieldMask &skipped_fields)
+    //--------------------------------------------------------------------------
+    {
+      partial_mask |= skipped_fields;
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::record_flush_only_fields(const FieldMask &flush_only)
     //--------------------------------------------------------------------------
     {
@@ -3581,6 +3588,38 @@ namespace LegionRuntime {
     // be found in region_tree.cc to make sure that templates are instantiated
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::update_state(CurrentState &state)
+    //--------------------------------------------------------------------------
+    {
+      // Our partial mask is initially an over approximation of
+      // the partially closed fields, so intersect it with the
+      // fields that were actually closed
+      if (!!partial_mask)
+        partial_mask &= closed_mask;
+      // See if we have any fields that were partially closed
+      if (!!partial_mask)
+      {
+        // Record the partially closed fields
+        state.partially_closed |= partial_mask;
+        // See if we did have any fully closed fields
+        FieldMask fully_closed = closed_mask - partial_mask;
+        if (!!fully_closed)
+        {
+          state.dirty_below -= fully_closed;
+          if (!!state.partially_closed)
+            state.partially_closed -= fully_closed;
+        }
+      }
+      else
+      {
+        // All the fields were fully closed, so we can clear dirty below
+        state.dirty_below -= closed_mask;
+        if (!!state.partially_closed)
+          state.partially_closed -= closed_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::register_close_operations(
                LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users)
     //--------------------------------------------------------------------------
@@ -3655,25 +3694,106 @@ namespace LegionRuntime {
       // that was already done when we 
       if (!!leave_open_mask)
       {
-        state.record_version_numbers(leave_open_mask, user,
-                                     leave_open_versions,
-                                     true/*previous*/, 
-                                     false/*path only*/, true/*final*/,
-                                     true/*close top*/, false/*report*/);
-        FieldMask force_close_mask = closed_mask - leave_open_mask;
-        if (!!force_close_mask)
-          state.record_version_numbers(force_close_mask, user,
-                                       force_close_versions, true/*previous*/,
-                                       false/*path only*/, true/*final*/, 
+        // See if we have any partial closes for these fields, if there
+        // are partially closed fields we don't need to capture from 
+        // the previous version number because we've already done that
+        if (!state.partially_closed || (closed_mask * state.partially_closed))
+        {
+          // Common case, there are no partially closed fields
+          state.record_version_numbers(leave_open_mask, user,
+                                       leave_open_versions,
+                                       true/*previous*/, 
+                                       false/*path only*/, true/*final*/,
                                        true/*close top*/, false/*report*/);
+          FieldMask force_close_mask = closed_mask - leave_open_mask;
+          if (!!force_close_mask)
+            state.record_version_numbers(force_close_mask, user,
+                                         force_close_versions, true/*previous*/,
+                                         false/*path only*/, true/*final*/, 
+                                         true/*close top*/, false/*report*/);
+        }
+        else
+        {
+          // Handle partially closed fields
+          FieldMask partial_open = leave_open_mask & state.partially_closed;
+          if (!!partial_open)
+          {
+            state.record_version_numbers(partial_open, user,
+                                         leave_open_versions,
+                                         false/*previous*/,
+                                         false/*path only*/, true/*final*/,
+                                         true/*close top*/, false/*report*/);
+            FieldMask non_partial_open = leave_open_mask - partial_open;
+            if (!!non_partial_open)
+              state.record_version_numbers(non_partial_open, user,
+                                           leave_open_versions,
+                                           true/*previous*/, 
+                                           false/*path only*/, true/*final*/,
+                                           true/*close top*/, false/*report*/);
+          }
+          else
+          {
+            // No partial fields for leave open
+            state.record_version_numbers(leave_open_mask, user,
+                                         leave_open_versions,
+                                         true/*previous*/, 
+                                         false/*path only*/, true/*final*/,
+                                         true/*close top*/, false/*report*/);
+          }
+          FieldMask force_close_mask = closed_mask - leave_open_mask;
+          if (!!force_close_mask)
+          {
+            FieldMask partial_close = force_close_mask & state.partially_closed;
+            if (!!partial_close)
+            {
+              state.record_version_numbers(partial_close, user,
+                                        force_close_versions, false/*previous*/,
+                                        false/*path only*/,true/*final*/,
+                                        true/*close top*/, false/*report*/);
+              FieldMask non_partial_close = force_close_mask - partial_close;
+              if (!!non_partial_close)
+                state.record_version_numbers(non_partial_close, user,
+                                        force_close_versions, true/*previous*/,
+                                        false/*path only*/, true/*final*/,
+                                        true/*close top*/, false/*report*/);
+            }
+            else
+            {
+              state.record_version_numbers(force_close_mask, user,
+                                         force_close_versions, true/*previous*/,
+                                         false/*path only*/, true/*final*/, 
+                                         true/*close top*/, false/*report*/);
+            }
+          }
+        }
       }
       else
       {
-        // Normal case is simple
-        state.record_version_numbers(closed_mask, user, force_close_versions,
-                                     true/*previous*/, false/*path only*/, 
-                                     true/*final*/, true/*close top*/,
-                                     false/*report*/);
+        // Normal case is relatively simple
+        // See if there are any partially closed fields
+        FieldMask partial_close = closed_mask & state.partially_closed;
+        if (!partial_close)
+        {
+          // Common case: there are no partially closed fields
+          state.record_version_numbers(closed_mask, user, force_close_versions,
+                                       true/*previous*/, false/*path only*/, 
+                                       true/*final*/, true/*close top*/,
+                                       false/*report*/);
+        }
+        else
+        {
+          // Record the partially closed fields from this version
+          state.record_version_numbers(partial_close, user, 
+                                       force_close_versions, false/*previous*/,
+                                       false/*path only*/, true/*final*/,
+                                       true/*close top*/, false/*report*/);
+          FieldMask non_partial = closed_mask - partial_close;
+          if (!!non_partial)
+            state.record_version_numbers(non_partial, user,
+                                         force_close_versions, true/*previous*/,
+                                         false/*path only*/, true/*final*/,
+                                         true/*close top*/, false/*report*/);
+        }
       }
     }
 
