@@ -3623,7 +3623,7 @@ namespace LegionRuntime {
             }
           case SEND_BACK_LOGICAL_STATE:
             {
-              runtime->handle_logical_state_return(derez);
+              runtime->handle_logical_state_return(derez, remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -12464,10 +12464,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Internal::handle_logical_state_return(Deserializer &derez)
+    void Internal::handle_logical_state_return(Deserializer &derez, 
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(forest, derez);
+      RegionTreeNode::handle_logical_state_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

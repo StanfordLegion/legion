@@ -11707,7 +11707,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::process_logical_state_return(Deserializer &derez)
+    void RegionTreeNode::process_logical_state_return(Deserializer &derez,
+                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       ContextID local_ctx;
@@ -11728,6 +11729,7 @@ namespace LegionRuntime {
           derez.deserialize(child);
           FieldMask &child_mask = field_state.open_children[child];
           derez.deserialize(child_mask);
+          column_source->transform_field_mask(child_mask, source);
           field_state.valid_fields |= child_mask;
         }
         merge_new_field_state(state, field_state);
@@ -11749,6 +11751,7 @@ namespace LegionRuntime {
           derez.deserialize(owner);
           FieldMask state_mask;
           derez.deserialize(state_mask);
+          column_source->transform_field_mask(state_mask, source);
           VersionState *version_state = 
             state.find_remote_version_state(vid, did, owner);
           info.states[version_state] |= state_mask; 
@@ -11772,6 +11775,7 @@ namespace LegionRuntime {
           derez.deserialize(owner);
           FieldMask state_mask;
           derez.deserialize(state_mask);
+          column_source->transform_field_mask(state_mask, source);
           VersionState *version_state = 
             state.find_remote_version_state(vid, did, owner);
           info.states[version_state] |= state_mask; 
@@ -11786,23 +11790,27 @@ namespace LegionRuntime {
         derez.deserialize(redop);
         FieldMask reduc_mask;
         derez.deserialize(reduc_mask);
+        column_source->transform_field_mask(reduc_mask, source);
         state.outstanding_reductions[redop] |= reduc_mask;
         state.outstanding_reduction_fields |= reduc_mask;
       }
       FieldMask dirty_below;
       derez.deserialize(dirty_below);
+      column_source->transform_field_mask(dirty_below, source);
       state.dirty_below |= dirty_below;
       FieldMask partial;
       derez.deserialize(partial);
+      column_source->transform_field_mask(partial, source);
       state.partially_closed |= partial;
       FieldMask restricted;
       derez.deserialize(restricted);
+      column_source->transform_field_mask(restricted, source);
       state.restricted_fields |= restricted;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void RegionTreeNode::handle_logical_state_return(
-                                  RegionTreeForest *forest, Deserializer &derez)
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11821,7 +11829,7 @@ namespace LegionRuntime {
         derez.deserialize(handle);
         target_node = forest->get_node(handle);
       }
-      target_node->process_logical_state_return(derez);
+      target_node->process_logical_state_return(derez, source);
     }
 
     //--------------------------------------------------------------------------

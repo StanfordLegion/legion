@@ -1532,9 +1532,11 @@ namespace LegionRuntime {
       void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
                                    const FieldMask &send_mask, 
                                    AddressSpaceID target);
-      void process_logical_state_return(Deserializer &derez);
+      void process_logical_state_return(Deserializer &derez,
+                                        AddressSpaceID source);
       static void handle_logical_state_return(RegionTreeForest *forest,
-                                              Deserializer &derez);
+                                              Deserializer &derez,
+                                              AddressSpaceID source);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
