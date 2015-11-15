@@ -14096,31 +14096,7 @@ namespace LegionRuntime {
             it++;
           continue;
         }
-        
-        if (closer.capture_users)
-        {
-          // Record that we closed this user
-          // Update the field mask and the privilege
-          closer.closed_users.push_back(*it);
-          LogicalUser &closed_user = closer.closed_users.back();
-          closed_user.field_mask = overlap;
-          closed_user.usage.privilege = 
-            (PrivilegeMode)((int)closed_user.usage.privilege | PROMOTED);
-          // Remove the closed set of fields from this user
-          it->field_mask -= overlap;
-          // If it's empty, remove it from the list and let
-          // the mapping reference go up the tree with it
-          // Otherwise add a new mapping reference
-          if (!it->field_mask)
-            it = users.erase(it);
-          else
-          {
-            it->op->add_mapping_reference(it->gen);
-            it++;
-          }
-        }
-        else
-        {
+
           // If we're not capturing the users, then we actually
           // have to do the dependence analysis with respect to 
           // the closing user
@@ -14156,6 +14132,68 @@ namespace LegionRuntime {
             // it hasn't committed, reset timeout
             it->timeout = LogicalUser::TIMEOUT;
           }
+        
+        if (closer.capture_users)
+        {
+          // Record that we closed this user
+          // Update the field mask and the privilege
+          closer.closed_users.push_back(*it);
+          LogicalUser &closed_user = closer.closed_users.back();
+          closed_user.field_mask = overlap;
+          closed_user.usage.privilege = 
+            (PrivilegeMode)((int)closed_user.usage.privilege | PROMOTED);
+          // Remove the closed set of fields from this user
+          it->field_mask -= overlap;
+          // If it's empty, remove it from the list and let
+          // the mapping reference go up the tree with it
+          // Otherwise add a new mapping reference
+          if (!it->field_mask)
+            it = users.erase(it);
+          else
+          {
+            it->op->add_mapping_reference(it->gen);
+            it++;
+          }
+        }
+        else
+        {
+#if 0
+          // If we're not capturing the users, then we actually
+          // have to do the dependence analysis with respect to 
+          // the closing user
+          DependenceType dtype = check_dependence_type(it->usage, 
+                                                     closer.user.usage);
+#ifdef LEGION_LOGGING
+          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
+            LegionLogging::log_mapping_dependence(
+                Processor::get_executing_processor(),
+                closer.user.op->get_parent()->get_unique_task_id(),
+                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+#endif
+#ifdef LEGION_SPY
+          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
+            LegionSpy::log_mapping_dependence(
+                closer.user.op->get_parent()->get_unique_task_id(),
+                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+#endif
+          // Register the dependence 
+          if (closer.user.op->register_region_dependence(closer.user.idx, 
+                                                         it->op, it->gen, 
+                                                         it->idx, dtype,
+                                                         closer.validates,
+                                                         overlap))
+          {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+            it = users.erase(it);
+            continue;
+#endif
+          }
+          else
+          {
+            // it hasn't committed, reset timeout
+            it->timeout = LogicalUser::TIMEOUT;
+          }
+#endif
           // Remove the closed set of fields from this user
           it->field_mask -= overlap;
           // Otherwise, if we can remote it, then remove it's

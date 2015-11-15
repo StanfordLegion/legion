@@ -2344,6 +2344,7 @@ namespace LegionRuntime {
       clear_logical_users(); 
       restricted_fields.clear();
       dirty_below.clear();
+      partially_closed.clear();
       if (!current_version_infos.empty())
       {
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
@@ -2395,6 +2396,9 @@ namespace LegionRuntime {
     void CurrentState::sanity_check(void)
     //--------------------------------------------------------------------------
     {
+      // The partially closed fields should be a subset of the
+      // fields that are dirty below
+      assert(!(partially_closed - dirty_below));
       // This code is a sanity check that each field appears for at most
       // one version number
       FieldMask current_version_fields;
