@@ -216,9 +216,9 @@ namespace LegionRuntime {
           // We can get this from the set of operations on which the
           // operation we are currently performing dependence analysis
           // has dependences.
-          InterCloseOp *close_op = static_cast<InterCloseOp*>(op);
+          TraceCloseOp *close_op = static_cast<TraceCloseOp*>(op);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(close_op == dynamic_cast<InterCloseOp*>(op));
+          assert(close_op == dynamic_cast<TraceCloseOp*>(op));
 #endif
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)

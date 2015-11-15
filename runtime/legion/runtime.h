@@ -1792,6 +1792,8 @@ namespace LegionRuntime {
                                                   bool has_lock = false);
       InterCloseOp*         get_available_inter_close_op(bool need_cont,
                                                   bool has_lock = false);
+      ReadCloseOp*          get_available_read_close_op(bool need_cont,
+                                                  bool has_lock = false);
       PostCloseOp*          get_available_post_close_op(bool need_cont,
                                                   bool has_lock = false);
       VirtualCloseOp*       get_available_virtual_close_op(bool need_cont,
@@ -1841,6 +1843,7 @@ namespace LegionRuntime {
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_inter_close_op(InterCloseOp *op); 
+      void free_read_close_op(ReadCloseOp *op);
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -2061,6 +2064,7 @@ namespace LegionRuntime {
       Reservation frame_op_lock;
       Reservation deletion_op_lock;
       Reservation inter_close_op_lock;
+      Reservation read_close_op_lock;
       Reservation post_close_op_lock;
       Reservation virtual_close_op_lock;
       Reservation dynamic_collective_op_lock;
@@ -2092,6 +2096,7 @@ namespace LegionRuntime {
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<InterCloseOp*>         available_inter_close_ops;
+      std::deque<ReadCloseOp*>          available_read_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;

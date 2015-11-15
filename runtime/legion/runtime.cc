@@ -4135,6 +4135,7 @@ namespace LegionRuntime {
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         inter_close_op_lock(Reservation::create_reservation()), 
+        read_close_op_lock(Reservation::create_reservation()),
         post_close_op_lock(Reservation::create_reservation()),
         virtual_close_op_lock(Reservation::create_reservation()),
         dynamic_collective_op_lock(Reservation::create_reservation()),
@@ -4488,6 +4489,14 @@ namespace LegionRuntime {
       available_inter_close_ops.clear();
       inter_close_op_lock.destroy_reservation();
       inter_close_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReadCloseOp*>::const_iterator it = 
+            available_read_close_ops.begin(); it != 
+            available_read_close_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      read_close_op_lock.destroy_reservation();
+      read_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -13799,6 +13808,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    ReadCloseOp* Internal::get_available_read_close_op(bool need_cont,
+                                                       bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReadCloseOp*,
+                     &Internal::get_available_read_close_op> 
+                       continuation(this, read_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(read_close_op_lock, 
+                           available_read_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     PostCloseOp* Internal::get_available_post_close_op(bool need_cont,
                                                       bool has_lock)
     //--------------------------------------------------------------------------
@@ -14252,6 +14280,14 @@ namespace LegionRuntime {
     {
       AutoLock i_lock(inter_close_op_lock);
       available_inter_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::free_read_close_op(ReadCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(read_close_op_lock);
+      available_read_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------

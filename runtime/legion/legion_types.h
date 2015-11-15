@@ -458,7 +458,9 @@ namespace LegionRuntime {
     class FrameOp;
     class DeletionOp;
     class CloseOp;
+    class TraceCloseOp;
     class InterCloseOp;
+    class ReadCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
     class AcquireOp;
@@ -793,7 +795,9 @@ namespace LegionRuntime {
     friend class FuturePredOp;                    \
     friend class DeletionOp;                      \
     friend class CloseOp;                         \
+    friend class TraceCloseOp;                    \
     friend class InterCloseOp;                    \
+    friend class ReadCloseOp;                     \
     friend class PostCloseOp;                     \
     friend class VirtualCloseOp;                  \
     friend class AcquireOp;                       \
