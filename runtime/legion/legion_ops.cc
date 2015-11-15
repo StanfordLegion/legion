@@ -4117,7 +4117,7 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::perform_logging(unsigned is_inter_close_op /* = 0*/)
+    void CloseOp::perform_logging(bool is_intermediate_close_op)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
@@ -4138,7 +4138,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_close_operation(parent_ctx->get_unique_task_id(),
                                      unique_op_id,
-                                     is_inter_close_op);
+                                     is_intermediate_close_op);
       if (requirement.handle_type == PART_PROJECTION)
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
@@ -4225,6 +4225,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void TraceCloseOp::initialize_trace_close_op(SingleTask *ctx, 
                                                  const RegionRequirement &req,
+                                            const std::set<ColorPoint> &targets,
                                                  LegionTrace *trace,
                                                  int close, 
                                                  const FieldMask &close_m,
@@ -4242,11 +4243,12 @@ namespace LegionRuntime {
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
+      target_children = targets;
       close_idx = close;
       close_mask = close_m;
       create_op = create;
       create_gen = create_op->get_generation();
-      perform_logging(1/*is inter close op*/);
+      perform_logging(true/*is intermediate close op*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4264,6 +4266,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
+      target_children.clear();
+      next_children.clear();
       close_mask.clear();
     }
 
@@ -4293,6 +4297,16 @@ namespace LegionRuntime {
       // Otherwise do the registration
       register_region_dependence(0/*idx*/, target, target_gen,
                                target_idx, dtype, false/*validates*/, overlap);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceCloseOp::add_next_child(const ColorPoint &next_child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(next_child.is_valid());
+#endif
+      next_children.insert(next_child);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4340,25 +4354,15 @@ namespace LegionRuntime {
                                   const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
+      initialize_trace_close_op(ctx, req, targets,
+                                trace, close, close_m, create);
       // Merge in the two different version informations
       version_info.merge(close_info, close_m);
       version_info.merge(ver_info, close_m);
       restrict_info.merge(res_info, close_m);
-      target_children = targets;
       leave_open = open;
       parent_req_index = create->find_parent_index(close_idx);
-    }
-
-    //--------------------------------------------------------------------------
-    void InterCloseOp::add_next_child(const ColorPoint &next_child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(next_child.is_valid());
-#endif
-      next_children.insert(next_child);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InterCloseOp::activate(void)
@@ -4373,8 +4377,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_trace_close();
-      target_children.clear();
-      next_children.clear();
       runtime->free_inter_close_op(this);
     }
 
@@ -4391,20 +4393,6 @@ namespace LegionRuntime {
     {
       return INTER_CLOSE_OP_KIND;
     }
-
-    //--------------------------------------------------------------------------
-    const RegionRequirement& InterCloseOp::get_region_requirement(void) const
-    //--------------------------------------------------------------------------
-    {
-      return requirement;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<ColorPoint>& InterCloseOp::get_target_children(void) const
-    //--------------------------------------------------------------------------
-    {
-      return target_children;
-    } 
 
     //--------------------------------------------------------------------------
     bool InterCloseOp::trigger_execution(void)
@@ -4550,7 +4538,8 @@ namespace LegionRuntime {
                                  const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
+      initialize_trace_close_op(ctx, req, targets, 
+                                trace, close, close_m, create);
       parent_req_index = create->find_parent_index(close_idx);
     }
 
@@ -4644,7 +4633,7 @@ namespace LegionRuntime {
         requirement.privilege = READ_WRITE;
       parent_idx = idx;
       localize_region_requirement(requirement);
-      perform_logging();
+      perform_logging(false/*intermediate close op*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4835,7 +4824,7 @@ namespace LegionRuntime {
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      perform_logging();
+      perform_logging(false/*intermediate close op*/);
     }
     
     //--------------------------------------------------------------------------

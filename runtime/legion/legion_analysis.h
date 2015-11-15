@@ -485,7 +485,7 @@ namespace LegionRuntime {
       inline bool has_closed_fields(void) const { return !!closed_mask; }
       const FieldMask& get_closed_mask(void) const { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
-                               bool leave_open);
+                               bool leave_open, bool read_only_close);
       void record_flush_only_fields(const FieldMask &flush_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
@@ -512,11 +512,13 @@ namespace LegionRuntime {
                           const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
-                          const LegionList<ClosingSet>::aligned &close_sets,
-                      LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops);
+                          const LegionList<ClosingSet>::aligned &close_sets);
+      void create_read_only_close_operations(RegionTreeNode *target, 
+                          Operation *creator, const TraceInfo &trace_info,
+                          const LegionList<ClosingSet>::aligned &close_sets);
       void register_dependences(const LogicalUser &current, 
                                 const FieldMask &open_below,
-             LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
+             LegionMap<TraceCloseOp*,LogicalUser>::aligned &closes,
              LegionMap<ColorPoint,ClosingInfo>::aligned &children,
              LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -531,9 +533,13 @@ namespace LegionRuntime {
       FieldMask closed_mask, leave_open_mask;
       LegionMap<ColorPoint,ClosingInfo>::aligned leave_open_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned force_close_children;
+      LegionMap<ColorPoint,ClosingInfo>::aligned read_only_children;
     protected:
-      LegionMap<InterCloseOp*,LogicalUser>::aligned leave_open_closes;
-      LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
+      // Use the base TraceCloseOp class so we can call the same
+      // register_dependences method on all of them
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned leave_open_closes;
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned force_close_closes;
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned read_only_closes;
     protected:
       VersionInfo leave_open_versions;
       VersionInfo force_close_versions;

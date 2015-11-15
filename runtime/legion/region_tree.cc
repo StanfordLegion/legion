@@ -10569,6 +10569,7 @@ namespace LegionRuntime {
         perform_close_operations(closer, overlap, *it,
                                  next_child, false/*allow next*/,
                                  false/*upgrade*/, false/*leave open*/,
+                                 false/*read only close*/,
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  dummy_states, already_open);
@@ -10628,6 +10629,7 @@ namespace LegionRuntime {
                                  ColorPoint()/*next child*/,
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
+                                 false/*read only close*/,
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  new_states, already_open);
@@ -10716,6 +10718,7 @@ namespace LegionRuntime {
                                        next_child, false/*allow_next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
+                                       false/*read only close*/,
                                        record_close_operations,
                                        true/*record closed fields*/,
                                        new_states, closed_child_fields);
@@ -10787,7 +10790,8 @@ namespace LegionRuntime {
                                          true/*allow next*/,
                                          needs_upgrade,
                                          false/*permit leave open*/,
-                                         false/*record_close_operations*/,
+                                         true/*read only close*/,
+                                         true/*record_close_operations*/,
                                          false/*record closed fields*/,
                                          new_states, already_open);
                 open_below |= already_open;
@@ -10809,6 +10813,7 @@ namespace LegionRuntime {
                                        true/*allow next*/,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
+                                       false/*read only close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        new_states, open_below);
@@ -10914,6 +10919,7 @@ namespace LegionRuntime {
                                            true/*allow next*/,
                                            true/*needs upgrade*/,
                                            false/*permit leave open*/,
+                                           false/*read only close*/,
                                            record_close_operations,
                                            false/*record closed fields*/,
                                            new_states, already_open);
@@ -10938,6 +10944,7 @@ namespace LegionRuntime {
                                          false/*allow next*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
+                                         false/*read only close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          new_states, already_open);
@@ -10977,6 +10984,7 @@ namespace LegionRuntime {
                                          false/*allow next child*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
+                                         false/*read only close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          new_states, already_open);
@@ -11013,6 +11021,7 @@ namespace LegionRuntime {
                                             bool allow_next_child,
                                             bool upgrade_next_child,
                                             bool permit_leave_open,
+                                            bool read_only_close,
                                             bool record_close_operations,
                                             bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
@@ -11058,8 +11067,8 @@ namespace LegionRuntime {
               child_node->close_logical_node(closer, close_mask, 
                                              permit_leave_open);
               if (record_close_operations)
-                closer.record_closed_child(finder->first, 
-                                           close_mask, permit_leave_open);
+                closer.record_closed_child(finder->first, close_mask, 
+                                           permit_leave_open, read_only_close);
               // Remove the closed fields
               finder->second -= close_mask;
               removed_fields = true;
@@ -11118,8 +11127,8 @@ namespace LegionRuntime {
           RegionTreeNode *child_node = get_tree_child(it->first);
           child_node->close_logical_node(closer, close_mask, permit_leave_open);
           if (record_close_operations)
-            closer.record_closed_child(it->first, 
-                                       close_mask, permit_leave_open);
+            closer.record_closed_child(it->first, close_mask, 
+                                       permit_leave_open, read_only_close);
           // Remove the close fields
           it->second -= close_mask;
           removed_fields = true;
@@ -13889,7 +13898,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LogicalCloser::register_dependences(const LogicalUser &current,
                                              const FieldMask &open_below,
-           LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
+           LegionMap<TraceCloseOp*,LogicalUser>::aligned &closes,
            LegionMap<ColorPoint,ClosingInfo>::aligned &children,
            LegionList<LogicalUser,LOGICAL_REC_ALLOC >::track_aligned &abv_users,
            LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cur_users,
@@ -13897,7 +13906,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Start dependence analysis for all our closes
-      for (LegionMap<InterCloseOp*,LogicalUser>::aligned::iterator op_it = 
+      for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::iterator op_it = 
             closes.begin(); op_it != closes.end(); op_it++)
       {
         // Mark that we are starting our dependence analysis
@@ -14032,39 +14041,6 @@ namespace LegionRuntime {
             it++;
           continue;
         }
-        DependenceType dtype = check_dependence_type(it->usage, 
-                                                     closer.user.usage);
-        // We can 
-#ifdef LEGION_LOGGING
-        if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
-          LegionLogging::log_mapping_dependence(
-              Processor::get_executing_processor(),
-              closer.user.op->get_parent()->get_unique_task_id(),
-              it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
-#ifdef LEGION_SPY
-        if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
-          LegionSpy::log_mapping_dependence(
-              closer.user.op->get_parent()->get_unique_task_id(),
-              it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
-        // Register the dependence 
-        if (closer.user.op->register_region_dependence(closer.user.idx, 
-                                                       it->op, it->gen, 
-                                                       it->idx, dtype,
-                                                       closer.validates,
-                                                       overlap))
-        {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
-          it = users.erase(it);
-          continue;
-#endif
-        }
-        else
-        {
-          // it hasn't committed, reset timeout
-          it->timeout = LogicalUser::TIMEOUT;
-        }
         
         if (closer.capture_users)
         {
@@ -14090,6 +14066,41 @@ namespace LegionRuntime {
         }
         else
         {
+          // If we're not capturing the users, then we actually
+          // have to do the dependence analysis with respect to 
+          // the closing user
+          DependenceType dtype = check_dependence_type(it->usage, 
+                                                     closer.user.usage);
+#ifdef LEGION_LOGGING
+          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
+            LegionLogging::log_mapping_dependence(
+                Processor::get_executing_processor(),
+                closer.user.op->get_parent()->get_unique_task_id(),
+                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+#endif
+#ifdef LEGION_SPY
+          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
+            LegionSpy::log_mapping_dependence(
+                closer.user.op->get_parent()->get_unique_task_id(),
+                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+#endif
+          // Register the dependence 
+          if (closer.user.op->register_region_dependence(closer.user.idx, 
+                                                         it->op, it->gen, 
+                                                         it->idx, dtype,
+                                                         closer.validates,
+                                                         overlap))
+          {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+            it = users.erase(it);
+            continue;
+#endif
+          }
+          else
+          {
+            // it hasn't committed, reset timeout
+            it->timeout = LogicalUser::TIMEOUT;
+          }
           // Remove the closed set of fields from this user
           it->field_mask -= overlap;
           // Otherwise, if we can remote it, then remove it's
@@ -14519,6 +14530,28 @@ namespace LegionRuntime {
                      trace_info.trace, trace_info.req_idx, 
                      close_info, version_info, restrict_info, 
                      closing_mask, creator);
+      return op;
+    }
+
+    //--------------------------------------------------------------------------
+    ReadCloseOp* RegionNode::create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
+                                            const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      ReadCloseOp *op = context->runtime->get_available_read_close_op(false);
+      // Construct a reigon requirement for this operation
+      // All privileges are based on the parent logical region
+      RegionRequirement req(handle, READ_WRITE, EXCLUSIVE, 
+                            trace_info.req.parent);
+      // Compute the set of fields that we need
+      column_source->get_field_set(closing_mask, 
+                                   trace_info.req.privilege_fields,
+                                   req.privilege_fields);
+      // Now initialize the operation
+      op->initialize(creator->get_parent(), req, targets, trace_info.trace,
+                     trace_info.req_idx, closing_mask, creator);
       return op;
     }
 
@@ -16080,6 +16113,28 @@ namespace LegionRuntime {
       op->initialize(creator->get_parent(), req, targets, leave_open, 
                      trace_info.trace, trace_info.req_idx, 
                      close_info, ver_info, res_info, closing_mask, creator);
+      return op;
+    }
+
+    //--------------------------------------------------------------------------
+    ReadCloseOp* PartitionNode::create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
+                                            const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      ReadCloseOp *op = context->runtime->get_available_read_close_op(false);
+      // Construct a region requirement for this operation
+      // Make it a projection requirement so we walk to a partition
+      RegionRequirement req(handle, 0/*projection id */,
+                            READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+      // Compute the set of fields that we need
+      column_source->get_field_set(closing_mask, 
+                                   trace_info.req.privilege_fields,
+                                   req.privilege_fields);
+      // Now initialize the operation
+      op->initialize(creator->get_parent(), req, targets, trace_info.trace,
+                     trace_info.req_idx, closing_mask, creator);
       return op;
     }
 

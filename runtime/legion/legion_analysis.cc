@@ -3308,9 +3308,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LogicalCloser::record_closed_child(const ColorPoint &child, 
                                             const FieldMask &mask,
-                                            bool leave_open)
+                                            bool leave_open, bool read_only)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      // should never be both, but can be neither
+      assert(!(leave_open && read_only));
+#endif
       closed_mask |= mask;
       // IMPORTANT: Always do this even if we don't have any closed users
       // They could have been pruned out because they finished executing, but
@@ -3328,6 +3332,19 @@ namespace LegionRuntime {
         }
         else
           leave_open_children[child] = ClosingInfo(mask, closed_users);
+      }
+      else if (read_only)
+      {
+        LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
+                                              read_only_children.find(child);
+        if (finder != read_only_children.end())
+        {
+          finder->second.child_fields |= mask;
+          finder->second.child_users.insert(finder->second.child_users.end(),
+                                      closed_users.begin(), closed_users.end());
+        }
+        else
+          read_only_children[child] = ClosingInfo(mask, closed_users);
       }
       else
       {
@@ -3372,16 +3389,21 @@ namespace LegionRuntime {
         LegionList<ClosingSet>::aligned leave_open;
         compute_close_sets(leave_open_children, leave_open);
         create_close_operations(target, creator, leave_open_versions, ver_info,
-                                res_info, trace_info, true/*leave open*/, 
-                                leave_open, leave_open_closes);
+                         res_info, trace_info, true/*leave open*/, leave_open);
+      }
+      if (!read_only_children.empty())
+      {
+        LegionList<ClosingSet>::aligned read_only;
+        compute_close_sets(read_only_children, read_only);
+        create_read_only_close_operations(target, creator, 
+                                          trace_info, read_only);
       }
       if (!force_close_children.empty())
       {
         LegionList<ClosingSet>::aligned force_close;
         compute_close_sets(force_close_children, force_close);
         create_close_operations(target, creator, force_close_versions, ver_info,
-                                res_info, trace_info, false/*leave open*/, 
-                                force_close, force_close_closes);
+                        res_info, trace_info, false/*leave open*/, force_close);
       }
       // Finally if we have any fields which are flush only
       // make a close operation for them and add it to force close
@@ -3406,7 +3428,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Only need to add children to leave open closes
-      for (LegionMap<InterCloseOp*,LogicalUser>::aligned::const_iterator it = 
+      for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it = 
             leave_open_closes.begin(); it != leave_open_closes.end(); it++)
       {
         it->first->add_next_child(next_child);
@@ -3485,12 +3507,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::create_close_operations(RegionTreeNode *target,
-                            Operation *creator, const VersionInfo &local_info,
-                            const VersionInfo &version_info,
-                            const RestrictInfo &restrict_info, 
-                            const TraceInfo &trace_info, bool leave_open,
-                            const LegionList<ClosingSet>::aligned &close_sets,
-                       LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops)
+                              Operation *creator, const VersionInfo &local_info,
+                              const VersionInfo &version_info,
+                              const RestrictInfo &restrict_info, 
+                              const TraceInfo &trace_info, bool leave_open,
+                              const LegionList<ClosingSet>::aligned &close_sets)
     //--------------------------------------------------------------------------
     {
       for (LegionList<ClosingSet>::aligned::const_iterator it = 
@@ -3515,6 +3536,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::create_read_only_close_operations(
+                              RegionTreeNode *target, Operation *creator,
+                              const TraceInfo &trace_info,
+                              const LegionList<ClosingSet>::aligned &close_sets)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionList<ClosingSet>::aligned::const_iterator it = 
+            close_sets.begin(); it != close_sets.end(); it++)
+      {
+        ReadCloseOp *close_op = target->create_read_only_close_op(creator,
+                                                              it->closing_mask,
+                                                              it->children,
+                                                              trace_info);
+        read_only_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
+            RegionUsage(close_op->get_region_requirement()), it->closing_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
                                                     const FieldMask &open_below,
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -3526,10 +3566,15 @@ namespace LegionRuntime {
       // don't run too early.
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
                                               current.op->get_logical_records();
-      register_dependences(current, open_below, leave_open_closes, 
-                           leave_open_children, above_users, cusers, pusers);
-      register_dependences(current, open_below, force_close_closes, 
-                           force_close_children, above_users, cusers, pusers);
+      if (!leave_open_closes.empty())
+        register_dependences(current, open_below, leave_open_closes, 
+                             leave_open_children, above_users, cusers, pusers);
+      if (!read_only_closes.empty())
+        register_dependences(current, open_below, read_only_closes,
+                             read_only_children, above_users, cusers, pusers);
+      if (!force_close_closes.empty())
+        register_dependences(current, open_below, force_close_closes, 
+                             force_close_children, above_users, cusers, pusers);
     }
 
     // If you are looking for LogicalCloser::register_dependences it can 
@@ -3542,15 +3587,29 @@ namespace LegionRuntime {
     {
       // Add our close operations onto the list
       // Note we already added our mapping references when we made them
-      for (LegionMap<InterCloseOp*,LogicalUser>::aligned::const_iterator it = 
-            leave_open_closes.begin(); it != leave_open_closes.end(); it++)
+      if (!leave_open_closes.empty())
       {
-        users.push_back(it->second);
+        for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
+              leave_open_closes.begin(); it != leave_open_closes.end(); it++)
+        {
+          users.push_back(it->second);
+        }
       }
-      for (LegionMap<InterCloseOp*,LogicalUser>::aligned::const_iterator it = 
-            force_close_closes.begin(); it != force_close_closes.end(); it++)
+      if (!read_only_closes.empty())
       {
-        users.push_back(it->second);
+        for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
+              read_only_closes.begin(); it != read_only_closes.end(); it++)
+        {
+          users.push_back(it->second);
+        }
+      }
+      if (!force_close_closes.empty())
+      {
+        for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
+              force_close_closes.begin(); it != force_close_closes.end(); it++)
+        {
+          users.push_back(it->second);
+        }
       }
     }
 

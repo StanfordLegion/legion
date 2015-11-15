@@ -1503,6 +1503,7 @@ namespace LegionRuntime {
                                     bool allow_next_child,
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
+                                    bool read_only_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
@@ -1732,6 +1733,10 @@ namespace LegionRuntime {
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info) = 0;
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
+                                            const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
                                            const std::set<ColorPoint> &targets,
@@ -1871,6 +1876,10 @@ namespace LegionRuntime {
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
@@ -2045,6 +2054,10 @@ namespace LegionRuntime {
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,

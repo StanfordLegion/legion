@@ -810,7 +810,7 @@ namespace LegionRuntime {
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void perform_logging(unsigned is_inter_close_op = 0);
+      void perform_logging(bool is_intermediate_close_op);
     public:
       // For recording trace dependences
     public:
@@ -847,6 +847,7 @@ namespace LegionRuntime {
     public:
       void initialize_trace_close_op(SingleTask *ctx, 
                                      const RegionRequirement &req,
+                                     const std::set<ColorPoint> &targets,
                                      LegionTrace *trace, int close_idx,
                                      const FieldMask &close_mask,
                                      Operation *create_op);
@@ -857,8 +858,16 @@ namespace LegionRuntime {
                                    int target_idx, int source_idx, 
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
+      void add_next_child(const ColorPoint &next_child);
     public:
+      inline const RegionRequirement& get_region_requirement(void) const
+        { return requirement; }
+      inline const std::set<ColorPoint>& get_target_children(void) const
+        { return target_children; }
       inline int get_close_index(void) const { return close_idx; }
+    protected:
+      std::set<ColorPoint> target_children;
+      std::set<ColorPoint> next_children;
     protected:
       // These things are really only needed for tracing
       // The source index from the original 
@@ -893,10 +902,6 @@ namespace LegionRuntime {
                       const VersionInfo &version_info,
                       const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
-      void add_next_child(const ColorPoint &next_child);
-    public:
-      const RegionRequirement& get_region_requirement(void) const;
-      const std::set<ColorPoint>& get_target_children(void) const; 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -906,9 +911,7 @@ namespace LegionRuntime {
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
-      std::set<ColorPoint> target_children;
       bool leave_open;
-      std::set<ColorPoint> next_children;
       unsigned parent_req_index;
     
     };
