@@ -9995,14 +9995,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifdef LEGION_SPY
-      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
-            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
-#else
       // Mark that we are starting a trace
       ctx->begin_trace(tid);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10027,11 +10021,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15672,7 +15663,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                             false, // no inner optimizations for analysis
 #else
-                            options.inner, 
+                            false, // disabling this for now
+                            // See github issue #102
+                            //options.inner, 
 #endif
                             options.leaf, 
                             vid);
@@ -15722,7 +15715,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                                 false, // no inner optimizations for analysis
 #else
-                                options.inner, 
+                                false, // disabling this for now
+                                // See github issue #102
+                                //options.inner,
 #endif
                                 options.leaf, 
                                 vid);
