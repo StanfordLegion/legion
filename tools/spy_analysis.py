@@ -928,6 +928,9 @@ class SingleTask(object):
                 # LegionSpy how to properly compute them yet
                 if mdep.op2.get_op_kind() == DELETION_OP:
                     continue
+                # Skip fences too
+                if mdep.op1.get_op_kind() == FENCE_OP or mdep.op2.get_op_kind() == FENCE_OP:
+                    continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
                       mdep.op1.get_name()+" (ID "+str(mdep.op1.uid)+\
