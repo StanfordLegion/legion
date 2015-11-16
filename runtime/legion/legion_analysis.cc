@@ -3595,6 +3595,7 @@ namespace LegionRuntime {
     void LogicalCloser::update_state(CurrentState &state)
     //--------------------------------------------------------------------------
     {
+      RegionTreeNode *node = state.owner;
       // Our partial mask is initially an over approximation of
       // the partially closed fields, so intersect it with the
       // fields that were actually closed
@@ -3612,6 +3613,9 @@ namespace LegionRuntime {
           state.dirty_below -= fully_closed;
           if (!!state.partially_closed)
             state.partially_closed -= fully_closed;
+          // We can only filter fields fully closed
+          node->filter_prev_epoch_users(state, fully_closed); 
+          node->filter_curr_epoch_users(state, fully_closed);
         }
       }
       else
@@ -3620,6 +3624,9 @@ namespace LegionRuntime {
         state.dirty_below -= closed_mask;
         if (!!state.partially_closed)
           state.partially_closed -= closed_mask;
+        // Filter all the fields since they were all fully closed
+        node->filter_prev_epoch_users(state, closed_mask);
+        node->filter_curr_epoch_users(state, closed_mask);
       }
     }
 

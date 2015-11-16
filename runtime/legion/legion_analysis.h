@@ -485,7 +485,6 @@ namespace LegionRuntime {
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
       inline bool has_closed_fields(void) const { return !!closed_mask; }
-      const FieldMask& get_closed_mask(void) const { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
                                bool leave_open, bool read_only_close);
       void record_partial_fields(const FieldMask &skipped_fields);

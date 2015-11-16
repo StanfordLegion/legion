@@ -9902,7 +9902,6 @@ namespace LegionRuntime {
         if (closer.has_closed_fields())
         {
           // Generate the close operations         
-          const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
           closer.record_top_version_numbers(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
@@ -9913,15 +9912,13 @@ namespace LegionRuntime {
           closer.perform_dependence_analysis(user, open_below,
                                              state.curr_epoch_users,
                                              state.prev_epoch_users);
-          // Now we can flush out all the users dominated by closes
-          filter_prev_epoch_users(state, closed_mask);
-          filter_curr_epoch_users(state, closed_mask);
           // Note we don't need to update the version numbers because
           // that happened when we recorded dirty fields below. 
           // However, we do need to mark that there is no longer any
           // dirty data below this node for all the closed fields
 
           // Update the dirty_below and partial close fields
+          // and filter the current and previous epochs
           closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
@@ -10262,7 +10259,6 @@ namespace LegionRuntime {
         if (closer.has_closed_fields())
         {
           // Generate the close operations         
-          const FieldMask &closed_mask = closer.get_closed_mask();
           // We need to record the version numbers for this node as well
           closer.record_top_version_numbers(this, state);
           closer.initialize_close_operations(this, user.op, version_info, 
@@ -10279,15 +10275,13 @@ namespace LegionRuntime {
           closer.perform_dependence_analysis(user, any_open_below,
                                              state.curr_epoch_users,
                                              state.prev_epoch_users);
-          // Now we can flush out all the users dominated by closes
-          filter_prev_epoch_users(state, closed_mask);
-          filter_curr_epoch_users(state, closed_mask);
           // Note we don't need to update the version numbers because
           // that happened when we recorded dirty fields below. 
           // However, we do need to mark that there is no longer any
           // dirty data below this node for all the closed fields
           
           // Update the dirty below and partial closed fields
+          // and filter the current and previous epochs
           closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
