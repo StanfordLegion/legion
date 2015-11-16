@@ -9890,10 +9890,11 @@ namespace LegionRuntime {
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
-        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*captures*/);
+        const bool captures_closes = !arrived || 
+                              IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
         siphon_logical_children(closer, state, user.field_mask,
-                  !arrived || IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
-                  next_child, open_below);
+                                captures_closes, next_child, open_below);
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
@@ -10232,7 +10233,9 @@ namespace LegionRuntime {
       FieldMask any_open_below;
       // Perform the close operations for all the children
       {
-        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*captures*/);
+        const bool captures_closes = !arrived ||
+                          IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
         if (!arrived)
         {
           // Close up any interfering children, we know our children
@@ -10254,8 +10257,7 @@ namespace LegionRuntime {
           // Writes get their own special close routine
           // Otherwise just do the normal single close operation
           siphon_logical_children(closer, state, user.field_mask,
-                          IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage),
-                          ColorPoint(), any_open_below);
+                                 captures_closes, ColorPoint(), any_open_below);
         }
         if (closer.has_closed_fields())
         {
@@ -10527,7 +10529,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CurrentState &state = get_current_state(ctx);
-      LogicalCloser closer(ctx, user, false/*validates*/, true/*captures*/);
+      LogicalCloser closer(ctx, user, false/*validates*/, false/*captures*/);
       ColorPoint dummy_next_child;
       FieldMask dummy_open_below;
       siphon_logical_children(closer, state, user.field_mask, false/*record*/,
@@ -10801,7 +10803,7 @@ namespace LegionRuntime {
                                          needs_upgrade,
                                          false/*permit leave open*/,
                                          true/*read only close*/,
-                                         true/*record_close_operations*/,
+                                         record_close_operations,
                                          false/*record closed fields*/,
                                          new_states, already_open);
                 open_below |= already_open;
@@ -14097,42 +14099,6 @@ namespace LegionRuntime {
           continue;
         }
 
-          // If we're not capturing the users, then we actually
-          // have to do the dependence analysis with respect to 
-          // the closing user
-          DependenceType dtype = check_dependence_type(it->usage, 
-                                                     closer.user.usage);
-#ifdef LEGION_LOGGING
-          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
-            LegionLogging::log_mapping_dependence(
-                Processor::get_executing_processor(),
-                closer.user.op->get_parent()->get_unique_task_id(),
-                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
-#ifdef LEGION_SPY
-          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
-            LegionSpy::log_mapping_dependence(
-                closer.user.op->get_parent()->get_unique_task_id(),
-                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
-          // Register the dependence 
-          if (closer.user.op->register_region_dependence(closer.user.idx, 
-                                                         it->op, it->gen, 
-                                                         it->idx, dtype,
-                                                         closer.validates,
-                                                         overlap))
-          {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
-            it = users.erase(it);
-            continue;
-#endif
-          }
-          else
-          {
-            // it hasn't committed, reset timeout
-            it->timeout = LogicalUser::TIMEOUT;
-          }
-        
         if (closer.capture_users)
         {
           // Record that we closed this user
@@ -14157,7 +14123,6 @@ namespace LegionRuntime {
         }
         else
         {
-#if 0
           // If we're not capturing the users, then we actually
           // have to do the dependence analysis with respect to 
           // the closing user
@@ -14193,7 +14158,6 @@ namespace LegionRuntime {
             // it hasn't committed, reset timeout
             it->timeout = LogicalUser::TIMEOUT;
           }
-#endif
           // Remove the closed set of fields from this user
           it->field_mask -= overlap;
           // Otherwise, if we can remote it, then remove it's

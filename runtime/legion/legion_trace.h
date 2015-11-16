@@ -115,6 +115,11 @@ namespace LegionRuntime {
       SingleTask *const ctx;
       bool fixed;
       bool tracing;
+#ifdef LEGION_SPY
+    protected:
+      std::vector<UniqueID> current_uids;
+      std::vector<unsigned> num_regions;
+#endif
     };
 
     /**

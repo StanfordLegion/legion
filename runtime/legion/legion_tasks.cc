@@ -2838,7 +2838,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (current_fence != NULL)
+      {
         op->register_dependence(current_fence, fence_gen);
+#ifdef LEGION_SPY
+        unsigned num_regions = op->get_region_count();
+        if (num_regions > 0)
+        {
+          for (unsigned idx = 0; idx < num_regions; idx++)
+          {
+            LegionSpy::log_mapping_dependence(
+                get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+                op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
+          }
+        }
+        else
+          LegionSpy::log_mapping_dependence(
+              get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
