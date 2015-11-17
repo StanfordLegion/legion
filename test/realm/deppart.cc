@@ -14,6 +14,8 @@
 
 using namespace Realm;
 
+Logger log_app("app");
+
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
@@ -48,6 +50,19 @@ void dump_sparse_index_space(const char *pfx, ZIndexSpace<N,T> is)
   }
 } 
 
+static int check_empty(Event e, const std::vector<ZIndexSpace<1> >& p, const char *pfx)
+{
+  int errors = 0;
+  e.wait();
+  for(size_t i = 0; i < p.size(); i++)
+    if(p[i].volume() > 0) {
+      log_app.error() << "HELP! " << pfx << "[" << i << "] space " << p[i] << " isn't empty?";
+      dump_sparse_index_space(pfx, p[i]);
+      errors++;
+    }
+  return errors;
+}
+
 template <typename T, T DEFVAL>
 class WithDefault {
 public:
@@ -59,8 +74,6 @@ protected:
   T val;
 };
 
-Logger log_app("app");
-
 class TestInterface {
 public:
   virtual ~TestInterface(void) {}
@@ -71,6 +84,8 @@ public:
 				const std::vector<Processor>& procs) = 0;
 
   virtual Event perform_partitioning(void) = 0;
+
+  virtual int perform_dynamic_checks(void) = 0;
 
   virtual int check_partitioning(void) = 0;
 };
@@ -583,6 +598,48 @@ public:
     return e4;
   }
 
+  virtual int perform_dynamic_checks(void)
+  {
+    int errors = 0;
+
+    std::vector<ZIndexSpace<1> > p_int_faces, p_border_faces;
+    for(int idx = 0; idx < n_blocks; idx++) {
+      p_int_faces.push_back(p_facetypes[idx][BC_INTERIOR]);
+      p_border_faces.push_back(p_facetypes[idx][BC_BLOCK_BORDER]);
+    }
+    std::vector<ZIndexSpace<1> > p_img_left, p_img_right_i, p_img_right_b;
+    Event e1 = is_cells.create_subspaces_by_image(face_left_field_data,
+						  p_faces,
+						  p_img_left,
+						  Realm::ProfilingRequestSet());
+    Event e2 = is_cells.create_subspaces_by_image(face_right_field_data,
+						  p_int_faces,
+						  p_img_right_i,
+						  Realm::ProfilingRequestSet());
+    Event e3 = is_cells.create_subspaces_by_image(face_right_field_data,
+						  p_border_faces,
+						  p_img_right_b,
+						  Realm::ProfilingRequestSet());
+    std::vector<ZIndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
+    Event e4 = ZIndexSpace<1>::compute_differences(p_img_left, p_cells,
+						   p_l_test,
+						   Realm::ProfilingRequestSet(),
+						   e1);
+    Event e5 = ZIndexSpace<1>::compute_differences(p_img_right_i, p_cells,
+						   p_ri_test,
+						   Realm::ProfilingRequestSet(),
+						   e2);
+    Event e6 = ZIndexSpace<1>::compute_differences(p_img_right_b, p_ghost,
+						   p_rb_test,
+						   Realm::ProfilingRequestSet(),
+						   e3);
+    errors += check_empty(e4, p_l_test, "p_l_test");
+    errors += check_empty(e5, p_ri_test, "p_ri_test");
+    errors += check_empty(e6, p_rb_test, "p_rb_test");
+
+    return errors;
+  }
+
   virtual int check_partitioning(void)
   {
     int errors = 0;
@@ -1016,6 +1073,44 @@ public:
 
     // all done - wait on e7 and e8, which dominate every other operation
     return Event::merge_events(e7, e8);
+  }
+
+  virtual int perform_dynamic_checks(void)
+  {
+    int errors = 0;
+
+    // compute the intermediates for the checks - these duplicate things we
+    //  already have, but we're not supposed to know that here
+    std::vector<ZIndexSpace<1> > p_pvt_and_shr, p_all, p_in_img, p_out_img;
+    Event e1 = ZIndexSpace<1>::compute_unions(p_pvt, p_shr, p_pvt_and_shr,
+                                              Realm::ProfilingRequestSet(),
+                                              Event::NO_EVENT);
+    Event e2 = ZIndexSpace<1>::compute_unions(p_pvt_and_shr, p_ghost, p_all,
+                                              Realm::ProfilingRequestSet(),
+                                              e1);
+    Event e3 = is_nodes.create_subspaces_by_image(in_node_field_data,
+						  p_edges,
+						  p_in_img,
+						  Realm::ProfilingRequestSet(),
+						  Event::NO_EVENT);
+    Event e4 = is_nodes.create_subspaces_by_image(out_node_field_data,
+						  p_edges,
+						  p_out_img,
+						  Realm::ProfilingRequestSet(),
+						  Event::NO_EVENT);
+    std::vector<ZIndexSpace<1> > p_in_test, p_out_test;
+    Event e5 = ZIndexSpace<1>::compute_differences(p_in_img, p_pvt_and_shr,
+                                                   p_in_test,
+						   Realm::ProfilingRequestSet(),
+                                                   Event::merge_events(e1, e3));
+    Event e6 = ZIndexSpace<1>::compute_differences(p_out_img, p_all,
+                                                   p_out_test,
+						   Realm::ProfilingRequestSet(),
+                                                   Event::merge_events(e2, e4));
+    errors += check_empty(e5, p_in_test, "p_in_test");
+    errors += check_empty(e6, p_out_test, "p_out_test");
+
+    return errors;
   }
 
   virtual int check_partitioning(void)
@@ -1509,6 +1604,43 @@ public:
     return e6;
   }
 
+  virtual int perform_dynamic_checks(void)
+  {
+    int errors = 0;
+
+    std::vector<ZIndexSpace<1> > p_img_mapsz, p_img_mapsp1, p_img_mapss3;
+    Event e1 = is_zones.create_subspaces_by_image(side_mapsz_field_data,
+						  p_sides,
+						  p_img_mapsz,
+						  Realm::ProfilingRequestSet());
+    Event e2 = is_points.create_subspaces_by_image(side_mapsp1_field_data,
+						   p_sides,
+						   p_img_mapsp1,
+						   Realm::ProfilingRequestSet());
+    Event e3 = is_sides.create_subspaces_by_image(side_mapss3_field_data,
+						  p_sides,
+						  p_img_mapss3,
+						  Realm::ProfilingRequestSet());
+    std::vector<ZIndexSpace<1> > p_z_test, p_p_test, p_s_test;
+    Event e4 = ZIndexSpace<1>::compute_differences(p_img_mapsz, p_zones,
+						   p_z_test,
+						   Realm::ProfilingRequestSet(),
+						   e1);
+    Event e5 = ZIndexSpace<1>::compute_differences(p_img_mapsp1, p_points,
+						   p_p_test,
+						   Realm::ProfilingRequestSet(),
+						   e2);
+    Event e6 = ZIndexSpace<1>::compute_differences(p_img_mapss3, p_sides,
+						   p_s_test,
+						   Realm::ProfilingRequestSet(),
+						   e3);
+    errors += check_empty(e4, p_z_test, "p_z_test");
+    errors += check_empty(e5, p_p_test, "p_p_test");
+    errors += check_empty(e6, p_s_test, "p_s_test");
+
+    return errors;
+  }
+
   virtual int check_partitioning(void)
   {
     int errors = 0;
@@ -1652,6 +1784,12 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     Event e = testcfg->perform_partitioning();
 
     e.wait();
+  }
+
+  // dynamic checks (which would be eliminated by compiler)
+  {
+    Realm::TimeStamp ts("dynamic checks", true, &log_app);
+    errors += testcfg->perform_dynamic_checks();
   }
 
   if(!skip_check) {
