@@ -37,6 +37,7 @@ namespace Realm {
     bool cfg_disable_intersection_optimization = false;
     int cfg_max_rects_in_approximation = 32;
     size_t cfg_max_bytes_per_packet = 2048;//32768;
+    bool cfg_worker_threads_sleep = false;
   };
 
 
@@ -119,6 +120,8 @@ namespace Realm {
           nx = bounds.lo.x + cum_weight * (total_x / total_weight);
         else
 	  nx = bounds.lo.x + (total_x * cum_weight / total_weight);
+	// wrap-around here means bad math
+	assert(nx >= px);
 	ss.bounds.lo.x = px;
 	ss.bounds.hi.x = nx - 1;
 	subspaces.push_back(ss);
@@ -1611,15 +1614,12 @@ namespace Realm {
     if(cfg_num_partitioning_workers > 1)
       inline_ok = false;
     // if there were no registrations by caller (or if they're really fast), the count will be 2
-    //  and we can execute this microop inline
+    //  and we can execute this microop inline (if we're allowed to)
     int left1 = __sync_sub_and_fetch(&wait_count, 1);
-    if(left1 == 1) {
-      if(inline_ok) {
-	mark_started();
-	execute();
-	mark_finished();
-      } else
-	op_queue->enqueue_partitioning_microop(this);
+    if((left1 == 1) && inline_ok) {
+      mark_started();
+      execute();
+      mark_finished();
       return;
     }
 
@@ -4185,8 +4185,15 @@ namespace Realm {
       while(!op && !shutdown_flag) {
 	AutoHSLLock al(mutex);
 	op = queued_ops.get(&priority);
-	if(!op && !shutdown_flag)
-	  condvar.wait();
+	if(!op && !shutdown_flag) {
+          if(cfg_worker_threads_sleep) {
+	    condvar.wait();
+          } else {
+            mutex.unlock();
+            Thread::yield();
+            mutex.lock();
+          }
+        }
       }
       if(op) {
 	switch(priority) {
