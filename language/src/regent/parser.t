@@ -602,24 +602,24 @@ function parser.expr_prefix(p)
     if p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
-      local region_type_expr = p:luaexpr()
+      local region = p:expr()
       p:expect(",")
       local coloring = p:expr()
       p:expect(")")
       return ast.unspecialized.expr.Partition {
         disjointness = disjointness,
-        region_type_expr = region_type_expr,
+        region = region,
         coloring = coloring,
         options = ast.default_options(),
         span = ast.span(start, p),
       }
     else
-      local coloring = p:expr_region_root()
+      local region = p:expr_region_root()
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
       return ast.unspecialized.expr.PartitionByField {
-        coloring = coloring,
+        region = region,
         colors = colors,
         options = ast.default_options(),
         span = ast.span(start, p),

@@ -151,6 +151,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Partition) then
     return nil
 
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return nil
+
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
@@ -585,6 +588,15 @@ function optimize_futures.expr_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_partition_by_field(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
 function optimize_futures.expr_cross_product(cx, node)
   local args = node.args:map(
     function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
@@ -800,6 +812,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Partition) then
     return optimize_futures.expr_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return optimize_futures.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)

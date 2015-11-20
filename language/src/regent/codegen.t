@@ -2998,6 +2998,48 @@ function codegen.expr_partition(cx, node)
     partition_type)
 end
 
+function codegen.expr_partition_by_field(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local partition_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [colors.actions];
+    [emit_debuginfo(node)]
+  end
+
+  assert(cx:has_region(region_type))
+  local parent_region =
+    cx:region(cx:region(region_type).root_region_type).logical_region
+
+  local fields = std.flatten_struct_fields(region_type:fspace())
+  local field_paths = data.filter(
+    function(field) return field:starts_with(node.region.fields[1]) end,
+    fields)
+  assert(#field_paths == 1)
+
+  local field_id = cx:region(region_type):field_id(field_paths[1])
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
+    var domain = c.legion_index_space_get_domain(
+      [cx.runtime], [cx.context], [colors.value].impl)
+    var [ip] = c.legion_index_partition_create_by_field(
+    [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
+    field_id, domain, -1, false)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
+  end
+
+  return values.value(
+    expr.once_only(actions, `(partition_type { impl = [lp] })),
+    partition_type)
+end
+
 function codegen.expr_cross_product(cx, node)
   local args = node.args:map(function(arg) return codegen.expr(cx, arg):read(cx) end)
   local expr_type = std.as_read(node.expr_type)
@@ -4293,6 +4335,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Partition) then
     return codegen.expr_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return codegen.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)

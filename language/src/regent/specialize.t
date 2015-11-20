@@ -829,23 +829,40 @@ end
 
 function specialize.expr_partition(cx, node)
   local disjointness = specialize.disjointness_kind(cx, node.disjointness)
-  local region_type = node.region_type_expr(cx.env:env())
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if disjointness ~= std.disjoint and disjointness ~= std.aliased then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
+  local region = specialize.expr(cx, node.region)
+  local coloring = specialize.expr(cx, node.coloring)
+
+  local region_symbol
+  if region:is(ast.specialized.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(disjointness, region_type)
-  local region = ast.specialized.expr.ID {
-    value = expr_type.parent_region_symbol,
-    options = node.options,
-    span = node.span,
-  }
+  local expr_type = std.partition(disjointness, region_symbol)
   return ast.specialized.expr.Partition {
     disjointness = disjointness,
     region = region,
-    coloring = specialize.expr(cx, node.coloring),
+    coloring = coloring,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_partition_by_field(cx, node)
+  local region = specialize.expr_region_root(cx, node.region)
+  local colors = specialize.expr(cx, node.colors)
+
+  local region_symbol
+  if region.region:is(ast.specialized.expr.ID) then
+    region_symbol = region.region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol)
+  return ast.specialized.expr.PartitionByField {
+    region = region,
+    colors = colors,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1067,6 +1084,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Partition) then
     return specialize.expr_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    return specialize.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)

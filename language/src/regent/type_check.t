@@ -1205,11 +1205,8 @@ function type_check.expr_partition(cx, node)
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring)
 
-  -- Note: This test can't fail because disjointness is tested in specialize.
-  if not (disjointness == std.disjoint or disjointness == std.aliased) then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
-  end
+  -- Note: This test can't fail because disjointness is tested in the parser.
+  assert(disjointness == std.disjoint or disjointness == std.aliased)
 
   if not std.is_region(region_type) then
     log.error(node, "type mismatch in argument 2: expected region but got " ..
@@ -1230,11 +1227,66 @@ function type_check.expr_partition(cx, node)
     end
   end
 
+  local expr_type = node.expr_type
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
   return ast.typed.expr.Partition {
     disjointness = disjointness,
     region = region,
     coloring = coloring,
-    expr_type = node.expr_type,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_partition_by_field(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.check_read(cx, colors)
+
+  if #region.fields ~= 1 then
+    log.error(node, "type mismatch in argument 1: expected 1 field but got " ..
+                tostring(#region.fields))
+  end
+
+  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
+  if not std.type_eq(field_type, int) then
+    log.error(node, "type mismatch in argument 1: expected field of type " .. tostring(int) ..
+                " but got " .. tostring(field_type))
+  end
+
+  if not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 2: expected ispace but got " ..
+                tostring(colors_type))
+  end
+
+  local expr_type = node.expr_type
+  if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
+    log.error(
+      node, "invalid privileges in argument 1: " .. tostring(std.reads) .. "(" ..
+        (data.newtuple(expr_type.parent_region_symbol) .. region.fields[1]):mkstring(".") ..
+        ")")
+  end
+
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
+  return ast.typed.expr.PartitionByField {
+    region = region,
+    colors = colors,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1836,6 +1888,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Partition) then
     return type_check.expr_partition(cx, node)
+
+  elseif node:is(ast.specialized.expr.PartitionByField) then
+    return type_check.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
