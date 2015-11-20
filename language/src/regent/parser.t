@@ -391,6 +391,25 @@ function parser.constraint(p)
   }
 end
 
+function parser.is_disjointness_kind(p)
+  return p:matches("aliased") or p:matches("disjoint")
+end
+
+function parser.disjointness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("aliased") then
+    return ast.unspecialized.disjointness_kind.Aliased {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("disjoint") then
+    return ast.unspecialized.disjointness_kind.Disjoint {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected disjointness")
+  end
+end
+
 function parser.expr_prefix(p)
   local start = ast.save(p)
   if p:nextif("(") then
@@ -580,19 +599,32 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
-    local disjointness_expr = p:luaexpr()
-    p:expect(",")
-    local region_type_expr = p:luaexpr()
-    p:expect(",")
-    local coloring = p:expr()
-    p:expect(")")
-    return ast.unspecialized.expr.Partition {
-      disjointness_expr = disjointness_expr,
-      region_type_expr = region_type_expr,
-      coloring = coloring,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
+    if p:is_disjointness_kind() then
+      local disjointness = p:disjointness_kind()
+      p:expect(",")
+      local region_type_expr = p:luaexpr()
+      p:expect(",")
+      local coloring = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.Partition {
+        disjointness = disjointness,
+        region_type_expr = region_type_expr,
+        coloring = coloring,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    else
+      local coloring = p:expr_region_root()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionByField {
+        coloring = coloring,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    end
 
   elseif p:nextif("cross_product") then
     p:expect("(")

@@ -533,6 +533,16 @@ function specialize.constraints(cx, node)
     function(constraint) return specialize.constraint(cx, constraint) end)
 end
 
+function specialize.disjointness_kind(cx, node)
+  if node:is(ast.unspecialized.disjointness_kind.Aliased) then
+    return std.aliased
+  elseif node:is(ast.unspecialized.disjointness_kind.Disjoint) then
+    return std.disjoint
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.expr_id(cx, node)
   local value = cx.env:lookup(node, node.name)
   return convert_lua_value(cx, node, value)
@@ -818,7 +828,7 @@ function specialize.expr_region(cx, node)
 end
 
 function specialize.expr_partition(cx, node)
-  local disjointness = node.disjointness_expr(cx.env:env())
+  local disjointness = specialize.disjointness_kind(cx, node.disjointness)
   local region_type = node.region_type_expr(cx.env:env())
   -- Hack: Need to do this type checking early because otherwise we
   -- can't construct a type here.

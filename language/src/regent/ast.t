@@ -414,6 +414,10 @@ ast.unspecialized.condition_kind:leaf("Arrives")
 ast.unspecialized.condition_kind:leaf("Awaits")
 ast.unspecialized:leaf("Condition", {"conditions", "variables"})
 
+ast.unspecialized:inner("disjointness_kind")
+ast.unspecialized.disjointness_kind:leaf("Aliased")
+ast.unspecialized.disjointness_kind:leaf("Disjoint")
+
 ast.unspecialized:inner("expr", {"options"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
@@ -437,8 +441,8 @@ ast.unspecialized.expr:leaf("DynamicCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("StaticCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("Ispace", {"index_type_expr", "extent", "start"})
 ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
-ast.unspecialized.expr:leaf("Partition", {"disjointness_expr",
-                                          "region_type_expr", "coloring"})
+ast.unspecialized.expr:leaf("Partition", {"disjointness", "region_type_expr",
+                                          "coloring"})
 ast.unspecialized.expr:leaf("CrossProduct", {"arg_type_exprs"})
 ast.unspecialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
 ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})

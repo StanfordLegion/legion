@@ -57,7 +57,7 @@ local language = {
     "__spmd",
     "__unroll",
     "__vectorize",
-    "aliased", -- reserved for future use
+    "aliased",
     "allocate_scratch_fields",
     "advance",
     "arrives",
@@ -65,7 +65,7 @@ local language = {
     "atomic",
     "copy",
     "cross_product",
-    "disjoint", -- reserved for future use
+    "disjoint",
     "dynamic_cast",
     "exclusive",
     "fill",
