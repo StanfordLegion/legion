@@ -3748,7 +3748,7 @@ local function expr_fill_setup_region(
 
       local fill_value = value_value
       for _, field_name in ipairs(value_field) do
-        fill_value = `([value_value].[field_name])
+        fill_value = `([fill_value].[field_name])
       end
       fill_value = std.implicit_cast(
         value_field_type, dst_field_type, fill_value)
