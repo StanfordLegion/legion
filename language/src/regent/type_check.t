@@ -1078,10 +1078,10 @@ function type_check.expr_dynamic_cast(cx, node)
   if not std.is_bounded_type(node.expr_type) then
     log.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not std.is_bounded_type(value_type) then
+  if not (std.is_index_type(value_type) or std.is_bounded_type(value_type)) then
     log.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
-  if not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+  if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
     log.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
