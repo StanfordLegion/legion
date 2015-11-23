@@ -180,14 +180,14 @@ def install():
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
-    root_dir = os.path.realpath(os.path.dirname(__file__))
+    root_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(root_dir)
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.
     runtime_dir = os.path.join(legion_dir, 'runtime')
     if 'LG_RT_DIR' in os.environ:
-        runtime_dir = os.environ['LG_RT_DIR']
+        runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
     terra_dir = os.path.join(root_dir, 'terra')
     install_terra(terra_dir, args.terra, thread_count)

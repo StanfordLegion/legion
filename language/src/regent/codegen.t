@@ -5721,11 +5721,6 @@ function codegen.stat_task(cx, node)
       physical_regions_index:insert(physical_region_i)
       physical_region_i = physical_region_i + 1
 
-      -- we still need physical regions for map/unmap operations to work
-      for i, field_path in ipairs(field_paths) do
-        physical_regions_by_field_path[field_path:hash()] = physical_region
-      end
-
       if not task:get_config_options().inner then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
@@ -5740,6 +5735,7 @@ function codegen.stat_task(cx, node)
         base_pointers:insert(pr_base_pointers)
 
         for i, field_path in ipairs(field_paths) do
+          physical_regions_by_field_path[field_path:hash()] = physical_region
           if privileges_by_field_path[field_path:hash()] ~= "none" then
             base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
             strides_by_field_path[field_path:hash()] = pr_strides[i]
