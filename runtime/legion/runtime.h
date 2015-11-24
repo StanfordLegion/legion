@@ -2141,10 +2141,12 @@ namespace LegionRuntime {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Internal* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
