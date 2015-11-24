@@ -2251,7 +2251,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   end
 
   function st:list_depth()
-    return 1 + self.element_type:list_depth()
+    if std.is_list(self.element_type) then
+      return 1 + self.element_type:list_depth()
+    else
+      return 1
+    end
   end
 
   function st:leaf_element_type()
