@@ -22,6 +22,12 @@
 -- The graph description also includes one or more source node IDs, which are
 -- the origins of the individual SSSP problems, which may be processed serially,
 -- or in parallel.
+--
+-- This version accept an additional -p N option that divides the nodes and edges
+-- into N ~equal subregions and parallelizes the loading, analysis, and checking.
+-- No attempt is made to line up the nodes and edges partitions though, so the
+-- the update step for a subset of edges still requires access to all the nodes,
+-- preventing us from doing any local iteration.
 
 -- This is for the automated Regent test suite:
 -- runs-with:
@@ -41,6 +47,7 @@ local helpers = require("mssp_helpers")
 
 fspace Node {
   distance : float,
+  dist_next : float,
   exp_distance : float
 }
 
@@ -66,8 +73,35 @@ do
   --end
 end
 
-task sssp(g : GraphCfg, rn : region(Node), re : region(Edge(rn)), root : ptr(Node, rn))
-  where reads(re.{n1,n2,cost}), reads writes(rn.{distance})
+task sssp_update(g : GraphCfg, rn : region(Node), re : region(Edge(rn)))
+  where reads(re.{n1,n2,cost}), reads(rn.distance), reduces min(rn.dist_next)
+do
+  for e in re do
+    var d1 = e.n1.distance
+    e.n2.dist_next min= d1 + e.cost
+  end
+end
+
+task sssp_collect(g : GraphCfg, rn : region(Node))
+  where reads writes(rn.distance), reads(rn.dist_next)
+do
+  var count = 0
+  for n in rn do
+    var oldval = n.distance
+    var newval = n.dist_next
+    if (newval < oldval) then
+      n.distance = newval
+      count = count + 1
+    end
+  end
+  return count
+end
+
+task sssp(g : GraphCfg, subgraphs : int,
+	  rn : region(Node), re : region(Edge(rn)),
+	  pn : partition(disjoint, rn), pe : partition(disjoint, re),
+	  root : ptr(Node, rn))
+  where reads(re.{n1,n2,cost}), reads writes(rn.{distance,dist_next})
 do
   -- fill called by parent
   --fill(rn.distance, INFINITY)
@@ -76,13 +110,16 @@ do
   -- upper bound is |V|-1 iterations - should normally take much less than that
   for steps = 1, g.nodes do
     var count = 0
-    for e in re do
-      var d1 = e.n1.distance
-      var d2 = e.n2.distance
-      if (d1 + e.cost) < d2 then
-	e.n2.distance = d1 + e.cost
-	count = count + 1
-      end
+    fill(rn.dist_next, INFINITY)
+
+    __demand(__parallel)
+    for i = 0, subgraphs do
+      sssp_update(g, rn, pe[i])
+    end
+
+    __demand(__parallel)
+    for i = 0, subgraphs do
+      count += sssp_collect(g, pn[i])
     end
     if count == 0 then
       break
@@ -104,6 +141,7 @@ do
   for n in rn do
     var d = n.distance
     var ed = n.exp_distance
+    --c.printf("%3d %5.3f %5.3f %g %g\n", __raw(n).value, d, ed, d - ed, cmath.fabsf(d - ed))
     if (cmath.fabsf(d - ed) < 1e-5) or (cmath.isinf(ed) == 1 and (d > 1e10)) then
       -- ok
     else
@@ -122,11 +160,15 @@ task toplevel()
 
   var graph : GraphCfg
   var verbose = false
+  var subgraphs = 1
   do
     var i = 1
     while i < args.argc do
       if cstring.strcmp(args.argv[i], '-v') == 0 then
 	verbose = true
+      elseif cstring.strcmp(args.argv[i], '-p') == 0 then
+	i = i + 1
+	subgraphs = c.atoi(args.argv[i])
       else
 	break
       end
@@ -160,17 +202,51 @@ task toplevel()
     c.legion_index_allocator_destroy(i)
   end
 
-  read_edge_data(graph, rn, re)
+  -- equal subspaces of rn
+  --var pn : partition(disjoint, rn)
+  var ccn = c.legion_coloring_create()
+  do
+    var i = 0
+    for n in rn do
+      var color = i * subgraphs / graph.nodes
+      c.legion_coloring_add_point(ccn, color, __raw(n))
+      i = i + 1
+    end
+  end
+  var pn = partition(disjoint, rn, ccn)
+  c.legion_coloring_destroy(ccn)
+
+  -- equal subspaces of re
+  var cc = c.legion_coloring_create()
+  do 
+    var i = 0
+    for e in re do
+      var color = i * subgraphs / graph.edges
+      c.legion_coloring_add_point(cc, color, __raw(e))
+      i = i + 1
+    end
+  end
+  var pe = partition(disjoint, re, cc)
+  c.legion_coloring_destroy(cc)
+
+  -- parallel load of edge data
+  __demand(__parallel)
+  for i = 0, subgraphs do
+    read_edge_data(graph, rn, pe[i])
+  end
 
   for s = 0, graph.num_sources do
     fill(rn.distance, INFINITY)
 
     var root_id = graph.sources[s]
     var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
-    sssp(graph, rn, re, root)
+    sssp(graph, subgraphs, rn, re, pn, pe, root)
 
-    read_expected_distances(graph, rn, [&int8](graph.expecteds[s]))
-    var errors = check_results(graph, rn, verbose)
+    var errors = 0
+    for i = 0, subgraphs do
+      read_expected_distances(graph, pn[i], [&int8](graph.expecteds[s]))
+      errors += check_results(graph, pn[i], verbose)
+    end
     if errors == 0 then
       c.printf("source %d OK\n", root_id)
     else

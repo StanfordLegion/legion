@@ -26,6 +26,7 @@ function read_region_data(t)
 			     filename : &int8,
 			     offset : uint64)
     var fd = fcntl.open(filename, fcntl.O_RDONLY)
+    regentlib.assert(fd >= 0, "failed to open input file")
     
     var fa = c.legion_physical_region_get_field_accessor_array(pr, fld)
 
@@ -40,10 +41,7 @@ function read_region_data(t)
 			     [&t](c.legion_accessor_array_ref(fa, start)),
 			     sizeof(t) * count,
 			     offset + sizeof(t) * start.value)
-      if amt < sizeof(t) * count then
-	c.printf("short read!\n")
-	c.exit(1)
-      end
+      regentlib.assert(amt == sizeof(t) * count, "short read!")
     end
     unistd.close(fd)
   end
