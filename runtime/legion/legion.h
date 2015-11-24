@@ -5510,6 +5510,7 @@ namespace LegionRuntime {
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;
       Internal *runtime;
