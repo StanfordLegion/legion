@@ -669,6 +669,8 @@ namespace LegionRuntime {
     protected:
       ReductionOpID redop;
       const ReductionOp *reduction_op;
+      // For handling reductions of types with serdez methods
+      const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
       void *reduction_state; 
     };

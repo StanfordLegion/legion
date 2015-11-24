@@ -15478,6 +15478,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezRedopFns* Internal::get_serdez_redop_fns(
+                                                         ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      SerdezRedopTable &serdez_table = get_serdez_redop_table(); 
+      SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
+      if (finder != serdez_table.end())
+        return &(finder->second);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Internal::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
@@ -15508,6 +15520,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
+      return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ SerdezRedopTable& Internal::get_serdez_redop_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static SerdezRedopTable table;
       return table;
     }
 
