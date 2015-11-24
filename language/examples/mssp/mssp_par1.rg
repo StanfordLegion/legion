@@ -141,8 +141,7 @@ do
   for n in rn do
     var d = n.distance
     var ed = n.exp_distance
-    --c.printf("%3d %5.3f %5.3f %g %g\n", __raw(n).value, d, ed, d - ed, cmath.fabsf(d - ed))
-    if (cmath.fabsf(d - ed) < 1e-5) or (cmath.isinf(ed) == 1 and (d > 1e10)) then
+    if (d == ed) or (cmath.fabsf(d - ed) < 1e-5) then
       -- ok
     else
       if verbose then
