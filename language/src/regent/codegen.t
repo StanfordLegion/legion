@@ -1719,8 +1719,9 @@ function codegen.expr_index_access(cx, node)
     local index = codegen.expr(cx, node.index):read(cx)
     return values.ref(index, node.expr_type.pointer_type)
   elseif std.is_list(value_type) then
+    local index_type = std.as_read(node.index.expr_type)
     local index = codegen.expr(cx, node.index):read(cx)
-    if not std.is_list(node.expr_type) then
+    if not std.is_list(index_type) then
       -- Single indexing
       local value = codegen.expr(cx, node.value):get_index(cx, index, expr_type)
       if not value_type:is_list_of_regions() then

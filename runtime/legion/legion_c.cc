@@ -366,12 +366,13 @@ legion_index_space_retrieve_name(legion_runtime_t runtime_,
 //------------------------------------------------------------------------
 
 legion_index_partition_t
-legion_index_partition_create_coloring(legion_runtime_t runtime_,
-                                       legion_context_t ctx_,
-                                       legion_index_space_t parent_,
-                                       legion_coloring_t coloring_,
-                                       bool disjoint,
-                                       int part_color /* = -1 */)
+legion_index_partition_create_coloring(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_coloring_t coloring_,
+  bool disjoint,
+  int part_color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
@@ -385,60 +386,6 @@ legion_index_partition_create_coloring(legion_runtime_t runtime_,
 }
 
 legion_index_partition_t
-legion_index_partition_create_blockify_1d(legion_runtime_t runtime_,
-                                          legion_context_t ctx_,
-                                          legion_index_space_t parent_,
-                                          legion_blockify_1d_t blockify_,
-                                          int part_color /* = -1 */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
-
-  return CObjectWrapper::wrap(ip);
-}
-
-legion_index_partition_t
-legion_index_partition_create_blockify_2d(legion_runtime_t runtime_,
-                                          legion_context_t ctx_,
-                                          legion_index_space_t parent_,
-                                          legion_blockify_2d_t blockify_,
-                                          int part_color /* = -1 */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
-
-  return CObjectWrapper::wrap(ip);
-}
-
-legion_index_partition_t
-legion_index_partition_create_blockify_3d(legion_runtime_t runtime_,
-                                          legion_context_t ctx_,
-                                          legion_index_space_t parent_,
-                                          legion_blockify_3d_t blockify_,
-                                          int part_color /* = -1 */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
-
-  return CObjectWrapper::wrap(ip);
-}
-
-legion_index_partition_t
 legion_index_partition_create_domain_coloring(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
@@ -446,7 +393,7 @@ legion_index_partition_create_domain_coloring(
   legion_domain_t color_space_,
   legion_domain_coloring_t coloring_,
   bool disjoint,
-  int part_color /* = -1 */)
+  int part_color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
@@ -457,6 +404,84 @@ legion_index_partition_create_domain_coloring(
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     disjoint, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_blockify_1d(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_blockify_1d_t blockify_,
+  int part_color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, blockify, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_blockify_2d(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_blockify_2d_t blockify_,
+  int part_color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, blockify, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_blockify_3d(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_blockify_3d_t blockify_,
+  int part_color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, blockify, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_equal(legion_runtime_t runtime_,
+                                    legion_context_t ctx_,
+                                    legion_index_space_t parent_,
+                                    legion_domain_t color_space_,
+                                    size_t granularity,
+                                    int color /* = AUTO_GENERATE_ID */,
+                                    bool allocable /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    // FIXME: This won't actually work yet...
+    runtime->create_equal_partition(ctx, parent, color_space, color, allocable);
+#else
+    runtime->create_equal_partition(ctx, parent, color_space, color, allocable);
+#endif
   return CObjectWrapper::wrap(ip);
 }
 
@@ -578,6 +603,76 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
 #else
     runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
                                        color, allocable);
+#endif
+
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_image(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t handle_,
+  legion_logical_partition_t projection_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_domain_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */,
+  bool allocable /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  LogicalPartition projection = CObjectWrapper::unwrap(projection_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    // FIXME: This won't actually work yet...
+    runtime->create_partition_by_image(
+      ctx, handle, projection, parent, fid, color_space, part_kind, color,
+      allocable);
+#else
+    runtime->create_partition_by_image(
+      ctx, handle, projection, parent, fid, color_space, part_kind, color,
+      allocable);
+#endif
+
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_preimage(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t projection_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_domain_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */,
+  bool allocable /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexPartition projection = CObjectWrapper::unwrap(projection_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    // FIXME: This won't actually work yet...
+    runtime->create_partition_by_preimage(
+      ctx, projection, handle, parent, fid, color_space, part_kind, color,
+      allocable);
+#else
+    runtime->create_partition_by_preimage(
+      ctx, projection, handle, parent, fid, color_space, part_kind, color,
+      allocable);
 #endif
 
   return CObjectWrapper::wrap(ip);

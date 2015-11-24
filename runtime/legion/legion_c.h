@@ -602,49 +602,14 @@ extern "C" {
    *        Context, IndexSpace, Coloring, bool, int)
    */
   legion_index_partition_t
-  legion_index_partition_create_coloring(legion_runtime_t runtime,
-                                         legion_context_t ctx,
-                                         legion_index_space_t parent,
-                                         legion_coloring_t coloring,
-                                         bool disjoint,
-                                         int part_color /* = -1 */);
+  legion_index_partition_create_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_coloring_t coloring,
+    bool disjoint,
+    int part_color /* = AUTO_GENERATE_ID */);
 
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
-   *        Context, IndexSpace, const T&, int)
-   */
-  legion_index_partition_t
-  legion_index_partition_create_blockify_1d(legion_runtime_t runtime,
-                                            legion_context_t ctx,
-                                            legion_index_space_t parent,
-                                            legion_blockify_1d_t blockify,
-                                            int part_color /* = -1 */);
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
-   *        Context, IndexSpace, const T&, int)
-   */
-  legion_index_partition_t
-  legion_index_partition_create_blockify_2d(legion_runtime_t runtime,
-                                            legion_context_t ctx,
-                                            legion_index_space_t parent,
-                                            legion_blockify_2d_t blockify,
-                                            int part_color /* = -1 */);
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
-   *        Context, IndexSpace, const T&, int)
-   */
-  legion_index_partition_t
-  legion_index_partition_create_blockify_3d(legion_runtime_t runtime,
-                                            legion_context_t ctx,
-                                            legion_index_space_t parent,
-                                            legion_blockify_3d_t blockify,
-                                            int part_color /* = -1 */);
   /**
    * @return Caller takes ownership of return value.
    *
@@ -659,12 +624,69 @@ extern "C" {
     legion_domain_t color_space,
     legion_domain_coloring_t coloring,
     bool disjoint,
-    int part_color /* = -1 */);
+    int part_color /* = AUTO_GENERATE_ID */);
+
 
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_field
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_1d(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_blockify_1d_t blockify,
+    int part_color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_2d(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_blockify_2d_t blockify,
+    int part_color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_3d(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_blockify_3d_t blockify,
+    int part_color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_equal_partition()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_equal(legion_runtime_t runtime,
+                                      legion_context_t ctx,
+                                      legion_index_space_t parent,
+                                      legion_domain_t color_space,
+                                      size_t granularity,
+                                      int color /* = AUTO_GENERATE_ID */,
+                                      bool allocable /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_field()
    */
   legion_index_partition_t
   legion_index_partition_create_by_field(legion_runtime_t runtime,
@@ -675,6 +697,42 @@ extern "C" {
                                          legion_domain_t color_space,
                                          int color /* = AUTO_GENERATE_ID */,
                                          bool allocable /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_image()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_image(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_logical_partition_t projection,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_domain_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */,
+    bool allocable /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_preimage()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_preimage(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t projection,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_domain_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */,
+    bool allocable /* = false */);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.

@@ -603,10 +603,12 @@ function type_check.expr_index_access(cx, node)
 
     if not value_type:is_list_of_regions() then
       local expr_type = value_type:leaf_element_type()
+      local start = 2
       if slice then
-        for i = 1, value_type:list_depth() do
-          expr_type = std.list(expr_type)
-        end
+        start = 1
+      end
+      for i = start, value_type:list_depth() do
+        expr_type = std.list(expr_type)
       end
       return ast.typed.expr.IndexAccess {
         value = value,
