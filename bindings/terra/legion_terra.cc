@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <string>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 #include "legion.h"
@@ -184,11 +185,11 @@ DECLARE_REDUCTION(register_reduction_divide_int32,
 DECLARE_REDUCTION(register_reduction_max_float,
                   safe_reduce_max_float, safe_reduce_max_float_domain_point,
                   reduce_max_float, reduce_max_float_domain_point,
-                  MaxOPFloat, float, int, max, max, -FLT_MAX)
+                  MaxOPFloat, float, int, max, max, -std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_max_double,
                   safe_reduce_max_double, safe_reduce_max_double_domain_point,
                   reduce_max_double, reduce_max_double_domain_point,
-                  MaxOpDouble, double, size_t, max, max, -DBL_MAX)
+                  MaxOpDouble, double, size_t, max, max, -std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_max_int32,
                   safe_reduce_max_int32, safe_reduce_max_int32_domain_point,
                   reduce_max_int32, reduce_max_int32_domain_point,
@@ -197,11 +198,11 @@ DECLARE_REDUCTION(register_reduction_max_int32,
 DECLARE_REDUCTION(register_reduction_min_float,
                   safe_reduce_min_float, safe_reduce_min_float_domain_point,
                   reduce_min_float, reduce_min_float_domain_point,
-                  MinOPFloat, float, int, min, min, FLT_MAX)
+                  MinOPFloat, float, int, min, min, std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_min_double,
                   safe_reduce_min_double, safe_reduce_min_double_domain_point,
                   reduce_min_double, reduce_min_double_domain_point,
-                  MinOpDouble, double, size_t, min, min, DBL_MAX)
+                  MinOpDouble, double, size_t, min, min, std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_min_int32,
                   safe_reduce_min_int32, safe_reduce_min_int32_domain_point,
                   reduce_min_int32, reduce_min_int32_domain_point,
