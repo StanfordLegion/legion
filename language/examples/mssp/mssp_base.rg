@@ -23,6 +23,10 @@
 -- the origins of the individual SSSP problems, which may be processed serially,
 -- or in parallel.
 
+-- This is for the automated Regent test suite:
+-- runs-with:
+-- [ ["small"] ]
+
 import "regent"
 
 -- these give us useful things like c.printf, c.exit, cstring.strcmp, ...
