@@ -1151,6 +1151,11 @@ namespace LegionRuntime {
       inline PhysicalManager* get_manager(void) const { return manager; }
       inline InstanceView* get_instance_view(void) const { return view; }
     public:
+      // These methods are used by PhysicalRegion::Impl to hold
+      // valid references to avoid premature collection
+      void add_valid_reference(ReferenceSource source);
+      void remove_valid_reference(ReferenceSource source);
+    public:
       MaterializedView* get_materialized_view(void) const;
       ReductionView* get_reduction_view(void) const;
     public:

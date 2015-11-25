@@ -6823,6 +6823,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void InstanceRef::add_valid_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view != NULL);
+#endif
+      view->add_base_valid_ref(source);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::remove_valid_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view != NULL);
+#endif
+      if (view->remove_base_valid_ref(source))
+        LogicalView::delete_logical_view(view);
+    }
+
+    //--------------------------------------------------------------------------
     MaterializedView* InstanceRef::get_materialized_view(void) const
     //--------------------------------------------------------------------------
     {

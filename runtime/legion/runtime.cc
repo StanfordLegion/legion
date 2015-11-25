@@ -1137,6 +1137,8 @@ namespace LegionRuntime {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1371,7 +1373,12 @@ namespace LegionRuntime {
     void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!reference.has_ref());
+#endif
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1382,7 +1389,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
     }
