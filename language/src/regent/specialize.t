@@ -53,7 +53,7 @@ local function guess_type_for_literal(value)
   end
 end
 
-function convert_lua_value(cx, node, value)
+local function convert_lua_value(cx, node, value)
   if type(value) == "number" or type(value) == "boolean" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
@@ -1449,7 +1449,9 @@ function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
   proto:setinline(node.options.inline)
-  cx.env:insert(node, node.name, proto)
+  if #node.name == 1 then
+    cx.env:insert(node, node.name[1], proto)
+  end
   cx = cx:new_local_scope()
 
   local params = specialize.stat_task_params(cx, node.params)

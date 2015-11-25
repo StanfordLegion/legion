@@ -2734,12 +2734,12 @@ function task:__call(...)
 end
 
 function task:__tostring()
-  return self:getname()
+  return tostring(self:getname())
 end
 
 function std.newtask(name)
   local terra proto
-  proto.name = name
+  proto.name = tostring(name)
   return setmetatable({
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),
@@ -2997,7 +2997,7 @@ function std.start(main_task)
           inner = options.inner,
           idempotent = options.idempotent,
         },
-        [task:getname()],
+        [tostring(task:getname())],
         [task:getdefinition()])
       end
     end)

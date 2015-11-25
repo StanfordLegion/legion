@@ -16,6 +16,7 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local parser = {}
@@ -1412,6 +1413,14 @@ function parser.stat(p)
   end
 end
 
+function parser.stat_task_name(p)
+  local name = terralib.newlist()
+  repeat
+    name:insert(p:expect(p.name).value)
+  until not p:nextif(".")
+  return data.newtuple(unpack(name))
+end
+
 function parser.stat_task_params(p)
   p:expect("(")
   local params = terralib.newlist()
@@ -1467,7 +1476,7 @@ end
 function parser.stat_task(p, options)
   local start = ast.save(p)
   p:expect("task")
-  local name = p:expect(p.name).value
+  local name = p:stat_task_name()
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
   local privileges, coherence_modes, flags, conditions, constraints =
