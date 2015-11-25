@@ -1942,8 +1942,28 @@ local function expr_call_setup_future_arg(
   end)
 end
 
+local function add_phase_barrier_arg_recurse(
+  add_barrier, launcher, arg, arg_type)
+  if std.is_phase_barrier(arg_type) then
+    return quote
+      add_barrier(launcher, [arg].impl)
+    end
+  else
+    local index = terralib.newsymbol()
+    local elmt = terralib.newsymbol()
+    local loop_body = add_phase_barrier_arg_recurse(add_barrier, launcher, elmt,
+      arg_type.element_type)
+    return quote
+      for [index] = 0, [arg].__size do
+        var [elmt] = [arg_type:data(arg)][ [index] ]
+        [loop_body]
+      end
+    end
+  end
+end
+
 local function expr_call_setup_phase_barrier_arg(
-    cx, task, arg, condition, launcher, index, args_setup)
+    cx, task, arg, condition, launcher, index, args_setup, arg_type)
   local add_barrier
   if condition == std.arrives then
     if index then
@@ -1961,9 +1981,8 @@ local function expr_call_setup_phase_barrier_arg(
     assert(false)
   end
 
-  args_setup:insert(quote
-    add_barrier(launcher, [arg].impl)
-  end)
+  args_setup:insert(
+    add_phase_barrier_arg_recurse(add_barrier, launcher, arg, arg_type))
 end
 
 local function expr_call_setup_ispace_arg(
@@ -2336,11 +2355,12 @@ function codegen.expr_call(cx, node)
     for condition, args_enabled in pairs(conditions) do
       for i, arg_type in ipairs(arg_types) do
         if args_enabled[i] then
-          assert(std.is_phase_barrier(arg_type))
+          assert(std.is_phase_barrier(arg_type) or
+            (std.is_list(arg_type) and std.is_phase_barrier(arg_type.element_type)))
           local arg_value = arg_values[i]
           expr_call_setup_phase_barrier_arg(
             cx, fn.value, arg_value, condition,
-            launcher, false, args_setup)
+            launcher, false, args_setup, arg_type)
         end
       end
     end
@@ -5064,7 +5084,7 @@ function codegen.stat_index_launch(cx, node)
         local arg_value = arg_values[i]
         expr_call_setup_phase_barrier_arg(
           cx, fn.value, arg_value, condition,
-          launcher, true, args_setup)
+          launcher, true, args_setup, arg_type)
       end
     end
   end

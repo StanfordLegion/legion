@@ -148,7 +148,10 @@ end
 function type_check.condition_variable(cx, node)
   local symbol = node.symbol
   local var_type = symbol.type
-  if not std.is_phase_barrier(var_type) then
+  while std.is_list(var_type) do
+    var_type = var_type.element_type
+  end
+  if not std.is_phase_barrier(var_type)  then
     log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(var_type))
   end
   return symbol
