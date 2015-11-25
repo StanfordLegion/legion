@@ -187,22 +187,10 @@ task toplevel()
   var rn = region(ispace(ptr, graph.nodes), Node)
   var re = region(ispace(ptr, graph.edges), Edge(rn))
 
-  --graph:allocate_nodes(rn)
-  --graph:allocate_edges(re)
-  do
-    var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(rn).index_space)
-    c.legion_index_allocator_alloc(i, graph.nodes)
-    c.legion_index_allocator_destroy(i)
-  end
-
-  do
-    var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(re).index_space)
-    c.legion_index_allocator_alloc(i, graph.edges)
-    c.legion_index_allocator_destroy(i)
-  end
+  helpers.allocate_elements(__runtime(), __context(), __raw(rn), graph.nodes)
+  helpers.allocate_elements(__runtime(), __context(), __raw(re), graph.edges)
 
   -- equal subspaces of rn
-  --var pn : partition(disjoint, rn)
   var ccn = c.legion_coloring_create()
   do
     var i = 0
@@ -241,9 +229,11 @@ task toplevel()
     var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
     sssp(graph, subgraphs, rn, re, pn, pe, root)
 
-    var errors = 0
     for i = 0, subgraphs do
       read_expected_distances(graph, pn[i], [&int8](graph.expecteds[s]))
+    end
+    var errors = 0
+    for i = 0, subgraphs do
       errors += check_results(graph, pn[i], verbose)
     end
     if errors == 0 then

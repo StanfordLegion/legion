@@ -49,10 +49,22 @@ function read_region_data(t)
   return specialized
 end
 
+-- simple helper to allocate a large block of elements in a region
+terra allocate_elements(runtime : c.legion_runtime_t,
+			ctx : c.legion_context_t,
+			region : c.legion_logical_region_t,
+			count : uint64)
+  var i = c.legion_index_allocator_create(runtime, ctx, region.index_space)
+  c.legion_index_allocator_alloc(i, count)
+  c.legion_index_allocator_destroy(i)
+end
+
 helpers = { 
   read_region_data = read_region_data,
   read_ptr_field = read_region_data(int),
   read_float_field = read_region_data(float),
+
+  allocate_elements = allocate_elements,
 }
 
 return helpers

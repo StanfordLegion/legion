@@ -146,19 +146,8 @@ task toplevel()
   var rn = region(ispace(ptr, graph.nodes), Node)
   var re = region(ispace(ptr, graph.edges), Edge(rn))
 
-  --graph:allocate_nodes(rn)
-  --graph:allocate_edges(re)
-  do
-    var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(rn).index_space)
-    c.legion_index_allocator_alloc(i, graph.nodes)
-    c.legion_index_allocator_destroy(i)
-  end
-
-  do
-    var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(re).index_space)
-    c.legion_index_allocator_alloc(i, graph.edges)
-    c.legion_index_allocator_destroy(i)
-  end
+  helpers.allocate_elements(__runtime(), __context(), __raw(rn), graph.nodes)
+  helpers.allocate_elements(__runtime(), __context(), __raw(re), graph.edges)
 
   read_edge_data(graph, rn, re)
 
