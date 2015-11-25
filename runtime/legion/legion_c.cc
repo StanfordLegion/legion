@@ -478,9 +478,11 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
   IndexPartition ip =
 #if USE_LEGION_PARTAPI_SHIM
     // FIXME: This won't actually work yet...
-    runtime->create_equal_partition(ctx, parent, color_space, color, allocable);
+    runtime->create_equal_partition(ctx, parent, color_space, granularity,
+                                    color, allocable);
 #else
-    runtime->create_equal_partition(ctx, parent, color_space, color, allocable);
+    runtime->create_equal_partition(ctx, parent, color_space, granularity,
+                                    color, allocable);
 #endif
   return CObjectWrapper::wrap(ip);
 }
