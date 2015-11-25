@@ -685,6 +685,7 @@ namespace LegionRuntime {
             AddressSpaceID target, std::set<Event> &applied_conditions);
       void reset(void);
       void record_created_instance(InstanceView *view);
+      void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
       PhysicalState* clone(const FieldMask &clone_mask, 

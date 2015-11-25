@@ -4500,6 +4500,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalState::filter_open_children(const FieldMask &filter_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<ColorPoint> to_delete; 
+      for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
+            it = children.open_children.begin(); 
+            it != children.open_children.end(); it++)
+      {
+        it->second -= filter_mask;
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      if (!to_delete.empty())
+      {
+        if (to_delete.size() != children.open_children.size())
+        {
+          for (std::vector<ColorPoint>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            children.open_children.erase(*it);  
+          }
+        }
+        else
+          children.open_children.clear();
+      }
+      children.valid_fields -= filter_mask;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalState* PhysicalState::clone(bool capture_state, bool need_adv) const
     //--------------------------------------------------------------------------
     {

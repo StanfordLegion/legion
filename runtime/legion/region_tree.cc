@@ -15005,38 +15005,12 @@ namespace LegionRuntime {
             // Remove any open children for these fields, we don't
             // need to traverse down the tree because we already
             // advanced those version numbers logically so we don't
-            // need to both updating the version states
+            // need to be updating the version states
             if (!(user_mask * state->children.valid_fields))
-            {
-              std::vector<ColorPoint> to_delete; 
-              for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
-                    it = state->children.open_children.begin(); 
-                    it != state->children.open_children.end(); it++)
-              {
-                it->second -= user_mask;
-                if (!it->second)
-                  to_delete.push_back(it->first);
-              }
-              if (!to_delete.empty())
-              {
-                if (to_delete.size() != state->children.open_children.size())
-                {
-                  for (std::vector<ColorPoint>::const_iterator it = 
-                        to_delete.begin(); it != to_delete.end(); it++)
-                  {
-                    state->children.open_children.erase(*it);  
-                  }
-                }
-                else
-                  state->children.open_children.clear();
-              }
-              state->children.valid_fields -= user_mask;
-            }
+              state->filter_open_children(user_mask);
             // Remove any overlapping reducitons
-            FieldMask reduction_overlap = user_mask &
-                                          state->reduction_mask;
-            if (!!reduction_overlap)
-              invalidate_reduction_views(state, reduction_overlap);
+            if (!(user_mask * state->reduction_mask))
+              invalidate_reduction_views(state, user_mask);
             // This is write-only so update the valid views on the
             // state with the new instance view
             update_valid_views(state, user_mask, 
@@ -15231,6 +15205,11 @@ namespace LegionRuntime {
                              true/*register now*/, fill_value);
       // Now update the physical state
       PhysicalState *state = get_physical_state(ctx, version_info);
+      // Invalidate any open children and any reductions
+      if (!(fill_mask * state->children.valid_fields))
+        state->filter_open_children(fill_mask); 
+      if (!(fill_mask * state->reduction_mask))
+        invalidate_reduction_views(state, fill_mask);
       update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
     }
 
