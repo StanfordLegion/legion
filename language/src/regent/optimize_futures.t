@@ -360,7 +360,7 @@ function analyze_var_flow.stat(cx, node)
   end
 end
 
-function compute_var_futures(cx)
+local function compute_var_futures(cx)
   local inflow = {}
   for v1, flow in pairs(cx.var_flows) do
     for v2, _ in pairs(flow) do
@@ -390,7 +390,7 @@ end
 
 local optimize_futures = {}
 
-function concretize(node)
+local function concretize(node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
     return ast.typed.expr.FutureGetResult {
@@ -403,7 +403,7 @@ function concretize(node)
   return node
 end
 
-function promote(node)
+local function promote(node)
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
     return ast.typed.expr.Future {

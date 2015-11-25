@@ -1496,7 +1496,7 @@ function rawref:get_index(cx, index, result_type)
 end
 
 -- A helper for capturing debug information.
-function emit_debuginfo(node)
+local function emit_debuginfo(node)
   assert(node.span.source and node.span.start.line)
   if string.len(node.span.source) == 0 then
     return quote end
@@ -1816,9 +1816,9 @@ function codegen.expr_method_call(cx, node)
     expr_type)
 end
 
-function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
-                                   params_struct_type, params_map, task_args,
-                                   task_args_setup, task_args_cleanup)
+local function expr_call_setup_task_args(
+    cx, task, args, arg_types, param_types, params_struct_type, params_map,
+    task_args, task_args_setup, task_args_cleanup)
   local size = terralib.newsymbol(c.size_t, "size")
   local buffer = terralib.newsymbol(&opaque, "buffer")
 
@@ -1918,7 +1918,8 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
   end)
 end
 
-function expr_call_setup_future_arg(cx, task, arg, launcher, index, args_setup)
+local function expr_call_setup_future_arg(
+    cx, task, arg, launcher, index, args_setup)
   local add_future = c.legion_task_launcher_add_future
   if index then
     add_future = c.legion_index_launcher_add_future
@@ -1929,7 +1930,8 @@ function expr_call_setup_future_arg(cx, task, arg, launcher, index, args_setup)
   end)
 end
 
-function expr_call_setup_phase_barrier_arg(cx, task, arg, condition, launcher, index, args_setup)
+local function expr_call_setup_phase_barrier_arg(
+    cx, task, arg, condition, launcher, index, args_setup)
   local add_barrier
   if condition == std.arrives then
     if index then
@@ -1952,8 +1954,8 @@ function expr_call_setup_phase_barrier_arg(cx, task, arg, condition, launcher, i
   end)
 end
 
-function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
-                                    index, args_setup)
+local function expr_call_setup_ispace_arg(
+    cx, task, arg_type, param_type, launcher, index, args_setup)
   local parent_ispace =
     cx:ispace(cx:ispace(arg_type).root_ispace_type).index_space
 
@@ -1976,8 +1978,8 @@ function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
     end)
 end
 
-function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
-                                    index, args_setup)
+local function expr_call_setup_region_arg(
+    cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
                              task:get_coherence_modes(), task:get_flags())
@@ -2054,7 +2056,7 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
   end
 end
 
-function raise_privilege_depth(cx, value, container_type)
+local function raise_privilege_depth(cx, value, container_type)
   for i = 1, container_type.privilege_depth do
     value = `(
       c.legion_logical_partition_get_parent_logical_region(
@@ -2065,7 +2067,7 @@ function raise_privilege_depth(cx, value, container_type)
   return value
 end
 
-function setup_list_of_regions_add_region(
+local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
     add_field, has_field, requirement_args, launcher)
@@ -2088,7 +2090,7 @@ function setup_list_of_regions_add_region(
     end
 end
 
-function setup_list_of_regions_add_list(
+local function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
     add_field, has_field, requirement_args, launcher)
@@ -2116,8 +2118,8 @@ function setup_list_of_regions_add_list(
   end
 end
 
-function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
-                                             launcher, index, args_setup)
+local function expr_call_setup_list_of_regions_arg(
+    cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
                              task:get_coherence_modes(), task:get_flags())
@@ -2200,9 +2202,8 @@ function expr_call_setup_list_of_regions_arg(cx, task, arg_type, param_type,
   end
 end
 
-function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
-                                       partition, launcher, index,
-                                       args_setup)
+local function expr_call_setup_partition_arg(
+    cx, task, arg_type, param_type, partition, launcher, index, args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task:getprivileges(),
@@ -5364,7 +5365,7 @@ function codegen.stat_expr(cx, node)
   return quote [expr.actions] end
 end
 
-function find_region_roots(cx, region_types)
+local function find_region_roots(cx, region_types)
   local roots_by_type = {}
   for _, region_type in ipairs(region_types) do
     assert(cx:has_region(region_type))
@@ -5378,7 +5379,7 @@ function find_region_roots(cx, region_types)
   return roots
 end
 
-function find_region_roots_physical(cx, region_types)
+local function find_region_roots_physical(cx, region_types)
   local roots = find_region_roots(cx, region_types)
   local result = terralib.newlist()
   for _, region_type in ipairs(roots) do
@@ -5483,7 +5484,7 @@ function codegen.stat(cx, node)
   end
 end
 
-function get_params_map_type(params)
+local function get_params_map_type(params)
   if #params == 0 then
     return false
   elseif #params <= 64 then
