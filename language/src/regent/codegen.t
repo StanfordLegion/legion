@@ -1728,26 +1728,38 @@ function codegen.expr_index_access(cx, node)
         return value
       else
         local region = value:read(cx)
-        local region_type = node.expr_type
+        local region_type = std.as_read(node.expr_type)
 
-        -- FIXME: For the moment, iterators, allocators, and physical
-        -- regions are inaccessible since we assume lists are always
-        -- unmapped.
-        cx:add_ispace_root(
-          region_type:ispace(),
-          `([region_type].index_space),
-          false,
-          false)
-        cx:add_region_root(
-          region_type, region.value,
-          cx:list_of_regions(value_type).field_paths,
-          cx:list_of_regions(value_type).privilege_field_paths,
-          cx:list_of_regions(value_type).field_privileges,
-          cx:list_of_regions(value_type).field_types,
-          cx:list_of_regions(value_type).field_ids,
-          false,
-          false,
-          false)
+        if std.is_region(region_type) then
+          -- FIXME: For the moment, iterators, allocators, and physical
+          -- regions are inaccessible since we assume lists are always
+          -- unmapped.
+          cx:add_ispace_root(
+            region_type:ispace(),
+            `([region_type].index_space),
+            false,
+            false)
+          cx:add_region_root(
+            region_type, region.value,
+            cx:list_of_regions(value_type).field_paths,
+            cx:list_of_regions(value_type).privilege_field_paths,
+            cx:list_of_regions(value_type).field_privileges,
+            cx:list_of_regions(value_type).field_types,
+            cx:list_of_regions(value_type).field_ids,
+            false,
+            false,
+            false)
+        elseif std.is_list_of_regions(region_type) then
+          cx:add_list_of_regions(
+            region_type, region.value,
+            cx:list_of_regions(value_type).field_paths,
+            cx:list_of_regions(value_type).privilege_field_paths,
+            cx:list_of_regions(value_type).field_privileges,
+            cx:list_of_regions(value_type).field_types,
+            cx:list_of_regions(value_type).field_ids)
+        else
+          assert(false)
+        end
         return values.value(region, region_type)
       end
     else
