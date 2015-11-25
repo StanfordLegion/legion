@@ -151,6 +151,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Partition) then
     return nil
 
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return nil
+
   elseif node:is(ast.typed.expr.PartitionByField) then
     return nil
 
@@ -588,6 +591,15 @@ function optimize_futures.expr_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_partition_equal(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
 function optimize_futures.expr_partition_by_field(cx, node)
   local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   local colors = concretize(optimize_futures.expr(cx, node.colors))
@@ -812,6 +824,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Partition) then
     return optimize_futures.expr_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return optimize_futures.expr_partition_equal(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return optimize_futures.expr_partition_by_field(cx, node)

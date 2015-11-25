@@ -3000,6 +3000,36 @@ function codegen.expr_partition(cx, node)
     partition_type)
 end
 
+function codegen.expr_partition_equal(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local partition_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [colors.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
+    var domain = c.legion_index_space_get_domain(
+      [cx.runtime], [cx.context], [colors.value].impl)
+    var [ip] = c.legion_index_partition_create_equal(
+    [cx.runtime], [cx.context], [region.value].impl.index_space,
+    domain, 1, -1, false)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
+  end
+
+  return values.value(
+    expr.once_only(actions, `(partition_type { impl = [lp] })),
+    partition_type)
+end
+
 function codegen.expr_partition_by_field(cx, node)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
@@ -4337,6 +4367,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Partition) then
     return codegen.expr_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return codegen.expr_partition_equal(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return codegen.expr_partition_by_field(cx, node)

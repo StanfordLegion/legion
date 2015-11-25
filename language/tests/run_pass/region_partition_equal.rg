@@ -12,13 +12,17 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: This needs a shim for Realm before it will run.
+
 import "regent"
 
 local int1d = index_type(int, "int1d")
 
 struct t {
   value : int,
-  color : int,
 }
 
 task f()
@@ -27,15 +31,7 @@ task f()
   var x1 = new(ptr(t, r))
   var x2 = new(ptr(t, r))
 
-  do
-    var i = 0
-    for x in r do
-      x.color = i
-      i += 1
-    end
-  end
-
-  var p = partition(r.color, ispace(int1d, 3))
+  var p = partition(equal, r, ispace(int1d, 3))
 
   for i = 0, 3 do
     var ri = p[i]

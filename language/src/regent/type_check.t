@@ -1247,6 +1247,40 @@ function type_check.expr_partition(cx, node)
   }
 end
 
+function type_check.expr_partition_equal(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region)
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.check_read(cx, colors)
+
+  if not std.is_region(region_type) then
+    log.error(node, "type mismatch in argument 1: expected region but got " ..
+                tostring(region_type))
+  end
+
+  if not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 2: expected ispace but got " ..
+                tostring(colors_type))
+  end
+
+  local expr_type = node.expr_type
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
+  return ast.typed.expr.PartitionEqual {
+    region = region,
+    colors = colors,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_partition_by_field(cx, node)
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region)
@@ -1890,6 +1924,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Partition) then
     return type_check.expr_partition(cx, node)
+
+  elseif node:is(ast.specialized.expr.PartitionEqual) then
+    return type_check.expr_partition_equal(cx, node)
 
   elseif node:is(ast.specialized.expr.PartitionByField) then
     return type_check.expr_partition_by_field(cx, node)

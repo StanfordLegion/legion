@@ -614,6 +614,18 @@ function parser.expr_prefix(p)
         options = ast.default_options(),
         span = ast.span(start, p),
       }
+    elseif p:nextif("equal") then
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionEqual {
+        region = region,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
     else
       local region = p:expr_region_root()
       p:expect(",")
