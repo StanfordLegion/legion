@@ -40,7 +40,7 @@ using namespace LegionRuntime::HighLevel;
   static const TaskResult identity;                                     \
   };                                                                    \
                                                                         \
-  const T_N CLASS::identity_buffer = { ID };                            \
+  const T_N CLASS::identity_buffer = { { ID } };                        \
   const TaskResult CLASS::identity((void *)&CLASS::identity_buffer,     \
                                    sizeof(CLASS::identity_buffer));     \
                                                                         \
