@@ -280,7 +280,6 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
     color_min = std::min(color_min, it->first);
     color_max = std::max(color_max, it->first);
   }
-  printf("color space min %u max %u\n", color_min, color_max);
   Domain domain = Domain::from_rect<1>(
     Rect<1>(Point<1>(color_min), Point<1>(color_max)));
   return CObjectWrapper::wrap(domain);
@@ -507,6 +506,7 @@ public:
 private:
   static const TaskID task_id = 539418; // a "unique" number
   struct Args {
+    FieldID fid;
     Domain color_space;
     int color;
     bool allocable;
@@ -533,6 +533,7 @@ PartitionByFieldShim::launch(HighLevelRuntime *runtime,
                              bool allocable)
 {
   Args args;
+  args.fid = fid;
   args.color_space = color_space;
   args.color = color;
   args.allocable = allocable;
@@ -561,7 +562,7 @@ PartitionByFieldShim::task(const Task *task,
   }
 
   Accessor::RegionAccessor<SOA, Color> accessor =
-    regions[0].get_accessor().typeify<Color>().convert<SOA>();
+    regions[0].get_field_accessor(args.fid).typeify<Color>().convert<SOA>();
   for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
        it.has_next();) {
     ptr_t p = it.next();
