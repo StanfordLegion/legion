@@ -30,6 +30,7 @@ task f()
   do
     var i = 0
     for x in r do
+      x.value = 0
       x.color = i
       i += 1
     end
@@ -40,7 +41,7 @@ task f()
   for i = 0, 3 do
     var ri = p[i]
     for x in ri do
-      x.value = 10 * i
+      x.value = 10 * i + 1000
     end
   end
 
@@ -56,6 +57,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 30, "test failed")
+  regentlib.assert(f() == 3030, "test failed")
 end
 regentlib.start(main)
