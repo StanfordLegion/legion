@@ -2291,10 +2291,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return std.region(ispace, self:fspace())
   end
 
-  function st:slice()
+  function st:slice(strip_levels)
+    if strip_levels == nil then strip_levels = 0 end
     assert(std.is_list_of_regions(self))
     local slice_type = self:subregion_dynamic()
-    for i = 1, self:list_depth() do
+    for i = 1 + strip_levels, self:list_depth() do
       slice_type = std.list(
         slice_type, self:partition(), self.privilege_depth)
     end

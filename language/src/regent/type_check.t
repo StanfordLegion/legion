@@ -622,7 +622,7 @@ function type_check.expr_index_access(cx, node)
       if slice then
         expr_type = value_type:slice()
       else
-        expr_type = value_type:subregion_dynamic()
+        expr_type = value_type:slice(1)
       end
       std.copy_privileges(cx, value_type, expr_type)
       -- FIXME: Copy constraints from list type.
