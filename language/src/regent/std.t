@@ -310,6 +310,18 @@ function std.meet_privilege(a, b)
   end
 end
 
+function std.meet_coherence(a, b)
+  if a == b then
+    return a
+  elseif not a then
+    return b
+  elseif not b then
+    return a
+  else
+    assert(false)
+  end
+end
+
 function std.meet_flag(a, b)
   if a == b then
     return a
@@ -389,8 +401,8 @@ end
 function std.find_task_privileges(region_type, privileges, coherence_modes, flags)
   assert(std.type_supports_privileges(region_type))
   assert(privileges)
-  assert(data.is_map(coherence_modes))
-  assert(data.is_map(flags))
+  assert(data.is_default_map(coherence_modes))
+  assert(data.is_default_map(flags))
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
   local grouped_flags = terralib.newlist()
@@ -2239,7 +2251,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   end
 
   function st:list_depth()
-    return 1 + self.element_type:list_depth()
+    if std.is_list(self.element_type) then
+      return 1 + self.element_type:list_depth()
+    else
+      return 1
+    end
   end
 
   function st:leaf_element_type()
@@ -2275,10 +2291,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return std.region(ispace, self:fspace())
   end
 
-  function st:slice()
+  function st:slice(strip_levels)
+    if strip_levels == nil then strip_levels = 0 end
     assert(std.is_list_of_regions(self))
     local slice_type = self:subregion_dynamic()
-    for i = 1, self:list_depth() do
+    for i = 1 + strip_levels, self:list_depth() do
       slice_type = std.list(
         slice_type, self:partition(), self.privilege_depth)
     end
@@ -2692,6 +2709,10 @@ function task:make_variant()
   variant_task:settaskid(self:gettaskid())
   variant_task:settype(self:gettype())
   variant_task:setprivileges(self:getprivileges())
+  variant_task:set_coherence_modes(self:get_coherence_modes())
+  variant_task:set_conditions(self:get_conditions())
+  variant_task:set_param_constraints(self:get_param_constraints())
+  variant_task:set_flags(self:get_flags())
   variant_task:set_constraints(self:get_constraints())
   variant_task:set_source_variant(self)
   return variant_task
@@ -2714,12 +2735,12 @@ function task:__call(...)
 end
 
 function task:__tostring()
-  return self:getname()
+  return tostring(self:getname())
 end
 
 function std.newtask(name)
   local terra proto
-  proto.name = name
+  proto.name = tostring(name)
   return setmetatable({
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),
@@ -2977,21 +2998,25 @@ function std.start(main_task)
           inner = options.inner,
           idempotent = options.idempotent,
         },
-        [task:getname()],
+        [tostring(task:getname())],
         [task:getdefinition()])
       end
     end)
   if std.config["cuda"] then
     cudahelper.link_driver_library()
+    local all_kernels = {}
     tasks:map(function(task)
       if task:getcuda() then
         local kernels = task:getcudakernels()
         if kernels ~= nil then
-          print("JIT compiling CUDA kernels in task " .. task.name)
-          cudahelper.jit_compile_kernels_and_register(kernels)
+          for k, v in pairs(kernels) do
+            all_kernels[k] = v
+          end
         end
       end
     end)
+    print("JIT compiling CUDA kernels")
+    cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local reduction_registrations = terralib.newlist()

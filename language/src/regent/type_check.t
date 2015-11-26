@@ -148,7 +148,10 @@ end
 function type_check.condition_variable(cx, node)
   local symbol = node.symbol
   local var_type = symbol.type
-  if not std.is_phase_barrier(var_type) then
+  while std.is_list(var_type) do
+    var_type = var_type.element_type
+  end
+  if not std.is_phase_barrier(var_type)  then
     log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(var_type))
   end
   return symbol
@@ -243,9 +246,6 @@ function type_check.coherence(cx, node, result)
       local region = region_field.region
       local region_type = region.type
       assert(std.type_supports_privileges(region_type))
-      if not result[region_type] then
-        result[region_type] = data.newmap()
-      end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
@@ -257,7 +257,7 @@ function type_check.coherence(cx, node, result)
 end
 
 function type_check.coherence_modes(cx, node)
-  local result = data.newmap()
+  local result = data.new_recursive_map(1)
   for _, coherence in ipairs(node) do
     type_check.coherence(cx, coherence, result)
   end
@@ -285,15 +285,9 @@ function type_check.flag(cx, node, result)
       local region = region_field.region
       local region_type = region.type
       assert(std.type_supports_privileges(region_type))
-      if not result[region_type] then
-        result[region_type] = data.newmap()
-      end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
-        if not result[region_type][field] then
-          result[region_type][field] = data.newmap()
-        end
         result[region_type][field][flag] = true
       end
     end
@@ -301,7 +295,7 @@ function type_check.flag(cx, node, result)
 end
 
 function type_check.flags(cx, node)
-  local result = data.newmap()
+  local result = data.new_recursive_map(2)
   for _, flag in ipairs(node) do
     type_check.flag(cx, flag, result)
   end
@@ -612,10 +606,12 @@ function type_check.expr_index_access(cx, node)
 
     if not value_type:is_list_of_regions() then
       local expr_type = value_type:leaf_element_type()
+      local start = 2
       if slice then
-        for i = 1, value_type:list_depth() do
-          expr_type = std.list(expr_type)
-        end
+        start = 1
+      end
+      for i = start, value_type:list_depth() do
+        expr_type = std.list(expr_type)
       end
       return ast.typed.expr.IndexAccess {
         value = value,
@@ -629,7 +625,7 @@ function type_check.expr_index_access(cx, node)
       if slice then
         expr_type = value_type:slice()
       else
-        expr_type = value_type:subregion_dynamic()
+        expr_type = value_type:slice(1)
       end
       std.copy_privileges(cx, value_type, expr_type)
       -- FIXME: Copy constraints from list type.
@@ -1087,10 +1083,10 @@ function type_check.expr_dynamic_cast(cx, node)
   if not std.is_bounded_type(node.expr_type) then
     log.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not std.is_bounded_type(value_type) then
+  if not (std.is_index_type(value_type) or std.is_bounded_type(value_type)) then
     log.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
-  if not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+  if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
     log.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
@@ -1214,11 +1210,8 @@ function type_check.expr_partition(cx, node)
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring)
 
-  -- Note: This test can't fail because disjointness is tested in specialize.
-  if not (disjointness == std.disjoint or disjointness == std.aliased) then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
-  end
+  -- Note: This test can't fail because disjointness is tested in the parser.
+  assert(disjointness == std.disjoint or disjointness == std.aliased)
 
   if not std.is_region(region_type) then
     log.error(node, "type mismatch in argument 2: expected region but got " ..
@@ -1239,11 +1232,100 @@ function type_check.expr_partition(cx, node)
     end
   end
 
+  local expr_type = node.expr_type
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
   return ast.typed.expr.Partition {
     disjointness = disjointness,
     region = region,
     coloring = coloring,
-    expr_type = node.expr_type,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_partition_equal(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region)
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.check_read(cx, colors)
+
+  if not std.is_region(region_type) then
+    log.error(node, "type mismatch in argument 1: expected region but got " ..
+                tostring(region_type))
+  end
+
+  if not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 2: expected ispace but got " ..
+                tostring(colors_type))
+  end
+
+  local expr_type = node.expr_type
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
+  return ast.typed.expr.PartitionEqual {
+    region = region,
+    colors = colors,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_partition_by_field(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.check_read(cx, colors)
+
+  if #region.fields ~= 1 then
+    log.error(node, "type mismatch in argument 1: expected 1 field but got " ..
+                tostring(#region.fields))
+  end
+
+  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
+  if not std.type_eq(field_type, int) then
+    log.error(node, "type mismatch in argument 1: expected field of type " .. tostring(int) ..
+                " but got " .. tostring(field_type))
+  end
+
+  if not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 2: expected ispace but got " ..
+                tostring(colors_type))
+  end
+
+  local expr_type = node.expr_type
+  if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
+    log.error(
+      node, "invalid privileges in argument 1: " .. tostring(std.reads) .. "(" ..
+        (data.newtuple(expr_type.parent_region_symbol) .. region.fields[1]):mkstring(".") ..
+        ")")
+  end
+
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if expr_type.parent_region_symbol.type == nil then
+    expr_type.parent_region_symbol.type = region_type
+  end
+  assert(expr_type.parent_region_symbol.type == region_type)
+
+  return ast.typed.expr.PartitionByField {
+    region = region,
+    colors = colors,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1845,6 +1927,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Partition) then
     return type_check.expr_partition(cx, node)
+
+  elseif node:is(ast.specialized.expr.PartitionEqual) then
+    return type_check.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.specialized.expr.PartitionByField) then
+    return type_check.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)

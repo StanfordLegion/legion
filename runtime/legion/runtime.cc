@@ -1137,6 +1137,8 @@ namespace LegionRuntime {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1371,7 +1373,12 @@ namespace LegionRuntime {
     void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!reference.has_ref());
+#endif
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1382,7 +1389,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
     }
@@ -3197,6 +3208,10 @@ namespace LegionRuntime {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
+#ifdef LEGION_PROF_MESSAGES
+        unsigned long long start = 
+          Realm::Clock::current_time_in_microseconds();
+#endif
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -3619,7 +3634,7 @@ namespace LegionRuntime {
             }
           case SEND_BACK_LOGICAL_STATE:
             {
-              runtime->handle_logical_state_return(derez);
+              runtime->handle_logical_state_return(derez, remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -3635,6 +3650,12 @@ namespace LegionRuntime {
           default:
             assert(false); // should never get here
         }
+#ifdef LEGION_PROF_MESSAGES
+        unsigned long long stop = 
+          Realm::Clock::current_time_in_microseconds();
+        if (runtime->profiler != NULL)
+          runtime->profiler->record_message(kind, start, stop);
+#endif
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -4125,6 +4146,7 @@ namespace LegionRuntime {
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         inter_close_op_lock(Reservation::create_reservation()), 
+        read_close_op_lock(Reservation::create_reservation()),
         post_close_op_lock(Reservation::create_reservation()),
         virtual_close_op_lock(Reservation::create_reservation()),
         dynamic_collective_op_lock(Reservation::create_reservation()),
@@ -4254,6 +4276,10 @@ namespace LegionRuntime {
                                       hlr_task_descriptions, 
                                       Operation::LAST_OP_KIND, 
                                       Operation::op_names); 
+#ifdef LEGION_PROF_MESSAGES
+        HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
+        profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
+#endif
         // We also have to register any statically registered task
         // variants here since the profiler didn't exist before
         const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
@@ -4474,6 +4500,14 @@ namespace LegionRuntime {
       available_inter_close_ops.clear();
       inter_close_op_lock.destroy_reservation();
       inter_close_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReadCloseOp*>::const_iterator it = 
+            available_read_close_ops.begin(); it != 
+            available_read_close_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      read_close_op_lock.destroy_reservation();
+      read_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -10095,14 +10129,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifdef LEGION_SPY
-      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
-            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
-#else
       // Mark that we are starting a trace
       ctx->begin_trace(tid);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10127,11 +10155,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12564,10 +12589,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Internal::handle_logical_state_return(Deserializer &derez)
+    void Internal::handle_logical_state_return(Deserializer &derez, 
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(forest, derez);
+      RegionTreeNode::handle_logical_state_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -13908,6 +13934,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    ReadCloseOp* Internal::get_available_read_close_op(bool need_cont,
+                                                       bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReadCloseOp*,
+                     &Internal::get_available_read_close_op> 
+                       continuation(this, read_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(read_close_op_lock, 
+                           available_read_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     PostCloseOp* Internal::get_available_post_close_op(bool need_cont,
                                                       bool has_lock)
     //--------------------------------------------------------------------------
@@ -14361,6 +14406,14 @@ namespace LegionRuntime {
     {
       AutoLock i_lock(inter_close_op_lock);
       available_inter_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::free_read_close_op(ReadCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(read_close_op_lock);
+      available_read_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -15559,6 +15612,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezRedopFns* Internal::get_serdez_redop_fns(
+                                                         ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      SerdezRedopTable &serdez_table = get_serdez_redop_table(); 
+      SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
+      if (finder != serdez_table.end())
+        return &(finder->second);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Internal::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
@@ -15589,6 +15654,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
+      return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ SerdezRedopTable& Internal::get_serdez_redop_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static SerdezRedopTable table;
       return table;
     }
 
@@ -15744,7 +15817,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                             false, // no inner optimizations for analysis
 #else
-                            options.inner, 
+                            false, // disabling this for now
+                            // See github issue #102
+                            //options.inner, 
 #endif
                             options.leaf, 
                             vid);
@@ -15794,7 +15869,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                                 false, // no inner optimizations for analysis
 #else
-                                options.inner, 
+                                false, // disabling this for now
+                                // See github issue #102
+                                //options.inner,
 #endif
                                 options.leaf, 
                                 vid);

@@ -1,0 +1,4 @@
+nodes 10
+edges 20
+data edges.dat
+source 3 result_3.dat

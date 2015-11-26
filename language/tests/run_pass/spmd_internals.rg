@@ -13,6 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
+-- []
+
 -- [["-ll:cpu", "4"]]
 
 import "regent"
@@ -44,13 +46,14 @@ end
 task shard(is : regentlib.list(int),
            rs_private : regentlib.list(region(elt)),
            rs_ghost : regentlib.list(region(elt)),
-           rs_ghost_product : regentlib.list(regentlib.list(region(elt))),
+           rs_ghost_product : regentlib.list(
+             regentlib.list(region(elt), nil, 1), nil, 1),
            empty_in : regentlib.list(regentlib.list(phase_barrier)),
            empty_out : regentlib.list(regentlib.list(phase_barrier)),
            full_in : regentlib.list(regentlib.list(phase_barrier)),
            full_out : regentlib.list(regentlib.list(phase_barrier)))
 where
-  reads writes(rs_private, rs_ghost), -- reads write(rs_ghost_product),
+  reads writes(rs_private, rs_ghost, rs_ghost_product),
   simultaneous(rs_ghost, rs_ghost_product),
   no_access_flag(rs_ghost_product)-- ,
   -- rs_private * rs_ghost,
@@ -69,8 +72,8 @@ do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end
   copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +)
-  -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +,
-  --      awaits(empty_out), arrives(full_out))
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +,
+       awaits(empty_out), arrives(full_out))
 
   -- awaits(advance(full_in)), arrives(empty_in)
   for i in is do

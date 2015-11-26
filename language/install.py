@@ -91,9 +91,10 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet,
-                     thread_count):
+def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
+                     cuda, gasnet, thread_count):
     env = dict(os.environ.items() + [
+        ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
     ])
 
@@ -179,14 +180,20 @@ def install():
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
-    root_dir = os.path.realpath(os.path.dirname(__file__))
+    root_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(root_dir)
+
+    # Grab LG_RT_DIR from the environment if available, otherwise
+    # assume we're running relative to our own location.
+    runtime_dir = os.path.join(legion_dir, 'runtime')
+    if 'LG_RT_DIR' in os.environ:
+        runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
     terra_dir = os.path.join(root_dir, 'terra')
     install_terra(terra_dir, args.terra, thread_count)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, terra_dir, args.debug,
+    install_bindings(bindings_dir, runtime_dir, terra_dir, args.debug,
                      general, args.cuda, args.gasnet,
                      thread_count)
 

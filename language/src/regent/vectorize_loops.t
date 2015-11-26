@@ -247,6 +247,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       new_node.fn = ast.typed.expr.Function {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
+        options = node.options,
         span = node.span,
       }
     end

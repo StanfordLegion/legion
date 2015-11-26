@@ -98,6 +98,14 @@ namespace LegionRuntime {
         size_t total_bytes;
         unsigned long long create, destroy;
       };
+#ifdef LEGION_PROF_MESSAGES
+      struct MessageInfo {
+      public:
+        MessageKind kind;
+        unsigned long long start, stop;
+        Processor proc;
+      };
+#endif
     public:
       LegionProfInstance(LegionProfiler *owner);
       LegionProfInstance(const LegionProfInstance &rhs);
@@ -126,6 +134,12 @@ namespace LegionRuntime {
       void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+#ifdef LEGION_PROF_MESSAGES
+    public:
+      void record_message(Processor proc, MessageKind kind, 
+                          unsigned long long start,
+                          unsigned long long stop);
+#endif
     public:
       void dump_state(void);
     private:
@@ -140,6 +154,10 @@ namespace LegionRuntime {
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstInfo> inst_infos;
+#ifdef LEGION_PROF_MESSAGES
+    private:
+      std::deque<MessageInfo> message_infos;
+#endif
     };
 
     class LegionProfiler {
@@ -211,6 +229,13 @@ namespace LegionRuntime {
     public:
       // Dump all the results
       void finalize(void);
+#ifdef LEGION_PROF_MESSAGES
+    public:
+      void record_message_kinds(const char *const *const message_names,
+                                unsigned int num_message_kinds);
+      void record_message(MessageKind kind, unsigned long long start,
+                          unsigned long long stop);
+#endif
     public:
       const Processor target_proc;
     private:

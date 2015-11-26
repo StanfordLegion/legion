@@ -174,7 +174,7 @@ namespace Realm {
       {
         typename REDOP::RHS *rhs_ptr = (typename REDOP::RHS *)ptr;
         for (size_t i = 0; i < count; i++)
-          memcpy(rhs_ptr++, &(REDOP::identity), sizeof_rhs);
+          *rhs_ptr++ = REDOP::identity;
       }
 
       virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,

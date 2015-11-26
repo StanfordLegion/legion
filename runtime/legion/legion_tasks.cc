@@ -2838,7 +2838,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (current_fence != NULL)
+      {
         op->register_dependence(current_fence, fence_gen);
+#ifdef LEGION_SPY
+        unsigned num_regions = op->get_region_count();
+        if (num_regions > 0)
+        {
+          for (unsigned idx = 0; idx < num_regions; idx++)
+          {
+            LegionSpy::log_mapping_dependence(
+                get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+                op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
+          }
+        }
+        else
+          LegionSpy::log_mapping_dependence(
+              get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5584,6 +5602,7 @@ namespace LegionRuntime {
       minimal_points_assigned = 0;
       redop = 0;
       reduction_op = NULL;
+      serdez_redop_fns = NULL;
       reduction_state_size = 0;
       reduction_state = NULL;
     }
@@ -5792,6 +5811,7 @@ namespace LegionRuntime {
       if (this->redop != 0)
       {
         this->reduction_op = rhs->reduction_op;
+        this->serdez_redop_fns = rhs->serdez_redop_fns;
         initialize_reduction_state();
       }
       // Take ownership of all the points
@@ -6037,6 +6057,7 @@ namespace LegionRuntime {
       if (redop > 0)
       {
         reduction_op = Internal::get_reduction_op(redop);
+        serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
         initialize_reduction_state();
       }
       size_t num_points;
@@ -6062,7 +6083,12 @@ namespace LegionRuntime {
 #endif
       reduction_state_size = reduction_op->sizeof_rhs;
       reduction_state = legion_malloc(REDUCTION_ALLOC, reduction_state_size);
-      reduction_op->init(reduction_state, 1);
+      // If we need to initialize specially, then we do that with a serdez fn
+      if (serdez_redop_fns != NULL)
+        (*(serdez_redop_fns->init_fn))(reduction_op, reduction_state, 
+                                       reduction_state_size);
+      else
+        reduction_op->init(reduction_state, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -6076,10 +6102,13 @@ namespace LegionRuntime {
       assert(reduction_op != NULL);
       assert(reduction_op->is_foldable);
       assert(reduction_state != NULL);
-      assert(result_size == reduction_op->sizeof_rhs);
 #endif
-      // Perform the reduction
-      reduction_op->fold(reduction_state, result, 1, exclusive);
+      // Perform the reduction, see if we have to do serdez reductions
+      if (serdez_redop_fns != NULL)
+        (*(serdez_redop_fns->fold_fn))(reduction_op, reduction_state,
+                                       reduction_state_size, result, exclusive);
+      else
+        reduction_op->fold(reduction_state, result, 1, exclusive);
 
       // If we're the owner, then free the memory
       if (owner)
@@ -8441,6 +8470,7 @@ namespace LegionRuntime {
     {
       activate_multi();
       reduction_op = NULL;
+      serdez_redop_fns = NULL;
       slice_fraction = Fraction<long long>(0,1); // empty fraction
       total_points = 0;
       mapped_points = 0;
@@ -8598,6 +8628,7 @@ namespace LegionRuntime {
       index_domain = launcher.launch_domain;
       redop = redop_id;
       reduction_op = Internal::get_reduction_op(redop);
+      serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
@@ -8754,6 +8785,7 @@ namespace LegionRuntime {
       index_domain = domain;
       redop = redop_id;
       reduction_op = Internal::get_reduction_op(redop);
+      serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "

@@ -714,13 +714,13 @@ class SingleTask(object):
                 op.get_reachable(reachable, False)
 
     def add_mdep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.mdeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_adep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.adeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_instance_requirement(self, idx, index):
@@ -927,6 +927,9 @@ class SingleTask(object):
                 # Skip any deletion op dependences since we haven't taught
                 # LegionSpy how to properly compute them yet
                 if mdep.op2.get_op_kind() == DELETION_OP:
+                    continue
+                # Skip fences too
+                if mdep.op1.get_op_kind() == FENCE_OP or mdep.op2.get_op_kind() == FENCE_OP:
                     continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\

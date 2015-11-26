@@ -210,10 +210,10 @@ namespace LegionRuntime {
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             unsigned is_inter_close_op)
+                                             bool is_intermediate_close_op)
       {
         log_spy.info("Close Operation %llu %llu %u",
-            context, unique_id, is_inter_close_op);
+            context, unique_id, is_intermediate_close_op ? 1 : 0);
       }
 
       static inline void log_fence_operation(UniqueID context,

@@ -45,7 +45,7 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
-function check_privilege_noninterference(cx, task, region_type,
+local function check_privilege_noninterference(cx, task, region_type,
                                          other_region_type, mapping)
   local param_region_type = mapping[region_type]
   local other_param_region_type = mapping[other_region_type]
@@ -77,8 +77,8 @@ function check_privilege_noninterference(cx, task, region_type,
   return true
 end
 
-function analyze_noninterference_previous(cx, task, region_type,
-                                          regions_previously_used, mapping)
+local function analyze_noninterference_previous(
+    cx, task, region_type, regions_previously_used, mapping)
   for i, other_region_type in pairs(regions_previously_used) do
     local constraint = {
       lhs = region_type,
@@ -96,8 +96,8 @@ function analyze_noninterference_previous(cx, task, region_type,
   return true
 end
 
-function analyze_noninterference_self(cx, task, region_type,
-                                      partition_type, mapping)
+local function analyze_noninterference_self(
+    cx, task, region_type, partition_type, mapping)
   if partition_type and partition_type:is_disjoint() then
     return true
   end
@@ -133,6 +133,8 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.RawRuntime) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListCrossProduct) or
@@ -165,6 +167,8 @@ local function analyze_is_loop_invariant_node(cx)
     elseif node:is(ast.typed.expr.Call) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListCrossProduct) or
@@ -188,7 +192,7 @@ end
 
 local optimize_index_launch_loops = {}
 
-function ignore(...) end
+local function ignore(...) end
 
 function optimize_index_launch_loops.stat_for_num(cx, node)
   local log_pass = ignore

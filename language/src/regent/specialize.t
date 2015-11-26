@@ -53,7 +53,7 @@ local function guess_type_for_literal(value)
   end
 end
 
-function convert_lua_value(cx, node, value)
+local function convert_lua_value(cx, node, value)
   if type(value) == "number" or type(value) == "boolean" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
@@ -214,8 +214,18 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Partition) then
-    if get_num_accessed_fields(node.disjointness_expr) > 1 then return false end
-    if get_num_accessed_fields(node.region_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.disjointness) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
@@ -533,6 +543,16 @@ function specialize.constraints(cx, node)
     function(constraint) return specialize.constraint(cx, constraint) end)
 end
 
+function specialize.disjointness_kind(cx, node)
+  if node:is(ast.unspecialized.disjointness_kind.Aliased) then
+    return std.aliased
+  elseif node:is(ast.unspecialized.disjointness_kind.Disjoint) then
+    return std.disjoint
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.expr_id(cx, node)
   local value = cx.env:lookup(node, node.name)
   return convert_lua_value(cx, node, value)
@@ -818,24 +838,61 @@ function specialize.expr_region(cx, node)
 end
 
 function specialize.expr_partition(cx, node)
-  local disjointness = node.disjointness_expr(cx.env:env())
-  local region_type = node.region_type_expr(cx.env:env())
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if disjointness ~= std.disjoint and disjointness ~= std.aliased then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
+  local disjointness = specialize.disjointness_kind(cx, node.disjointness)
+  local region = specialize.expr(cx, node.region)
+  local coloring = specialize.expr(cx, node.coloring)
+
+  local region_symbol
+  if region:is(ast.specialized.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(disjointness, region_type)
-  local region = ast.specialized.expr.ID {
-    value = expr_type.parent_region_symbol,
-    options = node.options,
-    span = node.span,
-  }
+  local expr_type = std.partition(disjointness, region_symbol)
   return ast.specialized.expr.Partition {
     disjointness = disjointness,
     region = region,
-    coloring = specialize.expr(cx, node.coloring),
+    coloring = coloring,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_partition_equal(cx, node)
+  local region = specialize.expr(cx, node.region)
+  local colors = specialize.expr(cx, node.colors)
+
+  local region_symbol
+  if region:is(ast.specialized.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol)
+  return ast.specialized.expr.PartitionEqual {
+    region = region,
+    colors = colors,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_partition_by_field(cx, node)
+  local region = specialize.expr_region_root(cx, node.region)
+  local colors = specialize.expr(cx, node.colors)
+
+  local region_symbol
+  if region.region:is(ast.specialized.expr.ID) then
+    region_symbol = region.region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol)
+  return ast.specialized.expr.PartitionByField {
+    region = region,
+    colors = colors,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1057,6 +1114,12 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Partition) then
     return specialize.expr_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    return specialize.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    return specialize.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
@@ -1419,7 +1482,9 @@ function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
   proto:setinline(node.options.inline)
-  cx.env:insert(node, node.name, proto)
+  if #node.name == 1 then
+    cx.env:insert(node, node.name[1], proto)
+  end
   cx = cx:new_local_scope()
 
   local params = specialize.stat_task_params(cx, node.params)

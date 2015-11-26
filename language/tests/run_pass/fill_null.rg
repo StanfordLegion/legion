@@ -12,16 +12,18 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_partition3.rg:25: type mismatch in argument 1: expected disjoint or aliased but got int32
---   var p = partition(int, r, c)
---                   ^
-
 import "regent"
 
-task f() : int
-  var r = region(ispace(ptr, 5), int)
-  var c : regentlib.c.legion_coloring_t
-  var p = partition(int, r, c)
+fspace t(r : region(t(r))) {
+  x : ptr(t(r), r),
+}
+
+task main()
+  var r = region(ispace(ptr, 5), t(r))
+  var x = new(ptr(t(r), r))
+
+  fill(r.x, null(ptr(t(r), r)))
+
+  regentlib.assert(isnull(x.x), "test failed")
 end
-f:compile()
+regentlib.start(main)

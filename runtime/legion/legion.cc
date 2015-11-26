@@ -3783,6 +3783,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_redop_table();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ ProjectionID Runtime::
       register_region_projection_function(ProjectionID handle, void *func_ptr)
     //--------------------------------------------------------------------------
