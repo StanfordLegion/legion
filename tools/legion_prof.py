@@ -19,6 +19,7 @@ import sys, os, shutil
 import string, re
 from math import sqrt, log
 from getopt import getopt
+from cgi import escape
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -892,7 +893,7 @@ class SVGPrinter(object):
 
     def emit_timing_range(self, color, level, start, finish, title):
         self.target.write('  <g>\n')
-        self.target.write('    <title>'+title+'</title>\n')
+        self.target.write('    <title>'+escape(title)+'</title>\n')
         assert level <= self.offset
         x_start = start//US_PER_PIXEL
         x_length = (finish-start)//US_PER_PIXEL
