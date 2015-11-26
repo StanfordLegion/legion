@@ -58,10 +58,19 @@ typedef enum legion_lowlevel_memory_kind_t {
   SOCKET_MEM,
   Z_COPY_MEM,
   GPU_FB_MEM,
+  DISK_MEM,
+  HDF_MEM,
+  FILE_MEM,
   LEVEL3_CACHE,
   LEVEL2_CACHE,
   LEVEL1_CACHE,
 } legion_lowlevel_memory_kind_t;
+
+typedef enum legion_lowlevel_file_mode_t {
+  LEGION_FILE_READ_ONLY,
+  LEGION_FILE_READ_WRITE,
+  LEGION_FILE_CREATE
+} legion_lowlevel_file_mode_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in lowlevel.h
 typedef enum legion_lowlevel_domain_max_rect_dim_t {

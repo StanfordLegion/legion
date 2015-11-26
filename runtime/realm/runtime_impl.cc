@@ -783,6 +783,12 @@ namespace Realm {
       } else
         diskmem = 0;
 
+      FileMemory *filemem;
+      filemem = new FileMemory(ID(ID::ID_MEMORY,
+                                 gasnet_mynode(),
+                                 n->memories.size(), 0).convert<Memory>());
+      n->memories.push_back(filemem);
+
 #ifdef USE_HDF
       // create HDF memory
       HDFMemory *hdfmem;
@@ -871,13 +877,20 @@ namespace Realm {
 				  5,   // "low" bandwidth
 				  100 // "high" latency
 				  );
-	  
+
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::HDF_MEM],
 				  5,   // "low" bandwidth
 				  100 // "high" latency
 				  );
+
+	  add_proc_mem_affinities(machine,
+                  procs_by_kind[k],
+                  mems_by_kind[Memory::FILE_MEM],
+                  5,    // low bandwidth
+                  100   // high latency)
+                  );
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
@@ -897,6 +910,13 @@ namespace Realm {
 	add_mem_mem_affinities(machine,
 			       mems_by_kind[Memory::SYSTEM_MEM],
 			       mems_by_kind[Memory::DISK_MEM],
+			       15,  // "low" bandwidth
+			       50  // "high" latency
+			       );
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::FILE_MEM],
 			       15,  // "low" bandwidth
 			       50  // "high" latency
 			       );

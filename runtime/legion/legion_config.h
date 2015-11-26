@@ -365,15 +365,11 @@ enum {
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
 
-typedef enum legion_file_mode_t {
-  LEGION_FILE_READ_ONLY,
-  LEGION_FILE_READ_WRITE,
-} legion_file_mode_t;
-
 //==========================================================================
 //                                Types
 //==========================================================================
 
+typedef legion_lowlevel_file_mode_t legion_file_mode_t;
 typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
 typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
 typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;

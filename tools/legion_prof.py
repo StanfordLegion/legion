@@ -58,9 +58,10 @@ memory_kinds = {
     5 : 'Framebuffer',
     6 : 'Disk',
     7 : 'HDF5',
-    8 : 'L3 Cache',
-    9 : 'L2 Cache',
-    10 : 'L1 Cache',
+    8 : 'File',
+    9 : 'L3 Cache',
+    10 : 'L2 Cache',
+    11 : 'L1 Cache',
 }
 
 # Micro-seconds per pixel

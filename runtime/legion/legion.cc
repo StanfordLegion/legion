@@ -3067,6 +3067,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_file(Context ctx,
+                                                 const char *file_name,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::vector<FieldID> &field_vec,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_file(ctx, file_name, handle,
+                                  parent, field_vec, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_file(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_file(ctx, region);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx, 
                                                 const CopyLauncher &launcher)
     //--------------------------------------------------------------------------

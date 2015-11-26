@@ -914,6 +914,9 @@ namespace Realm {
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
                                           bool read_only) const;
+      RegionInstance create_file_instance(const char *file_name,
+                                          const std::vector<size_t> &field_sizes,
+                                          legion_lowlevel_file_mode_t file_mode) const;
       struct CopySrcDstField {
       public:
         CopySrcDstField(void) 
