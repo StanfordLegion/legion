@@ -44,6 +44,7 @@
         overflow-x: scroll;
         overflow-y: scroll;
         margin-left: 300px;
+        margin-right: 50px;
       }
 
       div.fixed-left {
@@ -83,8 +84,9 @@
       var zoom = 1.0;
       var maxZoom = 1000.0
       var margin_left = 300;
+      var margin_right = 50;
       var margin_bottom = 50;
-      var width = $(window).width() - margin_left;
+      var width = $(window).width() - margin_left - margin_right;
       var height = $(window).height() - margin_bottom;
       var start = 0;
       var end = %d;
@@ -831,6 +833,8 @@
     <div id="loader-icon" style="position: absolute; left: 50%%; top: 50%%;"></div>
 
     <script type="text/javascript">
+      width = $("body").width() - margin_left - margin_right - 16;
+      scale = width / (end - start);
       init();
 
       var timelineSvg = d3.select("#timeline").append("svg")
