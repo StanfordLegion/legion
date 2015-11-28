@@ -857,7 +857,7 @@ class Message(object):
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
-        self.file_name = file_name
+        self.file_name = os.path.basename(file_name)
         self.html_file = html_file
         assert self.target is not None
         self.offset = 0
@@ -1579,8 +1579,8 @@ class State(object):
 
         html_file = open(html_file_name, "w")
         html_file.write(template % (last_time, base_level + 1,
-                                    repr(data_tsv_file_name),
-                                    repr(processor_tsv_file_name)))
+                                    repr(os.path.basename(data_tsv_file_name)),
+                                    repr(os.path.basename(processor_tsv_file_name))))
         html_file.close()
 
 def usage():
