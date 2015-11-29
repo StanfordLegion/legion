@@ -17,6 +17,7 @@
 
 local ast = require("bishop/ast")
 local log = require("bishop/log")
+local std = require("bishop/std")
 
 local function any(values)
   local tbl = {}
@@ -221,37 +222,28 @@ function specialize.element(node)
   local patterns = terralib.newlist()
 
   node.constraints:map(function(constraint)
-    local binder = terralib.newsymbol()
+    local binder = std.newsymbol()
     patterns:insert(ast.specialized.PatternMatch {
       binder = binder,
       field = constraint.field,
       position = constraint.position,
     })
     constraints:insert(ast.specialized.Constraint {
-      lhs = binder,
+      lhs = ast.specialized.expr.Variable {
+        value = binder,
+        position = constraint.position,
+      },
       rhs = specialize.expr(constraint.value),
       position = constraint.position,
     })
   end)
   node.patterns:map(function(pattern)
-    --local binder = terralib.newsymbol()
-    --local variable = terralib.newsymbol(pattern.binder)
     local variable = pattern.binder
-    --patterns:insert(ast.specialized.PatternMatch {
-    --  binder = binder,
-    --  field = pattern.field,
-    --  position = pattern.position,
-    --})
     patterns:insert(ast.specialized.PatternMatch {
       binder = variable,
       field = pattern.field,
       position = pattern.position,
     })
-    --constraints:insert(ast.specialized.Constraint {
-    --  lhs = binder,
-    --  rhs = variable,
-    --  position = pattern.position,
-    --})
   end)
 
   local ctor

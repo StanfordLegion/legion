@@ -16,6 +16,7 @@
 
 local parser = require("bishop/parser")
 local specialize = require("bishop/specialize")
+local type_check = require("bishop/type_check")
 local codegen = require("bishop/codegen")
 local std = require("bishop/std")
 
@@ -57,6 +58,7 @@ function language:statement(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
     node = specialize.rules(node)
+    node = type_check.rules(node)
     node = codegen.rules(node)
     return node
   end

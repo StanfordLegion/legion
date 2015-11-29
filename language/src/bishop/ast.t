@@ -435,4 +435,68 @@ ast.specialized.expr.Variable.unparse = ast.unspecialized.expr.Variable.unparse
 ast.specialized.expr:leaf("Keyword", { "value" })
 ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
 
+ast:inner("typed", { "position" })
+
+ast.typed:leaf("Rules", { "task_rules", "region_rules" })
+ast.typed:inner("rule", { "selector", "properties" })
+ast.typed.rule:leaf("Task", {})
+ast.typed.rule:leaf("Region", {})
+
+ast.typed:leaf("Selector", { "type", "elements", "constraints" })
+function ast.typed.Selector:unparse()
+  return table.concat(unparse_all(self.elements), " ")
+end
+
+ast.typed:inner("element", { "name", "classes", "patterns" })
+function ast.typed.element:unparse()
+  local str = ""
+  if #self.name > 0 then str = str .. "#" .. self.name[1] end
+  return str
+end
+ast.typed.element:leaf("Task", {})
+function ast.typed.element.Task:unparse()
+  return "task" .. ast.typed.element.unparse(self)
+end
+ast.typed.element:leaf("Region", {})
+function ast.typed.element.Region:unparse()
+  return "region" .. ast.typed.element.unparse(self)
+end
+
+ast.typed:leaf("Property", { "field", "value" })
+ast.typed:leaf("Constraint", { "lhs", "rhs" })
+ast.typed:leaf("FilterConstraint", { "field", "value" })
+function ast.typed.FilterConstraint:unparse()
+  return self.field .. "=" .. self.value:unparse()
+end
+ast.typed:leaf("PatternMatch", { "field", "binder" })
+
+ast.typed:inner("expr", { "expr_type" })
+ast.typed.expr:leaf("Unary", { "rhs", "op" })
+function ast.typed.expr.Unary:unparse()
+  return tostring(self.op) .. self.rhs:unparse()
+end
+ast.typed.expr:leaf("Binary", { "lhs", "rhs", "op" })
+function ast.typed.expr.Binary:unparse()
+  return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+ast.typed.expr:leaf("Index", { "value", "index" })
+function ast.typed.expr.Index:unparse()
+  return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
+end
+ast.typed.expr:leaf("Filter", { "value", "constraints" })
+function ast.typed.expr.Filter:unparse()
+  local const_str = table.concat(unparse_all(self.constraints), " and ")
+  return self.value:unparse() .. "[" .. const_str .. "]"
+end
+ast.typed.expr:leaf("Field", { "value", "field" })
+function ast.typed.expr.Field:unparse()
+  return self.value:unparse() .. "." .. self.field
+end
+ast.typed.expr:leaf("Constant", { "value" })
+ast.typed.expr.Constant.unparse = ast.specialized.expr.Constant.unparse
+ast.typed.expr:leaf("Variable", { "value" })
+ast.typed.expr.Variable.unparse = ast.specialized.expr.Variable.unparse
+ast.typed.expr:leaf("Keyword", { "value" })
+ast.typed.expr.Keyword.unparse = ast.specialized.expr.Keyword.unparse
+
 return ast

@@ -69,7 +69,7 @@ function codegen.expr(binders, expr_type, node)
     var [value]
   end
 
-  if node:is(ast.specialized.expr.Keyword) then
+  if node:is(ast.typed.expr.Keyword) then
     local keyword = node.value
     if keyword == "processors" then
       assert(expr_type == c.bishop_processor_list_t)
@@ -83,7 +83,7 @@ function codegen.expr(binders, expr_type, node)
       log.error(node, "keyword " .. keyword .. " is not yet supported")
     end
 
-  elseif node:is(ast.specialized.expr.Unary) then
+  elseif node:is(ast.typed.expr.Unary) then
     local rhs = codegen.expr(binders, expr_type, node.rhs)
     actions = quote
       [rhs.actions];
@@ -91,7 +91,7 @@ function codegen.expr(binders, expr_type, node)
       [value] = [std.quote_unary_op(node.op, rhs.value)]
     end
 
-  elseif node:is(ast.specialized.expr.Binary) then
+  elseif node:is(ast.typed.expr.Binary) then
     local lhs = codegen.expr(binders, expr_type, node.lhs)
     local rhs = codegen.expr(binders, expr_type, node.rhs)
     actions = quote
@@ -101,13 +101,13 @@ function codegen.expr(binders, expr_type, node)
       [value] = [std.quote_binary_op(node.op, lhs.value, rhs.value)]
     end
 
-  elseif node:is(ast.specialized.expr.Filter) then
+  elseif node:is(ast.typed.expr.Filter) then
     local base = codegen.expr(binders, expr_type, node.value)
     node.constraints:map(function(constraint)
-      assert(constraint:is(ast.specialized.FilterConstraint))
+      assert(constraint:is(ast.typed.FilterConstraint))
       if constraint.field == "isa" then
         if expr_type == c.bishop_processor_list_t then
-          if not constraint.value:is(ast.specialized.expr.Keyword) then
+          if not constraint.value:is(ast.typed.expr.Keyword) then
             log.error(constraint, "the value for field " .. constraint.field ..
               " is invalid")
           end
@@ -132,7 +132,7 @@ function codegen.expr(binders, expr_type, node)
         end
       elseif constraint.field == "kind" then
         if expr_type == c.bishop_memory_list_t then
-          if not constraint.value:is(ast.specialized.expr.Keyword) then
+          if not constraint.value:is(ast.typed.expr.Keyword) then
             log.error(constraint, "the value for field " .. constraint.field ..
               " is invalid")
           end
@@ -165,7 +165,7 @@ function codegen.expr(binders, expr_type, node)
       end
     end)
 
-  elseif node:is(ast.specialized.expr.Index) then
+  elseif node:is(ast.typed.expr.Index) then
     local base = codegen.expr(binders, expr_type, node.value)
     local index = codegen.expr(binders, uint, node.index)
     actions = quote
@@ -180,7 +180,7 @@ function codegen.expr(binders, expr_type, node)
         [value].list[0] = [value].list[ [index.value] ]
       end
     end
-  elseif node:is(ast.specialized.expr.Field) then
+  elseif node:is(ast.typed.expr.Field) then
     if node.field == "memories" then
       local base = codegen.expr(binders, c.legion_processor_t, node.value)
       actions = quote
@@ -197,12 +197,12 @@ function codegen.expr(binders, expr_type, node)
     else
       log.error(node, "field " .. node.field  ..  " is not supported")
     end
-  elseif node:is(ast.specialized.expr.Constant) then
+  elseif node:is(ast.typed.expr.Constant) then
     actions = quote
       [actions];
       [value] = [node.value]
     end
-  elseif node:is(ast.specialized.expr.Variable) then
+  elseif node:is(ast.typed.expr.Variable) then
     assert(binders[node.value])
     actions = quote
       [actions];
@@ -247,7 +247,7 @@ function codegen.task_rule(node)
   local selector_string = selector:unparse()
   assert(#selector.elements > 0)
   local first_element = selector.elements[1]
-  assert(first_element:is(ast.specialized.element.Task))
+  assert(first_element:is(ast.typed.element.Task))
   local binders = {}
 
   if #first_element.name > 0 then
@@ -297,9 +297,9 @@ function codegen.region_rule(node)
   local selector_string = selector:unparse()
   assert(#selector.elements > 1)
   local first_element = selector.elements[1]
-  assert(first_element:is(ast.specialized.element.Region))
+  assert(first_element:is(ast.typed.element.Region))
   local first_task_element = selector.elements[2]
-  assert(first_task_element:is(ast.specialized.element.Task))
+  assert(first_task_element:is(ast.typed.element.Task))
   local binders = {}
 
   if #first_task_element.name > 0 then

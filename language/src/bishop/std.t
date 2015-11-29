@@ -34,6 +34,14 @@ terra std.assert(x : bool, message : rawstring)
   end
 end
 
+std.symbol_count = 0
+
+function std.newsymbol()
+  local new_var = "__var" .. tostring(std.symbol_count)
+  std.symbol_count = std.symbol_count + 1
+  return new_var
+end
+
 function std.quote_unary_op(op, rhs)
   if op == "-" then
     return `(-[rhs])
@@ -41,6 +49,25 @@ function std.quote_unary_op(op, rhs)
     assert(false, "unknown operator " .. tostring(op))
   end
 end
+
+local function register_opaque_type(keyword)
+  local flag = "is_" .. keyword
+  local tbl = {}
+  tbl[flag] = true
+  setmetatable(tbl, tbl)
+  tbl.__index = tbl
+  tbl.__tostring = function(self) return keyword end
+
+  std[keyword] = tbl
+  std[flag] = function(t) return rawget(t, flag) end
+end
+
+register_opaque_type("isa_type")
+register_opaque_type("compile_option_type")
+register_opaque_type("processor_type")
+register_opaque_type("memory_type")
+register_opaque_type("memory_kind_type")
+register_opaque_type("point_type")
 
 function std.quote_binary_op(op, lhs, rhs)
   if op == "*" then
