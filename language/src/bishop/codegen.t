@@ -244,7 +244,8 @@ function codegen.task_rule(node)
   local is_matched = terralib.newsymbol(bool)
   local selector_body = quote var [is_matched] = true end
   local selector = node.selector
-  local selector_string = selector:unparse()
+  local position_string = node.position.filename .. ":" ..
+    tostring(node.position.linenumber)
   assert(#selector.elements > 0)
   local first_element = selector.elements[1]
   assert(first_element:is(ast.typed.element.Task))
@@ -271,12 +272,12 @@ function codegen.task_rule(node)
   local terra select_task_options([task_var] : c.legion_task_t)
     [selector_body];
     if [is_matched] then
-      c.bishop_logger_info("[select_task_options] selector '%s' matches",
-        [selector_string])
+      c.bishop_logger_info("[select_task_options] rule at %s matches",
+        position_string)
       [select_task_options_body]
     else
-      c.bishop_logger_info(["[select_task_options] rule '%s { ... }' " ..
-        "was not applied"], selector_string)
+      c.bishop_logger_info("[select_task_options] rule at %s was not applied",
+        position_string)
     end
   end
 
@@ -294,7 +295,8 @@ function codegen.region_rule(node)
   local is_matched = terralib.newsymbol(bool)
   local selector_body = quote var [is_matched] = true end
   local selector = node.selector
-  local selector_string = selector:unparse()
+  local position_string = node.position.filename .. ":" ..
+    tostring(node.position.linenumber)
   assert(#selector.elements > 1)
   local first_element = selector.elements[1]
   assert(first_element:is(ast.typed.element.Region))
@@ -341,11 +343,11 @@ function codegen.region_rule(node)
     [selector_body];
     [pattern_matches];
     if [is_matched] then
-      c.bishop_logger_info("[map_task] selector '%s' matches", selector_string)
+      c.bishop_logger_info("[map_task] rule at %s matches", position_string)
       [map_task_body]
     else
-      c.bishop_logger_info("[map_task] rule '%s { ... }' was not applied",
-        [selector_string])
+      c.bishop_logger_info("[map_task] rule at %s was not applied",
+        position_string)
     end
   end
 
