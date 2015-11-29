@@ -42,13 +42,16 @@ function parser.value(p)
       value = token.value,
       position = pos,
     }
+  elseif p:nextif("(") then
+    value = p:expr()
+    p:expect(")")
   else
     p:error("unexpected type of value")
   end
   return value
 end
 
-function parser.expr(p)
+function parser.expr_complex(p)
   local expr = p:value()
   while true do
     if p:nextif("[") then
@@ -61,7 +64,7 @@ function parser.expr(p)
           position = pos,
         }
       else
-        local value = p:value()
+        local value = p:expr()
         local pos = ast.save(p)
         expr = ast.unspecialized.expr.Index {
           value = expr,
@@ -84,6 +87,41 @@ function parser.expr(p)
   end
   return expr
 end
+
+function parser.expr_unary(precedence)
+  return function(p)
+    local position = ast.save(p)
+    local op = p:next().type
+    local rhs = p:expr(precedence)
+    return ast.unspecialized.expr.Unary {
+      op = op,
+      rhs = rhs,
+      position = position,
+    }
+  end
+end
+
+function parser.expr_binary_left(p, lhs)
+  local position = lhs.position
+  local op = p:next().type
+  local rhs = p:expr(op)
+  return ast.unspecialized.expr.Binary {
+    op = op,
+    lhs = lhs,
+    rhs = rhs,
+    position = position,
+  }
+end
+
+parser.expr = parsing.Pratt()
+  :prefix("-", parser.expr_unary(50))
+  :infix("*", 40, parser.expr_binary_left)
+  :infix("/", 40, parser.expr_binary_left)
+  :infix("%", 40, parser.expr_binary_left)
+  :infix("+", 30, parser.expr_binary_left)
+  :infix("-", 30, parser.expr_binary_left)
+  :prefix(parsing.default, parser.expr_complex)
+
 
 function parser.property(p)
   local field = p:next(p.name)

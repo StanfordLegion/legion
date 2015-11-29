@@ -82,6 +82,25 @@ function codegen.expr(binders, expr_type, node)
     else
       log.error(node, "keyword " .. keyword .. " is not yet supported")
     end
+
+  elseif node:is(ast.specialized.expr.Unary) then
+    local rhs = codegen.expr(binders, expr_type, node.rhs)
+    actions = quote
+      [rhs.actions];
+      [actions];
+      [value] = [std.quote_unary_op(node.op, rhs.value)]
+    end
+
+  elseif node:is(ast.specialized.expr.Binary) then
+    local lhs = codegen.expr(binders, expr_type, node.lhs)
+    local rhs = codegen.expr(binders, expr_type, node.rhs)
+    actions = quote
+      [lhs.actions];
+      [rhs.actions];
+      [actions];
+      [value] = [std.quote_binary_op(node.op, lhs.value, rhs.value)]
+    end
+
   elseif node:is(ast.specialized.expr.Filter) then
     local base = codegen.expr(binders, expr_type, node.value)
     node.constraints:map(function(constraint)
@@ -155,7 +174,7 @@ function codegen.expr(binders, expr_type, node)
       [index.actions];
       do
         std.assert([index.value] >= 0 and [index.value] < [base.value].size,
-          ["index " .. tostring(node.index.value) .. " is out-of-bounds"])
+          ["index " .. tostring(index.value) .. " is out-of-bounds"])
         [value] = [base.value]
         [value].size = 1
         [value].list[0] = [value].list[ [index.value] ]

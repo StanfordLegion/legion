@@ -331,6 +331,16 @@ function ast.unspecialized.PatternMatch:unparse()
 end
 
 ast.unspecialized:inner("expr")
+ast.unspecialized.expr:leaf("Unary", { "rhs", "op" })
+function ast.unspecialized.expr.Unary:unparse()
+  return tostring(self.op) .. self.rhs:unparse()
+end
+
+ast.unspecialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
+function ast.unspecialized.expr.Binary:unparse()
+  return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+
 ast.unspecialized.expr:leaf("Index", { "value", "index" })
 function ast.unspecialized.expr.Index:unparse()
   return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
@@ -397,6 +407,14 @@ end
 ast.specialized:leaf("PatternMatch", { "field", "binder" })
 
 ast.specialized:inner("expr")
+ast.specialized.expr:leaf("Unary", { "rhs", "op" })
+function ast.specialized.expr.Unary:unparse()
+  return tostring(self.op) .. self.rhs:unparse()
+end
+ast.specialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
+function ast.specialized.expr.Binary:unparse()
+  return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
 ast.specialized.expr:leaf("Index", { "value", "index" })
 function ast.specialized.expr.Index:unparse()
   return self.value:unparse() .. "[" .. self.index:unparse() .. "]"

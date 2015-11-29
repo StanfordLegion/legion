@@ -117,21 +117,21 @@ local pattern_match_checks = {
 
 local specialize = {}
 
-function specialize.value(node)
+function specialize.expr(node)
   if node:is(ast.unspecialized.expr.Index) then
-    local value = specialize.value(node.value)
-    local index = specialize.value(node.index)
+    local value = specialize.expr(node.value)
+    local index = specialize.expr(node.index)
     return ast.specialized.expr.Index {
       value = value,
       index = index,
       position = node.position,
     }
   elseif node:is(ast.unspecialized.expr.Filter) then
-    local value = specialize.value(node.value)
+    local value = specialize.expr(node.value)
     local constraints = node.constraints:map(function(constraint)
       return ast.specialized.FilterConstraint {
         field = constraint.field,
-        value = specialize.value(constraint.value),
+        value = specialize.expr(constraint.value),
         position = constraint.position,
       }
     end)
@@ -142,7 +142,7 @@ function specialize.value(node)
     }
     return new_node
   elseif node:is(ast.unspecialized.expr.Field) then
-    local value = specialize.value(node.value)
+    local value = specialize.expr(node.value)
     return ast.specialized.expr.Field {
       value = value,
       field = node.field,
@@ -163,6 +163,22 @@ function specialize.value(node)
       value = node.value,
       position = node.position,
     }
+  elseif node:is(ast.unspecialized.expr.Unary) then
+    local rhs = specialize.expr(node.rhs)
+    return ast.specialized.expr.Unary {
+      op = node.op,
+      rhs = rhs,
+      position = node.position,
+    }
+  elseif node:is(ast.unspecialized.expr.Binary) then
+    local lhs = specialize.expr(node.lhs)
+    local rhs = specialize.expr(node.rhs)
+    return ast.specialized.expr.Binary {
+      op = node.op,
+      lhs = lhs,
+      rhs = rhs,
+      position = node.position,
+    }
   else
     assert(false, "unexpected node type: " .. tostring(node.node_type))
   end
@@ -170,7 +186,7 @@ end
 
 function specialize.property(node, type)
   local field = node.field
-  local value = specialize.value(node.value)
+  local value = specialize.expr(node.value)
 
   if value:is(ast.specialized.expr.Keyword) then
     if not (property_checks[field] and
@@ -213,7 +229,7 @@ function specialize.element(node)
     })
     constraints:insert(ast.specialized.Constraint {
       lhs = binder,
-      rhs = specialize.value(constraint.value),
+      rhs = specialize.expr(constraint.value),
       position = constraint.position,
     })
   end)

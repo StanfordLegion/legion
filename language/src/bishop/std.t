@@ -34,6 +34,30 @@ terra std.assert(x : bool, message : rawstring)
   end
 end
 
+function std.quote_unary_op(op, rhs)
+  if op == "-" then
+    return `(-[rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+function std.quote_binary_op(op, lhs, rhs)
+  if op == "*" then
+    return `([lhs] * [rhs])
+  elseif op == "/" then
+    return `([lhs] / [rhs])
+  elseif op == "%" then
+    return `([lhs] % [rhs])
+  elseif op == "+" then
+    return `([lhs] + [rhs])
+  elseif op == "-" then
+    return `([lhs] - [rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
 function std.register_bishop_mappers()
   local rules = terralib.newsymbol(&c.bishop_rule_t)
   local register_body = quote end
