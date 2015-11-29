@@ -330,6 +330,8 @@ function codegen.region_rule(node)
     end
   end)
 
+  local constraint_checks = quote end
+
   local map_task_body = quote end
   node.properties:map(function(property)
     map_task_body = quote
@@ -338,17 +340,23 @@ function codegen.region_rule(node)
     end
   end)
 
+  local early_out = quote
+    if not [is_matched] then
+      c.bishop_logger_info("[map_task] rule at %s was not applied",
+        position_string)
+      return
+    end
+  end
+
   local terra map_task([task_var] : c.legion_task_t,
                        [req_var] : c.legion_region_requirement_t)
     [selector_body];
+    [early_out];
     [pattern_matches];
-    if [is_matched] then
-      c.bishop_logger_info("[map_task] rule at %s matches", position_string)
-      [map_task_body]
-    else
-      c.bishop_logger_info("[map_task] rule at %s was not applied",
-        position_string)
-    end
+    [constraint_checks];
+    [early_out];
+    c.bishop_logger_info("[map_task] rule at %s matches", position_string)
+    [map_task_body]
   end
 
   return {
