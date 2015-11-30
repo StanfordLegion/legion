@@ -32,8 +32,9 @@ namespace LegionRuntime {
 		class BishopMapper : public DefaultMapper
 		{
 			public:
-				BishopMapper(const std::vector<bishop_rule_t>&, Machine, HighLevelRuntime*,
-                     Processor);
+				BishopMapper(const std::vector<bishop_task_rule_t>&,
+                     const std::vector<bishop_region_rule_t>&,
+                     Machine, HighLevelRuntime*, Processor);
 				~BishopMapper();
 
 				virtual void select_task_options(Task *task);
@@ -47,7 +48,8 @@ namespace LegionRuntime {
 				virtual void notify_mapping_failed(const Mappable *mappable);
 
       private:
-        std::vector<bishop_rule_t> task_rules;
+        std::vector<bishop_task_rule_t> task_rules;
+        std::vector<bishop_region_rule_t> region_rules;
 		};
 
 	};

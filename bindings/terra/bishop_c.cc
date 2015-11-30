@@ -27,7 +27,8 @@ using namespace std;
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
 
-static vector<bishop_rule_t> task_rules;
+static vector<bishop_task_rule_t> task_rules;
+static vector<bishop_region_rule_t> region_rules;
 
 extern Logger::Category log_bishop;
 
@@ -38,17 +39,22 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
   for (set<Processor>::const_iterator it = local_procs.begin();
        it != local_procs.end(); it++)
   {
-    runtime->replace_default_mapper(new BishopMapper(task_rules, machine,
-                                                     runtime, *it),
+    runtime->replace_default_mapper(new BishopMapper(task_rules, region_rules,
+                                                     machine, runtime, *it),
                                     *it);
   }
 }
 
 void
-register_bishop_mappers(bishop_rule_t* _task_rules, unsigned _num_task_rules)
+register_bishop_mappers(bishop_task_rule_t* _task_rules,
+                        unsigned _num_task_rules,
+                        bishop_region_rule_t* _region_rules,
+                        unsigned _num_region_rules)
 {
   for (unsigned i = 0; i < _num_task_rules; ++i)
     task_rules.push_back(_task_rules[i]);
+  for (unsigned i = 0; i < _num_region_rules; ++i)
+    region_rules.push_back(_region_rules[i]);
 
   HighLevelRuntime::set_registration_callback(
       bishop_mapper_registration_callback);

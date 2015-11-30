@@ -32,7 +32,7 @@ namespace LegionRuntime {
 #define RUN_ALL_TASK_RULES(CALLBACK) \
     for (unsigned i = 0; i < task_rules.size(); ++i)       \
     {                                                      \
-      bishop_rule_t& rule = task_rules[i];                 \
+      bishop_task_rule_t& rule = task_rules[i];            \
       if (rule.CALLBACK)                                   \
       {                                                    \
         legion_task_t task_ = CObjectWrapper::wrap(task);  \
@@ -40,27 +40,29 @@ namespace LegionRuntime {
       }                                                    \
     }                                                      \
 
-#define RUN_ALL_REGION_RULES(CALLBACK)                            \
-    for (unsigned i = 0; i < task_rules.size(); ++i)              \
-    {                                                             \
-      bishop_rule_t& rule = task_rules[i];                        \
-      if (rule.CALLBACK)                                          \
-      {                                                           \
-        legion_task_t task_ = CObjectWrapper::wrap(task);         \
-        for (unsigned idx = 0; idx < task->regions.size(); ++idx) \
-        {                                                         \
-          legion_region_requirement_t req_ =                      \
-            CObjectWrapper::wrap(&task->regions[idx]);            \
-          rule.CALLBACK(task_, req_);                             \
-        }                                                         \
-      }                                                           \
-    }                                                             \
+#define RUN_ALL_REGION_RULES(CALLBACK)                               \
+    for (unsigned i = 0; i < task_rules.size(); ++i)                 \
+    {                                                                \
+      bishop_region_rule_t& rule = region_rules[i];                  \
+      if (rule.CALLBACK)                                             \
+      {                                                              \
+        legion_task_t task_ = CObjectWrapper::wrap(task);            \
+        for (unsigned idx = 0; idx < task->regions.size(); ++idx)    \
+        {                                                            \
+          legion_region_requirement_t req_ =                         \
+            CObjectWrapper::wrap(&task->regions[idx]);               \
+          rule.CALLBACK(task_, req_);                                \
+        }                                                            \
+      }                                                              \
+    }                                                                \
 
     //--------------------------------------------------------------------------
-		BishopMapper::BishopMapper(const std::vector<bishop_rule_t>& _task_rules,
+		BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
+                               const std::vector<bishop_region_rule_t>& rrules,
                                Machine machine, HighLevelRuntime *runtime,
                                Processor local_proc)
-			: DefaultMapper(machine, runtime, local_proc), task_rules(_task_rules)
+			: DefaultMapper(machine, runtime, local_proc),
+        task_rules(trules), region_rules(rrules)
     //--------------------------------------------------------------------------
 		{
       log_bishop.info("bishop mapper created");

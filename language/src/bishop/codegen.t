@@ -308,12 +308,9 @@ function codegen.task_rule(node)
         position_string)
     end
   end
-
   return {
     select_task_options = select_task_options,
-    pre_map_task = 0,
     select_task_variant = 0,
-    map_task = 0,
   }
 end
 
@@ -411,19 +408,18 @@ function codegen.region_rule(node)
   end
 
   return {
-    select_task_options = 0,
     pre_map_task = 0,
-    select_task_variant = 0,
     map_task = map_task,
   }
 end
 
 function codegen.rules(node)
-  local rules = terralib.newlist()
-  rules:insertall(node.task_rules:map(codegen.task_rule))
-  rules:insertall(node.region_rules:map(codegen.region_rule))
-  node.region_rules:map(codegen.region_rule)
-  return rules
+  local task_rules = node.task_rules:map(codegen.task_rule)
+  local region_rules = node.region_rules:map(codegen.region_rule)
+  return {
+    task_rules = task_rules,
+    region_rules = region_rules,
+  }
 end
 
 return codegen

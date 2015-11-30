@@ -32,23 +32,31 @@ void bishop_delete_##NAME##_list(TYPE);                    \
 LIST_TYPE(processor, bishop_processor_list_t, legion_processor_t)
 LIST_TYPE(memory, bishop_memory_list_t, legion_memory_t)
 
+typedef bool (*bishop_task_predicate_t)(legion_task_t);
+typedef bool (*bishop_region_predicate_t)(legion_task_t,
+                                          legion_region_requirement_t);
+
 typedef void (*bishop_task_callback_fn_t)(legion_task_t);
 typedef void (*bishop_region_callback_fn_t)(legion_task_t,
                                             legion_region_requirement_t);
 
-typedef struct bishop_rule_t {
+typedef struct bishop_task_rule_t {
   bishop_task_callback_fn_t select_task_options;
-  bishop_region_callback_fn_t pre_map_task;
   bishop_task_callback_fn_t select_task_variant;
+} bishop_task_rule_t;
+
+typedef struct bishop_region_rule_t {
+  bishop_region_callback_fn_t pre_map_task;
   bishop_region_callback_fn_t map_task;
-} bishop_rule_t;
+} bishop_region_rule_t;
 
 typedef enum bishop_isa_t {
   X86_ISA = 1,
   CUDA_ISA
 } bishop_isa_t;
 
-void register_bishop_mappers(bishop_rule_t*, unsigned);
+void register_bishop_mappers(bishop_task_rule_t*, unsigned,
+                             bishop_region_rule_t*, unsigned);
 
 bishop_processor_list_t bishop_all_processors();
 

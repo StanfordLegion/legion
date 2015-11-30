@@ -88,31 +88,44 @@ function std.quote_binary_op(op, lhs, rhs)
 end
 
 function std.register_bishop_mappers()
-  local rules = terralib.newsymbol(&c.bishop_rule_t)
+  local task_rules = terralib.newsymbol(&c.bishop_task_rule_t)
+  local region_rules = terralib.newsymbol(&c.bishop_region_rule_t)
   local register_body = quote end
 
-  for i = 1, #__bishop__ do
-    local rule = __bishop__[i]
+  for i = 1, #__bishop__.task_rules do
+    local task_rule = __bishop__.task_rules[i]
     register_body = quote
       [register_body];
-      [rules][ [i - 1] ] = c.bishop_rule_t {
+      [task_rules][ [i - 1] ] = c.bishop_task_rule_t {
         select_task_options =
-          [c.bishop_task_callback_fn_t]([rule.select_task_options]),
-        pre_map_task =
-          [c.bishop_region_callback_fn_t]([rule.pre_map_task]),
+          [c.bishop_task_callback_fn_t]([task_rule.select_task_options]),
         select_task_variant =
-          [c.bishop_task_callback_fn_t]([rule.select_task_variant]),
+          [c.bishop_task_callback_fn_t]([task_rule.select_task_variant]),
+      }
+    end
+  end
+
+  for i = 1, #__bishop__.region_rules do
+    local region_rule = __bishop__.region_rules[i]
+    register_body = quote
+      [register_body];
+      [region_rules][ [i - 1] ] = c.bishop_region_rule_t {
+        pre_map_task =
+          [c.bishop_region_callback_fn_t]([region_rule.pre_map_task]),
         map_task =
-          [c.bishop_region_callback_fn_t]([rule.map_task]),
+          [c.bishop_region_callback_fn_t]([region_rule.map_task]),
       }
     end
   end
 
   local terra register()
-    var num_rules = [#__bishop__]
-    var [rules] : c.bishop_rule_t[#__bishop__]
+    var num_task_rules = [#__bishop__.task_rules]
+    var num_region_rules = [#__bishop__.region_rules]
+    var [task_rules] : c.bishop_task_rule_t[ #__bishop__.task_rules ]
+    var [region_rules] : c.bishop_region_rule_t[ #__bishop__.region_rules ]
     [register_body]
-    c.register_bishop_mappers([rules], num_rules)
+    c.register_bishop_mappers([task_rules], num_task_rules,
+                              [region_rules], num_region_rules)
   end
 
   register()
