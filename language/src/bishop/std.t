@@ -97,8 +97,12 @@ function std.register_bishop_mappers()
     register_body = quote
       [register_body];
       [task_rules][ [i - 1] ] = c.bishop_task_rule_t {
+        matches =
+          [c.bishop_task_predicate_t]([task_rule.matches]),
         select_task_options =
           [c.bishop_task_callback_fn_t]([task_rule.select_task_options]),
+        select_target_for_point =
+          [c.bishop_assignment_fn_t]([task_rule.select_target_for_point]),
         select_task_variant =
           [c.bishop_task_callback_fn_t]([task_rule.select_task_variant]),
       }

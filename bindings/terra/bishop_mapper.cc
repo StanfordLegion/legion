@@ -41,7 +41,7 @@ namespace LegionRuntime {
     }                                                      \
 
 #define RUN_ALL_REGION_RULES(CALLBACK)                               \
-    for (unsigned i = 0; i < task_rules.size(); ++i)                 \
+    for (unsigned i = 0; i < region_rules.size(); ++i)               \
     {                                                                \
       bishop_region_rule_t& rule = region_rules[i];                  \
       if (rule.CALLBACK)                                             \
@@ -88,8 +88,35 @@ namespace LegionRuntime {
         std::vector<DomainSplit> &slices)
     //--------------------------------------------------------------------------
     {
+      using namespace LegionRuntime::Arrays;
       log_bishop.info("[slice_domain] task %s", task->variants->name);
       DefaultMapper::slice_domain(task, domain, slices);
+      for (unsigned i = 0; i < task_rules.size(); ++i)
+      {
+        bishop_task_rule_t& rule = task_rules[i];
+        if (rule.select_target_for_point)
+        {
+          legion_task_t task_ = CObjectWrapper::wrap(const_cast<Task*>(task));
+          // TODO: only supports 1D indexspace launch at the moment
+          if (rule.matches(task_) && domain.get_dim() == 1)
+          {
+            slices.clear();
+            Arrays::Rect<1> r = domain.get_rect<1>();
+            for(Arrays::GenericPointInRectIterator<1> pir(r); pir; pir++)
+            {
+              legion_domain_point_t dp_ =
+                CObjectWrapper::wrap(DomainPoint::from_point<1>(pir.p));
+              Processor target =
+                CObjectWrapper::unwrap(
+                    rule.select_target_for_point(task_, dp_));
+              Arrays::Rect<1> subrect(pir.p, pir.p);
+              Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,
+                  false, false);
+              slices.push_back(ds);
+            }
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -116,7 +143,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       log_bishop.info("[map_task] task %s", task->variants->name);
-      bool result = true; //DefaultMapper::map_task(task);
+      bool result = DefaultMapper::map_task(task);
       RUN_ALL_REGION_RULES(map_task);
       return result;
     }

@@ -40,8 +40,13 @@ typedef void (*bishop_task_callback_fn_t)(legion_task_t);
 typedef void (*bishop_region_callback_fn_t)(legion_task_t,
                                             legion_region_requirement_t);
 
+typedef legion_processor_t (*bishop_assignment_fn_t)(legion_task_t,
+                                                     legion_domain_point_t);
+
 typedef struct bishop_task_rule_t {
+  bishop_task_predicate_t matches;
   bishop_task_callback_fn_t select_task_options;
+  bishop_assignment_fn_t select_target_for_point;
   bishop_task_callback_fn_t select_task_variant;
 } bishop_task_rule_t;
 

@@ -92,7 +92,7 @@ function codegen.type(ty)
   elseif std.is_memory_kind_type(ty) then
     return c.legion_memory_kind_t
   elseif std.is_point_type(ty) then
-    return &int
+    return c.legion_domain_point_t
   elseif ty == int then
     return ty
   else
@@ -193,14 +193,23 @@ function codegen.expr(binders, node)
   elseif node:is(ast.typed.expr.Index) then
     local base = codegen.expr(binders, node.value)
     local index = codegen.expr(binders, node.index)
-    actions = quote
-      [actions];
-      [base.actions];
-      [index.actions];
-      do
-        std.assert([index.value] >= 0 and [index.value] < [base.value].size,
-          ["index " .. tostring(index.value) .. " is out-of-bounds"])
-        [value] = [base.value].list[ [index.value] ]
+    if std.is_point_type(node.value.expr_type) then
+      actions = quote
+        [actions];
+        [base.actions];
+        [index.actions];
+        [value] = [base.value].point_data[ [index.value] ]
+      end
+    else
+      actions = quote
+        [actions];
+        [base.actions];
+        [index.actions];
+        do
+          std.assert([index.value] >= 0 and [index.value] < [base.value].size,
+            ["index " .. tostring(index.value) .. " is out-of-bounds"])
+          [value] = [base.value].list[ [index.value] ]
+        end
       end
     end
   elseif node:is(ast.typed.expr.Field) then
@@ -270,7 +279,7 @@ end
 function codegen.task_rule(node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local is_matched = terralib.newsymbol(bool)
-  local selector_body = quote var [is_matched] = true end
+  local point_var = terralib.newsymbol(c.legion_domain_point_t, "dp_")
   local selector = node.selector
   local position_string = node.position.filename .. ":" ..
     tostring(node.position.linenumber)
@@ -279,6 +288,8 @@ function codegen.task_rule(node)
   assert(first_element:is(ast.typed.element.Task))
   local binders = {}
 
+  local is_index_task = false
+  local selector_body = quote var [is_matched] = true end
   if #first_element.name > 0 then
     assert(#first_element.name == 1)
     local task_name = terralib.constant(first_element.name[1])
@@ -289,13 +300,53 @@ function codegen.task_rule(node)
     end
   end
 
-  local select_task_options_body = quote end
-  node.properties:map(function(property)
-    select_task_options_body = quote
-      [select_task_options_body];
-      [codegen.property(binders, "task", task_var, property)]
+  local pattern_matches = quote end
+  first_element.patterns:map(function(pattern)
+    if pattern.field == "index" then
+      is_index_task = true
+      local binder = terralib.newsymbol(pattern.binder)
+      binders[pattern.binder] = binder
+      pattern_matches = quote
+        [pattern_matches];
+        var [binder] : c.legion_domain_point_t
+        [binder] = [point_var]
+      end
+    else
+      log.error(node, "field " .. pattern.field ..
+      " is not supported for pattern match")
     end
   end)
+
+  local select_task_options_body = quote end
+  local select_target_for_point_body = quote end
+
+  node.properties:map(function(property)
+    if is_index_task and property.field == "target" then
+      local value = codegen.expr(binders, property.value)
+      select_target_for_point_body = quote
+        [select_target_for_point_body];
+        [value.actions];
+        return [value.value]
+      end
+    else
+      select_task_options_body = quote
+        [select_task_options_body];
+        [codegen.property(binders, "task", task_var, property)]
+      end
+    end
+  end)
+
+  local terra matches([task_var] : c.legion_task_t)
+    [selector_body];
+    if [is_matched] then
+      c.bishop_logger_info("[slice_domain] rule at %s matches",
+        position_string)
+    else
+      c.bishop_logger_info("[slice_domain] rule at %s was not applied",
+        position_string)
+    end
+    return [is_matched]
+  end
 
   local terra select_task_options([task_var] : c.legion_task_t)
     [selector_body];
@@ -308,8 +359,17 @@ function codegen.task_rule(node)
         position_string)
     end
   end
+
+  local terra select_target_for_point([task_var] : c.legion_task_t,
+                                      [point_var] : c.legion_domain_point_t)
+    [pattern_matches];
+    [select_target_for_point_body]
+  end
+
   return {
+    matches = matches,
     select_task_options = select_task_options,
+    select_target_for_point = select_target_for_point,
     select_task_variant = 0,
   }
 end
