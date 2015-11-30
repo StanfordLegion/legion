@@ -288,7 +288,6 @@ function codegen.task_rule(node)
   assert(first_element:is(ast.typed.element.Task))
   local binders = {}
 
-  local is_index_task = false
   local selector_body = quote var [is_matched] = true end
   if #first_element.name > 0 then
     assert(#first_element.name == 1)
@@ -300,14 +299,21 @@ function codegen.task_rule(node)
     end
   end
 
-  local pattern_matches = quote end
+  local select_task_options_pattern_matches = quote end
+  local select_target_for_point_pattern_matches = quote end
+  local predicate_pattern_matches = quote end
   first_element.patterns:map(function(pattern)
     if pattern.field == "index" then
-      is_index_task = true
       local binder = terralib.newsymbol(pattern.binder)
       binders[pattern.binder] = binder
-      pattern_matches = quote
-        [pattern_matches];
+      select_task_options_pattern_matches = quote
+        [select_task_options_pattern_matches];
+        var [binder] : c.legion_domain_point_t
+        [binder].dim = 1
+        [binder].point_data[0] = 0
+      end
+      select_target_for_point_pattern_matches = quote
+        [select_target_for_point_pattern_matches];
         var [binder] : c.legion_domain_point_t
         [binder] = [point_var]
       end
@@ -321,14 +327,13 @@ function codegen.task_rule(node)
   local select_target_for_point_body = quote end
 
   node.properties:map(function(property)
-    if is_index_task and property.field == "target" then
+    if property.field == "target" then
       local value = codegen.expr(binders, property.value)
       select_target_for_point_body = quote
         [select_target_for_point_body];
         [value.actions];
         return [value.value]
       end
-    else
       select_task_options_body = quote
         [select_task_options_body];
         [codegen.property(binders, "task", task_var, property)]
@@ -336,8 +341,24 @@ function codegen.task_rule(node)
     end
   end)
 
+  local constraint_checks = quote end
+  selector.constraints:map(function(constraint)
+    local lhs = codegen.expr(binders, constraint.lhs)
+    local rhs = codegen.expr(binders, constraint.rhs)
+    constraint_checks = quote
+      [constraint_checks];
+      do
+        [lhs.actions];
+        [rhs.actions];
+        [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
+      end
+    end
+  end)
+
   local terra matches([task_var] : c.legion_task_t)
     [selector_body];
+    [predicate_pattern_matches];
+    [constraint_checks];
     if [is_matched] then
       c.bishop_logger_info("[slice_domain] rule at %s matches",
         position_string)
@@ -348,21 +369,30 @@ function codegen.task_rule(node)
     return [is_matched]
   end
 
+  local function early_out(callback)
+    return quote
+      if not [is_matched] then
+        c.bishop_logger_info(["[" .. callback .. "] rule at %s was not applied"],
+          position_string)
+        return
+      end
+    end
+  end
+
   local terra select_task_options([task_var] : c.legion_task_t)
     [selector_body];
-    if [is_matched] then
-      c.bishop_logger_info("[select_task_options] rule at %s matches",
-        position_string)
-      [select_task_options_body]
-    else
-      c.bishop_logger_info("[select_task_options] rule at %s was not applied",
-        position_string)
-    end
+    [early_out("select_task_options")];
+    [select_task_options_pattern_matches];
+    [constraint_checks];
+    [early_out("select_task_options")];
+    c.bishop_logger_info("[select_task_options] rule at %s matches",
+      position_string)
+    [select_task_options_body]
   end
 
   local terra select_target_for_point([task_var] : c.legion_task_t,
                                       [point_var] : c.legion_domain_point_t)
-    [pattern_matches];
+    [select_target_for_point_pattern_matches];
     [select_target_for_point_body]
   end
 
