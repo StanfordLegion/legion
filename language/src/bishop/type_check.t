@@ -209,6 +209,21 @@ function type_check.expr(type_env, expr)
         position = expr.position,
       }
 
+    elseif expr.field == "size" then
+      if not (std.is_processor_list_type(value.expr_type) or
+              std.is_memory_list_type(value.expr_type)) then
+        log.error(expr, "value of type '" .. tostring(value.expr_type) ..
+          "' does not have field '" .. expr.field .. "'")
+      end
+      local assigned_type = int
+
+      return ast.typed.expr.Field {
+        value = value,
+        field = expr.field,
+        expr_type = assigned_type,
+        position = expr.position,
+      }
+
     else
       log.error(expr, "unknown field access on field '" .. expr.field .. "'")
     end

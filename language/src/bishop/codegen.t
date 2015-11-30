@@ -217,6 +217,14 @@ function codegen.expr(binders, node)
           end
         end
       end
+    elseif node.field == "size" then
+      local base = codegen.expr(binders, node.value)
+      actions = quote
+        [actions];
+        [base.actions];
+        [value] = [base.value].size
+      end
+
     else
       log.error(node, "field " .. node.field  ..  " is not supported")
     end
