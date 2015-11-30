@@ -69,6 +69,8 @@ bool bishop_region_set_target_memory(legion_region_requirement_t,
 bool bishop_region_set_target_memory_list(legion_region_requirement_t,
                                           bishop_memory_list_t);
 
+bishop_isa_t bishop_processor_get_isa(legion_processor_t);
+
 void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 void bishop_logger_warning(const char* msg, ...)

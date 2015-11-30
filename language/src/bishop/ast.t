@@ -464,6 +464,9 @@ end
 
 ast.typed:leaf("Property", { "field", "value" })
 ast.typed:leaf("Constraint", { "lhs", "rhs" })
+function ast.typed.Constraint:unparse()
+  return self.lhs:unparse() .. "=" .. self.rhs:unparse()
+end
 ast.typed:leaf("FilterConstraint", { "field", "value" })
 function ast.typed.FilterConstraint:unparse()
   return self.field .. "=" .. self.value:unparse()

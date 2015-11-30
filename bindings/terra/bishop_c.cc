@@ -203,6 +203,28 @@ bishop_region_set_target_memory_list(legion_region_requirement_t req_,
     return false;
 }
 
+bishop_isa_t
+bishop_processor_get_isa(legion_processor_t proc_)
+{
+  Processor proc = CObjectWrapper::unwrap(proc_);
+  switch (proc.kind())
+  {
+    case Processor::LOC_PROC:
+      {
+        return X86_ISA;
+      }
+    case Processor::TOC_PROC:
+      {
+        return CUDA_ISA;
+      }
+    default:
+      {
+        assert(false);
+        return X86_ISA; // unreachable
+      }
+  }
+}
+
 void
 bishop_logger_info(const char* msg, ...)
 {

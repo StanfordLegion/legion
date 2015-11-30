@@ -312,7 +312,7 @@ end
 function codegen.region_rule(node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local req_var = terralib.newsymbol(c.legion_region_requirement_t)
-  local is_matched = terralib.newsymbol(bool)
+  local is_matched = terralib.newsymbol(bool, "is_matched")
   local selector_body = quote var [is_matched] = true end
   local selector = node.selector
   local position_string = node.position.filename .. ":" ..
@@ -344,6 +344,17 @@ function codegen.region_rule(node)
         var [binder] : c.legion_processor_t
         [binder] = c.legion_task_get_target_proc([task_var])
       end
+    elseif pattern.field == "isa" then
+      local binder = terralib.newsymbol(pattern.binder)
+      binders[pattern.binder] = binder
+      pattern_matches = quote
+        [pattern_matches];
+        var [binder] : c.legion_processor_kind_t
+        do
+          var proc = c.legion_task_get_target_proc([task_var])
+          [binder] = c.bishop_processor_get_isa(proc)
+        end
+      end
     else
       log.error(node, "field " .. pattern.field ..
       " is not supported for pattern match")
@@ -351,6 +362,18 @@ function codegen.region_rule(node)
   end)
 
   local constraint_checks = quote end
+  selector.constraints:map(function(constraint)
+    local lhs = codegen.expr(binders, constraint.lhs)
+    local rhs = codegen.expr(binders, constraint.rhs)
+    constraint_checks = quote
+      [constraint_checks];
+      do
+        [lhs.actions];
+        [rhs.actions];
+        [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
+      end
+    end
+  end)
 
   local map_task_body = quote end
   node.properties:map(function(property)
