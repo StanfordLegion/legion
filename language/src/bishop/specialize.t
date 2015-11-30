@@ -220,9 +220,20 @@ function specialize.element(node)
   local classes = node.classes
   local constraints = terralib.newlist()
   local patterns = terralib.newlist()
+  local pattern_match_check
+  if node:is(ast.unspecialized.element.Task) then
+    pattern_match_check = pattern_match_checks.task
+  else assert(node:is(ast.unspecialized.element.Region))
+    pattern_match_check = pattern_match_checks.region
+  end
 
   node.constraints:map(function(constraint)
     local binder = std.newsymbol()
+    if pattern_match_check(constraint.field) and
+      not property_checks[constraint.field] then
+      log.error(constraint, "invalid constraint on field '" ..
+        constraint.field .. "'")
+    end
     patterns:insert(ast.specialized.PatternMatch {
       binder = binder,
       field = constraint.field,
@@ -238,6 +249,10 @@ function specialize.element(node)
     })
   end)
   node.patterns:map(function(pattern)
+    if not pattern_match_check(pattern.field) then
+      log.error(pattern, "invalid pattern match on field '" ..
+        pattern.field .. "'")
+    end
     local variable = pattern.binder
     patterns:insert(ast.specialized.PatternMatch {
       binder = variable,
