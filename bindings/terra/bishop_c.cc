@@ -154,7 +154,16 @@ bishop_filter_memories_by_kind(bishop_memory_list_t source,
 }
 
 bool
-bishop_task_set_target_processor(legion_task_t task_, bishop_processor_list_t list_)
+bishop_task_set_target_processor(legion_task_t task_, legion_processor_t proc_)
+{
+  Task* task = CObjectWrapper::unwrap(task_);
+  task->target_proc = CObjectWrapper::unwrap(proc_);
+  return true;
+}
+
+bool
+bishop_task_set_target_processor_list(legion_task_t task_,
+                                      bishop_processor_list_t list_)
 {
   if (list_.size > 0)
   {
@@ -170,7 +179,17 @@ bishop_task_set_target_processor(legion_task_t task_, bishop_processor_list_t li
 
 bool
 bishop_region_set_target_memory(legion_region_requirement_t req_,
-                                bishop_memory_list_t list_)
+                                legion_memory_t memory_)
+{
+  RegionRequirement& req = *CObjectWrapper::unwrap(req_);
+  req.target_ranking.clear();
+  req.target_ranking.push_back(CObjectWrapper::unwrap(memory_));
+  return true;
+}
+
+bool
+bishop_region_set_target_memory_list(legion_region_requirement_t req_,
+                                     bishop_memory_list_t list_)
 {
   if (list_.size > 0)
   {

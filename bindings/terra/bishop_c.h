@@ -60,10 +60,14 @@ bishop_memory_list_t bishop_filter_memories_by_visibility(legion_processor_t);
 bishop_memory_list_t bishop_filter_memories_by_kind(bishop_memory_list_t,
                                                     legion_memory_kind_t);
 
-bool bishop_task_set_target_processor(legion_task_t, bishop_processor_list_t);
+bool bishop_task_set_target_processor(legion_task_t, legion_processor_t);
+bool bishop_task_set_target_processor_list(legion_task_t,
+                                           bishop_processor_list_t);
 
 bool bishop_region_set_target_memory(legion_region_requirement_t,
-                                     bishop_memory_list_t);
+                                     legion_memory_t);
+bool bishop_region_set_target_memory_list(legion_region_requirement_t,
+                                          bishop_memory_list_t);
 
 void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));

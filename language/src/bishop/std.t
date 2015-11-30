@@ -65,7 +65,9 @@ end
 register_opaque_type("isa_type")
 register_opaque_type("compile_option_type")
 register_opaque_type("processor_type")
+register_opaque_type("processor_list_type")
 register_opaque_type("memory_type")
+register_opaque_type("memory_list_type")
 register_opaque_type("memory_kind_type")
 register_opaque_type("point_type")
 

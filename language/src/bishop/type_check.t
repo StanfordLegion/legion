@@ -27,15 +27,27 @@ local function curry2(f, a, b) return function(...) return f(a, b, ...) end end
 local element_type_assignment = {
   task = {
     index = std.point_type,
-    inline = std.compile_option_type,
     isa = std.isa_type,
     target = std.processor_type,
-    vectorize = std.compile_option_type,
   },
   region = {
-    composite = std.compile_option_type,
-    create = std.compile_option_type,
-    target = std.memory_type,
+    -- instances = std.instance_list_type,
+    -- requested = std.field_list_type,
+    -- declared = std.field_list_type,
+  },
+}
+
+local property_type_assignment = {
+  task = {
+    inline = { std.compile_option_type },
+    isa = { std.isa_type },
+    target = { std.processor_type, std.processor_list_type },
+    vectorize = { std.compile_option_type },
+  },
+  region = {
+    composite = { std.compile_option_type },
+    create = { std.compile_option_type },
+    target = { std.memory_type, std.memory_list_type },
   },
 }
 
@@ -55,7 +67,7 @@ keyword_type_assignment:assign_type({ "global", "sysmem", "regmem", "fbmem",
 
 keyword_type_assignment:assign_type({ "forbid", "allow", "demand" },
                                     std.compile_option_type)
-keyword_type_assignment:assign_type({ "processors" }, std.processor_type)
+keyword_type_assignment:assign_type({ "processors" }, std.processor_list_type)
 
 function type_check.filter_constraint(value_type, type_env, constraint)
   assert(constraint:is(ast.specialized.FilterConstraint))
@@ -65,7 +77,7 @@ function type_check.filter_constraint(value_type, type_env, constraint)
   local type_error_msg = "expression of type '" .. tostring(value.expr_type) ..
     "' is invalid on field '" .. constraint.field .. "'"
 
-  if std.is_processor_type(value_type) then
+  if std.is_processor_list_type(value_type) then
     if constraint.field == "isa" then
       if not std.is_isa_type(value.expr_type) then
         log.error(expr.value, type_error_msg)
@@ -74,7 +86,7 @@ function type_check.filter_constraint(value_type, type_env, constraint)
       log.error(constraint, invalid_field_msg)
     end
 
-  elseif std.is_memory_type(value_type) then
+  elseif std.is_memory_list_type(value_type) then
     if constraint.field == "kind" then
       if not std.is_memory_kind_type(value.expr_type) then
         log.error(expr.value, type_error_msg)
@@ -142,14 +154,22 @@ function type_check.expr(type_env, expr)
       log.error(expr.index, "invalid type '" .. tostring(index.expr_type) ..
         "' for index expression")
     end
-    if not (std.is_processor_type(value.expr_type) or
-            std.is_memory_type(value.expr_type) or
+    if not (std.is_processor_list_type(value.expr_type) or
+            std.is_memory_list_type(value.expr_type) or
             std.is_point_type(value.expr_type)) then
       log.error(expr.value, "invalid type '" .. tostring(value.expr_type) ..
         "' for index access")
     end
-    local expr_type = value.expr_type
-    if std.is_point_type(value.expr_type) then expr_type = int end
+    local expr_type
+    if std.is_point_type(value.expr_type) then
+      expr_type = int
+    elseif std.is_processor_list_type(value.expr_type) then
+      expr_type = std.processor_type
+    elseif std.is_memory_list_type(value.expr_type) then
+      expr_type = std.memory_type
+    else
+      assert(false, "unreachable")
+    end
     return ast.typed.expr.Index {
       value = value,
       index = index,
@@ -159,8 +179,8 @@ function type_check.expr(type_env, expr)
 
   elseif expr:is(ast.specialized.expr.Filter) then
     local value = type_check.expr(type_env, expr.value)
-    if not (std.is_processor_type(value.expr_type) or
-            std.is_memory_type(value.expr_type)) then
+    if not (std.is_processor_list_type(value.expr_type) or
+            std.is_memory_list_type(value.expr_type)) then
       log.error(expr.value, "filter access is not valid on expressions of " ..
         "type '" .. tostring(value.expr_type) .. "'")
     end
@@ -176,11 +196,11 @@ function type_check.expr(type_env, expr)
   elseif expr:is(ast.specialized.expr.Field) then
     local value = type_check.expr(type_env, expr.value)
     if expr.field == "memories" then
-      if value.expr_type ~= std.processor_type then
+      if not std.is_processor_type(value.expr_type) then
         log.error(expr, "value of type '" .. tostring(value.expr_type) ..
-          "' does not have field '" .. expr.field "'")
+          "' does not have field '" .. expr.field .. "'")
       end
-      local assigned_type = std.memory_type
+      local assigned_type = std.memory_list_type
 
       return ast.typed.expr.Field {
         value = value,
@@ -285,15 +305,21 @@ end
 
 function type_check.property(rule_type, type_env, property)
   local value = type_check.expr(type_env, property.value)
-  local desired_type = element_type_assignment[rule_type][property.field]
-  if not desired_type then
+  local desired_types = property_type_assignment[rule_type][property.field]
+  if not desired_types then
     log.error(property, "invalid property assignment on field '" ..
       property.field .. "' for " .. rule_type .. " rule")
   end
-  if desired_type ~= value.expr_type then
-    log.error(property, "type mismatch in property assignment: expected '" ..
-      tostring(desired_type) .. "' but received '" ..
-      tostring(value.expr_type) .. "'")
+  local found = false
+  for i = 1, #desired_types do
+    if desired_types[i] == value.expr_type then
+      found = true
+      break
+    end
+  end
+  if not found then
+    log.error(property, "expression of type '" .. tostring(value.expr_type) ..
+      "' is invalid for property '" .. property.field .. "'")
   end
 
   return ast.typed.Property {

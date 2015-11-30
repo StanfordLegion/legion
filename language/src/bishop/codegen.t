@@ -28,22 +28,37 @@ local c = terralib.includecstring [[
 
 local codegen = {}
 
-local setters = {
+local property_setters = {
   task = {
-    target = {
-      fn = c.bishop_task_set_target_processor,
-      arg_type = c.bishop_processor_list_t,
-      cleanup = c.bishop_delete_processor_list,
-    }
+    target = {}
   },
   region = {
-    target = {
-      fn = c.bishop_region_set_target_memory,
-      arg_type = c.bishop_memory_list_t,
-      cleanup = c.bishop_delete_memory_list,
-    }
-  },
+    target = {}
+  }
 }
+
+function property_setters:register_setter(rule_type, field, arg_type, setter)
+  self[rule_type][field][arg_type] = setter
+end
+
+function property_setters:find_setter(rule_type, node)
+  local setter_info = self[rule_type][node.field][node.value.expr_type]
+  if not setter_info then
+    log.error(node, "field " .. node.field .. " is not valid")
+  end
+  return setter_info
+end
+
+property_setters:register_setter("task", "target", std.processor_type,
+                                 {fn = c.bishop_task_set_target_processor})
+property_setters:register_setter("task", "target", std.processor_list_type,
+                                 {fn = c.bishop_task_set_target_processor_list,
+                                  cleanup = c.bishop_delete_processor_list})
+property_setters:register_setter("region", "target", std.memory_type,
+                                 {fn = c.bishop_region_set_target_memory})
+property_setters:register_setter("region", "target", std.memory_list_type,
+                                 {fn = c.bishop_region_set_target_memory_list,
+                                  cleanup = c.bishop_delete_memory_list})
 
 local processor_isa = {
   x86 = c.X86_ISA,
@@ -63,8 +78,31 @@ local memory_kind = {
   l3cache = c.LEVEL3_CACHE,
 }
 
-function codegen.expr(binders, expr_type, node)
-  local value = terralib.newsymbol(expr_type)
+function codegen.type(ty)
+  if std.is_processor_type(ty) then
+    return c.legion_processor_t
+  elseif std.is_processor_list_type(ty) then
+    return c.bishop_processor_list_t
+  elseif std.is_memory_type(ty) then
+    return c.legion_memory_t
+  elseif std.is_memory_list_type(ty) then
+    return c.bishop_memory_list_t
+  elseif std.is_isa_type(ty) then
+    return c.legion_processor_kind_t
+  elseif std.is_memory_kind_type(ty) then
+    return c.legion_memory_kind_t
+  elseif std.is_point_type(ty) then
+    return &int
+  elseif ty == int then
+    return ty
+  else
+    assert(false, "type '" .. tostring(ty) .. "' should not be used for " ..
+      "actual terra code generation")
+  end
+end
+
+function codegen.expr(binders, node)
+  local value = terralib.newsymbol(codegen.type(node.expr_type))
   local actions = quote
     var [value]
   end
@@ -72,19 +110,27 @@ function codegen.expr(binders, expr_type, node)
   if node:is(ast.typed.expr.Keyword) then
     local keyword = node.value
     if keyword == "processors" then
-      assert(expr_type == c.bishop_processor_list_t)
+      assert(std.is_processor_list_type(node.expr_type))
       actions = quote
         [actions];
-        do
-          [value] = c.bishop_all_processors()
-        end
+        [value] = c.bishop_all_processors()
+      end
+    elseif std.is_isa_type(node.expr_type) then
+      actions = quote
+        [actions];
+        [value] = [ processor_isa[keyword] ]
+      end
+    elseif std.is_memory_kind_type(node.expr_type) then
+      actions = quote
+        [actions];
+        [value] = [ memory_kind[keyword] ]
       end
     else
       log.error(node, "keyword " .. keyword .. " is not yet supported")
     end
 
   elseif node:is(ast.typed.expr.Unary) then
-    local rhs = codegen.expr(binders, expr_type, node.rhs)
+    local rhs = codegen.expr(binders, node.rhs)
     actions = quote
       [rhs.actions];
       [actions];
@@ -92,8 +138,8 @@ function codegen.expr(binders, expr_type, node)
     end
 
   elseif node:is(ast.typed.expr.Binary) then
-    local lhs = codegen.expr(binders, expr_type, node.lhs)
-    local rhs = codegen.expr(binders, expr_type, node.rhs)
+    local lhs = codegen.expr(binders, node.lhs)
+    local rhs = codegen.expr(binders, node.rhs)
     actions = quote
       [lhs.actions];
       [rhs.actions];
@@ -102,72 +148,51 @@ function codegen.expr(binders, expr_type, node)
     end
 
   elseif node:is(ast.typed.expr.Filter) then
-    local base = codegen.expr(binders, expr_type, node.value)
+    local base = codegen.expr(binders, node.value)
+    actions = quote
+      [actions];
+      [base.actions];
+      [value] = [base.value]
+    end
     node.constraints:map(function(constraint)
       assert(constraint:is(ast.typed.FilterConstraint))
+      local v = codegen.expr(binders, constraint.value)
       if constraint.field == "isa" then
-        if expr_type == c.bishop_processor_list_t then
-          if not constraint.value:is(ast.typed.expr.Keyword) then
-            log.error(constraint, "the value for field " .. constraint.field ..
-              " is invalid")
+        assert(std.is_processor_list_type(node.value.expr_type))
+        assert(std.is_isa_type(constraint.value.expr_type))
+        actions = quote
+          [actions];
+          [v.actions];
+          [value] = c.bishop_filter_processors_by_isa([value], [v.value])
+          if [value].size == 0 then
+            c.bishop_logger_warning("expression '%s' yields an empty list",
+              [node:unparse()])
           end
-
-          local isa = processor_isa[constraint.value.value]
-          actions = quote
-            [actions];
-            [base.actions];
-            do
-              [value] = c.bishop_filter_processors_by_isa([base.value], [isa])
-              if [value].size == 0 then
-                c.bishop_logger_warning("expression '%s' yields an empty list",
-                  [node:unparse()])
-              end
-              c.bishop_delete_processor_list([base.value])
-            end
-          end
-        else
-          log.error(constraint, "filtering constraint on field " ..
-            constraint.field  .. " is not supported for type " ..
-            tostring(expr_type))
+          c.bishop_delete_processor_list([base.value])
         end
+
       elseif constraint.field == "kind" then
-        if expr_type == c.bishop_memory_list_t then
-          if not constraint.value:is(ast.typed.expr.Keyword) then
-            log.error(constraint, "the value for field " .. constraint.field ..
-              " is invalid")
+        assert(std.is_memory_list_type(node.value.expr_type))
+        assert(std.is_memory_kind_type(constraint.value.expr_type))
+        actions = quote
+          [actions];
+          [v.actions];
+          [value] = c.bishop_filter_memories_by_kind([value], [v.value])
+          if [value].size == 0 then
+            c.bishop_logger_warning("expression '%s' yields an empty list",
+              [node:unparse()])
           end
-
-          local kind = memory_kind[constraint.value.value]
-          assert(kind,
-            "kind '" .. constraint.value.value .. "' is not valid")
-          actions = quote
-            [actions];
-            [base.actions];
-            do
-              [value] = c.bishop_filter_memories_by_kind([base.value], [kind])
-              if [value].size == 0 then
-                c.bishop_logger_warning(
-                  "  expression '%s' yields an empty list",
-                  [node:unparse()])
-              end
-              c.bishop_delete_memory_list([base.value])
-            end
-          end
-
-        else
-          log.error(constraint, "filtering constraint on field " ..
-            constraint.field  ..  " is not supported for type " ..
-            tostring(expr_type))
+          c.bishop_delete_memory_list([base.value])
         end
+
       else
-        log.error(constraint, "filtering constraint on field " ..
-          constraint.field  .. " is not supported")
+        assert(false, "unreachable")
       end
     end)
 
   elseif node:is(ast.typed.expr.Index) then
-    local base = codegen.expr(binders, expr_type, node.value)
-    local index = codegen.expr(binders, uint, node.index)
+    local base = codegen.expr(binders, node.value)
+    local index = codegen.expr(binders, node.index)
     actions = quote
       [actions];
       [base.actions];
@@ -175,14 +200,12 @@ function codegen.expr(binders, expr_type, node)
       do
         std.assert([index.value] >= 0 and [index.value] < [base.value].size,
           ["index " .. tostring(index.value) .. " is out-of-bounds"])
-        [value] = [base.value]
-        [value].size = 1
-        [value].list[0] = [value].list[ [index.value] ]
+        [value] = [base.value].list[ [index.value] ]
       end
     end
   elseif node:is(ast.typed.expr.Field) then
     if node.field == "memories" then
-      local base = codegen.expr(binders, c.legion_processor_t, node.value)
+      local base = codegen.expr(binders, node.value)
       actions = quote
         [actions];
         [base.actions];
@@ -217,11 +240,8 @@ function codegen.expr(binders, expr_type, node)
 end
 
 function codegen.property(binders, rule_type, obj_var, node)
-  local setter_info = setters[rule_type][node.field]
-  if not setter_info then
-    log.error(node, "field " .. node.field .. " is not valid")
-  end
-  local value = codegen.expr(binders, setter_info.arg_type, node.value)
+  local setter_info = property_setters:find_setter(rule_type, node)
+  local value = codegen.expr(binders, node.value)
   local actions = quote
     [value.actions];
     var result = [setter_info.fn]([obj_var], [value.value])
