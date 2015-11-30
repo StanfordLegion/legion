@@ -2739,6 +2739,7 @@ function task:__tostring()
 end
 
 function std.newtask(name)
+  assert(data.is_tuple(name))
   local terra proto
   proto.name = tostring(name)
   return setmetatable({
@@ -2998,7 +2999,7 @@ function std.start(main_task)
           inner = options.inner,
           idempotent = options.idempotent,
         },
-        [tostring(task:getname())],
+        [task:getname():mkstring(".")],
         [task:getdefinition()])
       end
     end)

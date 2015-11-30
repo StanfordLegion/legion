@@ -3985,7 +3985,8 @@ local lift_unary_op_to_futures = terralib.memoize(
       expr_type = expr_type.result_type
     end
 
-    local name = "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op)
+    local name = data.newtuple(
+      "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op))
     local rhs_symbol = terralib.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
     local node = ast.typed.stat.Task {
@@ -4063,8 +4064,9 @@ local lift_binary_op_to_futures = terralib.memoize(
       expr_type = expr_type.result_type
     end
 
-    local name = ("__binary_" .. tostring(lhs_type) .. "_" ..
-                    tostring(rhs_type) .. "_" .. tostring(op))
+    local name = data.newtuple(
+      "__binary_" .. tostring(lhs_type) .. "_" ..
+        tostring(rhs_type) .. "_" .. tostring(op))
     local lhs_symbol = terralib.newsymbol(lhs_type, "lhs")
     local rhs_symbol = terralib.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
