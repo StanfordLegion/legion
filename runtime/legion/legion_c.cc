@@ -696,6 +696,20 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_domain_t
+legion_index_partition_get_color_space(legion_runtime_t runtime_,
+                                       legion_context_t ctx_,
+                                       legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  Domain d = runtime->get_index_partition_color_space(ctx, handle);
+
+  return CObjectWrapper::wrap(d);
+}
+
 void
 legion_index_partition_destroy(legion_runtime_t runtime_,
                                legion_context_t ctx_,
