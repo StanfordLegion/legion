@@ -2741,7 +2741,7 @@ end
 function std.newtask(name)
   assert(data.is_tuple(name))
   local terra proto
-  proto.name = tostring(name)
+  proto.name = name:mkstring(".")
   return setmetatable({
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),
