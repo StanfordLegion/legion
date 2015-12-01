@@ -228,6 +228,17 @@ local function get_num_accessed_fields(node)
     if get_num_accessed_fields(node.colors) > 1 then return false end
     return 1
 
+  elseif node:is(ast.unspecialized.expr.Image) then
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.parent) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    return 1
+
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
@@ -899,6 +910,48 @@ function specialize.expr_partition_by_field(cx, node)
   }
 end
 
+function specialize.expr_image(cx, node)
+  local partition = specialize.expr(cx, node.partition)
+  local region = specialize.expr_region_root(cx, node.region)
+  local parent = specialize.expr(cx, node.parent)
+
+  local parent_symbol
+  if parent:is(ast.specialized.expr.ID) then
+    parent_symbol = parent.value
+  else
+    parent_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.aliased, parent_symbol)
+  return ast.specialized.expr.Image {
+    partition = partition,
+    region = region,
+    parent = parent,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_preimage(cx, node)
+  local partition = specialize.expr(cx, node.partition)
+  local region = specialize.expr_region_root(cx, node.region)
+
+  local region_symbol
+  if region:is(ast.specialized.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.aliased, region_symbol)
+  return ast.specialized.expr.Preimage {
+    partition = partition,
+    region = region,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_cross_product(cx, node)
   local arg_types = node.arg_type_exprs:map(
     function(arg_type_expr) return arg_type_expr(cx.env:env()) end)
@@ -1120,6 +1173,12 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.PartitionByField) then
     return specialize.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Image) then
+    return specialize.expr_image(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    return specialize.expr_preimage(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)

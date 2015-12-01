@@ -157,6 +157,12 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.PartitionByField) then
     return nil
 
+  elseif node:is(ast.typed.expr.Image) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return nil
+
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
@@ -609,6 +615,26 @@ function optimize_futures.expr_partition_by_field(cx, node)
   }
 end
 
+function optimize_futures.expr_image(cx, node)
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
+  return node {
+    partition = partition,
+    region = region,
+    parent = parent,
+  }
+end
+
+function optimize_futures.expr_preimage(cx, node)
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    partition = partition,
+    region = region,
+  }
+end
+
 function optimize_futures.expr_cross_product(cx, node)
   local args = node.args:map(
     function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
@@ -830,6 +856,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return optimize_futures.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.Image) then
+    return optimize_futures.expr_image(cx, node)
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return optimize_futures.expr_preimage(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)

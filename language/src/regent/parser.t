@@ -639,6 +639,35 @@ function parser.expr_prefix(p)
       }
     end
 
+  elseif p:nextif("image") then
+    p:expect("(")
+    local partition = p:expr()
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local parent = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Image {
+      partition = partition,
+      region = region,
+      parent = parent,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("preimage") then
+    p:expect("(")
+    local partition = p:expr()
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.Preimage {
+      partition = partition,
+      region = region,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("cross_product") then
     p:expect("(")
     local arg_type_exprs = terralib.newlist()

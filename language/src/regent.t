@@ -70,6 +70,7 @@ local language = {
     "exclusive",
     "equal",
     "fill",
+    "image",
     "index_type", -- reserved for future use
     "isnull",
     "ispace",
@@ -86,6 +87,7 @@ local language = {
     "null",
     "partition",
     "phase_barrier",
+    "preimage",
     "product",
     "ptr", -- reserved for future use
     "reads",
