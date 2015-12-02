@@ -41,7 +41,7 @@ task f()
   for i = 0, 3 do
     var ri = p[i]
     for x in ri do
-      x.value = 10 * i + 1000
+      x.value = (1 + i) * (1 + i)
     end
   end
 
@@ -57,6 +57,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 3030, "test failed")
+  regentlib.assert(f() == 14, "test failed")
 end
 regentlib.start(main)

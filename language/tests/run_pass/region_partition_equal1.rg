@@ -25,6 +25,7 @@ task f()
   var x0 = new(ptr(t, r))
   var x1 = new(ptr(t, r))
   var x2 = new(ptr(t, r))
+  var x3 = new(ptr(t, r))
 
   var colors = ispace(ptr, 3)
   new(ptr(colors))
@@ -34,10 +35,8 @@ task f()
 
   for i in colors do
     var ri = p[i]
-    regentlib.c.printf("subregion %d\n", int(i))
     for x in ri do
-      x.value = 10 * int(i)
-      regentlib.c.printf("  point %d assigned %d\n", int(x), x.value)
+      x.value = (1 + int(i)) * (1 + int(i))
     end
   end
 
@@ -53,6 +52,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 30, "test failed")
+  regentlib.assert(f() == 15, "test failed")
 end
 regentlib.start(main)
