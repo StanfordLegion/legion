@@ -545,7 +545,8 @@ PartitionEqualShim::task(const Task *task,
 
   PointColoring coloring;
   size_t chunks = args.color_space.get_volume();
-  size_t chunksize = (total + chunks - 1) / chunks;
+  size_t chunksize = total / chunks;
+  size_t leftover = total % chunks;
   size_t elt = 0;
   Domain::DomainPointIterator c(args.color_space);
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
@@ -555,9 +556,12 @@ PartitionEqualShim::task(const Task *task,
       assert(c);
       coloring[upgrade_point(c.p)].points.insert(p);
       elt++;
-      if (elt >= chunksize) {
+      if (elt >= chunksize + (leftover > 0 ? 1 : 0)) {
         elt = 0;
         c++;
+      }
+      if (elt >= chunksize) {
+        leftover--;
       }
     }
   }
