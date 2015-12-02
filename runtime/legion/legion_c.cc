@@ -851,6 +851,123 @@ legion_index_partition_create_by_image(
   return CObjectWrapper::wrap(ip);
 }
 
+// Shim for Legion Dependent Partition API
+
+#if USE_LEGION_PARTAPI_SHIM
+class PartitionByPreimageShim {
+public:
+  static TaskID register_task();
+  static IndexPartition launch(HighLevelRuntime *runtime,
+                               Context ctx,
+                               IndexPartition projection,
+                               LogicalRegion handle,
+                               LogicalRegion parent,
+                               FieldID fid,
+                               const Domain &color_space,
+                               PartitionKind part_kind = COMPUTE_KIND,
+                               int color = AUTO_GENERATE_ID,
+                               bool allocable = false);
+  static IndexPartition task(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, HighLevelRuntime *runtime);
+private:
+  static const TaskID task_id = 509532; // a "unique" number
+  struct Args {
+    IndexPartition projection;
+    LogicalRegion handle;
+    LogicalRegion parent;
+    FieldID fid;
+    Domain color_space;
+    PartitionKind part_kind;
+    int color;
+    bool allocable;
+  };
+};
+
+Processor::TaskFuncID
+PartitionByPreimageShim::register_task()
+{
+  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+    task_id, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionByPreimageShim::task");
+}
+
+IndexPartition
+PartitionByPreimageShim::launch(HighLevelRuntime *runtime,
+                                Context ctx,
+                                IndexPartition projection,
+                                LogicalRegion handle,
+                                LogicalRegion parent,
+                                FieldID fid,
+                                const Domain &color_space,
+                                PartitionKind part_kind,
+                                int color,
+                                bool allocable)
+{
+  Args args;
+  args.handle = handle;
+  args.projection = projection;
+  args.parent = parent;
+  args.fid = fid;
+  args.color_space = color_space;
+  args.part_kind = part_kind;
+  args.color = color;
+  args.allocable = allocable;
+  TaskArgument targs(&args, sizeof(args));
+  TaskLauncher task(task_id, targs);
+  task.add_region_requirement(
+    RegionRequirement(parent, READ_ONLY, EXCLUSIVE, parent)
+    .add_field(fid));
+  Future f = runtime->execute_task(ctx, task);
+  return f.get_result<IndexPartition>();
+}
+
+IndexPartition
+PartitionByPreimageShim::task(const Task *task,
+                              const std::vector<PhysicalRegion> &regions,
+                              Context ctx, HighLevelRuntime *runtime)
+{
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+
+  PointColoring coloring;
+  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+    regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
+  for(GenericPointInRectIterator<1> c(args.color_space.get_rect<1>());
+      c; ++c) {
+    IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c.p);
+    std::set<ptr_t> points;
+    for (IndexIterator it(runtime, ctx, target); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < count; p++) {
+        points.insert(p);
+      }
+    }
+
+    for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < count; p++) {
+        if (points.count(accessor.read(p))) {
+          coloring[DomainPoint::from_point<1>(c.p)].points.insert(p);
+        }
+      }
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, args.handle.get_index_space(), args.color_space, coloring,
+      args.part_kind, args.color, args.allocable);
+  return ip;
+}
+
+static TaskID force_PartitionByPreimageShim_static_initialize =
+  PartitionByPreimageShim::register_task();
+#endif
+
 legion_index_partition_t
 legion_index_partition_create_by_preimage(
   legion_runtime_t runtime_,
@@ -873,10 +990,9 @@ legion_index_partition_create_by_preimage(
 
   IndexPartition ip =
 #if USE_LEGION_PARTAPI_SHIM
-    // FIXME: This won't actually work yet...
-    runtime->create_partition_by_preimage(
-      ctx, projection, handle, parent, fid, color_space, part_kind, color,
-      allocable);
+    PartitionByPreimageShim::launch(
+      runtime, ctx, projection, handle, parent, fid, color_space, part_kind,
+      color, allocable);
 #else
     runtime->create_partition_by_preimage(
       ctx, projection, handle, parent, fid, color_space, part_kind, color,
