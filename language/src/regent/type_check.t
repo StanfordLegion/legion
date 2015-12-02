@@ -1144,6 +1144,9 @@ function type_check.expr_ispace(cx, node)
   local start = node.start and type_check.expr(cx, node.start)
   local start_type = node.start and std.check_read(cx, start)
 
+  if not std.is_index_type(index_type) then
+    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
+  end
   if not std.validate_implicit_cast(extent_type, index_type) then
     log.error(node, "type mismatch in argument 2: expected " ..
                 tostring(index_type) .. " but got " .. tostring(extent_type))
@@ -1153,11 +1156,13 @@ function type_check.expr_ispace(cx, node)
                 tostring(index_type) .. " but got " .. tostring(start_type))
   end
 
+  local expr_type = std.ispace(index_type)
+
   return ast.typed.expr.Ispace {
     index_type = index_type,
     extent = extent,
     start = start,
-    expr_type = node.expr_type,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -1522,6 +1527,11 @@ function type_check.expr_cross_product(cx, node)
   local args = node.args:map(function(arg) return type_check.expr(cx, arg) end)
   local arg_types = args:map(function(arg) return std.check_read(cx, arg) end)
 
+  if #arg_types < 2 then
+    log.error(node, "cross product expected at least 2 arguments, got " ..
+                tostring(#arg_types))
+  end
+
   for i, arg_type in ipairs(arg_types) do
     if not std.is_partition(arg_type) then
       log.error(node, "type mismatch in argument " .. tostring(i) ..
@@ -1529,9 +1539,19 @@ function type_check.expr_cross_product(cx, node)
     end
   end
 
+  local arg_symbols = args:map(
+    function(arg)
+      if arg:is(ast.typed.expr.ID) then
+        return arg.value
+      else
+        return terralib.newsymbol(std.as_read(arg.expr_type))
+      end
+  end)
+  local expr_type = std.cross_product(unpack(arg_symbols))
+
   return ast.typed.expr.CrossProduct {
     args = args,
-    expr_type = node.expr_type,
+    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }

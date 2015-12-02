@@ -670,13 +670,10 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("cross_product") then
     p:expect("(")
-    local arg_type_exprs = terralib.newlist()
-    repeat
-      arg_type_exprs:insert(p:luaexpr())
-    until not p:nextif(",")
+    local args = p:expr_list()
     p:expect(")")
     return ast.unspecialized.expr.CrossProduct {
-      arg_type_exprs = arg_type_exprs,
+      args = args,
       options = ast.default_options(),
       span = ast.span(start, p),
     }

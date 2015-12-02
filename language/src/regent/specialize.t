@@ -813,16 +813,10 @@ end
 
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
-  if not std.is_index_type(index_type) then
-    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
-  end
-
-  local expr_type = std.ispace(index_type)
   return ast.specialized.expr.Ispace {
     index_type = index_type,
     extent = specialize.expr(cx, node.extent),
     start = node.start and specialize.expr(cx, node.start),
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -840,85 +834,56 @@ function specialize.expr_region(cx, node)
 end
 
 function specialize.expr_partition(cx, node)
-  local disjointness = specialize.disjointness_kind(cx, node.disjointness)
-  local region = specialize.expr(cx, node.region)
-  local coloring = specialize.expr(cx, node.coloring)
   return ast.specialized.expr.Partition {
-    disjointness = disjointness,
-    region = region,
-    coloring = coloring,
+    disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    region = specialize.expr(cx, node.region),
+    coloring = specialize.expr(cx, node.coloring),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_partition_equal(cx, node)
-  local region = specialize.expr(cx, node.region)
-  local colors = specialize.expr(cx, node.colors)
   return ast.specialized.expr.PartitionEqual {
-    region = region,
-    colors = colors,
+    region = specialize.expr(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_partition_by_field(cx, node)
-  local region = specialize.expr_region_root(cx, node.region)
-  local colors = specialize.expr(cx, node.colors)
   return ast.specialized.expr.PartitionByField {
-    region = region,
-    colors = colors,
+    region = specialize.expr_region_root(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_image(cx, node)
-  local partition = specialize.expr(cx, node.partition)
-  local region = specialize.expr_region_root(cx, node.region)
-  local parent = specialize.expr(cx, node.parent)
   return ast.specialized.expr.Image {
-    partition = partition,
-    region = region,
-    parent = parent,
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
+    parent = specialize.expr(cx, node.parent),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_preimage(cx, node)
-  local partition = specialize.expr(cx, node.partition)
-  local region = specialize.expr_region_root(cx, node.region)
   return ast.specialized.expr.Preimage {
-    partition = partition,
-    region = region,
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_cross_product(cx, node)
-  local arg_types = node.arg_type_exprs:map(
-    function(arg_type_expr) return arg_type_expr(cx.env:env()) end)
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if #arg_types < 2 then
-    log.error(node, "cross product expected at least 2 arguments, got " ..
-                tostring(#arg_types))
-  end
-  local expr_type = std.cross_product(unpack(arg_types))
-  local args = expr_type.partition_symbols:map(
-    function(partition)
-      return ast.specialized.expr.ID {
-        value = partition,
-        options = node.options,
-        span = node.span,
-      }
-  end)
   return ast.specialized.expr.CrossProduct {
-    args = args,
-    expr_type = expr_type,
+    args = node.args:map(
+      function(arg) return specialize.expr(cx, arg) end),
     options = node.options,
     span = node.span,
   }
