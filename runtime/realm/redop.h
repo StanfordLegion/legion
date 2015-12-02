@@ -71,6 +71,8 @@ namespace Realm {
                                     off_t ptr_offset, bool exclusive = false) const = 0;
       virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const = 0;
 
+      virtual ~ReductionOpUntyped() {}
+
     protected:
       ReductionOpUntyped(size_t _sizeof_lhs, size_t _sizeof_rhs,
 			 size_t _sizeof_list_entry,
