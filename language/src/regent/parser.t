@@ -523,9 +523,14 @@ function parser.expr_prefix(p)
   elseif p:nextif("new") then
     p:expect("(")
     local pointer_type_expr = p:luaexpr()
+    local extent = false
+    if p:nextif(",") then
+      extent = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.New {
       pointer_type_expr = pointer_type_expr,
+      extent = extent,
       options = ast.default_options(),
       span = ast.span(start, p),
     }

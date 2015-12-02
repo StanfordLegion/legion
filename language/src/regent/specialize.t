@@ -187,6 +187,7 @@ local function get_num_accessed_fields(node)
 
   elseif node:is(ast.unspecialized.expr.New) then
     if get_num_accessed_fields(node.pointer_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.extent) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Null) then
@@ -774,6 +775,7 @@ function specialize.expr_new(cx, node)
   }
   return ast.specialized.expr.New {
     pointer_type = pointer_type,
+    extent = node.extent and specialize.expr(cx, node.extent),
     region = region,
     options = node.options,
     span = node.span,

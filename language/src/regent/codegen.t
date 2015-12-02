@@ -2654,6 +2654,9 @@ function codegen.expr_new(cx, node)
   local pointer_type = node.pointer_type
   local region = codegen.expr(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
+  local extent = node.extent and codegen.expr(cx, node.extent):read(cx)
+  local extent_type = extent and std.as_read(node.extent.expr_type)
+
   local ispace_type = region_type
   if std.is_region(region_type) then
     ispace_type = region_type:ispace()
@@ -2664,13 +2667,15 @@ function codegen.expr_new(cx, node)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [region.actions];
+    [(extent and extent.actions) or quote end];
     [emit_debuginfo(node)]
   end
 
   return values.value(
     expr.once_only(
       actions,
-      `([pointer_type]{ __ptr = c.legion_index_allocator_alloc([isa], 1) })),
+      `([pointer_type]{ __ptr = c.legion_index_allocator_alloc(
+                          [isa], [(extent and extent.value) or 1]) })),
     expr_type)
 end
 

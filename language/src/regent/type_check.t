@@ -1053,10 +1053,20 @@ end
 function type_check.expr_new(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
-  -- Checked in specialize.
+  local extent = node.extent and type_check.expr(cx, node.extent)
+  local extent_type = extent and std.check_read(cx, extent)
+
+  -- Pointer and region types checked in specialize.
+
+  local index_type = node.pointer_type.index_type
+  if extent and not std.validate_implicit_cast(extent_type, index_type) then
+    log.error(node, "type mismatch in argument 2: expected " .. tostring(index_type) .. ", got " .. tostring(extent_type))
+  end
+
   return ast.typed.expr.New {
     pointer_type = node.pointer_type,
     region = region,
+    extent = extent,
     expr_type = node.pointer_type,
     options = node.options,
     span = node.span,

@@ -12,17 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_new3.rg:24: type mismatch in argument 2: expected ptr, got bool
+--   var x = new(ptr(int, r), true)
+--             ^
+
 import "regent"
 
-task main()
+task f()
   var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x123 = new(ptr(int, r), 3)
-
-  var t = 0
-  for x in r do
-    t += 1
-  end
-  regentlib.assert(t == 4, "test failed")
+  var x = new(ptr(int, r), true)
 end
-regentlib.start(main)
+f:compile()
