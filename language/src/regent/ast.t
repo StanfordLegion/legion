@@ -553,15 +553,12 @@ ast.specialized.expr:leaf("DynamicCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("StaticCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("Ispace", {"index_type", "extent", "start",
                                      "expr_type"})
-ast.specialized.expr:leaf("Region", {"ispace", "ispace_symbol", "fspace_type",
-                                     "expr_type"})
-ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
-                                        "expr_type"})
-ast.specialized.expr:leaf("PartitionEqual", {"region", "colors", "expr_type"})
-ast.specialized.expr:leaf("PartitionByField", {"region", "colors", "expr_type"})
-ast.specialized.expr:leaf("Image", {"partition", "region", "parent",
-                                    "expr_type"})
-ast.specialized.expr:leaf("Preimage", {"partition", "region", "expr_type"})
+ast.specialized.expr:leaf("Region", {"ispace", "fspace_type"})
+ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring"})
+ast.specialized.expr:leaf("PartitionEqual", {"region", "colors"})
+ast.specialized.expr:leaf("PartitionByField", {"region", "colors"})
+ast.specialized.expr:leaf("Image", {"partition", "region", "parent"})
+ast.specialized.expr:leaf("Preimage", {"partition", "region"})
 ast.specialized.expr:leaf("CrossProduct", {"args", "expr_type"})
 ast.specialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
 ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})

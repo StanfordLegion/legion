@@ -830,19 +830,10 @@ end
 
 function specialize.expr_region(cx, node)
   local ispace = specialize.expr(cx, node.ispace)
-  local ispace_symbol
-  if ispace:is(ast.specialized.expr.ID) then
-    ispace_symbol = ispace.value
-  else
-    ispace_symbol = terralib.newsymbol()
-  end
   local fspace_type = node.fspace_type_expr(cx.env:env())
-  local expr_type = std.region(ispace_symbol, fspace_type)
   return ast.specialized.expr.Region {
     ispace = ispace,
-    ispace_symbol = ispace_symbol,
     fspace_type = fspace_type,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -852,19 +843,10 @@ function specialize.expr_partition(cx, node)
   local disjointness = specialize.disjointness_kind(cx, node.disjointness)
   local region = specialize.expr(cx, node.region)
   local coloring = specialize.expr(cx, node.coloring)
-
-  local region_symbol
-  if region:is(ast.specialized.expr.ID) then
-    region_symbol = region.value
-  else
-    region_symbol = terralib.newsymbol()
-  end
-  local expr_type = std.partition(disjointness, region_symbol)
   return ast.specialized.expr.Partition {
     disjointness = disjointness,
     region = region,
     coloring = coloring,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -873,18 +855,9 @@ end
 function specialize.expr_partition_equal(cx, node)
   local region = specialize.expr(cx, node.region)
   local colors = specialize.expr(cx, node.colors)
-
-  local region_symbol
-  if region:is(ast.specialized.expr.ID) then
-    region_symbol = region.value
-  else
-    region_symbol = terralib.newsymbol()
-  end
-  local expr_type = std.partition(std.disjoint, region_symbol)
   return ast.specialized.expr.PartitionEqual {
     region = region,
     colors = colors,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -893,18 +866,9 @@ end
 function specialize.expr_partition_by_field(cx, node)
   local region = specialize.expr_region_root(cx, node.region)
   local colors = specialize.expr(cx, node.colors)
-
-  local region_symbol
-  if region.region:is(ast.specialized.expr.ID) then
-    region_symbol = region.region.value
-  else
-    region_symbol = terralib.newsymbol()
-  end
-  local expr_type = std.partition(std.disjoint, region_symbol)
   return ast.specialized.expr.PartitionByField {
     region = region,
     colors = colors,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -914,19 +878,10 @@ function specialize.expr_image(cx, node)
   local partition = specialize.expr(cx, node.partition)
   local region = specialize.expr_region_root(cx, node.region)
   local parent = specialize.expr(cx, node.parent)
-
-  local parent_symbol
-  if parent:is(ast.specialized.expr.ID) then
-    parent_symbol = parent.value
-  else
-    parent_symbol = terralib.newsymbol()
-  end
-  local expr_type = std.partition(std.aliased, parent_symbol)
   return ast.specialized.expr.Image {
     partition = partition,
     region = region,
     parent = parent,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -935,18 +890,9 @@ end
 function specialize.expr_preimage(cx, node)
   local partition = specialize.expr(cx, node.partition)
   local region = specialize.expr_region_root(cx, node.region)
-
-  local region_symbol
-  if region:is(ast.specialized.expr.ID) then
-    region_symbol = region.value
-  else
-    region_symbol = terralib.newsymbol()
-  end
-  local expr_type = std.partition(std.aliased, region_symbol)
   return ast.specialized.expr.Preimage {
     partition = partition,
     region = region,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }

@@ -1170,15 +1170,21 @@ function type_check.expr_region(cx, node)
     log.error(node, "type mismatch in argument 1: expected an ispace but got " .. tostring(ispace_type))
   end
 
+  local ispace_symbol
+  if ispace:is(ast.specialized.expr.ID) then
+    ispace_symbol = ispace.value
+  else
+    ispace_symbol = terralib.newsymbol()
+  end
+  local region = std.region(ispace_symbol, node.fspace_type)
+
   -- Hack: Stuff the ispace type back into the ispace symbol so it is
   -- accessible to the region type.
-  local ispace_symbol = node.ispace_symbol
   if not ispace_symbol.type then
     ispace_symbol.type = ispace_type
   end
   assert(std.type_eq(ispace_symbol.type, ispace_type))
 
-  local region = node.expr_type
   std.add_privilege(cx, "reads", region, data.newtuple())
   std.add_privilege(cx, "writes", region, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
@@ -1206,7 +1212,6 @@ function type_check.expr_partition(cx, node)
   local disjointness = node.disjointness
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
-
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring)
 
@@ -1232,7 +1237,14 @@ function type_check.expr_partition(cx, node)
     end
   end
 
-  local expr_type = node.expr_type
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(disjointness, region_symbol)
+
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
   if expr_type.parent_region_symbol.type == nil then
@@ -1253,7 +1265,6 @@ end
 function type_check.expr_partition_equal(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
-
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.check_read(cx, colors)
 
@@ -1267,7 +1278,14 @@ function type_check.expr_partition_equal(cx, node)
                 tostring(colors_type))
   end
 
-  local expr_type = node.expr_type
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol)
+
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
   if expr_type.parent_region_symbol.type == nil then
@@ -1307,7 +1325,14 @@ function type_check.expr_partition_by_field(cx, node)
                 tostring(colors_type))
   end
 
-  local expr_type = node.expr_type
+  local region_symbol
+  if region.region:is(ast.typed.expr.ID) then
+    region_symbol = region.region.value
+  else
+    region_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol)
+
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     log.error(
       node, "invalid privileges in argument 1: " .. tostring(std.reads) .. "(" ..
@@ -1373,9 +1398,16 @@ function type_check.expr_image(cx, node)
         ")")
   end
 
+  local parent_symbol
+  if parent:is(ast.typed.expr.ID) then
+    parent_symbol = parent.value
+  else
+    parent_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.aliased, parent_symbol)
+
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  local expr_type = node.expr_type
   if expr_type.parent_region_symbol.type == nil then
     expr_type.parent_region_symbol.type = parent_type
   end
@@ -1454,9 +1486,10 @@ function type_check.expr_preimage(cx, node)
         ")")
   end
 
+  local expr_type = std.partition(partition_type.disjointness, region_symbol)
+
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  local expr_type = node.expr_type
   if expr_type.parent_region_symbol.type == nil then
     expr_type.parent_region_symbol.type = region_type
   end
@@ -2342,14 +2375,6 @@ function type_check.stat_block(cx, node)
 end
 
 function type_check.stat_var(cx, node)
-  for i, symbol in ipairs(node.symbols) do
-    local var_type = symbol.type
-    local value = node.values[i]
-    if value and value:is(ast.specialized.expr.Region) then
-      cx.type_env:insert(node, symbol, std.rawref(&std.as_read(value.expr_type)))
-    end
-  end
-
   local values = node.values:map(
     function(value) return type_check.expr(cx, value) end)
   local value_types = values:map(
@@ -2362,7 +2387,7 @@ function type_check.stat_var(cx, node)
     local value = values[i]
     local value_type = value_types[i]
     if var_type then
-      if value and not std.validate_implicit_cast(value_type, var_type, {}) then
+      if value and not std.validate_implicit_cast(value_type, var_type) then
         log.error(node, "type mismatch in var: expected " .. tostring(var_type) .. " but got " .. tostring(value_type))
       end
     else
@@ -2375,9 +2400,7 @@ function type_check.stat_var(cx, node)
       -- to ptr types if necessary.
       symbol.type = var_type
     end
-    if not (node.values[i] and node.values[i]:is(ast.specialized.expr.Region)) then
-      cx.type_env:insert(node, symbol, std.rawref(&var_type))
-    end
+    cx.type_env:insert(node, symbol, std.rawref(&var_type))
     types:insert(var_type)
   end
 
