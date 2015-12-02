@@ -45,6 +45,8 @@ local GraphCfg = require("mssp_graphcfg")
 
 local helpers = require("mssp_helpers")
 
+local int1d = index_type(int, "int1d")
+
 fspace Node {
   distance : float,
   dist_next : float,
@@ -191,30 +193,11 @@ task toplevel()
   helpers.allocate_elements(__runtime(), __context(), __raw(re), graph.edges)
 
   -- equal subspaces of rn
-  var ccn = c.legion_coloring_create()
-  do
-    var i = 0
-    for n in rn do
-      var color = i * subgraphs / graph.nodes
-      c.legion_coloring_add_point(ccn, color, __raw(n))
-      i = i + 1
-    end
-  end
-  var pn = partition(disjoint, rn, ccn)
-  c.legion_coloring_destroy(ccn)
+  var colors = ispace(int1d, subgraphs)
+  var pn = partition(equal, rn, colors)
 
   -- equal subspaces of re
-  var cc = c.legion_coloring_create()
-  do 
-    var i = 0
-    for e in re do
-      var color = i * subgraphs / graph.edges
-      c.legion_coloring_add_point(cc, color, __raw(e))
-      i = i + 1
-    end
-  end
-  var pe = partition(disjoint, re, cc)
-  c.legion_coloring_destroy(cc)
+  var pe = partition(equal, re, colors)
 
   -- parallel load of edge data
   __demand(__parallel)
