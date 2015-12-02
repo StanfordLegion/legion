@@ -526,12 +526,8 @@ PartitionEqualShim::task(const Task *task,
   Args &args = *(Args *)task->args;
   assert(args.granularity == 1);
 
-  Coloring coloring;
+  PointColoring coloring;
   assert(args.color_space.get_dim() == 1);
-  for(GenericPointInRectIterator<1> it(args.color_space.get_rect<1>());
-      it; ++it) {
-    coloring[it.p[0]];
-  }
 
   size_t total = 0;
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
@@ -547,16 +543,15 @@ PartitionEqualShim::task(const Task *task,
     ptr_t start = it.next_span(count);
     for (ptr_t p(start); p.value - start.value < count; p++) {
       size_t c = elt / chunk;
-      if (coloring.count(c)) {
-        coloring[c].points.insert(p);
-      }
+      coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
       elt++;
     }
   }
 
   IndexPartition ip =
     runtime->create_index_partition(
-      ctx, args.handle, coloring, true, args.color);
+      ctx, args.handle, args.color_space, coloring,
+      DISJOINT_KIND, args.color, args.allocable);
   return ip;
 }
 
@@ -609,6 +604,8 @@ public:
 private:
   static const TaskID task_id = 539418; // a "unique" number
   struct Args {
+    LogicalRegion handle;
+    LogicalRegion parent;
     FieldID fid;
     Domain color_space;
     int color;
@@ -636,6 +633,8 @@ PartitionByFieldShim::launch(HighLevelRuntime *runtime,
                              bool allocable)
 {
   Args args;
+  args.handle = handle;
+  args.parent = parent;
   args.fid = fid;
   args.color_space = color_space;
   args.color = color;
@@ -657,28 +656,25 @@ PartitionByFieldShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  Coloring coloring;
+  PointColoring coloring;
   assert(args.color_space.get_dim() == 1);
-  for(GenericPointInRectIterator<1> it(args.color_space.get_rect<1>());
-      it; ++it) {
-    coloring[it.p[0]];
-  }
 
   Accessor::RegionAccessor<SOA, Color> accessor =
     regions[0].get_field_accessor(args.fid).typeify<Color>().convert<SOA>();
   for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
        it.has_next();) {
-    ptr_t p = it.next();
-    Color c = accessor.read(p);
-    if (coloring.count(c)) {
-      coloring[c].points.insert(p);
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < count; p++) {
+      Color c = accessor.read(p);
+      coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
     }
   }
 
   IndexPartition ip =
     runtime->create_index_partition(
-      ctx, regions[0].get_logical_region().get_index_space(),
-      coloring, true, args.color);
+      ctx, args.handle.get_index_space(), args.color_space, coloring,
+      DISJOINT_KIND, args.color, args.allocable);
   return ip;
 }
 
@@ -714,6 +710,113 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(ip);
 }
 
+// Shim for Legion Dependent Partition API
+
+#if USE_LEGION_PARTAPI_SHIM
+class PartitionByImageShim {
+public:
+  static TaskID register_task();
+  static IndexPartition launch(HighLevelRuntime *runtime,
+                               Context ctx,
+                               IndexSpace handle,
+                               LogicalPartition projection,
+                               LogicalRegion parent,
+                               FieldID fid,
+                               const Domain &color_space,
+                               PartitionKind part_kind = COMPUTE_KIND,
+                               int color = AUTO_GENERATE_ID,
+                               bool allocable = false);
+  static IndexPartition task(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, HighLevelRuntime *runtime);
+private:
+  static const TaskID task_id = 590467; // a "unique" number
+  struct Args {
+    IndexSpace handle;
+    LogicalPartition projection;
+    LogicalRegion parent;
+    FieldID fid;
+    Domain color_space;
+    PartitionKind part_kind;
+    int color;
+    bool allocable;
+  };
+};
+
+Processor::TaskFuncID
+PartitionByImageShim::register_task()
+{
+  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+    task_id, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionByImageShim::task");
+}
+
+IndexPartition
+PartitionByImageShim::launch(HighLevelRuntime *runtime,
+                             Context ctx,
+                             IndexSpace handle,
+                             LogicalPartition projection,
+                             LogicalRegion parent,
+                             FieldID fid,
+                             const Domain &color_space,
+                             PartitionKind part_kind,
+                             int color,
+                             bool allocable)
+{
+  Args args;
+  args.handle = handle;
+  args.projection = projection;
+  args.parent = parent;
+  args.fid = fid;
+  args.color_space = color_space;
+  args.part_kind = part_kind;
+  args.color = color;
+  args.allocable = allocable;
+  TaskArgument targs(&args, sizeof(args));
+  TaskLauncher task(task_id, targs);
+  task.add_region_requirement(
+    RegionRequirement(parent, READ_ONLY, EXCLUSIVE, parent)
+    .add_field(fid));
+  Future f = runtime->execute_task(ctx, task);
+  return f.get_result<IndexPartition>();
+}
+
+IndexPartition
+PartitionByImageShim::task(const Task *task,
+                           const std::vector<PhysicalRegion> &regions,
+                           Context ctx, HighLevelRuntime *runtime)
+{
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+
+  PointColoring coloring;
+  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+    regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
+  for(GenericPointInRectIterator<1> c(args.color_space.get_rect<1>());
+      c; ++c) {
+    LogicalRegion r =
+      runtime->get_logical_subregion_by_color(ctx, args.projection, c.p);
+    for (IndexIterator it(runtime, ctx, r); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < count; p++) {
+        coloring[DomainPoint::from_point<1>(c.p)].points.insert(accessor.read(p));
+      }
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, args.handle, args.color_space, coloring,
+      args.part_kind, args.color, args.allocable);
+  return ip;
+}
+
+static TaskID force_PartitionByImageShim_static_initialize =
+  PartitionByImageShim::register_task();
+#endif
+
 legion_index_partition_t
 legion_index_partition_create_by_image(
   legion_runtime_t runtime_,
@@ -736,10 +839,9 @@ legion_index_partition_create_by_image(
 
   IndexPartition ip =
 #if USE_LEGION_PARTAPI_SHIM
-    // FIXME: This won't actually work yet...
-    runtime->create_partition_by_image(
-      ctx, handle, projection, parent, fid, color_space, part_kind, color,
-      allocable);
+    PartitionByImageShim::launch(
+      runtime, ctx, handle, projection, parent, fid, color_space, part_kind,
+      color, allocable);
 #else
     runtime->create_partition_by_image(
       ctx, handle, projection, parent, fid, color_space, part_kind, color,
