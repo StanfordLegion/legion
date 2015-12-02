@@ -195,6 +195,9 @@ namespace LegionRuntime {
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
+#ifdef LEGION_SPY
+      const UniqueID producer_uid;
+#endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       UserEvent ready_event;
