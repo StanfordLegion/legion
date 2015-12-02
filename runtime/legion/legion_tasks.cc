@@ -2590,7 +2590,7 @@ namespace LegionRuntime {
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
-        op->set_trace(current_trace);
+        op->set_trace(current_trace, !current_trace->is_fixed());
       int outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
@@ -6482,6 +6482,12 @@ namespace LegionRuntime {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
+              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+#endif
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
@@ -8934,6 +8940,12 @@ namespace LegionRuntime {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
+              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+#endif
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();

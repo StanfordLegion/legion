@@ -203,7 +203,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace(LegionTrace *t)
+    void Operation::set_trace(LegionTrace *t, bool is_tracing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -211,7 +211,7 @@ namespace LegionRuntime {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing = !trace->is_fixed();
+      tracing = is_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -4237,9 +4237,10 @@ namespace LegionRuntime {
       // because we ran out of slots to issue
       initialize_close(ctx, req, false/*track*/);
       // Since we didn't register with our parent, we need to set
-      // any trace that we might have explicitly
+      // any trace that we might have explicitly. Get whether we
+      // are tracing from the creation operation.
       if (trace != NULL)
-        set_trace(trace);
+        set_trace(trace, create->is_tracing());
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
@@ -6996,7 +6997,7 @@ namespace LegionRuntime {
         indiv_tasks[idx]->set_must_epoch(this, idx);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
-          indiv_tasks[idx]->set_trace(trace);
+          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed());
         indiv_tasks[idx]->must_parallelism = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
@@ -7008,7 +7009,7 @@ namespace LegionRuntime {
                                           check_privileges, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);
         if (trace != NULL)
-          index_tasks[idx]->set_trace(trace);
+          index_tasks[idx]->set_trace(trace, !trace->is_fixed());
         index_tasks[idx]->must_parallelism = true;
       }
       index_triggered.resize(index_tasks.size(), false);

@@ -380,6 +380,9 @@ namespace LegionRuntime {
                        Operation *o /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
+#ifdef LEGION_SPY
+        producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
+#endif
         ready_event(UserEvent::create_user_event()), result(NULL),
         result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
@@ -400,6 +403,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Future::Impl::Impl(const Future::Impl &rhs)
       : DistributedCollectable(NULL, 0, 0, 0), producer_op(NULL), op_gen(0)
+#ifdef LEGION_SPY
+        , producer_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called

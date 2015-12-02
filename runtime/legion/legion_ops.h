@@ -192,7 +192,7 @@ namespace LegionRuntime {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
-      void set_trace(LegionTrace *trace);
+      void set_trace(LegionTrace *trace, bool is_tracing);
       void set_must_epoch(MustEpochOp *epoch, unsigned index);
     public:
       // Localize a region requirement to its parent context

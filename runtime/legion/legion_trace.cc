@@ -258,9 +258,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(close_op == dynamic_cast<TraceCloseOp*>(op));
 #endif
+          int closing_index = close_op->get_close_index();
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
+            // We only record dependences for this close operation on
+            // the indexes for which this close operation is being done
+            if (closing_index != it->next_idx)
+              continue;
 #ifdef DEBUG_HIGH_LEVEL
             assert((it->operation_idx >= 0) &&
                    ((size_t)it->operation_idx < operations.size()));
