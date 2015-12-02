@@ -30,8 +30,6 @@ task main()
   var x3 = new(ptr(t, r))
 
   var i = 0
-  -- Note: This test hits a bug in the vectorizer if vectorization is allowed.
-  __forbid(__vectorize)
   for x in r do
     x.a = 10000 + 10 * i
     x.b = 0

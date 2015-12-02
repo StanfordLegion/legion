@@ -552,6 +552,13 @@ function check_vectorizability.stat(cx, node)
         return false
       end
 
+      -- TODO: we could accept statements with no loop carrying dependence
+      if cx:lookup_expr_type(lh) == S then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "an assignment to a scalar expression")
+        return false
+      end
+
       -- TODO: for the moment we reject an assignment such as
       -- 'r[i] = i' where 'i' is of an index type
       if std.is_bounded_type(rh.expr_type) and
