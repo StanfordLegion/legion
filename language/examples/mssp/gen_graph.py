@@ -1,24 +1,11 @@
 #!/usr/bin/env python
 
-import os
-import sys
-import getopt
-import random
 import array
-
-opts, args = getopt.getopt(sys.argv[1:], 'n:e:s:c:p:o:r:v')
-opts = dict(opts)
-
-nodes = int(opts.get('-n', '10'))
-edges = int(opts.get('-e', '20'))
-subgraphs = int(opts.get('-s', '1'))
-cluster_factor = int(opts.get('-c', '95'))
-problems = int(opts.get('-p', '1'))
-randseed = int(opts.get('-r', '12345'))
-outdir = opts['-o']
-verbose = '-v' in opts
-
-random.seed(randseed)
+import getopt
+import os
+import random
+import sys
+import subprocess
 
 def create_graph(nodes, edges):
     n1 = [ random.randint(0, nodes - 1) for x in xrange(edges) ]
@@ -30,7 +17,20 @@ def create_graph(nodes, edges):
              'n2': n2,
              'length': length }
 
-def solve_graph(g, source):
+def metis_graph(g, outdir):
+    with open(os.path.join(outdir, 'graph.metis'), 'wb') as f:
+        f.write('{:3d} {:3d} 000\n'.format(nodes, edges))
+        for n in xrange(nodes):
+            f.write(' '.join('{:3d} 1'.format(n2+1) for n1, n2 in zip(g['n1'], g['n2']) if n1 == n))
+            f.write('\n')
+    subprocess.check_call(['./metis-install/bin/gpmetis', os.path.join(outdir, 'graph.metis'), str(subgraphs)])
+    with open(os.path.join(outdir, 'graph.metis.part.{}'.format(subgraphs)), 'rb') as f:
+        colors = [int(x) - 1 for x in f.read().split()]
+    mapping = dict(zip(sorted(range(nodes), key = lambda x: colors[x]), range(nodes)))
+    g['n1'] = [mapping[g['n1'][x]] for x in xrange(edges)]
+    g['n2'] = [mapping[g['n2'][x]] for x in xrange(edges)]
+
+def solve_graph(g, source, verbose):
     parent = [ -1 for x in xrange(g['nodes']) ]
     dist = [ 1e100 for x in xrange(g['nodes']) ]
     dist[source] = 0
@@ -55,28 +55,46 @@ def solve_graph(g, source):
 
     return dist
 
-G = create_graph(nodes, edges)
+if __name__ == '__main__':
+    opts, args = getopt.getopt(sys.argv[1:], 'n:e:s:c:p:o:r:v:m')
+    opts = dict(opts)
 
-if not os.path.exists(outdir):
-    os.mkdir(outdir)
-else:
-    assert os.path.isdir(outdir)
+    nodes = int(opts.get('-n', '10'))
+    edges = int(opts.get('-e', '20'))
+    subgraphs = int(opts.get('-s', '1'))
+    cluster_factor = int(opts.get('-c', '95'))
+    problems = int(opts.get('-p', '1'))
+    randseed = int(opts.get('-r', '12345'))
+    metis = bool(opts.get('-m', 'True'))
+    outdir = opts['-o']
+    verbose = '-v' in opts
 
-with open(os.path.join(outdir, 'edges.dat'), 'wb') as f:
-    array.array('i', G['n1']).tofile(f)
-    array.array('i', G['n2']).tofile(f)
-    array.array('f', G['length']).tofile(f)
+    random.seed(randseed)
 
-with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
-    f.write('nodes {:d}\n'.format(nodes))
-    f.write('edges {:d}\n'.format(edges))
-    f.write('data edges.dat\n')
+    G = create_graph(nodes, edges)
 
-    sources = random.sample(xrange(nodes), problems)
-    for s in sources:
-        parents = solve_graph(G, s)
-        with open(os.path.join(outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
-            array.array('f', parents).tofile(f2)
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+    else:
+        assert os.path.isdir(outdir)
 
-        f.write('source {:d} result_{:d}.dat\n'.format(s, s))
+    if metis:
+        metis_graph(G, outdir)
 
+    with open(os.path.join(outdir, 'edges.dat'), 'wb') as f:
+        array.array('i', G['n1']).tofile(f)
+        array.array('i', G['n2']).tofile(f)
+        array.array('f', G['length']).tofile(f)
+
+    with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
+        f.write('nodes {:d}\n'.format(nodes))
+        f.write('edges {:d}\n'.format(edges))
+        f.write('data edges.dat\n')
+
+        sources = random.sample(xrange(nodes), problems)
+        for s in sources:
+            parents = solve_graph(G, s, verbose)
+            with open(os.path.join(outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
+                array.array('f', parents).tofile(f2)
+
+            f.write('source {:d} result_{:d}.dat\n'.format(s, s))
