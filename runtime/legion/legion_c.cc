@@ -460,6 +460,110 @@ legion_index_partition_create_blockify_3d(
   return CObjectWrapper::wrap(ip);
 }
 
+// Shim for Legion Dependent Partition API
+
+#if USE_LEGION_PARTAPI_SHIM
+class PartitionEqualShim {
+public:
+  static TaskID register_task();
+  static IndexPartition launch(HighLevelRuntime *runtime,
+                               Context ctx,
+                               IndexSpace handle,
+                               const Domain &color_space,
+                               size_t granularity,
+                               int color = AUTO_GENERATE_ID,
+                               bool allocable = false);
+  static IndexPartition task(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, HighLevelRuntime *runtime);
+private:
+  static const TaskID task_id = 586659; // a "unique" number
+  struct Args {
+    IndexSpace handle;
+    Domain color_space;
+    size_t granularity;
+    int color;
+    bool allocable;
+  };
+};
+
+Processor::TaskFuncID
+PartitionEqualShim::register_task()
+{
+  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+    task_id, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionEqualShim::task");
+}
+
+IndexPartition
+PartitionEqualShim::launch(HighLevelRuntime *runtime,
+                           Context ctx,
+                           IndexSpace handle,
+                           const Domain &color_space,
+                           size_t granularity,
+                           int color,
+                           bool allocable)
+{
+  Args args;
+  args.handle = handle;
+  args.color_space = color_space;
+  args.granularity = granularity;
+  args.color = color;
+  args.allocable = allocable;
+  TaskArgument targs(&args, sizeof(args));
+  TaskLauncher task(task_id, targs);
+  Future f = runtime->execute_task(ctx, task);
+  return f.get_result<IndexPartition>();
+}
+
+IndexPartition
+PartitionEqualShim::task(const Task *task,
+                           const std::vector<PhysicalRegion> &regions,
+                           Context ctx, HighLevelRuntime *runtime)
+{
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+  assert(args.granularity == 1);
+
+  Coloring coloring;
+  assert(args.color_space.get_dim() == 1);
+  for(GenericPointInRectIterator<1> it(args.color_space.get_rect<1>());
+      it; ++it) {
+    coloring[it.p[0]];
+  }
+
+  size_t total = 0;
+  for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+    size_t count = 0;
+    it.next_span(count);
+    total += count;
+  }
+
+  size_t chunk = total / args.color_space.get_rect<1>().volume();
+  size_t elt = 0;
+  for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < count; p++) {
+      size_t c = elt / chunk;
+      if (coloring.count(c)) {
+        coloring[c].points.insert(p);
+      }
+      elt++;
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, args.handle, coloring, true, args.color);
+  return ip;
+}
+
+static TaskID force_PartitionEqualShim_static_initialize =
+  PartitionEqualShim::register_task();
+#endif
+
 legion_index_partition_t
 legion_index_partition_create_equal(legion_runtime_t runtime_,
                                     legion_context_t ctx_,
@@ -476,9 +580,8 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
 
   IndexPartition ip =
 #if USE_LEGION_PARTAPI_SHIM
-    // FIXME: This won't actually work yet...
-    runtime->create_equal_partition(ctx, parent, color_space, granularity,
-                                    color, allocable);
+    PartitionEqualShim::launch(runtime, ctx, parent, color_space, granularity,
+                               color, allocable);
 #else
     runtime->create_equal_partition(ctx, parent, color_space, granularity,
                                     color, allocable);
@@ -579,7 +682,7 @@ PartitionByFieldShim::task(const Task *task,
   return ip;
 }
 
-static TaskID force_shim_static_initialize =
+static TaskID force_PartitionByFieldShim_static_initialize =
   PartitionByFieldShim::register_task();
 #endif
 
