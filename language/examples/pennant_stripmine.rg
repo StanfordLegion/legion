@@ -14,17 +14,21 @@
 
 -- runs-with:
 -- [
---   ["pennant.tests/sedovsmall/sedovsmall.pnt",
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-fleaf", "0",
 --    "-npieces", "1", "-compact", "0"],
---   ["pennant.tests/sedovsmall/sedovsmall.pnt",
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-fleaf", "0",
 --    "-npieces", "2", "-compact", "0",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt", "-fleaf", "0",
+--    "-npieces", "1", "-compact", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt", "-fleaf", "0",
+--    "-npieces", "3", "-compact", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1", "-compact", "0"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2", "-compact", "0"]
+--   ["pennant.tests/leblanc/leblanc.pnt", "-fleaf", "0",
+--    "-npieces", "1", "-compact", "0"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-fleaf", "0",
+--    "-npieces", "2", "-compact", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT

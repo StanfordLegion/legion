@@ -12,43 +12,17 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- FIXME: This needs a shim for Realm before it will run.
+-- fails-with:
+-- privilege_partition_by_image1.rg:26: invalid privileges in argument 1: reads($s)
+--   var q = image(p, s, r)
+--               ^
 
 import "regent"
 
-local int1d = index_type(int, "int1d")
+local int1d = index_type(int, "ind1d")
 
-struct t {
-  value : int,
-}
-
-task f()
-  var r = region(ispace(ptr, 5), t)
-  var x0 = new(ptr(t, r))
-  var x1 = new(ptr(t, r))
-  var x2 = new(ptr(t, r))
-
-  var p = partition(equal, r, ispace(int1d, 3))
-
-  for i = 0, 3 do
-    var ri = p[i]
-    for x in ri do
-      x.value = 10 * i
-    end
-  end
-
-  var s = 0
-  for i = 0, 3 do
-    var ri = p[i]
-    for x in ri do
-      s += x.value
-    end
-  end
-
-  return s
+task f(r : region(int), s : region(ptr(int, r)))
+  var p = partition(equal, s, ispace(int1d, 3))
+  var q = image(p, s, r)
 end
-
-task main()
-  regentlib.assert(f() == 30, "test failed")
-end
-regentlib.start(main)
+f:compile()

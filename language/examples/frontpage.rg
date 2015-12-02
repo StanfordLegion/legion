@@ -12,43 +12,26 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- FIXME: This needs a shim for Realm before it will run.
-
 import "regent"
 
-local int1d = index_type(int, "int1d")
+fspace point { x : int, y : int, z : int }
 
-struct t {
-  value : int,
-}
-
-task f()
-  var r = region(ispace(ptr, 5), t)
-  var x0 = new(ptr(t, r))
-  var x1 = new(ptr(t, r))
-  var x2 = new(ptr(t, r))
-
-  var p = partition(equal, r, ispace(int1d, 3))
-
-  for i = 0, 3 do
-    var ri = p[i]
-    for x in ri do
-      x.value = 10 * i
-    end
+task inc(points : region(point))
+where reads writes(points.{x, y, z}) do
+  for x in points do
+    x.{x, y, z} += 1
   end
-
-  var s = 0
-  for i = 0, 3 do
-    var ri = p[i]
-    for x in ri do
-      s += x.value
-    end
-  end
-
-  return s
 end
 
 task main()
-  regentlib.assert(f() == 30, "test failed")
+  var points = region(ispace(ptr, 5), point)
+  for i = 0, 5 do new(ptr(point, points)) end
+  fill(points.{x, y, z}, 0)
+
+  var colors = ispace(ptr, 3)
+  var part = partition(equal, points, colors)
+
+  for i in colors do
+    inc(part[i])
+  end
 end
-regentlib.start(main)

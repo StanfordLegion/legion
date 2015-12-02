@@ -735,8 +735,6 @@ extern "C" {
     bool allocable /* = false */);
 
   /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
    * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
    */
   legion_index_space_t
@@ -744,6 +742,14 @@ extern "C" {
                                             legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color_space()
+   */
+  legion_domain_t
+  legion_index_partition_get_color_space(legion_runtime_t runtime,
+                                         legion_context_t ctx,
+                                         legion_index_partition_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
