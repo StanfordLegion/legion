@@ -460,6 +460,16 @@ legion_index_partition_create_blockify_3d(
   return CObjectWrapper::wrap(ip);
 }
 
+// The Legion runtime can't handle colorings with 0D (unstructured)
+// points, so upgrade them to 1D.
+static DomainPoint upgrade_point(DomainPoint p)
+{
+  if (p.get_dim() == 0) {
+    return DomainPoint::from_point<1>(Point<1>(p[0]));
+  }
+  return p;
+}
+
 // Shim for Legion Dependent Partition API
 
 #if USE_LEGION_PARTAPI_SHIM
@@ -526,9 +536,6 @@ PartitionEqualShim::task(const Task *task,
   Args &args = *(Args *)task->args;
   assert(args.granularity == 1);
 
-  PointColoring coloring;
-  assert(args.color_space.get_dim() == 1);
-
   size_t total = 0;
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
     size_t count = 0;
@@ -536,15 +543,22 @@ PartitionEqualShim::task(const Task *task,
     total += count;
   }
 
-  size_t chunk = total / args.color_space.get_rect<1>().volume();
+  PointColoring coloring;
+  size_t chunks = args.color_space.get_volume();
+  size_t chunksize = (total + chunks - 1) / chunks;
   size_t elt = 0;
+  Domain::DomainPointIterator c(args.color_space);
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
     size_t count = 0;
     ptr_t start = it.next_span(count);
     for (ptr_t p(start); p.value - start.value < count; p++) {
-      size_t c = elt / chunk;
-      coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
+      assert(c);
+      coloring[upgrade_point(c.p)].points.insert(p);
       elt++;
+      if (elt >= chunksize) {
+        elt = 0;
+        c++;
+      }
     }
   }
 
@@ -793,15 +807,14 @@ PartitionByImageShim::task(const Task *task,
   PointColoring coloring;
   Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
-  for(GenericPointInRectIterator<1> c(args.color_space.get_rect<1>());
-      c; ++c) {
+  for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     LogicalRegion r =
       runtime->get_logical_subregion_by_color(ctx, args.projection, c.p);
     for (IndexIterator it(runtime, ctx, r); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
       for (ptr_t p(start); p.value - start.value < count; p++) {
-        coloring[DomainPoint::from_point<1>(c.p)].points.insert(accessor.read(p));
+        coloring[upgrade_point(c.p)].points.insert(accessor.read(p));
       }
     }
   }
@@ -934,8 +947,7 @@ PartitionByPreimageShim::task(const Task *task,
   PointColoring coloring;
   Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
-  for(GenericPointInRectIterator<1> c(args.color_space.get_rect<1>());
-      c; ++c) {
+  for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c.p);
     std::set<ptr_t> points;
     for (IndexIterator it(runtime, ctx, target); it.has_next();) {
@@ -951,7 +963,7 @@ PartitionByPreimageShim::task(const Task *task,
       ptr_t start = it.next_span(count);
       for (ptr_t p(start); p.value - start.value < count; p++) {
         if (points.count(accessor.read(p))) {
-          coloring[DomainPoint::from_point<1>(c.p)].points.insert(p);
+          coloring[upgrade_point(c.p)].points.insert(p);
         }
       }
     }
