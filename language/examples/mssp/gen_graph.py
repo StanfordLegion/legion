@@ -29,8 +29,8 @@ def find_subgraph(n, subgraphs):
     assert len(s) == 1
     return s[0]
 
-def create_clustered_graph(nodes, edges, subgraphs, cluster_factor, verbose):
-    if verbose: print('Creating clustered graph with {} nodes and {} edges...'.format(nodes, edges))
+def create_clustered_DAG_graph(nodes, edges, subgraphs, cluster_factor, verbose):
+    if verbose: print('Creating clustered DAG graph with {} nodes and {} edges...'.format(nodes, edges))
     subgraphs = compute_subgraphs(nodes, subgraphs)
 
     def make_edge():
@@ -39,13 +39,10 @@ def create_clustered_graph(nodes, edges, subgraphs, cluster_factor, verbose):
             s = find_subgraph(n1, subgraphs)
             n2 = random.randint(*s)
         else:
-            n2 = random.randint(n1, nodes-1)
+            n2 = random.randint(min(n1, nodes-1), nodes-1)
         return (n1, n2)
 
     n1, n2 = zip(*(make_edge() for x in xrange(edges)))
-    # print('digraph {')
-    # print('\n'.join('%s -> %s' % e for e in zip(n1, n2)))
-    # print('}')
     length = [ random.expovariate(1.0) for x in xrange(edges) ]
     return { 'nodes': nodes,
              'edges': edges,
@@ -107,6 +104,11 @@ def write_graph(g, problems, outdir, verbose):
         array.array('i', g['n2']).tofile(f)
         array.array('f', g['length']).tofile(f)
 
+    with open(os.path.join(outdir, 'graph.dot'), 'wb') as f:
+        f.write('digraph {\n')
+        f.write('\n'.join('{} -> {}'.format(*e) for e in zip(g['n1'], g['n2'], g['length'])))
+        f.write('\n}\n')
+
     with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
         f.write('nodes {:d}\n'.format(g['nodes']))
         f.write('edges {:d}\n'.format(g['edges']))
@@ -124,7 +126,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description='graph generator')
     p.add_argument('--nodes', '-n', type=int, default=10)
     p.add_argument('--edges', '-e', type=int, default=20)
-    p.add_argument('--type', '-t', default='random', choices=['random', 'clustered'])
+    p.add_argument('--type', '-t', default='random', choices=['random', 'clustered_DAG'])
     p.add_argument('--subgraphs', '-s', type=int, default=1)
     p.add_argument('--cluster-factor', '-c', type=int, default=80)
     p.add_argument('--problems', '-p', type=int, default=1)
@@ -139,8 +141,8 @@ if __name__ == '__main__':
 
     if args.type == 'random':
         G = create_graph(args.nodes, args.edges, args.verbose)
-    elif args.type == 'clustered':
-        G = create_clustered_graph(args.nodes, args.edges, args.subgraphs, args.cluster_factor, args.verbose)
+    elif args.type == 'clustered_DAG':
+        G = create_clustered_DAG_graph(args.nodes, args.edges, args.subgraphs, args.cluster_factor, args.verbose)
     else:
         assert false
 
