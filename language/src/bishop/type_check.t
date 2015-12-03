@@ -61,8 +61,8 @@ keyword_type_assignment:assign_type({ "x86", "cuda", "arm", "ptx", "lua",
                                       "mic", "sm10", "sm20", "sm30", "sm35",
                                       "neon" }, std.isa_type)
 keyword_type_assignment:assign_type({ "global", "sysmem", "regmem", "fbmem",
-                                      "zcmem", "disk", "hdf", "l1cache",
-                                      "l2cache", "l3cache" },
+                                      "zcmem", "disk", "hdf", "file",
+                                      "l1cache", "l2cache", "l3cache" },
                                       std.memory_kind_type)
 
 keyword_type_assignment:assign_type({ "forbid", "allow", "demand" },

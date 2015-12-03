@@ -73,6 +73,7 @@ local memory_kind = {
   zcmem = c.Z_COPY_MEM,
   disk = c.DISK_MEM,
   hdf = c.HDF_MEM,
+  file = c.FILE_MEM,
   l1cache = c.LEVEL1_CACHE,
   l2cache = c.LEVEL2_CACHE,
   l3cache = c.LEVEL3_CACHE,

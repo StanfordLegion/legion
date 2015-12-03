@@ -5361,6 +5361,16 @@ namespace LegionRuntime {
       assert(regions.size() == region_deleted.size());
       assert(regions.size() == local_instances.size());
 #endif
+      // Quick check to make sure the user didn't forget to end a trace
+      if (current_trace != NULL)
+      {
+        log_task.error("Task %s (UID %lld) failed to end trace before exiting!",
+                        variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INCOMPLETE_TRACE);
+      }
       // Unmap all of the physical regions which are still mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
