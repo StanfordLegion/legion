@@ -128,11 +128,10 @@ do
       count += sssp_collect(psrc[i])
     end
 
+    c.legion_runtime_end_trace(__runtime(), __context(), 0)
     if count == 0 then
       break
     end
-
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
   return 0
 end
