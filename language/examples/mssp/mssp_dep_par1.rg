@@ -115,6 +115,8 @@ do
 
   -- upper bound is |V|-1 iterations - should normally take much less than that
   for steps = 1, g.nodes do
+    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+
     var count = 0
     __demand(__parallel)
     for i = 0, subgraphs do
@@ -129,6 +131,8 @@ do
     if count == 0 then
       break
     end
+
+    c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
 end
 
