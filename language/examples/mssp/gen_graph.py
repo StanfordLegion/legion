@@ -11,9 +11,41 @@ import sys
 import subprocess
 
 def create_graph(nodes, edges, verbose):
-    if verbose: print('Creating graph with {} nodes and {} edges...'.format(nodes, edges))
+    if verbose: print('Creating random graph with {} nodes and {} edges...'.format(nodes, edges))
     n1 = [ random.randint(0, nodes - 1) for x in xrange(edges) ]
     n2 = [ random.randint(0, nodes - 1) for x in xrange(edges) ]
+    length = [ random.expovariate(1.0) for x in xrange(edges) ]
+    return { 'nodes': nodes,
+             'edges': edges,
+             'n1': n1,
+             'n2': n2,
+             'length': length }
+
+def compute_subgraphs(n, p):
+    return [(x*(n/p) + min(x, n%p), ((x+1)*(n/p)-1) + min(x + 1, n%p)) for x in xrange(0, p)]
+
+def find_subgraph(n, subgraphs):
+    s = [(start, end) for start, end in subgraphs if start <= n and n <= end]
+    assert len(s) == 1
+    return s[0]
+
+def create_clustered_graph(nodes, edges, subgraphs, cluster_factor, verbose):
+    if verbose: print('Creating clustered graph with {} nodes and {} edges...'.format(nodes, edges))
+    subgraphs = compute_subgraphs(nodes, subgraphs)
+
+    def make_edge():
+        n1 = random.randint(0, nodes - 1)
+        if random.randint(1, 100) <= cluster_factor:
+            s = find_subgraph(n1, subgraphs)
+            n2 = random.randint(*s)
+        else:
+            n2 = random.randint(n1, nodes-1)
+        return (n1, n2)
+
+    n1, n2 = zip(*(make_edge() for x in xrange(edges)))
+    # print('digraph {')
+    # print('\n'.join('%s -> %s' % e for e in zip(n1, n2)))
+    # print('}')
     length = [ random.expovariate(1.0) for x in xrange(edges) ]
     return { 'nodes': nodes,
              'edges': edges,
@@ -92,8 +124,9 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description='graph generator')
     p.add_argument('--nodes', '-n', type=int, default=10)
     p.add_argument('--edges', '-e', type=int, default=20)
+    p.add_argument('--type', '-t', default='random', choices=['random', 'clustered'])
     p.add_argument('--subgraphs', '-s', type=int, default=1)
-    p.add_argument('--cluster-factor', '-c', type=int, default=95)
+    p.add_argument('--cluster-factor', '-c', type=int, default=80)
     p.add_argument('--problems', '-p', type=int, default=1)
     p.add_argument('--randseed', '-r', type=int, default=12345)
     p.add_argument('--metis-path', default='./metis-install/bin/gpmetis')
@@ -104,7 +137,12 @@ if __name__ == '__main__':
 
     random.seed(args.randseed)
 
-    G = create_graph(args.nodes, args.edges, args.verbose)
+    if args.type == 'random':
+        G = create_graph(args.nodes, args.edges, args.verbose)
+    elif args.type == 'clustered':
+        G = create_clustered_graph(args.nodes, args.edges, args.subgraphs, args.cluster_factor, args.verbose)
+    else:
+        assert false
 
     try:
         os.mkdir(args.outdir)
