@@ -27,9 +27,14 @@ def metis_graph(g, metis, subgraphs, outdir):
     subprocess.check_call([metis, os.path.join(outdir, 'graph.metis'), str(subgraphs)])
     with open(os.path.join(outdir, 'graph.metis.part.{}'.format(subgraphs)), 'rb') as f:
         colors = [int(x) - 1 for x in f.read().split()]
-    mapping = dict(zip(sorted(range(g['nodes']), key = lambda x: colors[x]), range(g['nodes'])))
+    mapping = dict(zip(sorted(xrange(g['nodes']), key = lambda x: colors[x]), range(g['nodes'])))
     g['n1'] = [mapping[g['n1'][x]] for x in xrange(g['edges'])]
     g['n2'] = [mapping[g['n2'][x]] for x in xrange(g['edges'])]
+
+def sort_graph(g):
+    mapping = dict(zip(sorted(xrange(g['edges']), key = lambda x: (g['n1'][x], g['n2'][x])), range(g['edges'])))
+    g['n1'] = [g['n1'][mapping[x]] for x in xrange(g['edges'])]
+    g['n2'] = [g['n2'][mapping[x]] for x in xrange(g['edges'])]
 
 def solve_graph(g, source, verbose):
     parent = [ -1 for x in xrange(g['nodes']) ]
@@ -57,16 +62,17 @@ def solve_graph(g, source, verbose):
     return dist
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(description = 'graph generator')
-    p.add_argument('--nodes', '-n', type = int, default = 10)
-    p.add_argument('--edges', '-e', type = int, default = 20)
-    p.add_argument('--subgraphs', '-s', type = int, default = 1)
-    p.add_argument('--cluster-factor', '-c', type = int, default = 95)
-    p.add_argument('--problems', '-p', type = int, default = 1)
-    p.add_argument('--randseed', '-r', type = int, default = 12345)
-    p.add_argument('--metis', '-m', default = './metis-install/bin/gpmetis')
-    p.add_argument('--outdir', '-o', required = True)
-    p.add_argument('--verbose', '-v', action = 'store_true')
+    p = argparse.ArgumentParser(description='graph generator')
+    p.add_argument('--nodes', '-n', type=int, default=10)
+    p.add_argument('--edges', '-e', type=int, default=20)
+    p.add_argument('--subgraphs', '-s', type=int, default=1)
+    p.add_argument('--cluster-factor', '-c', type=int, default=95)
+    p.add_argument('--problems', '-p', type=int, default=1)
+    p.add_argument('--randseed', '-r', type=int, default=12345)
+    p.add_argument('--metis-path', default='./metis-install/bin/gpmetis')
+    p.add_argument('--metis', '-m', action='store_true')
+    p.add_argument('--outdir', '-o', required=True)
+    p.add_argument('--verbose', '-v', action='store_true')
     args = p.parse_args()
 
     random.seed(args.randseed)
@@ -79,9 +85,11 @@ if __name__ == '__main__':
         pass
     assert os.path.isdir(args.outdir)
 
-    if len(args.metis) > 0:
-        assert os.path.isfile(args.metis)
-        metis_graph(G, args.metis, args.subgraphs, args.outdir)
+    if args.metis:
+        assert os.path.isfile(args.metis_path)
+        metis_graph(G, args.metis_path, args.subgraphs, args.outdir)
+
+    sort_graph(G)
 
     with open(os.path.join(args.outdir, 'edges.dat'), 'wb') as f:
         array.array('i', G['n1']).tofile(f)
