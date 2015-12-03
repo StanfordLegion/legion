@@ -54,8 +54,8 @@ def create_clustered_geometric_graph(nodes, edges, nsubgraphs, cluster_factor, v
     if verbose: print('Creating clustered geometric graph with {} nodes and {} edges...'.format(nodes, edges))
     blocks = int(math.sqrt(nsubgraphs))
     assert blocks**2 == nsubgraphs
-    bounds = [((100*(i%blocks)/blocks, 100*(i%blocks + 1)/blocks),
-               (100*(i/blocks)/blocks, 100*(i/blocks + 1)/blocks))
+    bounds = [((1.0*(i%blocks)/blocks, 1.0*(i%blocks + 1)/blocks),
+               (1.0*(i/blocks)/blocks, 1.0*(i/blocks + 1)/blocks))
               for i in xrange(nsubgraphs)]
 
     subgraphs = compute_subgraphs(nodes, nsubgraphs)
@@ -73,8 +73,9 @@ def create_clustered_geometric_graph(nodes, edges, nsubgraphs, cluster_factor, v
         return (n1, n2)
 
     n1, n2 = zip(*(make_edge() for x in xrange(edges)))
-    length = [math.sqrt(sum((a - b)**2 for a, b in zip(pos[n1[x]], pos[n2[x]])))
-              for x in xrange(edges)]
+    length = [xlen + random.expovariate(1000/xlen if xlen > 0.0001 else 1)
+              for x in xrange(edges)
+              for xlen in [math.sqrt(sum((a - b)**2 for a, b in zip(pos[n1[x]], pos[n2[x]])))]]
     return { 'nodes': nodes,
              'edges': edges,
              'n1': n1,
