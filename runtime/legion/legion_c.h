@@ -2337,6 +2337,25 @@ extern "C" {
   legion_processor_t
   legion_task_get_target_proc(legion_task_t task);
 
+  /**
+   * @see LegionRuntime::HighLevel::Task::variants::name
+   */
+  const char *
+  legion_task_get_name(legion_task_t task);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::target_proc
+   */
+  void
+  legion_task_set_target_proc(legion_task_t task, legion_processor_t proc);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::additional_procs
+   */
+  void
+  legion_task_add_additional_proc(legion_task_t task, legion_processor_t proc);
+
+  // -----------------------------------------------------------------------
   // -----------------------------------------------------------------------
   // Inline Operations
   // -----------------------------------------------------------------------
