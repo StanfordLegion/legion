@@ -4030,8 +4030,11 @@ namespace LegionRuntime {
     {
       assert(fill_size == fill_value_size);
       size_t field_start = 0, field_size = 0, within_field = 0;
-      size_t bytes = find_field(get_field_sizes(), fill_offset, fill_size,
-                                field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes =
+#endif
+	find_field(get_field_sizes(), fill_offset, fill_size,
+		   field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
         if (linearization.get_dim() == 1) {
@@ -5203,8 +5206,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         // Now iterate over all the points in the element space 
@@ -5314,8 +5320,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         IndexSpaceImpl *source = rt->get_metadata_impl(it->index_space);
@@ -5371,8 +5380,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         IndexSpaceImpl *source = rt->get_metadata_impl(it->index_space);
@@ -5596,7 +5608,7 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, field_size, within_field;
+		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
 					  field_start, field_size, within_field);
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
@@ -5621,7 +5633,7 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, field_size, within_field;
+		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
 					  field_start, field_size, within_field);
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",

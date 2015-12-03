@@ -2073,7 +2073,9 @@ namespace LegionRuntime {
         // First compute the path
         std::vector<ColorPoint> path;
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
         bool result = 
+#endif
 #endif
         compute_index_path(inst_manager->region_node->row_source->handle,
                            top_node->row_source->handle, path);
@@ -11915,7 +11917,9 @@ namespace LegionRuntime {
       bool create_composite = false;
       std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
       bool result = 
+#endif
 #endif
       siphon_physical_children(next_closer, state, closing_mask,
                                empty_next_children, create_composite);
@@ -14983,7 +14987,9 @@ namespace LegionRuntime {
             bool create_composite = false;
             std::set<ColorPoint> empty_next_children;
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
             bool result = 
+#endif
 #endif
             siphon_physical_children(closer, state, user_mask,
                                      empty_next_children, 

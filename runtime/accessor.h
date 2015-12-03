@@ -384,7 +384,10 @@ namespace LegionRuntime {
 	    //printf("in soa(%zd) converter\n", STRIDE);
 	    void *soa_base = 0;
 	    size_t soa_stride = STRIDE;
-	    bool ok = get_soa_parameters(soa_base, soa_stride);
+#ifndef NDEBUG
+	    bool ok =
+#endif
+	      get_soa_parameters(soa_base, soa_stride);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(soa_base, soa_stride);
             RegionAccessor<AT,T> result(t);
@@ -416,7 +419,10 @@ namespace LegionRuntime {
 	    size_t hybrid_soa_stride = STRIDE;
 	    size_t hybrid_soa_block_size = BLOCK_SIZE;
 	    size_t hybrid_soa_block_stride = BLOCK_STRIDE;
-	    bool ok = get_hybrid_soa_parameters(hybrid_soa_base, hybrid_soa_stride,
+#ifndef NDEBUG
+	    bool ok =
+#endif
+	      get_hybrid_soa_parameters(hybrid_soa_base, hybrid_soa_stride,
 						hybrid_soa_block_size, hybrid_soa_block_stride);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(hybrid_soa_base, hybrid_soa_stride,
@@ -441,7 +447,10 @@ namespace LegionRuntime {
 	  template <typename AT, typename REDOP>
 	  RegionAccessor<AT, T> convert_helper(ReductionFold<REDOP> *dummy) const {
 	    void *redfold_base = 0;
-	    bool ok = get_redfold_parameters(redfold_base);
+#ifndef NDEBUG
+	    bool ok =
+#endif
+	      get_redfold_parameters(redfold_base);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redfold_base);
             RegionAccessor<AT, T> result(t);
@@ -466,7 +475,10 @@ namespace LegionRuntime {
 	  RegionAccessor<AT, T> convert_helper(ReductionList<REDOP> *dummy) const {
 	    void *redlist_base = 0;
 	    ptr_t *redlist_next_ptr = 0;
-	    bool ok = get_redlist_parameters(redlist_base, redlist_next_ptr);
+#ifndef NDEBUG
+	    bool ok =
+#endif
+	      get_redlist_parameters(redlist_base, redlist_next_ptr);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redlist_base, redlist_next_ptr);
             RegionAccessor<AT, T> result(t);

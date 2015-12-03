@@ -825,7 +825,10 @@ namespace Realm {
       ThreadLocal::current_host_thread = ThreadLocal::current_thread;
       ThreadLocal::current_thread = switch_to;
 
-      int ret = swapcontext(&host_ctx, &switch_to->ctx);
+#ifndef NDEBUG
+      int ret =
+#endif
+	swapcontext(&host_ctx, &switch_to->ctx);
 
       // if we return with a value of 0, that means we were (eventually) given control
       //  back, as we hoped
@@ -848,7 +851,10 @@ namespace Realm {
 	ThreadLocal::current_thread = switch_to;
 
 	// a switch between two user contexts - nice and simple
-	int ret = swapcontext(&switch_from->ctx, &switch_to->ctx);
+#ifndef NDEBUG
+	int ret =
+#endif
+	  swapcontext(&switch_from->ctx, &switch_to->ctx);
 	assert(ret == 0);
 
 	assert(switch_from->running == false);
@@ -860,7 +866,10 @@ namespace Realm {
 	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
 	ThreadLocal::current_host_thread = 0;
 
-	int ret = swapcontext(&switch_from->ctx, ThreadLocal::host_context);
+#ifndef NDEBUG
+	int ret =
+#endif
+	  swapcontext(&switch_from->ctx, ThreadLocal::host_context);
 	assert(ret == 0);
 
 	// if we get control back

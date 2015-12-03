@@ -79,14 +79,20 @@ namespace Realm {
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // this is a blocking operation
-      ssize_t amt = pread(fd, dst, size, offset);
+#ifndef NDEBUG
+      ssize_t amt =
+#endif
+	pread(fd, dst, size, offset);
       assert(amt == (ssize_t)size);
     }
 
     void DiskMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // this is a blocking operation
-      ssize_t amt = pwrite(fd, src, size, offset);
+#ifndef NDEBUG
+      ssize_t amt =
+#endif
+	pwrite(fd, src, size, offset);
       assert(amt == (ssize_t)size);
     }
 
@@ -180,7 +186,10 @@ namespace Realm {
           for(std::vector<size_t>::const_iterator it = field_sizes.begin(); it != field_sizes.end(); it++) {
             field_size += *it;
           }
-          int ret = ftruncate(fd, field_size * domain.get_volume());
+#ifndef NDEBUG
+          int ret =
+#endif
+	    ftruncate(fd, field_size * domain.get_volume());
           assert(ret == 0);
           break;
         }
@@ -235,7 +244,10 @@ namespace Realm {
       pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
       pthread_mutex_unlock(&vector_lock);
-      size_t ret = pread(fd, dst, size, offset);
+#ifndef NDEBUG
+      size_t ret =
+#endif
+	pread(fd, dst, size, offset);
       assert(ret == size);
     }
 
@@ -249,7 +261,10 @@ namespace Realm {
       pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
       pthread_mutex_unlock(&vector_lock);
-      size_t ret = pwrite(fd, src, size, offset);
+#ifndef NDEBUG
+      size_t ret =
+#endif
+	pwrite(fd, src, size, offset);
       assert(ret == size);
     }
 

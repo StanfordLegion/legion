@@ -977,6 +977,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
       // Check to make sure we are asking for something in the domain
       if (valid_points.find(point) == valid_points.end())
       {
@@ -992,6 +993,7 @@ namespace LegionRuntime {
         }
         assert(is_valid_point);
       }
+#endif
 #endif
       if (valid)
       {
@@ -13589,7 +13591,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
       unsigned previous = 
+#endif
 #endif
       __sync_fetch_and_add(&outstanding_top_level_tasks,1);
 #ifdef DEBUG_HIGH_LEVEL
@@ -15775,7 +15779,9 @@ namespace LegionRuntime {
       if (uid == AUTO_GENERATE_ID)
       {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
         bool found = false; 
+#endif
 #endif
         for (unsigned idx = 0; idx < uid; idx++)
         {
@@ -15783,7 +15789,9 @@ namespace LegionRuntime {
           {
             uid = idx;
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
             found = true;
+#endif
 #endif
             break;
           }

@@ -163,7 +163,10 @@ namespace Realm {
 
     // serialize the data
     Serialization::DynamicBufferSerializer dbs(128);
-    bool ok = dbs << data;
+#ifndef NDEBUG
+    bool ok =
+#endif
+      dbs << data;
     assert(ok);
 
     // measurement data is stored in a ByteArray
@@ -223,7 +226,10 @@ namespace Realm {
     if(find_id((int)(T::ID), offset, size)) {
       Serialization::FixedBufferDeserializer fbd(data + offset, size);
       T *m = new T;
-      bool ok = fbd >> *m;
+#ifndef NDEBUG
+      bool ok =
+#endif
+        fbd >> *m;
       assert(ok);
       return m;
     } else

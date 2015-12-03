@@ -200,8 +200,8 @@ namespace Realm {
         offset += field_offset;
         elmt_stride = metadata.elmt_size;
       } else {
-        off_t field_start;
-        int field_size;
+        off_t field_start=0;
+        int field_size=0;
         find_field_start(metadata.field_sizes, field_offset, 1, field_start, field_size);
 
         offset += (field_start * metadata.block_size) + (field_offset - field_start);
@@ -350,8 +350,8 @@ namespace Realm {
 	// no blocking - don't need to know about field boundaries
 	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
-	off_t field_start;
-	int field_size;
+	off_t field_start=0;
+	int field_size=0;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
         o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
                          metadata.elmt_size, metadata.block_size, index);
@@ -370,8 +370,8 @@ namespace Realm {
 	// no blocking - don't need to know about field boundaries
 	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
       } else {
-	off_t field_start;
-	int field_size;
+	off_t field_start=0;
+	int field_size=0;
 	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
         o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
                          metadata.elmt_size, metadata.block_size, index);
