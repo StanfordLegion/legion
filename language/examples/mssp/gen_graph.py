@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import array
 import getopt
 import os
@@ -17,18 +18,18 @@ def create_graph(nodes, edges):
              'n2': n2,
              'length': length }
 
-def metis_graph(g, outdir):
+def metis_graph(g, metis, subgraphs, outdir):
     with open(os.path.join(outdir, 'graph.metis'), 'wb') as f:
-        f.write('{:3d} {:3d} 000\n'.format(nodes, edges))
-        for n in xrange(nodes):
+        f.write('{:3d} {:3d} 000\n'.format(g['nodes'], g['edges']))
+        for n in xrange(g['nodes']):
             f.write(' '.join('{:3d} 1'.format(n2+1) for n1, n2 in zip(g['n1'], g['n2']) if n1 == n))
             f.write('\n')
-    subprocess.check_call(['./metis-install/bin/gpmetis', os.path.join(outdir, 'graph.metis'), str(subgraphs)])
+    subprocess.check_call([metis, os.path.join(outdir, 'graph.metis'), str(subgraphs)])
     with open(os.path.join(outdir, 'graph.metis.part.{}'.format(subgraphs)), 'rb') as f:
         colors = [int(x) - 1 for x in f.read().split()]
-    mapping = dict(zip(sorted(range(nodes), key = lambda x: colors[x]), range(nodes)))
-    g['n1'] = [mapping[g['n1'][x]] for x in xrange(edges)]
-    g['n2'] = [mapping[g['n2'][x]] for x in xrange(edges)]
+    mapping = dict(zip(sorted(range(g['nodes']), key = lambda x: colors[x]), range(g['nodes'])))
+    g['n1'] = [mapping[g['n1'][x]] for x in xrange(g['edges'])]
+    g['n2'] = [mapping[g['n2'][x]] for x in xrange(g['edges'])]
 
 def solve_graph(g, source, verbose):
     parent = [ -1 for x in xrange(g['nodes']) ]
@@ -56,45 +57,46 @@ def solve_graph(g, source, verbose):
     return dist
 
 if __name__ == '__main__':
-    opts, args = getopt.getopt(sys.argv[1:], 'n:e:s:c:p:o:r:v:m')
-    opts = dict(opts)
+    p = argparse.ArgumentParser(description = 'graph generator')
+    p.add_argument('--nodes', '-n', type = int, default = 10)
+    p.add_argument('--edges', '-e', type = int, default = 20)
+    p.add_argument('--subgraphs', '-s', type = int, default = 1)
+    p.add_argument('--cluster-factor', '-c', type = int, default = 95)
+    p.add_argument('--problems', '-p', type = int, default = 1)
+    p.add_argument('--randseed', '-r', type = int, default = 12345)
+    p.add_argument('--metis', '-m', default = './metis-install/bin/gpmetis')
+    p.add_argument('--outdir', '-o', required = True)
+    p.add_argument('--verbose', '-v', action = 'store_true')
+    args = p.parse_args()
 
-    nodes = int(opts.get('-n', '10'))
-    edges = int(opts.get('-e', '20'))
-    subgraphs = int(opts.get('-s', '1'))
-    cluster_factor = int(opts.get('-c', '95'))
-    problems = int(opts.get('-p', '1'))
-    randseed = int(opts.get('-r', '12345'))
-    metis = bool(opts.get('-m', 'True'))
-    outdir = opts['-o']
-    verbose = '-v' in opts
+    random.seed(args.randseed)
 
-    random.seed(randseed)
+    G = create_graph(args.nodes, args.edges)
 
-    G = create_graph(nodes, edges)
+    try:
+        os.mkdir(args.outdir)
+    except:
+        pass
+    assert os.path.isdir(args.outdir)
 
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
-    else:
-        assert os.path.isdir(outdir)
+    if len(args.metis) > 0:
+        assert os.path.isfile(args.metis)
+        metis_graph(G, args.metis, args.subgraphs, args.outdir)
 
-    if metis:
-        metis_graph(G, outdir)
-
-    with open(os.path.join(outdir, 'edges.dat'), 'wb') as f:
+    with open(os.path.join(args.outdir, 'edges.dat'), 'wb') as f:
         array.array('i', G['n1']).tofile(f)
         array.array('i', G['n2']).tofile(f)
         array.array('f', G['length']).tofile(f)
 
-    with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
-        f.write('nodes {:d}\n'.format(nodes))
-        f.write('edges {:d}\n'.format(edges))
+    with open(os.path.join(args.outdir, 'graph.txt'), 'w') as f:
+        f.write('nodes {:d}\n'.format(args.nodes))
+        f.write('edges {:d}\n'.format(args.edges))
         f.write('data edges.dat\n')
 
-        sources = random.sample(xrange(nodes), problems)
+        sources = random.sample(xrange(args.nodes), args.problems)
         for s in sources:
-            parents = solve_graph(G, s, verbose)
-            with open(os.path.join(outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
+            parents = solve_graph(G, s, args.verbose)
+            with open(os.path.join(args.outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
                 array.array('f', parents).tofile(f2)
 
             f.write('source {:d} result_{:d}.dat\n'.format(s, s))
