@@ -179,12 +179,10 @@ do
       count += sssp_collect(pdst[i])
     end
 
+    c.legion_runtime_end_trace(__runtime(), __context(), 0)
     if count == 0 then
-      c.printf("converged after %d steps\n", steps)
       break
     end
-
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
   return 0
 end
