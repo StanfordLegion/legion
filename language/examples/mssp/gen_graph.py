@@ -106,7 +106,7 @@ def write_graph(g, problems, outdir, verbose):
 
     with open(os.path.join(outdir, 'graph.dot'), 'wb') as f:
         f.write('digraph {\n')
-        f.write('\n'.join('{} -> {}'.format(*e) for e in zip(g['n1'], g['n2'], g['length'])))
+        f.write('\n'.join('{} -> {} [ style = "{}"]'.format(e1, e2, 'dotted' if e2 <= e1 else 'solid') for e1, e2 in zip(g['n1'], g['n2'])))
         f.write('\n}\n')
 
     with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
