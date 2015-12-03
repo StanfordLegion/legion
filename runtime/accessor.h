@@ -314,8 +314,8 @@ namespace LegionRuntime {
 	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride)
 	  { return (T*)(Untyped::raw_dense_ptr<DIM>(r, subrect, elem_stride)); }
 
-	  template<typename REDOP>
-	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
+	  template<typename REDOP, typename PTRTYPE>
+	  inline void reduce(PTRTYPE ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(priv, region);

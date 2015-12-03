@@ -425,6 +425,8 @@ namespace LegionRuntime {
     class Runtime;
     // For backwards compatibility
     typedef Runtime HighLevelRuntime;
+    // Helper for saving instantiated template functions
+    struct SerdezRedopFns;
 
     // Forward declarations for compiler level objects
     // legion.h
@@ -458,7 +460,9 @@ namespace LegionRuntime {
     class FrameOp;
     class DeletionOp;
     class CloseOp;
+    class TraceCloseOp;
     class InterCloseOp;
+    class ReadCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
     class AcquireOp;
@@ -609,7 +613,12 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
     typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
-    typedef std::map<LowLevel::ReductionOpID, const LowLevel::ReductionOpUntyped *> ReductionOpTable;
+    typedef std::map<LowLevel::ReductionOpID, 
+            const LowLevel::ReductionOpUntyped *> ReductionOpTable;
+    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
+    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
+                                    const void*, bool);
+    typedef std::map<LowLevel::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
     typedef ::legion_color_t Color;
@@ -793,7 +802,9 @@ namespace LegionRuntime {
     friend class FuturePredOp;                    \
     friend class DeletionOp;                      \
     friend class CloseOp;                         \
+    friend class TraceCloseOp;                    \
     friend class InterCloseOp;                    \
+    friend class ReadCloseOp;                     \
     friend class PostCloseOp;                     \
     friend class VirtualCloseOp;                  \
     friend class AcquireOp;                       \

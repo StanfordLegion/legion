@@ -32,7 +32,7 @@
 namespace Realm {
 
   class ProfilingRequestSet;
-  
+
     class ElementMask {
     public:
       ElementMask(void);
@@ -49,7 +49,7 @@ namespace Realm {
 
       int find_enabled(int count = 1, int start = 0) const;
       int find_disabled(int count = 1, int start = 0) const;
-      
+
       bool is_set(int ptr) const;
       size_t pop_count(bool enabled = true) const;
       bool operator!(void) const;
@@ -106,7 +106,7 @@ namespace Realm {
 
       template <class T>
       static int forall_ranges(T &executor,
-			       const ElementMask &mask1, 
+			       const ElementMask &mask1,
 			       const ElementMask &mask2,
 			       int start = 0, int count = -1,
 			       bool do_enabled1 = true,
@@ -136,7 +136,7 @@ namespace Realm {
 
       static const IndexSpace NO_SPACE;
 
-      bool exists(void) const { return id != 0; } 
+      bool exists(void) const { return id != 0; }
 
       static IndexSpace create_index_space(size_t num_elmts);
       static IndexSpace create_index_space(const ElementMask &mask);
@@ -202,8 +202,8 @@ namespace Realm {
 				      bool mutable_results,
 				      Event wait_on = Event::NO_EVENT) const;
 
-      // logical operations on IndexSpaces can be either maps (performing operations in 
-      //   parallel on many pairs of IndexSpaces) or reductions (many IndexSpaces -> one) 
+      // logical operations on IndexSpaces can be either maps (performing operations in
+      //   parallel on many pairs of IndexSpaces) or reductions (many IndexSpaces -> one)
       enum IndexSpaceOperation {
         ISO_UNION,
         ISO_INTERSECT,
@@ -288,19 +288,19 @@ namespace Realm {
     };
 
     inline std::ostream& operator<<(std::ostream& os, IndexSpace i) { return os << std::hex << i.id << std::dec; }
-	
+
     class DomainPoint {
     public:
       enum { MAX_POINT_DIM = 3 };
 
-      DomainPoint(void) : dim(0) 
-      { 
+      DomainPoint(void) : dim(0)
+      {
         for (int i = 0; i < MAX_POINT_DIM; i++)
-          point_data[i] = 0; 
+          point_data[i] = 0;
       }
-      DomainPoint(int index) : dim(0) 
-      { 
-        point_data[0] = index; 
+      DomainPoint(int index) : dim(0)
+      {
+        point_data[0] = index;
         for (int i = 1; i < MAX_POINT_DIM; i++)
           point_data[i] = 0;
       }
@@ -318,7 +318,7 @@ namespace Realm {
           point_data[i] = rhs.point_data[i];
         return *this;
       }
-      
+
       bool operator==(const DomainPoint &rhs) const
       {
 	if(dim != rhs.dim) return false;
@@ -372,7 +372,7 @@ namespace Realm {
       static DomainPoint from_point(typename LegionRuntime::Arrays::Point<DIM> p)
       {
 	DomainPoint dp;
-	assert(DIM <= MAX_POINT_DIM); 
+	assert(DIM <= MAX_POINT_DIM);
 	dp.dim = DIM;
 	p.to_array(dp.point_data);
 	return dp;
@@ -402,14 +402,14 @@ namespace Realm {
     class DomainLinearization {
     public:
       DomainLinearization(void) : dim(-1), lptr(0) {}
-      DomainLinearization(const DomainLinearization& other) 
-        : dim(other.dim), lptr(other.lptr) 
+      DomainLinearization(const DomainLinearization& other)
+        : dim(other.dim), lptr(other.lptr)
       {
-        add_local_reference(); 
+        add_local_reference();
       }
       ~DomainLinearization(void)
       {
-        remove_local_reference(); 
+        remove_local_reference();
       }
 
       void add_local_reference(void)
@@ -618,7 +618,7 @@ namespace Realm {
       static Domain from_rect(typename LegionRuntime::Arrays::Rect<DIM> r)
       {
 	Domain d;
-	assert(DIM <= MAX_RECT_DIM); 
+	assert(DIM <= MAX_RECT_DIM);
 	d.dim = DIM;
 	r.to_array(d.rect_data);
 	return d;
@@ -754,7 +754,7 @@ namespace Realm {
 
       class DomainPointIterator {
       public:
-        DomainPointIterator(const Domain& d) 
+        DomainPointIterator(const Domain& d)
 	{
 	  p.dim = d.get_dim();
 	  switch(p.get_dim()) {
@@ -914,9 +914,12 @@ namespace Realm {
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
                                           bool read_only) const;
+      RegionInstance create_file_instance(const char *file_name,
+                                          const std::vector<size_t> &field_sizes,
+                                          legion_lowlevel_file_mode_t file_mode) const;
       struct CopySrcDstField {
       public:
-        CopySrcDstField(void) 
+        CopySrcDstField(void)
           : inst(RegionInstance::NO_INST), offset(0), size(0) { }
         CopySrcDstField(RegionInstance i, unsigned o, unsigned s)
           : inst(i), offset(o), size(s) { }
@@ -962,7 +965,7 @@ namespace Realm {
                  const ProfilingRequestSet &requests,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
-      
+
       Event copy(const std::vector<CopySrcDstField>& srcs,
 		 const std::vector<CopySrcDstField>& dsts,
                  const ProfilingRequestSet &reqeusts,
@@ -977,7 +980,7 @@ namespace Realm {
       explicit IndexSpaceAllocator(void *_impl) : impl(_impl) {}
 
       void *impl;
- 
+
     public:
       IndexSpaceAllocator(const IndexSpaceAllocator& to_copy)
 	: impl(to_copy.impl) {}
@@ -1030,7 +1033,7 @@ namespace Realm {
 
     template <class T>
     /*static*/ int ElementMask::forall_ranges(T &executor,
-					      const ElementMask &mask1, 
+					      const ElementMask &mask1,
 					      const ElementMask &mask2,
 					      int start /*= 0*/,
 					      int count /*= -1*/,
@@ -1103,4 +1106,3 @@ namespace Realm {
 //include "indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H
-

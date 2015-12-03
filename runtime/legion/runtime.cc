@@ -380,6 +380,9 @@ namespace LegionRuntime {
                        Operation *o /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
+#ifdef LEGION_SPY
+        producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
+#endif
         ready_event(UserEvent::create_user_event()), result(NULL),
         result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
@@ -400,6 +403,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Future::Impl::Impl(const Future::Impl &rhs)
       : DistributedCollectable(NULL, 0, 0, 0), producer_op(NULL), op_gen(0)
+#ifdef LEGION_SPY
+        , producer_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1137,6 +1143,8 @@ namespace LegionRuntime {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1371,7 +1379,12 @@ namespace LegionRuntime {
     void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!reference.has_ref());
+#endif
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1382,7 +1395,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
+      if (reference.has_ref())
+        reference.remove_valid_reference(PHYSICAL_REGION_REF);
       reference = ref;
+      if (reference.has_ref())
+        reference.add_valid_reference(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
     }
@@ -3623,7 +3640,7 @@ namespace LegionRuntime {
             }
           case SEND_BACK_LOGICAL_STATE:
             {
-              runtime->handle_logical_state_return(derez);
+              runtime->handle_logical_state_return(derez, remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -4135,6 +4152,7 @@ namespace LegionRuntime {
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         inter_close_op_lock(Reservation::create_reservation()), 
+        read_close_op_lock(Reservation::create_reservation()),
         post_close_op_lock(Reservation::create_reservation()),
         virtual_close_op_lock(Reservation::create_reservation()),
         dynamic_collective_op_lock(Reservation::create_reservation()),
@@ -4488,6 +4506,14 @@ namespace LegionRuntime {
       available_inter_close_ops.clear();
       inter_close_op_lock.destroy_reservation();
       inter_close_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReadCloseOp*>::const_iterator it = 
+            available_read_close_ops.begin(); it != 
+            available_read_close_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      read_close_op_lock.destroy_reservation();
+      read_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -9065,7 +9091,7 @@ namespace LegionRuntime {
                                         LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachOp *attach_op = get_available_attach_op(true); 
+      AttachOp *attach_op = get_available_attach_op(true);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9082,7 +9108,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
-                       handle, parent, field_map, mode, check_privileges); 
+                       handle, parent, field_map, mode, check_privileges);
 #else
       PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
                handle, parent, field_map, mode, false/*check privileges*/);
@@ -9167,6 +9193,129 @@ namespace LegionRuntime {
       {
         ctx->unregister_inline_mapped_region(region);
         region.impl->unmap_region();
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Internal::attach_file(Context ctx, const char *file_name,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                  const std::vector<FieldID> field_vec,
+                                        LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *attach_op = get_available_attach_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context attach normal file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal attach normal file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      PhysicalRegion result = attach_op->initialize_file(ctx, file_name,
+                       handle, parent, field_vec, mode, check_privileges);
+#else
+      PhysicalRegion result = attach_op->initialize_file(ctx, file_name,
+               handle, parent, field_vec, mode, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(attach_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach file operation on region "
+                      "(%x,%x,%x) that conflicts with mapped region "
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_file on file %s",
+                      handle.index_space.id, handle.field_space.id,
+                      handle.tree_id, ctx->regions[index].region.index_space.id,
+                      ctx->regions[index].region.field_space.id,
+                      ctx->regions[index].region.tree_id, index,
+                      ctx->variants->name, ctx->get_unique_task_id(),
+                      file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach file operation on region "
+                      "(%x,%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_file on file %s",
+                      handle.index_space.id, handle.field_space.id,
+                      handle.tree_id, ctx->variants->name,
+                      ctx->get_unique_task_id(), file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_executiong)
+        result.wait_until_valid();
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::detach_file(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context detach normal file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal detach normal file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+
+      // Then issue the detach operation
+      Processor proc = ctx->get_executing_processor();
+      DetachOp *detach_op = get_available_detach_op(true);
+      detach_op->initialize_detach(ctx, region);
+#ifdef INORDER_EXECUTION
+      Event term_event = detach_op->get_completion_event();
+#endif
+      add_to_dependence_queue(proc, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        ctx->unregister_inline_mapped_region(region);
+	// Defer the unmap itself until DetachOp::trigger_execution to avoid
+	// blocking the application task
+	//   region.impl->unmap_region();
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -9986,14 +10135,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifdef LEGION_SPY
-      log_run.info("Ignoring trace %d in task %s (ID %lld) when running with "
-            "Legion Spy", tid, ctx->variants->name, ctx->get_unique_task_id());
-#else
       // Mark that we are starting a trace
       ctx->begin_trace(tid);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10018,11 +10161,8 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Tracing does not work well with LegionSpy
-#ifndef LEGION_SPY
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12455,10 +12595,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Internal::handle_logical_state_return(Deserializer &derez)
+    void Internal::handle_logical_state_return(Deserializer &derez, 
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(forest, derez);
+      RegionTreeNode::handle_logical_state_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -13799,6 +13940,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    ReadCloseOp* Internal::get_available_read_close_op(bool need_cont,
+                                                       bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReadCloseOp*,
+                     &Internal::get_available_read_close_op> 
+                       continuation(this, read_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(read_close_op_lock, 
+                           available_read_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     PostCloseOp* Internal::get_available_post_close_op(bool need_cont,
                                                       bool has_lock)
     //--------------------------------------------------------------------------
@@ -14252,6 +14412,14 @@ namespace LegionRuntime {
     {
       AutoLock i_lock(inter_close_op_lock);
       available_inter_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::free_read_close_op(ReadCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(read_close_op_lock);
+      available_read_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -15450,6 +15618,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezRedopFns* Internal::get_serdez_redop_fns(
+                                                         ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      SerdezRedopTable &serdez_table = get_serdez_redop_table(); 
+      SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
+      if (finder != serdez_table.end())
+        return &(finder->second);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Internal::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
@@ -15480,6 +15660,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
+      return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ SerdezRedopTable& Internal::get_serdez_redop_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static SerdezRedopTable table;
       return table;
     }
 
@@ -15635,7 +15823,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                             false, // no inner optimizations for analysis
 #else
-                            options.inner, 
+                            false, // disabling this for now
+                            // See github issue #102
+                            //options.inner, 
 #endif
                             options.leaf, 
                             vid);
@@ -15685,7 +15875,9 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
                                 false, // no inner optimizations for analysis
 #else
-                                options.inner, 
+                                false, // disabling this for now
+                                // See github issue #102
+                                //options.inner,
 #endif
                                 options.leaf, 
                                 vid);

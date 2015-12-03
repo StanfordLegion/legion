@@ -176,6 +176,12 @@ local function analyze_usage_node(cx)
       return uses(cx, dst_type, remote)
     elseif node:is(ast.typed.expr.Region) then
       return uses(cx, node.expr_type, inline)
+    elseif node:is(ast.typed.expr.PartitionByField) then
+      return uses(cx, node.region.expr_type, remote)
+    elseif node:is(ast.typed.expr.Image) then
+      return uses(cx, node.region.expr_type, remote)
+    elseif node:is(ast.typed.expr.Preimage) then
+      return uses(cx, node.region.expr_type, remote)
     elseif node:is(ast.typed.expr.IndexAccess) then
       local base_type = std.as_read(node.value.expr_type)
       if std.is_region(base_type) then
@@ -205,19 +211,19 @@ end
 
 local optimize_inlines = {}
 
-function annotate(node, in_usage, out_usage)
+local function annotate(node, in_usage, out_usage)
   return { node, in_usage, out_usage }
 end
 
-function annotated_in_usage(annotated_node)
+local function annotated_in_usage(annotated_node)
   return annotated_node[2]
 end
 
-function annotated_out_usage(annotated_node)
+local function annotated_out_usage(annotated_node)
   return annotated_node[3]
 end
 
-function map_regions(diff)
+local function map_regions(diff)
   local result = terralib.newlist()
   if diff then
     local region_types_by_polarity = {}
@@ -250,7 +256,7 @@ function map_regions(diff)
   return result
 end
 
-function fixup_block(annotated_block, in_usage, out_usage)
+local function fixup_block(annotated_block, in_usage, out_usage)
   local node, node_in_usage, node_out_usage = unpack(annotated_block)
   local stats = terralib.newlist()
   stats:insertall(map_regions(usage_diff(in_usage, node_in_usage)))
@@ -259,7 +265,7 @@ function fixup_block(annotated_block, in_usage, out_usage)
   return node { stats = stats }
 end
 
-function fixup_elseif(annotated_node, in_usage, out_usage)
+local function fixup_elseif(annotated_node, in_usage, out_usage)
   local node, node_in_usage, node_out_usage = unpack(annotated_node)
   local annotated_block = annotate(node.block, node_in_usage, node_out_usage)
   local block = fixup_block(annotated_block, in_usage, out_usage)

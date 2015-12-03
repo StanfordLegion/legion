@@ -3325,7 +3325,7 @@ namespace LegionRuntime {
        * existing field that represents an enumerated function from 
        * pointers into the logical region containing the field 'fid'
        * to pointers in the 'handle' index space. The function the field
-       * represents therefore has type ptr_t@projection -> ptr_t@parent.
+       * represents therefore has type ptr_t@projection -> ptr_t@handle.
        * We can therefore create a new index partition of 'handle' by
        * mapping each of the pointers in the index subspaces in the
        * index partition of the 'projection' logical partition to get
@@ -3346,11 +3346,11 @@ namespace LegionRuntime {
        *                   a projected version of through the field
        * @param parent the parent region from which privileges are derived
        * @param fid the field ID of the 'projection' logical partition
-       *            we are reading which contains ptr_t@parent
+       *            we are reading which contains ptr_t@handle
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
        * @param allocable whether dynamic allocation of pointers is permitted
-       * @return a new index partition of the 'parent' index space
+       * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
                                          IndexSpace handle,
@@ -4327,6 +4327,22 @@ namespace LegionRuntime {
        * @param region the physical region for an HDF5 file to detach
        */
       void detach_hdf5(Context ctx, PhysicalRegion region);
+
+      /**
+       * Attach an normal file as a physical region. This attach is similar to
+       * attach_hdf5 operation, except that the file has exact same data format
+       * as in-memory physical region. Data lays out as SOA in file.
+       */
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> &field_vec,
+                                 LegionFileMode mode);
+
+      /**
+       * Detach an normal file. THis detach operation is similar to
+       * detach_hdf5
+       */
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations
@@ -5510,6 +5526,7 @@ namespace LegionRuntime {
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;
       Internal *runtime;

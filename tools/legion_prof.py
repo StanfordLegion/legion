@@ -19,6 +19,7 @@ import sys, os, shutil
 import string, re
 from math import sqrt, log
 from getopt import getopt
+from cgi import escape
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -28,8 +29,8 @@ copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<sr
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_<>]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_<>]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
@@ -58,9 +59,10 @@ memory_kinds = {
     5 : 'Framebuffer',
     6 : 'Disk',
     7 : 'HDF5',
-    8 : 'L3 Cache',
-    9 : 'L2 Cache',
-    10 : 'L1 Cache',
+    8 : 'File',
+    9 : 'L3 Cache',
+    10 : 'L2 Cache',
+    11 : 'L1 Cache',
 }
 
 # Micro-seconds per pixel
@@ -855,7 +857,7 @@ class Message(object):
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
-        self.file_name = file_name
+        self.file_name = os.path.basename(file_name)
         self.html_file = html_file
         assert self.target is not None
         self.offset = 0
@@ -891,7 +893,7 @@ class SVGPrinter(object):
 
     def emit_timing_range(self, color, level, start, finish, title):
         self.target.write('  <g>\n')
-        self.target.write('    <title>'+title+'</title>\n')
+        self.target.write('    <title>'+escape(title)+'</title>\n')
         assert level <= self.offset
         x_start = start//US_PER_PIXEL
         x_length = (finish-start)//US_PER_PIXEL
@@ -1577,8 +1579,8 @@ class State(object):
 
         html_file = open(html_file_name, "w")
         html_file.write(template % (last_time, base_level + 1,
-                                    repr(data_tsv_file_name),
-                                    repr(processor_tsv_file_name)))
+                                    repr(os.path.basename(data_tsv_file_name)),
+                                    repr(os.path.basename(processor_tsv_file_name))))
         html_file.close()
 
 def usage():

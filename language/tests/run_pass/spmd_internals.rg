@@ -13,6 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
+-- []
+
 -- [["-ll:cpu", "4"]]
 
 import "regent"

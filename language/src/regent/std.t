@@ -2251,7 +2251,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   end
 
   function st:list_depth()
-    return 1 + self.element_type:list_depth()
+    if std.is_list(self.element_type) then
+      return 1 + self.element_type:list_depth()
+    else
+      return 1
+    end
   end
 
   function st:leaf_element_type()
@@ -2287,10 +2291,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return std.region(ispace, self:fspace())
   end
 
-  function st:slice()
+  function st:slice(strip_levels)
+    if strip_levels == nil then strip_levels = 0 end
     assert(std.is_list_of_regions(self))
     local slice_type = self:subregion_dynamic()
-    for i = 1, self:list_depth() do
+    for i = 1 + strip_levels, self:list_depth() do
       slice_type = std.list(
         slice_type, self:partition(), self.privilege_depth)
     end
@@ -2730,12 +2735,13 @@ function task:__call(...)
 end
 
 function task:__tostring()
-  return self:getname()
+  return tostring(self:getname())
 end
 
 function std.newtask(name)
+  assert(data.is_tuple(name))
   local terra proto
-  proto.name = name
+  proto.name = name:mkstring(".")
   return setmetatable({
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),
@@ -2993,7 +2999,7 @@ function std.start(main_task)
           inner = options.inner,
           idempotent = options.idempotent,
         },
-        [task:getname()],
+        [task:getname():mkstring(".")],
         [task:getdefinition()])
       end
     end)

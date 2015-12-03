@@ -20,7 +20,7 @@ import os, platform, subprocess, sys
 
 os_name = platform.system()
 
-root_dir = os.path.realpath(os.path.dirname(__file__))
+root_dir = os.path.dirname(os.path.realpath(__file__))
 legion_dir = os.path.dirname(root_dir)
 
 terra_dir = os.path.join(root_dir, 'terra')

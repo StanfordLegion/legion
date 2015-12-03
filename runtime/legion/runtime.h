@@ -195,6 +195,9 @@ namespace LegionRuntime {
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
+#ifdef LEGION_SPY
+      const UniqueID producer_uid;
+#endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       UserEvent ready_event;
@@ -1286,6 +1289,11 @@ namespace LegionRuntime {
                                  const std::map<FieldID,const char*> field_map,
                                  LegionFileMode);
       void detach_hdf5(Context ctx, PhysicalRegion region);
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> field_vec,
+                                 LegionFileMode);
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
@@ -1639,7 +1647,8 @@ namespace LegionRuntime {
       void handle_remote_reduction_creation(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_remote_creation_response(Deserializer &derez);
-      void handle_logical_state_return(Deserializer &derez);
+      void handle_logical_state_return(Deserializer &derez,
+                                       AddressSpaceID source);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:
@@ -1792,6 +1801,8 @@ namespace LegionRuntime {
                                                   bool has_lock = false);
       InterCloseOp*         get_available_inter_close_op(bool need_cont,
                                                   bool has_lock = false);
+      ReadCloseOp*          get_available_read_close_op(bool need_cont,
+                                                  bool has_lock = false);
       PostCloseOp*          get_available_post_close_op(bool need_cont,
                                                   bool has_lock = false);
       VirtualCloseOp*       get_available_virtual_close_op(bool need_cont,
@@ -1841,6 +1852,7 @@ namespace LegionRuntime {
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_inter_close_op(InterCloseOp *op); 
+      void free_read_close_op(ReadCloseOp *op);
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -2061,6 +2073,7 @@ namespace LegionRuntime {
       Reservation frame_op_lock;
       Reservation deletion_op_lock;
       Reservation inter_close_op_lock;
+      Reservation read_close_op_lock;
       Reservation post_close_op_lock;
       Reservation virtual_close_op_lock;
       Reservation dynamic_collective_op_lock;
@@ -2092,6 +2105,7 @@ namespace LegionRuntime {
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<InterCloseOp*>         available_inter_close_ops;
+      std::deque<ReadCloseOp*>          available_read_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
@@ -2135,10 +2149,12 @@ namespace LegionRuntime {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Internal* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(

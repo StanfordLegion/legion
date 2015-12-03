@@ -27,6 +27,7 @@ namespace LegionRuntime {
       DEFERRED_TASK_REF,
       CURRENT_STATE_REF,
       PHYSICAL_STATE_REF,
+      PHYSICAL_REGION_REF,
       VERSION_MANAGER_REF,
       PENDING_GC_REF,
       REMOTE_DID_REF,
@@ -51,6 +52,8 @@ namespace LegionRuntime {
       "Deferred Task Reference",                    \
       "Current State Reference",                    \
       "Physical State Reference",                   \
+      "Physical Region Reference",                  \
+      "Version Manager Reference",                  \
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \

@@ -60,10 +60,17 @@ typedef enum legion_lowlevel_memory_kind_t {
   GPU_FB_MEM,   // Framebuffer memory for one GPU and all its SMs
   DISK_MEM,   // Disk memory visible to all processors on a node
   HDF_MEM,    // HDF memory visible to all processors on a node
+  FILE_MEM,   // file memory visible to all processors on a node
   LEVEL3_CACHE, // CPU L3 Visible to all processors on the node, better performance to processors on same socket 
   LEVEL2_CACHE, // CPU L2 Visible to all processors on the node, better performance to one processor
   LEVEL1_CACHE, // CPU L1 Visible to all processors on the node, better performance to one processor
 } legion_lowlevel_memory_kind_t;
+
+typedef enum legion_lowlevel_file_mode_t {
+  LEGION_FILE_READ_ONLY,
+  LEGION_FILE_READ_WRITE,
+  LEGION_FILE_CREATE
+} legion_lowlevel_file_mode_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in lowlevel.h
 typedef enum legion_lowlevel_domain_max_rect_dim_t {

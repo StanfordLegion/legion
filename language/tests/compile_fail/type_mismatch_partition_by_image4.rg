@@ -13,15 +13,18 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition3.rg:25: type mismatch in argument 1: expected disjoint or aliased but got int32
---   var p = partition(int, r, c)
---                   ^
+-- type_mismatch_partition_by_image4.rg:28: type mismatch in argument 2: expected 1 field but got 0
+--   var q = image(p, s.{}, r)
+--               ^
 
 import "regent"
 
-task f() : int
+local int1d = index_type(int, "ind1d")
+
+task f()
   var r = region(ispace(ptr, 5), int)
-  var c : regentlib.c.legion_coloring_t
-  var p = partition(int, r, c)
+  var s = region(ispace(ptr, 5), ptr(int, r))
+  var p = partition(equal, s, ispace(int1d, 3))
+  var q = image(p, s.{}, r)
 end
 f:compile()

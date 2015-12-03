@@ -53,7 +53,7 @@ local function guess_type_for_literal(value)
   end
 end
 
-function convert_lua_value(cx, node, value)
+local function convert_lua_value(cx, node, value)
   if type(value) == "number" or type(value) == "boolean" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
@@ -187,6 +187,7 @@ local function get_num_accessed_fields(node)
 
   elseif node:is(ast.unspecialized.expr.New) then
     if get_num_accessed_fields(node.pointer_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.extent) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Null) then
@@ -214,8 +215,29 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Partition) then
-    if get_num_accessed_fields(node.disjointness_expr) > 1 then return false end
-    if get_num_accessed_fields(node.region_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.disjointness) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Image) then
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.parent) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
@@ -533,6 +555,16 @@ function specialize.constraints(cx, node)
     function(constraint) return specialize.constraint(cx, constraint) end)
 end
 
+function specialize.disjointness_kind(cx, node)
+  if node:is(ast.unspecialized.disjointness_kind.Aliased) then
+    return std.aliased
+  elseif node:is(ast.unspecialized.disjointness_kind.Disjoint) then
+    return std.disjoint
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.expr_id(cx, node)
   local value = cx.env:lookup(node, node.name)
   return convert_lua_value(cx, node, value)
@@ -743,6 +775,7 @@ function specialize.expr_new(cx, node)
   }
   return ast.specialized.expr.New {
     pointer_type = pointer_type,
+    extent = node.extent and specialize.expr(cx, node.extent),
     region = region,
     options = node.options,
     span = node.span,
@@ -782,16 +815,10 @@ end
 
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
-  if not std.is_index_type(index_type) then
-    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
-  end
-
-  local expr_type = std.ispace(index_type)
   return ast.specialized.expr.Ispace {
     index_type = index_type,
     extent = specialize.expr(cx, node.extent),
     start = node.start and specialize.expr(cx, node.start),
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -799,70 +826,66 @@ end
 
 function specialize.expr_region(cx, node)
   local ispace = specialize.expr(cx, node.ispace)
-  local ispace_symbol
-  if ispace:is(ast.specialized.expr.ID) then
-    ispace_symbol = ispace.value
-  else
-    ispace_symbol = terralib.newsymbol()
-  end
   local fspace_type = node.fspace_type_expr(cx.env:env())
-  local expr_type = std.region(ispace_symbol, fspace_type)
   return ast.specialized.expr.Region {
     ispace = ispace,
-    ispace_symbol = ispace_symbol,
     fspace_type = fspace_type,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_partition(cx, node)
-  local disjointness = node.disjointness_expr(cx.env:env())
-  local region_type = node.region_type_expr(cx.env:env())
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if disjointness ~= std.disjoint and disjointness ~= std.aliased then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
-  end
-  local expr_type = std.partition(disjointness, region_type)
-  local region = ast.specialized.expr.ID {
-    value = expr_type.parent_region_symbol,
+  return ast.specialized.expr.Partition {
+    disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    region = specialize.expr(cx, node.region),
+    coloring = specialize.expr(cx, node.coloring),
     options = node.options,
     span = node.span,
   }
-  return ast.specialized.expr.Partition {
-    disjointness = disjointness,
-    region = region,
-    coloring = specialize.expr(cx, node.coloring),
-    expr_type = expr_type,
+end
+
+function specialize.expr_partition_equal(cx, node)
+  return ast.specialized.expr.PartitionEqual {
+    region = specialize.expr(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_partition_by_field(cx, node)
+  return ast.specialized.expr.PartitionByField {
+    region = specialize.expr_region_root(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_image(cx, node)
+  return ast.specialized.expr.Image {
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
+    parent = specialize.expr(cx, node.parent),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_preimage(cx, node)
+  return ast.specialized.expr.Preimage {
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_cross_product(cx, node)
-  local arg_types = node.arg_type_exprs:map(
-    function(arg_type_expr) return arg_type_expr(cx.env:env()) end)
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if #arg_types < 2 then
-    log.error(node, "cross product expected at least 2 arguments, got " ..
-                tostring(#arg_types))
-  end
-  local expr_type = std.cross_product(unpack(arg_types))
-  local args = expr_type.partition_symbols:map(
-    function(partition)
-      return ast.specialized.expr.ID {
-        value = partition,
-        options = node.options,
-        span = node.span,
-      }
-  end)
   return ast.specialized.expr.CrossProduct {
-    args = args,
-    expr_type = expr_type,
+    args = node.args:map(
+      function(arg) return specialize.expr(cx, arg) end),
     options = node.options,
     span = node.span,
   }
@@ -1057,6 +1080,18 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Partition) then
     return specialize.expr_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    return specialize.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    return specialize.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Image) then
+    return specialize.expr_image(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    return specialize.expr_preimage(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
@@ -1419,7 +1454,9 @@ function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
   proto:setinline(node.options.inline)
-  cx.env:insert(node, node.name, proto)
+  if #node.name == 1 then
+    cx.env:insert(node, node.name[1], proto)
+  end
   cx = cx:new_local_scope()
 
   local params = specialize.stat_task_params(cx, node.params)
