@@ -88,6 +88,7 @@ do
       break
     end
   end
+  return 0
 end
 
 task read_expected_distances(g : GraphCfg, rn : region(Node), filename : &int8)
@@ -114,6 +115,10 @@ do
     end
   end
   return errors
+end
+
+terra wait_for(x : int)
+  return x
 end
 
 task toplevel()
@@ -156,12 +161,14 @@ task toplevel()
 
     var root_id = graph.sources[s]
     var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
-    sssp(graph, rn, re, root)
+    var ts_start = c.legion_get_current_time_in_micros()
+    wait_for(sssp(graph, rn, re, root))
+    var ts_end = c.legion_get_current_time_in_micros()
 
     read_expected_distances(graph, rn, [&int8](graph.expecteds[s]))
     var errors = check_results(graph, rn, verbose)
     if errors == 0 then
-      c.printf("source %d OK\n", root_id)
+      c.printf("source %d OK, elapsed time: %.3f ms\n", root_id, (ts_end - ts_start) * 1e-3)
     else
       c.printf("source %d - %d errors!\n", root_id, errors)
     end
