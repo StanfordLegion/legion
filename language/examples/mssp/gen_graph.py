@@ -61,6 +61,25 @@ def solve_graph(g, source, verbose):
 
     return dist
 
+def write_graph(g, problems, outdir, verbose):
+    with open(os.path.join(outdir, 'edges.dat'), 'wb') as f:
+        array.array('i', g['n1']).tofile(f)
+        array.array('i', g['n2']).tofile(f)
+        array.array('f', g['length']).tofile(f)
+
+    with open(os.path.join(outdir, 'graph.txt'), 'w') as f:
+        f.write('nodes {:d}\n'.format(g['nodes']))
+        f.write('edges {:d}\n'.format(g['edges']))
+        f.write('data edges.dat\n')
+
+        sources = random.sample(xrange(g['nodes']), problems)
+        for s in sources:
+            parents = solve_graph(g, s, verbose)
+            with open(os.path.join(outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
+                array.array('f', parents).tofile(f2)
+
+            f.write('source {:d} result_{:d}.dat\n'.format(s, s))
+
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description='graph generator')
     p.add_argument('--nodes', '-n', type=int, default=10)
@@ -90,21 +109,4 @@ if __name__ == '__main__':
         metis_graph(G, args.metis_path, args.subgraphs, args.outdir)
 
     sort_graph(G)
-
-    with open(os.path.join(args.outdir, 'edges.dat'), 'wb') as f:
-        array.array('i', G['n1']).tofile(f)
-        array.array('i', G['n2']).tofile(f)
-        array.array('f', G['length']).tofile(f)
-
-    with open(os.path.join(args.outdir, 'graph.txt'), 'w') as f:
-        f.write('nodes {:d}\n'.format(args.nodes))
-        f.write('edges {:d}\n'.format(args.edges))
-        f.write('data edges.dat\n')
-
-        sources = random.sample(xrange(args.nodes), args.problems)
-        for s in sources:
-            parents = solve_graph(G, s, args.verbose)
-            with open(os.path.join(args.outdir, 'result_{:d}.dat'.format(s)), 'wb') as f2:
-                array.array('f', parents).tofile(f2)
-
-            f.write('source {:d} result_{:d}.dat\n'.format(s, s))
+    write_graph(G, args.problems, args.outdir, args.verbose)
