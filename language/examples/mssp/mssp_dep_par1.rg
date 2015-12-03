@@ -134,6 +134,7 @@ do
 
     c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
+  return 0
 end
 
 task read_expected_distances(rn : region(Node), filename : &int8)
@@ -160,6 +161,10 @@ do
     end
   end
   return errors
+end
+
+terra wait_for(x : int)
+  return x
 end
 
 task toplevel()
@@ -221,7 +226,9 @@ task toplevel()
 
     var root_id = graph.sources[s]
     var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
-    sssp(graph, subgraphs, rn, re, psrc, pdst, pe, root)
+    var ts_start = c.legion_get_current_time_in_micros()
+    wait_for(sssp(graph, subgraphs, rn, re, psrc, pdst, pe, root))
+    var ts_end = c.legion_get_current_time_in_micros()
 
     for i = 0, subgraphs do
       read_expected_distances(psrc[i], [&int8](graph.expecteds[s]))
@@ -231,7 +238,7 @@ task toplevel()
       errors += check_results(psrc[i], verbose)
     end
     if errors == 0 then
-      c.printf("source %d OK\n", root_id)
+      c.printf("source %d OK, elapsed time: %.3f ms\n", root_id, (ts_end - ts_start) * 1e-3)
     else
       c.printf("source %d - %d errors!\n", root_id, errors)
     end
