@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import argparse
 import array
-import getopt
+import math
 import os
 import random
 import sys
@@ -29,9 +29,9 @@ def find_subgraph(n, subgraphs):
     assert len(s) == 1
     return s[0]
 
-def create_clustered_DAG_graph(nodes, edges, subgraphs, cluster_factor, verbose):
+def create_clustered_DAG_graph(nodes, edges, nsubgraphs, cluster_factor, verbose):
     if verbose: print('Creating clustered DAG graph with {} nodes and {} edges...'.format(nodes, edges))
-    subgraphs = compute_subgraphs(nodes, subgraphs)
+    subgraphs = compute_subgraphs(nodes, nsubgraphs)
 
     def make_edge():
         n1 = random.randint(0, nodes - 1)
@@ -43,7 +43,39 @@ def create_clustered_DAG_graph(nodes, edges, subgraphs, cluster_factor, verbose)
         return (n1, n2)
 
     n1, n2 = zip(*(make_edge() for x in xrange(edges)))
-    length = [ random.expovariate(1.0) for x in xrange(edges) ]
+    length = [random.expovariate(1.0) for x in xrange(edges)]
+    return { 'nodes': nodes,
+             'edges': edges,
+             'n1': n1,
+             'n2': n2,
+             'length': length }
+
+def create_clustered_geometric_graph(nodes, edges, nsubgraphs, cluster_factor, verbose):
+    if verbose: print('Creating clustered geometric graph with {} nodes and {} edges...'.format(nodes, edges))
+    blocks = int(math.sqrt(nsubgraphs))
+    assert blocks**2 == nsubgraphs
+    bounds = [((1.0*(i%blocks)/blocks, 1.0*(i%blocks + 1)/blocks),
+               (1.0*(i/blocks)/blocks, 1.0*(i/blocks + 1)/blocks))
+              for i in xrange(nsubgraphs)]
+
+    subgraphs = compute_subgraphs(nodes, nsubgraphs)
+    pos = [(random.uniform(*x), random.uniform(*y))
+           for (lo, hi), (x, y) in zip(subgraphs, bounds)
+           for _ in xrange(lo, hi+1)]
+
+    def make_edge():
+        n1 = random.randint(0, nodes - 1)
+        if random.randint(1, 100) <= cluster_factor:
+            s = find_subgraph(n1, subgraphs)
+            n2 = random.randint(*s)
+        else:
+            n2 = random.randint(1, nodes-1)
+        return (n1, n2)
+
+    n1, n2 = zip(*(make_edge() for x in xrange(edges)))
+    length = [xlen + random.expovariate(1000/xlen if xlen > 0.0001 else 1)
+              for x in xrange(edges)
+              for xlen in [math.sqrt(sum((a - b)**2 for a, b in zip(pos[n1[x]], pos[n2[x]])))]]
     return { 'nodes': nodes,
              'edges': edges,
              'n1': n1,
@@ -126,9 +158,9 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description='graph generator')
     p.add_argument('--nodes', '-n', type=int, default=10)
     p.add_argument('--edges', '-e', type=int, default=20)
-    p.add_argument('--type', '-t', default='random', choices=['random', 'clustered_DAG'])
+    p.add_argument('--type', '-t', default='random', choices=['random', 'clustered_DAG', 'clustered_geometric'])
     p.add_argument('--subgraphs', '-s', type=int, default=1)
-    p.add_argument('--cluster-factor', '-c', type=int, default=80)
+    p.add_argument('--cluster-factor', '-c', type=int, default=95)
     p.add_argument('--problems', '-p', type=int, default=1)
     p.add_argument('--randseed', '-r', type=int, default=12345)
     p.add_argument('--metis-path', default='./metis-install/bin/gpmetis')
@@ -143,6 +175,8 @@ if __name__ == '__main__':
         G = create_graph(args.nodes, args.edges, args.verbose)
     elif args.type == 'clustered_DAG':
         G = create_clustered_DAG_graph(args.nodes, args.edges, args.subgraphs, args.cluster_factor, args.verbose)
+    elif args.type == 'clustered_geometric':
+        G = create_clustered_geometric_graph(args.nodes, args.edges, args.subgraphs, args.cluster_factor, args.verbose)
     else:
         assert false
 
