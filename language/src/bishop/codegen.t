@@ -202,6 +202,7 @@ function codegen.expr(binders, node)
         [value] = [base.value].point_data[ [index.value] ]
       end
     else
+      local cleanup
       if std.is_processor_list_type(node.value.expr_type) then
         cleanup = c.bishop_delete_processor_list
       else
