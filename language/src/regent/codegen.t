@@ -3185,13 +3185,24 @@ function codegen.expr_preimage(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
-  local fields = std.flatten_struct_fields(region_type:fspace())
-  local field_paths = data.filter(
+  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+  local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
-    fields)
-  assert(#field_paths == 1)
+    field_paths)
+  local field_path
+  if #fields_i ~= 1 then
+    assert(#fields_i == 2)
+    -- Hack: This will fail if the index type ever becomes uint32.
+    local match = data.filter(
+      function(i) return std.type_eq(field_types[i], uint32) end,
+      fields_i)
+    assert(#match == 1)
+    field_path = field_paths[match[1]]
+  else
+    field_path = field_paths[fields_i[1]]
+  end
 
-  local field_id = cx:region(region_type):field_id(field_paths[1])
+  local field_id = cx:region(region_type):field_id(field_path)
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
