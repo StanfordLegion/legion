@@ -2044,11 +2044,24 @@ local binary_ops = {
 function type_check.expr_binary(cx, node)
   local lhs = type_check.expr(cx, node.lhs)
   local lhs_type = std.check_read(cx, lhs)
-
   local rhs = type_check.expr(cx, node.rhs)
   local rhs_type = std.check_read(cx, rhs)
 
-  local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
+  local expr_type
+  if std.is_partition(lhs_type) then
+    if not std.is_partition(rhs_type) then
+      log.error(node.rhs, "type mismatch: expected a partition but got " .. tostring(rhs_type))
+    end
+    if not std.type_eq(lhs_type:fspace(), rhs_type:fspace()) then
+      log.error(node, "type mismatch: expected partition of " .. tostring(lhs_type:fspace()) .. " but got partition of " .. tostring(rhs_type:fspace()))
+    end
+    if node.op ~= "-" then
+      log.error(node.rhs, "operator " .. tostring(node.op) .. " not supported on partitions")
+    end
+    expr_type = std.partition(lhs_type.disjointness, lhs_type.parent_region_symbol)
+  else
+    expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
+  end
 
   return ast.typed.expr.Binary {
     op = node.op,

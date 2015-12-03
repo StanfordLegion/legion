@@ -4274,7 +4274,37 @@ end
 
 function codegen.expr_binary(cx, node)
   local expr_type = std.as_read(node.expr_type)
-  if std.is_future(expr_type) then
+  if std.is_partition(expr_type) then
+    assert(node.op == "-")
+    local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
+    local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
+    local actions = quote
+      [lhs.actions];
+      [rhs.actions];
+      [emit_debuginfo(node)]
+    end
+
+    local partition_type = std.as_read(node.expr_type)
+    local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+    local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+    actions = quote
+      [actions]
+      var is = c.legion_index_partition_get_parent_index_space(
+        [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
+      var [ip] = c.legion_index_partition_create_by_difference(
+        [cx.runtime], [cx.context],
+        is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
+        [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+        -1, false)
+      var [lp] = c.legion_logical_partition_create_by_tree(
+        [cx.runtime], [cx.context],
+        [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+    end
+
+    return values.value(
+      expr.once_only(actions, `(partition_type { impl = [lp] })),
+      partition_type)
+  elseif std.is_future(expr_type) then
     local lhs_type = std.as_read(node.lhs.expr_type)
     local rhs_type = std.as_read(node.rhs.expr_type)
     local task = lift_binary_op_to_futures(
