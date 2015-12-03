@@ -24,10 +24,13 @@ def create_graph(nodes, edges, verbose):
 def compute_subgraphs(n, p):
     return [(x*(n/p) + min(x, n%p), ((x+1)*(n/p)-1) + min(x + 1, n%p)) for x in xrange(0, p)]
 
-def find_subgraph(n, subgraphs):
-    s = [(start, end) for start, end in subgraphs if start <= n and n <= end]
+def find_subgraph_index(n, subgraphs):
+    s = [i for i, (start, end) in zip(xrange(len(subgraphs)), subgraphs) if start <= n and n <= end]
     assert len(s) == 1
     return s[0]
+
+def find_subgraph(n, subgraphs):
+    return subgraphs[find_subgraph_index(n, subgraphs)]
 
 def create_clustered_DAG_graph(nodes, edges, nsubgraphs, cluster_factor, verbose):
     if verbose: print('Creating clustered DAG graph with {} nodes and {} edges...'.format(nodes, edges))
@@ -69,7 +72,13 @@ def create_clustered_geometric_graph(nodes, edges, nsubgraphs, cluster_factor, v
             s = find_subgraph(n1, subgraphs)
             n2 = random.randint(*s)
         else:
-            n2 = random.randint(1, nodes-1)
+            i = find_subgraph_index(n1, subgraphs)
+            ix, iy = i%blocks, i/blocks
+            if random.randint(0, 1) == 0:
+                s2 = subgraphs[((ix+1)%blocks) + iy*blocks]
+            else:
+                s2 = subgraphs[ix + ((iy+1)%blocks)*blocks]
+            n2 = random.randint(*s2)
         return (n1, n2)
 
     n1, n2 = zip(*(make_edge() for x in xrange(edges)))
