@@ -460,6 +460,7 @@ legion_index_partition_create_blockify_3d(
   return CObjectWrapper::wrap(ip);
 }
 
+#if USE_LEGION_PARTAPI_SHIM
 // The Legion runtime can't handle colorings with 0D (unstructured)
 // points, so upgrade them to 1D.
 static DomainPoint upgrade_point(DomainPoint p)
@@ -469,6 +470,7 @@ static DomainPoint upgrade_point(DomainPoint p)
   }
   return p;
 }
+#endif
 
 // Shim for Legion Dependent Partition API
 
@@ -598,6 +600,37 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
 #else
     runtime->create_equal_partition(ctx, parent, color_space, granularity,
                                     color, allocable);
+#endif
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_difference(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_index_partition_t handle1_,
+  legion_index_partition_t handle2_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */,
+  bool allocable /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexPartition handle1 = CObjectWrapper::unwrap(handle1_);
+  IndexPartition handle2 = CObjectWrapper::unwrap(handle2_);
+
+  IndexPartition ip =
+#if USE_LEGION_PARTAPI_SHIM
+    // PartitionEqualShim::launch(runtime, ctx, parent, color_space, granularity,
+    //                            color, allocable);
+    // FIXME: Need shim.
+    runtime->create_partition_by_difference(ctx, parent, handle1, handle2,
+                                            part_kind, color, allocable);
+#else
+    runtime->create_partition_by_difference(ctx, parent, handle1, handle2,
+                                            part_kind, color, allocable);
 #endif
   return CObjectWrapper::wrap(ip);
 }
@@ -1045,6 +1078,20 @@ legion_index_partition_get_color_space(legion_runtime_t runtime_,
   Domain d = runtime->get_index_partition_color_space(ctx, handle);
 
   return CObjectWrapper::wrap(d);
+}
+
+legion_index_space_t
+legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
+                                              legion_context_t ctx_,
+                                              legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  IndexSpace is = runtime->get_parent_index_space(ctx, handle);
+
+  return CObjectWrapper::wrap(is);
 }
 
 void

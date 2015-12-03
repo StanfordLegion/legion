@@ -686,6 +686,22 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_difference()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_difference(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_index_partition_t handle1,
+    legion_index_partition_t handle2,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */,
+    bool allocable /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::create_partition_by_field()
    */
   legion_index_partition_t
@@ -750,6 +766,14 @@ extern "C" {
   legion_index_partition_get_color_space(legion_runtime_t runtime,
                                          legion_context_t ctx,
                                          legion_index_partition_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
+   */
+  legion_index_space_t
+  legion_index_partition_get_parent_index_space(legion_runtime_t runtime,
+                                                legion_context_t ctx,
+                                                legion_index_partition_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
