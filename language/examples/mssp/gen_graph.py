@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 import argparse
 import array
 import getopt
@@ -8,7 +10,8 @@ import random
 import sys
 import subprocess
 
-def create_graph(nodes, edges):
+def create_graph(nodes, edges, verbose):
+    if verbose: print('Creating graph with {} nodes and {} edges...'.format(nodes, edges))
     n1 = [ random.randint(0, nodes - 1) for x in xrange(edges) ]
     n2 = [ random.randint(0, nodes - 1) for x in xrange(edges) ]
     length = [ random.expovariate(1.0) for x in xrange(edges) ]
@@ -18,7 +21,8 @@ def create_graph(nodes, edges):
              'n2': n2,
              'length': length }
 
-def metis_graph(g, metis, subgraphs, outdir):
+def metis_graph(g, metis, subgraphs, outdir, verbose):
+    if verbose: print('Running METIS...')
     with open(os.path.join(outdir, 'graph.metis'), 'wb') as f:
         f.write('{:3d} {:3d} 000\n'.format(g['nodes'], g['edges']))
         for n in xrange(g['nodes']):
@@ -26,17 +30,20 @@ def metis_graph(g, metis, subgraphs, outdir):
             f.write('\n')
     subprocess.check_call([metis, os.path.join(outdir, 'graph.metis'), str(subgraphs)])
     with open(os.path.join(outdir, 'graph.metis.part.{}'.format(subgraphs)), 'rb') as f:
-        colors = [int(x) - 1 for x in f.read().split()]
+        colors = [int(x) for x in f.read().split()]
     mapping = dict(zip(sorted(xrange(g['nodes']), key = lambda x: colors[x]), range(g['nodes'])))
     g['n1'] = [mapping[g['n1'][x]] for x in xrange(g['edges'])]
     g['n2'] = [mapping[g['n2'][x]] for x in xrange(g['edges'])]
 
-def sort_graph(g):
+def sort_graph(g, verbose):
+    if verbose: print('Sorting graph...')
     mapping = dict(zip(sorted(xrange(g['edges']), key = lambda x: (g['n1'][x], g['n2'][x])), range(g['edges'])))
     g['n1'] = [g['n1'][mapping[x]] for x in xrange(g['edges'])]
     g['n2'] = [g['n2'][mapping[x]] for x in xrange(g['edges'])]
+    g['length'] = [g['length'][mapping[x]] for x in xrange(g['edges'])]
 
 def solve_graph(g, source, verbose):
+    if verbose: print('Solving graph...')
     parent = [ -1 for x in xrange(g['nodes']) ]
     dist = [ 1e100 for x in xrange(g['nodes']) ]
     dist[source] = 0
@@ -53,15 +60,16 @@ def solve_graph(g, source, verbose):
         if count == 0:
             break
 
-    if verbose:
-        for i, e in enumerate(zip(g['n1'], g['n2'], g['length'])):
-            print '{:3d} {:3d} {:3d} {:5.3f}'.format(i, e[0], e[1], e[2])
-        for i, n in enumerate(zip(parent, dist)):
-            print '{:3d} {:3d} {:5.3f}'.format(i, n[0], n[1])
+    # if verbose:
+    #     for i, e in enumerate(zip(g['n1'], g['n2'], g['length'])):
+    #         print('{:3d} {:3d} {:3d} {:5.3f}'.format(i, e[0], e[1], e[2]))
+    #     for i, n in enumerate(zip(parent, dist)):
+    #         print('{:3d} {:3d} {:5.3f}'.format(i, n[0], n[1]))
 
     return dist
 
 def write_graph(g, problems, outdir, verbose):
+    if verbose: print('Writing graph...')
     with open(os.path.join(outdir, 'edges.dat'), 'wb') as f:
         array.array('i', g['n1']).tofile(f)
         array.array('i', g['n2']).tofile(f)
@@ -96,7 +104,7 @@ if __name__ == '__main__':
 
     random.seed(args.randseed)
 
-    G = create_graph(args.nodes, args.edges)
+    G = create_graph(args.nodes, args.edges, args.verbose)
 
     try:
         os.mkdir(args.outdir)
@@ -106,7 +114,7 @@ if __name__ == '__main__':
 
     if args.metis:
         assert os.path.isfile(args.metis_path)
-        metis_graph(G, args.metis_path, args.subgraphs, args.outdir)
+        metis_graph(G, args.metis_path, args.subgraphs, args.outdir, args.verbose)
 
-    sort_graph(G)
+    sort_graph(G, args.verbose)
     write_graph(G, args.problems, args.outdir, args.verbose)
