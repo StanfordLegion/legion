@@ -64,6 +64,7 @@ void register_bishop_mappers(bishop_task_rule_t*, unsigned,
                              bishop_region_rule_t*, unsigned);
 
 bishop_processor_list_t bishop_all_processors();
+legion_processor_t bishop_get_no_processor();
 
 bishop_processor_list_t bishop_filter_processors_by_isa(bishop_processor_list_t,
                                                         bishop_isa_t);

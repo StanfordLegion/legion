@@ -93,6 +93,12 @@ bishop_all_processors()
   return procs_;
 }
 
+legion_processor_t
+bishop_get_no_processor()
+{
+  return CObjectWrapper::wrap(Processor::NO_PROC);
+}
+
 bishop_processor_list_t
 bishop_filter_processors_by_isa(bishop_processor_list_t source,
                                 bishop_isa_t isa)

@@ -202,6 +202,12 @@ function codegen.expr(binders, node)
         [value] = [base.value].point_data[ [index.value] ]
       end
     else
+      if std.is_processor_list_type(node.value.expr_type) then
+        cleanup = c.bishop_delete_processor_list
+      else
+        assert(std.is_memory_list_type(node.value_expr_type))
+        cleanup = c.bishop_delete_memory_list
+      end
       actions = quote
         [actions];
         [base.actions];
@@ -211,6 +217,7 @@ function codegen.expr(binders, node)
             ["index " .. tostring(index.value) .. " is out-of-bounds"])
           [value] = [base.value].list[ [index.value] ]
         end
+        [cleanup](base.value)
       end
     end
   elseif node:is(ast.typed.expr.Field) then
@@ -333,7 +340,30 @@ function codegen.task_rule(node)
       select_target_for_point_body = quote
         [select_target_for_point_body];
         [value.actions];
-        return [value.value]
+      end
+      if std.is_processor_list_type(property.value.expr_type) then
+        select_target_for_point_body = quote
+          [select_target_for_point_body];
+          if [value.value].size == 0 then
+            c.bishop_logger_warning(
+              ["[slice_domain] expression at %s returned an empty list. " ..
+               "this property might not get assigned properly!"],
+              [property.value.position.filename .. ":" ..
+               tostring(property.value.position.linenumber)])
+            return c.bishop_get_no_processor()
+          else
+            var proc : c.legion_processor_t = [value.value].list[0]
+            c.bishop_delete_processor_list([value.value])
+            return proc
+          end
+        end
+      elseif std.is_processor_type(property.value.expr_type) then
+        select_target_for_point_body = quote
+          [select_target_for_point_body];
+          return [value.value]
+        end
+      else
+        assert(false, "unreachable")
       end
       select_task_options_body = quote
         [select_task_options_body];
