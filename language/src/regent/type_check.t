@@ -2055,11 +2055,32 @@ function type_check.expr_binary(cx, node)
     if not std.type_eq(lhs_type:fspace(), rhs_type:fspace()) then
       log.error(node, "type mismatch: expected partition of " .. tostring(lhs_type:fspace()) .. " but got partition of " .. tostring(rhs_type:fspace()))
     end
-    if node.op ~= "-" then
-      log.error(node.rhs, "operator " .. tostring(node.op) .. " not supported on partitions")
+    if not (node.op == "-" or node.op == "&" or node.op == "|") then
+      log.error(node.rhs, "operator " .. tostring(node.op) ..
+                  " not supported on partitions")
     end
-    expr_type = std.partition(lhs_type.disjointness, lhs_type.parent_region_symbol)
+
+    local disjointness
+    if node.op == "-" then
+      disjointness = lhs_type.disjointness
+    elseif node.op == "&" then
+      if lhs_type:is_disjoint() or rhs_type:is_disjoint() then
+        disjointness = std.disjoint
+      else
+        disjointness = std.aliased
+      end
+    elseif node.op == "|" then
+      disjointness = std.aliased
+    end
+
+    expr_type = std.partition(
+      disjointness, lhs_type.parent_region_symbol)
   else
+    if node.op == "&" or node.op == "|" then
+      log.error(node.rhs, "operator " .. tostring(node.op) ..
+                  " not supported on " .. tostring(lhs_type) .. " and " ..
+                  tostring(rhs_type))
+    end
     expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
   end
 

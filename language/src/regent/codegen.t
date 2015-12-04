@@ -4297,13 +4297,23 @@ end
 function codegen.expr_binary(cx, node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_partition(expr_type) then
-    assert(node.op == "-")
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
     local actions = quote
       [lhs.actions];
       [rhs.actions];
       [emit_debuginfo(node)]
+    end
+
+    local create_partition
+    if node.op == "-" then
+      create_partition = c.legion_index_partition_create_by_difference
+    elseif node.op == "&" then
+      create_partition = c.legion_index_partition_create_by_intersection
+    elseif node.op == "|" then
+      create_partition = c.legion_index_partition_create_by_union
+    else
+      assert(false)
     end
 
     local partition_type = std.as_read(node.expr_type)
@@ -4313,7 +4323,7 @@ function codegen.expr_binary(cx, node)
       [actions]
       var is = c.legion_index_partition_get_parent_index_space(
         [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
-      var [ip] = c.legion_index_partition_create_by_difference(
+      var [ip] = [create_partition](
         [cx.runtime], [cx.context],
         is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
         [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
