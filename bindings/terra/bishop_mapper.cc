@@ -51,7 +51,7 @@ namespace LegionRuntime {
         {                                                            \
           legion_region_requirement_t req_ =                         \
             CObjectWrapper::wrap(&task->regions[idx]);               \
-          rule.CALLBACK(task_, req_);                                \
+          rule.CALLBACK(task_, req_, idx);                           \
         }                                                            \
       }                                                              \
     }                                                                \

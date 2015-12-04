@@ -17,6 +17,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
+local regent_std = require("regent/std")
 
 local c = terralib.includecstring [[
 #include "legion_c.h"
@@ -439,6 +440,7 @@ end
 function codegen.region_rule(node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local req_var = terralib.newsymbol(c.legion_region_requirement_t)
+  local req_idx = terralib.newsymbol(uint)
   local is_matched = terralib.newsymbol(bool, "is_matched")
   local selector_body = quote var [is_matched] = true end
   local selector = node.selector
@@ -503,6 +505,47 @@ function codegen.region_rule(node)
   end)
 
   local map_task_body = quote end
+  if #first_element.name > 0 then
+    if #first_task_element.name == 0 then
+      log.error(first_element,
+        "named region element should be preceded by a named task element")
+    end
+
+    local param_name = "$" .. first_element.name[1]
+    local regent_task = _G[first_task_element.name[1]]
+    local task_params = regent_task.ast.params
+    local param_type = nil
+    local accum_idx, start_idx, end_idx = 0, 0, 0
+    for _, param in pairs(task_params) do
+      local param_type_in_signature = regent_std.as_read(param.param_type)
+      if regent_std.is_region(param_type_in_signature) then
+        local privileges =
+          regent_std.find_task_privileges(param_type_in_signature,
+                                   regent_task:getprivileges(),
+                                   regent_task:get_coherence_modes(),
+                                   regent_task:get_flags())
+        if tostring(param.symbol) == param_name then
+          param_type = param_type_in_signature
+          start_idx = accum_idx
+          end_idx = start_idx + #privileges - 1
+          break
+        end
+        accum_idx = accum_idx + #privileges
+      end
+    end
+    if not param_type then
+      log.error(first_element,
+        "parameter '" .. first_element.name[1] ..
+        "' either does not exist or have a non-region type")
+    end
+    selector_body = quote
+      [selector_body];
+      [is_matched] = [is_matched] and
+                     [req_idx] >= start_idx and
+                     [req_idx] <= end_idx
+    end
+  end
+
   node.properties:map(function(property)
     map_task_body = quote
       [map_task_body];
@@ -519,7 +562,8 @@ function codegen.region_rule(node)
   end
 
   local terra map_task([task_var] : c.legion_task_t,
-                       [req_var] : c.legion_region_requirement_t)
+                       [req_var] : c.legion_region_requirement_t,
+                       [req_idx] : uint)
     [selector_body];
     [early_out];
     [pattern_matches];

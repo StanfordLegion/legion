@@ -88,12 +88,14 @@ function std.quote_binary_op(op, lhs, rhs)
 end
 
 function std.register_bishop_mappers()
+  local all_rules = __bishop_jit_mappers__()
+
   local task_rules = terralib.newsymbol(&c.bishop_task_rule_t)
   local region_rules = terralib.newsymbol(&c.bishop_region_rule_t)
   local register_body = quote end
 
-  for i = 1, #__bishop__.task_rules do
-    local task_rule = __bishop__.task_rules[i]
+  for i = 1, #all_rules.task_rules do
+    local task_rule = all_rules.task_rules[i]
     register_body = quote
       [register_body];
       [task_rules][ [i - 1] ] = c.bishop_task_rule_t {
@@ -109,8 +111,8 @@ function std.register_bishop_mappers()
     end
   end
 
-  for i = 1, #__bishop__.region_rules do
-    local region_rule = __bishop__.region_rules[i]
+  for i = 1, #all_rules.region_rules do
+    local region_rule = all_rules.region_rules[i]
     register_body = quote
       [register_body];
       [region_rules][ [i - 1] ] = c.bishop_region_rule_t {
@@ -123,10 +125,10 @@ function std.register_bishop_mappers()
   end
 
   local terra register()
-    var num_task_rules = [#__bishop__.task_rules]
-    var num_region_rules = [#__bishop__.region_rules]
-    var [task_rules] : c.bishop_task_rule_t[ #__bishop__.task_rules ]
-    var [region_rules] : c.bishop_region_rule_t[ #__bishop__.region_rules ]
+    var num_task_rules = [#all_rules.task_rules]
+    var num_region_rules = [#all_rules.region_rules]
+    var [task_rules] : c.bishop_task_rule_t[ #all_rules.task_rules ]
+    var [region_rules] : c.bishop_region_rule_t[ #all_rules.region_rules ]
     [register_body]
     c.register_bishop_mappers([task_rules], num_task_rules,
                               [region_rules], num_region_rules)

@@ -38,7 +38,8 @@ typedef bool (*bishop_region_predicate_t)(legion_task_t,
 
 typedef void (*bishop_task_callback_fn_t)(legion_task_t);
 typedef void (*bishop_region_callback_fn_t)(legion_task_t,
-                                            legion_region_requirement_t);
+                                            legion_region_requirement_t,
+                                            unsigned);
 
 typedef legion_processor_t (*bishop_assignment_fn_t)(legion_task_t,
                                                      legion_domain_point_t);

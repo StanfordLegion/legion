@@ -59,10 +59,11 @@ function language:statement(lex)
   local function ctor(environment_function)
     node = specialize.rules(node)
     node = type_check.rules(node)
-    node = codegen.rules(node)
-    return node
+    return function()
+      return codegen.rules(node)
+    end
   end
-  return ctor, {"__bishop__"}
+  return ctor, {"__bishop_jit_mappers__"}
 end
 
 return language
