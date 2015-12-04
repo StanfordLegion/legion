@@ -254,13 +254,17 @@ end
 
 function std.check_constraint(cx, constraint)
   local lhs = constraint.lhs
-  if terralib.issymbol(lhs) then
+  if lhs == wild then
+    return true
+  elseif terralib.issymbol(lhs) then
     lhs = lhs.type
   end
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
-  if terralib.issymbol(rhs) then
+  if rhs == wild then
+    return true
+  elseif terralib.issymbol(rhs) then
     rhs = rhs.type
   end
   assert(std.type_supports_constraints(rhs))
