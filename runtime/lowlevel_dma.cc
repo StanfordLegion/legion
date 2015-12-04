@@ -3950,9 +3950,12 @@ namespace LegionRuntime {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(dst.inst.get_location());
 
       MemoryImpl::MemoryKind mem_kind = mem_impl->kind;
+      // TODO: optimize transfers for framebuffer to use a memset kernel
       if ((mem_kind == MemoryImpl::MKIND_SYSMEM) ||
           (mem_kind == MemoryImpl::MKIND_ZEROCOPY) ||
-          (mem_kind == MemoryImpl::MKIND_RDMA))
+          (mem_kind == MemoryImpl::MKIND_RDMA) ||
+          (mem_kind == MemoryImpl::MKIND_GPUFB) ||
+          (mem_kind == MemoryImpl::MKIND_ZEROCOPY))
       {
         switch (domain.get_dim()) {
           case 0:
@@ -4020,7 +4023,8 @@ namespace LegionRuntime {
             assert(false);
         }
       } else {
-        // TODO: Implement GASNet, Disk, and Framebuffer
+        // TODO: Implement GASNet and Disk
+        assert(false);
       }
 
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
