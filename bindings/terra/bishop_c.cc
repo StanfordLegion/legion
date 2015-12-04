@@ -26,6 +26,7 @@
 using namespace std;
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::HighLevel::MappingUtilities ;
 
 static vector<bishop_task_rule_t> task_rules;
 static vector<bishop_region_rule_t> region_rules;
@@ -134,12 +135,15 @@ bishop_memory_list_t
 bishop_filter_memories_by_visibility(legion_processor_t proc_)
 {
   Machine m = Machine::get_machine();
-  set<Memory> memories;
-  m.get_all_memories(memories);
+  vector<Memory> memories;
+  Processor proc = CObjectWrapper::unwrap(proc_);
+  MachineQueryInterface::find_memory_stack(m, proc, memories,
+                                           proc.kind() == Processor::LOC_PROC);
 
   bishop_memory_list_t memories_ = bishop_create_memory_list(memories.size());
   int idx = 0;
-  for (set<Memory>::iterator it = memories.begin(); it != memories.end(); ++it)
+  for (vector<Memory>::iterator it = memories.begin();
+       it != memories.end(); ++it)
     memories_.list[idx++] = CObjectWrapper::wrap(*it);
   return memories_;
 }
