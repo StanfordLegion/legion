@@ -289,8 +289,20 @@ function specialize.selector(node)
   local type
   if elements[1]:is(ast.specialized.element.Task) then
     type = "task"
+    if #elements > 1 then
+      log.error(node,
+        "task selectors with multiple elements are not supported yet.")
+    end
   else assert(elements[1]:is(ast.specialized.element.Region))
     type = "region"
+    if not elements[2]:is(ast.specialized.element.Task) then
+      log.error(elements[2],
+        "region element should be preceded by task element in selectors.")
+    end
+    if #elements > 2 then
+      log.error(node,
+        "region selectors with multiple task elements are not supported yet.")
+    end
   end
 
   return ast.specialized.Selector {
