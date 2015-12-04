@@ -11761,7 +11761,15 @@ namespace LegionRuntime {
           column_source->transform_field_mask(state_mask, source);
           VersionState *version_state = 
             state.find_remote_version_state(vid, did, owner);
-          info.states[version_state] |= state_mask; 
+          LegionMap<VersionState*,FieldMask>::aligned::iterator finder =
+            info.states.find(version_state);
+          if (finder == info.states.end())
+          {
+            info.states[version_state] = state_mask;
+            version_state->add_base_valid_ref(CURRENT_STATE_REF);
+          }
+          else
+            finder->second |= state_mask;
           info.valid_fields |= state_mask;
         }
       }
@@ -11785,7 +11793,15 @@ namespace LegionRuntime {
           column_source->transform_field_mask(state_mask, source);
           VersionState *version_state = 
             state.find_remote_version_state(vid, did, owner);
-          info.states[version_state] |= state_mask; 
+          LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+            info.states.find(version_state);
+          if (finder == info.states.end())
+          {
+            info.states[version_state] = state_mask;
+            version_state->add_base_valid_ref(CURRENT_STATE_REF);
+          }
+          else
+            finder->second |= state_mask;
           info.valid_fields |= state_mask;
         }
       }
