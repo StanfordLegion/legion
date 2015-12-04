@@ -554,17 +554,26 @@ PartitionEqualShim::task(const Task *task,
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
     size_t count = 0;
     ptr_t start = it.next_span(count);
-    for (ptr_t p(start); p.value - start.value < count; p++) {
+    size_t chunk = chunksize + (leftover > 0 ? 1 : 0);
+
+    while (elt + count >= chunk) {
+      size_t rest = chunk - elt;
       assert(c);
-      coloring[upgrade_point(c.p)].points.insert(p);
-      elt++;
-      if (elt >= chunksize + (leftover > 0 ? 1 : 0)) {
-        elt = 0;
-        c++;
-      }
-      if (elt >= chunksize) {
+      coloring[upgrade_point(c.p)].ranges.insert(std::pair<ptr_t, ptr_t>(start, start.value + rest - 1));
+      start.value += rest;
+      count -= rest;
+      elt = 0;
+      c++;
+      if (chunk > chunksize) {
         leftover--;
       }
+      chunk = chunksize + (leftover > 0 ? 1 : 0);
+    }
+
+    if (count > 0) {
+      assert(c);
+      coloring[upgrade_point(c.p)].ranges.insert(std::pair<ptr_t, ptr_t>(start, start.value + count - 1));
+      elt += count;
     }
   }
 
