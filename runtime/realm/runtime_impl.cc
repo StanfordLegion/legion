@@ -1506,7 +1506,7 @@ namespace Realm {
         }
       }
       fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
-              gasnet_mynode(), pthread_self(), buffer);
+              gasnet_mynode(), (unsigned long)pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
       free(funcname);
