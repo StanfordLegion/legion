@@ -128,8 +128,12 @@ endif
 
 USE_LIBDL = 1
 ifeq ($(strip $(USE_LIBDL)),1)
+ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 LEGION_LD_FLAGS += -ldl -rdynamic
+else
+LEGION_LD_FLAGS += -ldl
+endif
 endif
 
 # Falgs for running in the general low-level runtime
