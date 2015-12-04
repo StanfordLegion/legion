@@ -112,7 +112,7 @@ do
 
   for p = 0, conf.num_pieces do
     var ptr_offset = p * conf.nodes_per_piece
-    for i = 0, conf.nodes_per_piece do
+    for i = 0, conf.wires_per_piece do
       var wire = new(ptr(Wire(rn), rw))
       wire.current.{_0, _1, _2} = 0.0
       wire.voltage.{_0, _1} = 0.0
