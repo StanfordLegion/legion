@@ -89,7 +89,7 @@
       var width = $(window).width() - margin_left - margin_right;
       var height = $(window).height() - margin_bottom;
       var start = 0;
-      var end = %d;
+      var end = %d * 1.01;
       var max_level = %d;
       var scale = width / (end - start);
       var thickness = Math.max(height / max_level, 20);
@@ -411,7 +411,9 @@
         var paneHeight = $("#timeline").height();
         var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
         var helpBoxWidth = Math.min(450, paneWidth - 100);
-        var helpBoxHeight = Math.min(450, paneHeight - 100);
+        var helpTextOffset = 20;
+        var helpBoxHeight = Math.min(helpMessage.length * helpTextOffset + 100,
+                                     paneHeight - 100);
 
         var timelineWidth = timelineSvg.select("g#timeline").attr("width");
         var timelineHeight = timelineSvg.select("g#timeline").attr("height");
@@ -443,8 +445,9 @@
         var off = 15;
         for (var i = 0; i < helpMessage.length; ++i) {
           helpText.append("tspan")
+            .style("font-size", "12pt")
             .attr("text-anchor", "start")
-            .attr({ x: boxStartX + 30, dy: off + 25})
+            .attr({ x: boxStartX + 30, dy: off + helpTextOffset})
             .text(helpMessage[i]);
           off = 0;
         }
