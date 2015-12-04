@@ -7553,6 +7553,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::get_field_space_fields(Context ctx, FieldSpace handle,
+                                          std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      forest->get_field_space_fields(handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::get_field_space_fields(FieldSpace handle, 
+                                          std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      forest->get_field_space_fields(handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::finalize_field_space_destroy(FieldSpace handle)
     //--------------------------------------------------------------------------
     {

@@ -205,6 +205,7 @@ namespace LegionRuntime {
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle);
       bool destroy_logical_region(LogicalRegion handle, 

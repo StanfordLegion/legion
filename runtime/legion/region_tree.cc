@@ -1200,6 +1200,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::get_field_space_fields(FieldSpace handle,
+                                                  std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->get_all_fields(fields);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_logical_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {

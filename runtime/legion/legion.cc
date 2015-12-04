@@ -2709,6 +2709,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
+                                         std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_field_space_fields(ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
                                             IndexSpace index, FieldSpace fields)
     //--------------------------------------------------------------------------
@@ -4014,6 +4022,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_field_space_fields(FieldSpace handle, 
+                                        std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->get_field_space_fields(handle, fields);
     }
 
     //--------------------------------------------------------------------------

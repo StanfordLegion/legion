@@ -2717,6 +2717,8 @@ namespace LegionRuntime {
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
       size_t get_field_size(FieldSpace handle, FieldID fid) const;
+
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees
@@ -3756,6 +3758,15 @@ namespace LegionRuntime {
        * @return the size of the field in bytes
        */
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
+
+      /**
+       * Get the IDs of the fields currently allocated in a field space.
+       * @param ctx enclosing task context
+       * @param handle field space handle
+       * @param set in which to place the field IDs
+       */
+      void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations
