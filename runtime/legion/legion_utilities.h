@@ -1606,7 +1606,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       // Save our enclosing context on the stack
+#ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
+#endif
       index += sizeof(size_t);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
@@ -1620,7 +1622,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       // Read the send context size out of the buffer      
+#ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
+#endif
       index += sizeof(size_t);
       // Check to make sure that they match
       assert(sent_context == context_bytes);

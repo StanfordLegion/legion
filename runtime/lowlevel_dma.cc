@@ -1910,7 +1910,10 @@ namespace LegionRuntime {
     void PosixAIOWrite::launch(void)
     {
       log_aio.debug("write issued: op=%p cb=%p", this, &cb);
-      int ret = aio_write(&cb);
+#ifndef NDEBUG
+      int ret =
+#endif
+	aio_write(&cb);
       assert(ret == 0);
     }
 
@@ -1948,7 +1951,10 @@ namespace LegionRuntime {
     void PosixAIORead::launch(void)
     {
       log_aio.debug("read issued: op=%p cb=%p", this, &cb);
-      int ret = aio_read(&cb);
+#ifndef NDEBUG
+      int ret =
+#endif
+	aio_read(&cb);
       assert(ret == 0);
     }
 
@@ -3555,7 +3561,10 @@ namespace LegionRuntime {
 	   (src_kind == MemoryImpl::MKIND_RDMA)) {
 	  void *src_base = 0;
 	  size_t src_stride = 0;
-	  bool src_ok = get_runtime()->get_instance_impl(srcs[0].inst)->get_strided_parameters(src_base, src_stride,
+#ifndef NDEBUG
+	  bool src_ok =
+#endif
+	    get_runtime()->get_instance_impl(srcs[0].inst)->get_strided_parameters(src_base, src_stride,
 											       srcs[0].offset);
 	  assert(src_ok);
 
@@ -3565,7 +3574,10 @@ namespace LegionRuntime {
 	    {
 	      void *dst_base = 0;
 	      size_t dst_stride = 0;
-	      bool dst_ok = get_runtime()->get_instance_impl(dst.inst)->get_strided_parameters(dst_base, dst_stride,
+#ifndef NDEBUG
+	      bool dst_ok =
+#endif
+		get_runtime()->get_instance_impl(dst.inst)->get_strided_parameters(dst_base, dst_stride,
 											       dst.offset);
 	      assert(dst_ok);
 
@@ -3597,8 +3609,8 @@ namespace LegionRuntime {
 
 	      assert(dst_impl->metadata.is_valid());
 
-	      off_t dst_field_start;
-	      int dst_field_size;
+	      off_t dst_field_start=0;
+	      int dst_field_size=0;
 	      find_field_start(dst_impl->metadata.field_sizes, dst.offset, dst.size, dst_field_start, dst_field_size);
 	      assert(dst.size == (size_t)dst_field_size);
 
@@ -3677,8 +3689,8 @@ namespace LegionRuntime {
 
 	      assert(dst_impl->metadata.is_valid());
 
-	      off_t dst_field_start;
-	      int dst_field_size;
+	      off_t dst_field_start=0;
+	      int dst_field_size=0;
 	      find_field_start(dst_impl->metadata.field_sizes, dst.offset, dst.size, dst_field_start, dst_field_size);
 	      assert(dst.size == (size_t)dst_field_size);
 
@@ -3964,7 +3976,7 @@ namespace LegionRuntime {
               IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
               assert(ispace->valid_mask_complete);
               RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(dst.inst);
-              off_t field_start; int field_size;
+              off_t field_start=0; int field_size=0;
               find_field_start(inst_impl->metadata.field_sizes, dst.offset,
                                dst.size, field_start, field_size);
               assert(field_size <= int(fill_size));
@@ -4039,7 +4051,7 @@ namespace LegionRuntime {
     void FillRequest::perform_dma_rect(MemoryImpl *mem_impl)
     {
       RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(dst.inst);
-      off_t field_start; int field_size;
+      off_t field_start=0; int field_size=0;
       find_field_start(inst_impl->metadata.field_sizes, dst.offset,
                        dst.size, field_start, field_size);
       assert(field_size <= (int)fill_size);
