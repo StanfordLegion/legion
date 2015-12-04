@@ -92,7 +92,7 @@
       var end = %d;
       var max_level = %d;
       var scale = width / (end - start);
-      var thickness = height / max_level;
+      var thickness = Math.max(height / max_level, 20);
       var baseThickness = height / max_level;
       height = max_level * thickness;
 
