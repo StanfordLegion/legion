@@ -147,7 +147,7 @@ do
 end
 
 
-terra helper.calculate_gflops(sim_time : uint, conf : CktConfig)
+terra helper.calculate_gflops(sim_time : double, conf : CktConfig)
 
   -- Compute the floating point operations per second
   var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
