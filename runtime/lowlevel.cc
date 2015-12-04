@@ -1425,7 +1425,10 @@ namespace LegionRuntime {
 
       void *base;
       size_t act_stride = 0;
-      bool ok = impl->get_strided_parameters(base, act_stride, field_offset);
+#ifndef NDEBUG
+      bool ok =
+#endif
+	impl->get_strided_parameters(base, act_stride, field_offset);
       assert(ok);
 
 #ifdef BOUNDS_CHECKS

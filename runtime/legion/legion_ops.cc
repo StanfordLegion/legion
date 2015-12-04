@@ -6214,7 +6214,9 @@ namespace LegionRuntime {
       const size_t result_size = redop->sizeof_lhs;
       void *result_buffer = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
       bool result = 
+#endif
 #endif
       collective.phase_barrier.get_previous_phase().get_result(result_buffer,
 							       result_size);

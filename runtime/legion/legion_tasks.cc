@@ -4342,7 +4342,9 @@ namespace LegionRuntime {
               if (perform_mapping())
               {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
                 bool still_local = 
+#endif
 #endif
                 distribute_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -5951,7 +5953,9 @@ namespace LegionRuntime {
                   if (perform_mapping())
                   {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
                     bool still_local = 
+#endif
 #endif
                     distribute_task();
 #ifdef DEBUG_HIGH_LEVEL
