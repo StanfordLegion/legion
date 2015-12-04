@@ -1532,7 +1532,7 @@ class State(object):
                 "legion_prof.html.template")
         data_tsv_file_name = output_prefix + "_data.tsv"
         processor_tsv_file_name = output_prefix + "_processor.tsv"
-        html_file_name = output_prefix + "_interactive.html"
+        html_file_name = output_prefix + ".html"
         print 'Generating interactive visualization files %s, %s, and %s' % \
                 (data_tsv_file_name,processor_tsv_file_name,html_file_name)
 
