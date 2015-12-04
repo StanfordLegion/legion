@@ -3020,7 +3020,6 @@ function std.start(main_task)
         end
       end
     end)
-    print("JIT compiling CUDA kernels")
     cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
