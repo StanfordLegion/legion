@@ -192,6 +192,7 @@ namespace Realm {
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
+      static void realm_backtrace(int signal);
 
     public:
       MachineImpl *machine;

@@ -29,6 +29,10 @@
 
 #include "utils.h"
 
+// For doing backtraces
+#include <execinfo.h> // symbols
+#include <cxxabi.h>   // demangling
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -688,22 +692,24 @@ namespace Realm {
       signal(SIGTERM, deadlock_catch);
       signal(SIGINT, deadlock_catch);
 #endif
-#if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE)
-      signal(SIGSEGV, realm_backtrace);
-      signal(SIGABRT, realm_backtrace);
-      signal(SIGFPE,  realm_backtrace);
-      signal(SIGILL,  realm_backtrace);
-      signal(SIGBUS,  realm_backtrace);
-#endif
       if ((getenv("LEGION_FREEZE_ON_ERROR") != NULL) ||
-          (getenv("REALM_FREEZE_ON_ERROR") != NULL))
-      {
+          (getenv("REALM_FREEZE_ON_ERROR") != NULL)) {
         signal(SIGSEGV, realm_freeze);
         signal(SIGABRT, realm_freeze);
         signal(SIGFPE,  realm_freeze);
         signal(SIGILL,  realm_freeze);
         signal(SIGBUS,  realm_freeze);
+      } 
+#if 0
+      else if ((getenv("REALM_BACKTRACE") != NULL) ||
+                 (getenv("LEGION_BACKTRACE") != NULL)) {
+        signal(SIGSEGV, realm_backtrace);
+        signal(SIGABRT, realm_backtrace);
+        signal(SIGFPE,  realm_backtrace);
+        signal(SIGILL,  realm_backtrace);
+        signal(SIGBUS,  realm_backtrace);
       }
+#endif
       
       start_polling_threads(active_msg_worker_threads);
 
@@ -1439,6 +1445,79 @@ namespace Realm {
       }
 	  
       return mem->instances[id.index_l()];
+    }
+
+    /*static*/
+    void RuntimeImpl::realm_backtrace(int signal)
+    {
+      assert((signal == SIGILL) || (signal == SIGFPE) || 
+             (signal == SIGABRT) || (signal == SIGSEGV) ||
+             (signal == SIGBUS));
+      void *bt[256];
+      int bt_size = backtrace(bt, 256);
+      char **bt_syms = backtrace_symbols(bt, bt_size);
+      size_t buffer_size = 2048; // default buffer size
+      char *buffer = (char*)malloc(buffer_size);
+      size_t offset = 0;
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ 
+        // under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        // If offset is within half of the buffer size, double the buffer
+        if (offset >= (buffer_size / 2)) {
+          buffer_size *= 2;
+          buffer = (char*)realloc(buffer, buffer_size);
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = 
+            abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                         "  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function 
+            // with no arguments.
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                     "  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += snprintf(buffer+offset,buffer_size-offset,
+                             "%s\n",bt_syms[i]);
+        }
+      }
+      fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
+              gasnet_mynode(), pthread_self(), buffer);
+      fflush(stderr);
+      free(buffer);
+      free(funcname);
+      // returning would almost certainly cause this signal to be raised again,
+      //  so sleep for a second in case other threads also want to chronicle
+      //  their own deaths, and then exit
+      sleep(1);
+      exit(1);
     }
 
   
