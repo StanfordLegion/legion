@@ -699,9 +699,7 @@ namespace Realm {
         signal(SIGFPE,  realm_freeze);
         signal(SIGILL,  realm_freeze);
         signal(SIGBUS,  realm_freeze);
-      } 
-#if 0
-      else if ((getenv("REALM_BACKTRACE") != NULL) ||
+      } else if ((getenv("REALM_BACKTRACE") != NULL) ||
                  (getenv("LEGION_BACKTRACE") != NULL)) {
         signal(SIGSEGV, realm_backtrace);
         signal(SIGABRT, realm_backtrace);
@@ -709,7 +707,6 @@ namespace Realm {
         signal(SIGILL,  realm_backtrace);
         signal(SIGBUS,  realm_backtrace);
       }
-#endif
       
       start_polling_threads(active_msg_worker_threads);
 
