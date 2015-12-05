@@ -158,15 +158,15 @@ task toplevel()
   c.printf("Creating partitions...\n")
   var colors = ispace(int1d, conf.num_pieces)
   var pn_equal = partition(equal, rn, colors)
-  var pw_outgoing = preimage(pn_equal, rw.in_ptr)
-  var pw_incoming = preimage(pn_equal, rw.out_ptr)
+  var pw_outgoing = preimage(rw, pn_equal, rw.in_ptr)
+  var pw_incoming = preimage(rw, pn_equal, rw.out_ptr)
   var pw_crossing_out = pw_outgoing - pw_incoming
   var pw_crossing_in = pw_incoming - pw_outgoing
-  var pn_shared_in = image(pw_crossing_in, rw.out_ptr, rn)
-  var pn_shared_out = image(pw_crossing_out, rw.in_ptr, rn)
+  var pn_shared_in = image(rn, pw_crossing_in, rw.out_ptr)
+  var pn_shared_out = image(rn, pw_crossing_out, rw.in_ptr)
   var pn_private = (pn_equal - pn_shared_in) - pn_shared_out
   var pn_shared = pn_equal - pn_private
-  var pn_ghost = image(pw_crossing_out, rw.out_ptr, rn)
+  var pn_ghost = image(rn, pw_crossing_out, rw.out_ptr)
 
   if conf.dump_graph then
     helper.dump_graph(conf, rn, rw,

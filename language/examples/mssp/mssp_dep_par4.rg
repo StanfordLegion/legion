@@ -274,8 +274,8 @@ task toplevel()
   read_edge_data(graph, re)
 
   -- preimage partition of re
-  var pe = preimage(pdst, re.n2)
-  var psrc = image(pe, re.n1, rn)
+  var pe = preimage(re, pdst, re.n2)
+  var psrc = image(rn, pe, re.n1)
 
   __demand(__parallel)
   for i = 0, subgraphs do

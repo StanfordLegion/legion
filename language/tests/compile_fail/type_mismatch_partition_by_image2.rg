@@ -14,7 +14,7 @@
 
 -- fails-with:
 -- type_mismatch_partition_by_image2.rg:26: type mismatch: expected a region but got int32
---   var q = image(p, (0), r)
+--   var q = image(r, p, (0))
 --                    ^
 
 import "regent"
@@ -23,6 +23,6 @@ task f()
   var r = region(ispace(ptr, 5), int)
   var s = region(ispace(ptr, 5), ptr(int, r))
   var p = partition(equal, s, ispace(int1d, 3))
-  var q = image(p, (0), r)
+  var q = image(r, p, (0))
 end
 f:compile()

@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_image4.rg:26: type mismatch in argument 2: expected 1 field but got 0
---   var q = image(p, s.{}, r)
+-- type_mismatch_partition_by_image4.rg:26: type mismatch in argument 3: expected 1 field but got 0
+--   var q = image(r, p, s.{})
 --               ^
 
 import "regent"
@@ -23,6 +23,6 @@ task f()
   var r = region(ispace(ptr, 5), int)
   var s = region(ispace(ptr, 5), ptr(int, r))
   var p = partition(equal, s, ispace(int1d, 3))
-  var q = image(p, s.{}, r)
+  var q = image(r, p, s.{})
 end
 f:compile()

@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_partition_by_image1.rg:24: invalid privileges in argument 1: reads($s)
---   var q = image(p, s, r)
+-- privilege_partition_by_image1.rg:24: invalid privileges in argument 3: reads($s)
+--   var q = image(r, p, s)
 --               ^
 
 import "regent"
 
 task f(r : region(int), s : region(ptr(int, r)))
   var p = partition(equal, s, ispace(int1d, 3))
-  var q = image(p, s, r)
+  var q = image(r, p, s)
 end
 f:compile()

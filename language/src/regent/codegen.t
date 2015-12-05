@@ -3110,18 +3110,18 @@ function codegen.expr_partition_by_field(cx, node)
 end
 
 function codegen.expr_image(cx, node)
+  local parent_type = std.as_read(node.parent.expr_type)
+  local parent = codegen.expr(cx, node.parent):read(cx)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
-  local parent_type = std.as_read(node.parent.expr_type)
-  local parent = codegen.expr(cx, node.parent):read(cx)
 
   local result_type = std.as_read(node.expr_type)
   local actions = quote
+    [parent.actions];
     [partition.actions];
     [region.actions];
-    [parent.actions];
     [emit_debuginfo(node)]
   end
 
@@ -3169,6 +3169,8 @@ function codegen.expr_image(cx, node)
 end
 
 function codegen.expr_preimage(cx, node)
+  local parent_type = std.as_read(node.parent.expr_type)
+  local parent = codegen.expr(cx, node.parent):read(cx)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx)
   local region_type = std.as_read(node.region.expr_type)
@@ -3176,6 +3178,7 @@ function codegen.expr_preimage(cx, node)
 
   local result_type = std.as_read(node.expr_type)
   local actions = quote
+    [parent.actions];
     [partition.actions];
     [region.actions];
     [emit_debuginfo(node)]
@@ -3212,7 +3215,7 @@ function codegen.expr_preimage(cx, node)
       [cx.runtime], [cx.context], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_preimage(
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
-      [region.value].impl, [region_parent].impl, field_id,
+      [parent.value].impl, [region_parent].impl, field_id,
       domain, c.COMPUTE_KIND, -1, false)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])

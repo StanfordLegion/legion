@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_preimage1.rg:26: type mismatch in argument 1: expected partition but got int32
---   var q = preimage(0, s)
+-- type_mismatch_partition_by_preimage1.rg:26: type mismatch in argument 2: expected partition but got int32
+--   var q = preimage(s, 0, s)
 --                  ^
 
 import "regent"
@@ -23,6 +23,6 @@ task f()
   var r = region(ispace(ptr, 5), int)
   var s = region(ispace(ptr, 5), ptr(int, r))
   var p = partition(equal, r, ispace(int1d, 3))
-  var q = preimage(0, s)
+  var q = preimage(s, 0, s)
 end
 f:compile()

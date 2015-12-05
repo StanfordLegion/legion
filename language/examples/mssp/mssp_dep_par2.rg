@@ -228,8 +228,8 @@ task toplevel()
   end
 
   -- preimage partition of re
-  var pe = preimage(pdst, re.n2)
-  var psrc = image(pe, re.n1, rn)
+  var pe = preimage(re, pdst, re.n2)
+  var psrc = image(rn, pe, re.n1)
 
   for s = 0, graph.num_sources do
     fill(rn.distance, INFINITY)

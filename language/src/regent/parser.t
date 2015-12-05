@@ -646,27 +646,30 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("image") then
     p:expect("(")
+    local parent = p:expr()
+    p:expect(",")
     local partition = p:expr()
     p:expect(",")
     local region = p:expr_region_root()
-    p:expect(",")
-    local parent = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.Image {
+      parent = parent,
       partition = partition,
       region = region,
-      parent = parent,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
 
   elseif p:nextif("preimage") then
     p:expect("(")
+    local parent = p:expr()
+    p:expect(",")
     local partition = p:expr()
     p:expect(",")
     local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.Preimage {
+      parent = parent,
       partition = partition,
       region = region,
       options = ast.default_options(),

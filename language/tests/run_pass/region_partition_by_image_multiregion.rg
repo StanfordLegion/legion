@@ -40,7 +40,7 @@ task f()
   var p = partition(disjoint, s, sc)
   c.legion_coloring_destroy(sc)
 
-  var q = image(p, s, r)
+  var q = image(r, p, s)
 
   for x in r do
     @x = 1

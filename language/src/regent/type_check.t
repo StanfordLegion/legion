@@ -1372,31 +1372,31 @@ function type_check.expr_partition_by_field(cx, node)
 end
 
 function type_check.expr_image(cx, node)
+  local parent = type_check.expr(cx, node.parent)
+  local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region)
-  local parent = type_check.expr(cx, node.parent)
-  local parent_type = std.check_read(cx, parent)
+
+  if not std.is_region(parent_type) then
+    log.error(node, "type mismatch in argument 1: expected region but got " ..
+                tostring(parent_type))
+  end
 
   if not std.is_partition(partition_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
+    log.error(node, "type mismatch in argument 2: expected partition but got " ..
                 tostring(partition_type))
   end
 
   if #region.fields ~= 1 then
-    log.error(node, "type mismatch in argument 2: expected 1 field but got " ..
+    log.error(node, "type mismatch in argument 3: expected 1 field but got " ..
                 tostring(#region.fields))
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
   if not (std.is_bounded_type(field_type) and field_type:is_ptr()) then
-    log.error(node, "type mismatch in argument 2: expected field of ptr type but got " .. tostring(field_type))
-  end
-
-  if not std.is_region(parent_type) then
-    log.error(node, "type mismatch in argument 3: expected region but got " ..
-                tostring(parent_type))
+    log.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
   end
 
   local region_symbol
@@ -1408,7 +1408,7 @@ function type_check.expr_image(cx, node)
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     log.error(
-      node, "invalid privileges in argument 1: " .. tostring(std.reads) .. "(" ..
+      node, "invalid privileges in argument 3: " .. tostring(std.reads) .. "(" ..
         (data.newtuple(region_symbol) .. region.fields[1]):mkstring(".") ..
         ")")
   end
@@ -1445,7 +1445,7 @@ function type_check.expr_image(cx, node)
   -- Check that parent is a subregion of the field bounds.
   for _, bound_symbol in ipairs(field_type.bounds_symbols) do
     local constraint = {
-      lhs = expr_type.parent_region_symbol,
+      lhs = parent_symbol,
       rhs = bound_symbol,
       op = "<="
     }
@@ -1457,9 +1457,9 @@ function type_check.expr_image(cx, node)
   end
 
   return ast.typed.expr.Image {
+    parent = parent,
     partition = partition,
     region = region,
-    parent = parent,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1467,24 +1467,31 @@ function type_check.expr_image(cx, node)
 end
 
 function type_check.expr_preimage(cx, node)
+  local parent = type_check.expr(cx, node.parent)
+  local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region)
 
+  if not std.is_region(parent_type) then
+    log.error(node, "type mismatch in argument 1: expected region but got " ..
+                tostring(parent_type))
+  end
+
   if not std.is_partition(partition_type) then
-    log.error(node, "type mismatch in argument 1: expected partition but got " ..
+    log.error(node, "type mismatch in argument 2: expected partition but got " ..
                 tostring(partition_type))
   end
 
   if #region.fields ~= 1 then
-    log.error(node, "type mismatch in argument 2: expected 1 field but got " ..
+    log.error(node, "type mismatch in argument 3: expected 1 field but got " ..
                 tostring(#region.fields))
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
   if not (std.is_bounded_type(field_type) and field_type:is_ptr()) then
-    log.error(node, "type mismatch in argument 2: expected field of ptr type but got " .. tostring(field_type))
+    log.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
   end
 
   local region_symbol
@@ -1496,21 +1503,41 @@ function type_check.expr_preimage(cx, node)
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     log.error(
-      node, "invalid privileges in argument 1: " .. tostring(std.reads) .. "(" ..
+      node, "invalid privileges in argument 3: " .. tostring(std.reads) .. "(" ..
         (data.newtuple(region_symbol) .. region.fields[1]):mkstring(".") ..
         ")")
   end
 
-  local expr_type = std.partition(partition_type.disjointness, region_symbol)
+  local parent_symbol
+  if parent:is(ast.typed.expr.ID) then
+    parent_symbol = parent.value
+  else
+    parent_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(partition_type.disjointness, parent_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
   if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = region_type
+    expr_type.parent_region_symbol.type = parent_type
   end
-  assert(expr_type.parent_region_symbol.type == region_type)
+  assert(expr_type.parent_region_symbol.type == parent_type)
 
-  -- Check that parent is a subregion of the field bounds.
+  -- Check that parent is a subregion of region.
+  do
+    local constraint = {
+      lhs = parent_symbol,
+      rhs = region_symbol,
+      op = "<="
+    }
+    if not std.check_constraint(cx, constraint) then
+      log.error(node, "invalid image missing constraint " ..
+                  tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
+                  " " .. tostring(constraint.rhs))
+    end
+  end
+
+  -- Check that partitions's parent is a subregion of the field bounds.
   for _, bound_symbol in ipairs(field_type.bounds_symbols) do
     local constraint = {
       lhs = partition_type.parent_region_symbol,
@@ -1527,6 +1554,7 @@ function type_check.expr_preimage(cx, node)
   return ast.typed.expr.Preimage {
     partition = partition,
     region = region,
+    parent = parent,
     expr_type = expr_type,
     options = node.options,
     span = node.span,

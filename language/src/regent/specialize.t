@@ -230,12 +230,13 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Image) then
+    if get_num_accessed_fields(node.parent) > 1 then return false end
     if get_num_accessed_fields(node.partition) > 1 then return false end
     if get_num_accessed_fields(node.region) > 1 then return false end
-    if get_num_accessed_fields(node.parent) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Preimage) then
+    if get_num_accessed_fields(node.parent) > 1 then return false end
     if get_num_accessed_fields(node.partition) > 1 then return false end
     if get_num_accessed_fields(node.region) > 1 then return false end
     return 1
@@ -865,9 +866,9 @@ end
 
 function specialize.expr_image(cx, node)
   return ast.specialized.expr.Image {
+    parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
-    parent = specialize.expr(cx, node.parent),
     options = node.options,
     span = node.span,
   }
@@ -875,6 +876,7 @@ end
 
 function specialize.expr_preimage(cx, node)
   return ast.specialized.expr.Preimage {
+    parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
     options = node.options,

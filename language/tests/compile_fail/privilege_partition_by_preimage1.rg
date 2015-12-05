@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_partition_by_preimage1.rg:24: invalid privileges in argument 1: reads($s)
---   var q = preimage(p, s)
+-- privilege_partition_by_preimage1.rg:24: invalid privileges in argument 3: reads($s)
+--   var q = preimage(s, p, s)
 --                  ^
 
 import "regent"
 
 task f(r : region(int), s : region(ptr(int, r)))
   var p = partition(equal, r, ispace(int1d, 3))
-  var q = preimage(p, s)
+  var q = preimage(s, p, s)
 end
 f:compile()

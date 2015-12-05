@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
 import "regent"
 
 local c = regentlib.c
@@ -158,13 +161,13 @@ task toplevel()
   c.printf("Creating partitions...\n")
   var colors = ispace(int1d, conf.num_pieces)
   var pn_equal = partition(equal, rn, colors)
-  var pw_outgoing = preimage(pn_equal, rw.in_ptr)
-  var pw_incoming = preimage(pn_equal, rw.out_ptr)
+  var pw_outgoing = preimage(rw, pn_equal, rw.in_ptr)
+  var pw_incoming = preimage(rw, pn_equal, rw.out_ptr)
   var pw_crossing_out = pw_outgoing - pw_incoming
   var pw_crossing = pw_crossing_out | pw_incoming - pw_outgoing
-  var pn_shared = pn_equal & image(pw_crossing, rw.in_ptr, rn)
+  var pn_shared = pn_equal & image(rn, pw_crossing, rw.in_ptr)
   var pn_private = pn_equal - pn_shared
-  var pn_ghost = image(pw_crossing_out, rw.out_ptr, rn)
+  var pn_ghost = image(rn, pw_crossing_out, rw.out_ptr)
 
   if conf.dump_graph then
     helper.dump_graph(conf, rn, rw,

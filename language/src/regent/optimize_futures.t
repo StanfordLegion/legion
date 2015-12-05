@@ -616,20 +616,22 @@ function optimize_futures.expr_partition_by_field(cx, node)
 end
 
 function optimize_futures.expr_image(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
   local partition = concretize(optimize_futures.expr(cx, node.partition))
   local region = concretize(optimize_futures.expr_region_root(cx, node.region))
-  local parent = concretize(optimize_futures.expr(cx, node.parent))
   return node {
+    parent = parent,
     partition = partition,
     region = region,
-    parent = parent,
   }
 end
 
 function optimize_futures.expr_preimage(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
   local partition = concretize(optimize_futures.expr(cx, node.partition))
   local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node {
+    parent = parent,
     partition = partition,
     region = region,
   }
