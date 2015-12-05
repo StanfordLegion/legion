@@ -753,7 +753,28 @@ namespace LegionRuntime {
       {
         // Pick the global memory
         Memory global = machine_interface.find_global_memory();
-        assert(global.exists());
+        if (!global.exists())
+        {
+          bool found = false;
+          std::vector<Memory> stack;
+          machine_interface.find_memory_stack(local_proc, stack,
+              local_proc.kind() == Processor::LOC_PROC);
+          // If there is no global memory, try finding RDMA memory
+          for (unsigned idx = 0; idx < stack.size() && !found; ++idx)
+            if (stack[idx].kind() == Memory::REGDMA_MEM)
+            {
+              global = stack[idx];
+              found = true;
+            }
+          // If failed, try using system memory
+          for (unsigned idx = 0; idx < stack.size() && !found; ++idx)
+            if (stack[idx].kind() == Memory::SYSTEM_MEM)
+            {
+              global = stack[idx];
+              found = true;
+            }
+          assert(true);
+        }
         to_create.push_back(global);
         // Only make one new instance
         create_one = true;
