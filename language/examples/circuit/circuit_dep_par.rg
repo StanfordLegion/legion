@@ -49,7 +49,6 @@ fspace Wire(rpn : region(Node),
   voltage    : Voltages,
 }
 
-local int1d = index_type(int, "int1d")
 local CktConfig = require("circuit_config")
 local helper = require("circuit_helper_dep")
 

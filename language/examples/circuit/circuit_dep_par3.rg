@@ -160,18 +160,18 @@ task toplevel()
   c.printf("Creating partitions...\n")
   var colors = ispace(int1d, conf.num_pieces)
   var pn_equal = partition(equal, rn, colors)
-  var pw_outgoing = preimage(rw, pn_equal, rw.in_ptr)
-  var pw_incoming = preimage(rw, pn_equal, rw.out_ptr)
-  var pw_crossing_out = pw_outgoing - pw_incoming
-  var pw_crossing = pw_crossing_out | pw_incoming - pw_outgoing
-  var pn_shared = pn_equal & image(rn, pw_crossing, rw.in_ptr)
-  var pn_private = pn_equal - pn_shared
-  var pn_ghost = image(rn, pw_crossing_out, rw.out_ptr)
+  var pw_out = preimage(rw, pn_equal, rw.in_ptr)
+  var pw_in = preimage(rw, pn_equal, rw.out_ptr)
+  var pn_out = image(rn, pw_out, rw.out_ptr)
+  var pn_in = image(rn, pw_in, rw.in_ptr)
+  var pn_private = pn_equal & pn_in & pn_out
+  var pn_shared = pn_equal - pn_private
+  var pn_ghost = pn_out - pn_equal
 
   if conf.dump_graph then
     helper.dump_graph(conf, rn, rw,
                       pn_private, pn_shared,
-                      pn_ghost, pw_outgoing)
+                      pn_ghost, pw_out)
   end
 
   __demand(__parallel)
@@ -179,7 +179,7 @@ task toplevel()
     helper.validate_pointers(pn_private[i],
                              pn_shared[i],
                              pn_ghost[i],
-                             pw_outgoing[i])
+                             pw_out[i])
   end
 
   helper.wait_for(rn, rw)
@@ -196,14 +196,14 @@ task toplevel()
                              pn_private[i],
                              pn_shared[i],
                              pn_ghost[i],
-                             pw_outgoing[i])
+                             pw_out[i])
     end
     __demand(__parallel)
     for i = 0, conf.num_pieces do
       distribute_charge(pn_private[i],
                         pn_shared[i],
                         pn_ghost[i],
-                        pw_outgoing[i])
+                        pw_out[i])
     end
     __demand(__parallel)
     for i = 0, conf.num_pieces do
