@@ -32,9 +32,9 @@ struct CktConfig {
 terra CktConfig:initialize_from_command()
   self.num_loops = 5
   self.num_pieces = 4
-  self.nodes_per_piece = 2
-  self.wires_per_piece = 4
-  self.pct_wire_in_piece = 95
+  self.nodes_per_piece = 4
+  self.wires_per_piece = 8
+  self.pct_wire_in_piece = 80
   self.random_seed = 12345
   self.steps = 10000
   self.dump_graph = false

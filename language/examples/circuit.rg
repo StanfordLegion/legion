@@ -557,9 +557,9 @@ task toplevel()
   var conf : Config
   conf.num_loops = 5
   conf.num_pieces = 4
-  conf.nodes_per_piece = 2
-  conf.wires_per_piece = 4
-  conf.pct_wire_in_piece = 95
+  conf.nodes_per_piece = 4
+  conf.wires_per_piece = 8
+  conf.pct_wire_in_piece = 80
   conf.random_seed = 12345
   conf.steps = STEPS
   conf.sync = 0
