@@ -16,8 +16,6 @@ import "regent"
 
 local c = regentlib.c
 
-local int1d = index_type(int, "int1d")
-
 task f()
   var r = region(ispace(ptr, 5), int)
   var x0 = new(ptr(int, r))

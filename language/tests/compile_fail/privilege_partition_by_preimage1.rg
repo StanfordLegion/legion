@@ -13,13 +13,11 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_partition_by_preimage1.rg:26: invalid privileges in argument 1: reads($s)
+-- privilege_partition_by_preimage1.rg:24: invalid privileges in argument 1: reads($s)
 --   var q = preimage(p, s)
 --                  ^
 
 import "regent"
-
-local int1d = index_type(int, "ind1d")
 
 task f(r : region(int), s : region(ptr(int, r)))
   var p = partition(equal, r, ispace(int1d, 3))

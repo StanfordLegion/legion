@@ -13,13 +13,11 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_image1.rg:28: type mismatch in argument 1: expected partition but got int32
+-- type_mismatch_partition_by_image1.rg:26: type mismatch in argument 1: expected partition but got int32
 --   var q = image(0, s, r)
 --               ^
 
 import "regent"
-
-local int1d = index_type(int, "ind1d")
 
 task f()
   var r = region(ispace(ptr, 5), int)

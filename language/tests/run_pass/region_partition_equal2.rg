@@ -16,8 +16,6 @@
 
 import "regent"
 
-local int1d = index_type(int, "int1d")
-
 struct t {
   value : int,
 }

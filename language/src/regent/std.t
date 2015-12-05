@@ -588,6 +588,14 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t)
 end
 
+function std.is_fspace(x)
+  return getmetatable(x) == fspace
+end
+
+function std.is_fspace_instance(t)
+  return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
+end
+
 struct std.untyped {}
 
 function std.type_sub(t, mapping)
@@ -1640,7 +1648,12 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
+local struct int2d { x : int, y : int }
+local struct int3d { x : int, y : int, z : int }
 std.ptr = std.index_type(opaque, "ptr")
+std.int1d = std.index_type(int, "int1d")
+std.int2d = std.index_type(int2d, "int2d")
+std.int3d = std.index_type(int3d, "int3d")
 
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
@@ -2839,14 +2852,6 @@ function std.newfspace(node, name, has_params)
     fs = fs()
   end
   return fs
-end
-
-function std.is_fspace(x)
-  return getmetatable(x) == fspace
-end
-
-function std.is_fspace_instance(t)
-  return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
 
 -- #####################################

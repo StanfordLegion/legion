@@ -45,8 +45,6 @@ local GraphCfg = require("mssp_graphcfg")
 
 local helpers = require("mssp_helpers")
 
-local int1d = index_type(int, "int1d")
-
 fspace Node {
   distance : float,
   dist_next : float,
