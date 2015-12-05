@@ -35,6 +35,7 @@ fspace Node {
   leakage       : float,
   charge        : float,
   node_voltage  : float,
+  is_private    : int,
 }
 
 fspace Wire(rpn : region(Node),
@@ -166,7 +167,20 @@ task toplevel()
   var pn_private = pn_equal - pn_shared
   var pn_ghost = (image(rn, pw_crossing_out, rw.out_ptr) | image(rn, pw_crossing_in, rw.in_ptr)) - pn_shared
 
-  if conf.dump_graph then
+  fill(rn.is_private, 0)
+  for i in colors do
+    fill((pn_private[i]).is_private, 1)
+  end
+
+  var pn_top = partition(rn.is_private, ispace(int1d, 2))
+  var pn_top_private = cross_product(pn_top, pn_private)
+  var pn_top_shared = cross_product(pn_top, pn_shared)
+  var pn_top_ghost = cross_product(pn_top, pn_ghost)
+  var pn_sub_private = pn_top_private[1].partition
+  var pn_sub_shared = pn_top_shared[0].partition
+  var pn_sub_ghost = pn_top_ghost[0+0].partition -- Hack: force dynamic lookup
+
+  if true or conf.dump_graph then
     helper.dump_graph(conf, rn, rw,
                       pn_private, pn_shared,
                       pn_ghost, pw_outgoing)
@@ -174,9 +188,9 @@ task toplevel()
 
   __demand(__parallel)
   for i = 0, conf.num_pieces do
-    helper.validate_pointers(pn_private[i],
-                             pn_shared[i],
-                             pn_ghost[i],
+    helper.validate_pointers(pn_sub_private[i],
+                             pn_sub_shared[i],
+                             pn_sub_ghost[i],
                              pw_outgoing[i])
   end
 
@@ -191,21 +205,25 @@ task toplevel()
     __demand(__parallel)
     for i = 0, conf.num_pieces do
       calculate_new_currents(steps,
-                             pn_private[i],
-                             pn_shared[i],
-                             pn_ghost[i],
+                             pn_sub_private[i],
+                             pn_sub_shared[i],
+                             pn_sub_ghost[i],
                              pw_outgoing[i])
     end
     __demand(__parallel)
     for i = 0, conf.num_pieces do
-      distribute_charge(pn_private[i],
-                        pn_shared[i],
-                        pn_ghost[i],
+      distribute_charge(pn_sub_private[i],
+                        pn_sub_shared[i],
+                        pn_sub_ghost[i],
                         pw_outgoing[i])
     end
     __demand(__parallel)
     for i = 0, conf.num_pieces do
-      update_voltages(pn_equal[i])
+      update_voltages(pn_sub_private[i])
+    end
+    __demand(__parallel)
+    for i = 0, conf.num_pieces do
+      update_voltages(pn_sub_shared[i])
     end
 
     c.legion_runtime_end_trace(__runtime(), __context(), 0)
