@@ -6856,9 +6856,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(view != NULL);
+      assert((view != NULL) || (manager != NULL));
 #endif
-      view->add_base_valid_ref(source);
+      // If we have a view, put the reference on the view
+      // otherwise we put it on the instance itself. The later
+      // case happens when instances are locally mapped and moved
+      // to remote nodes.
+      if (view != NULL)
+        view->add_base_valid_ref(source);
+      else
+        manager->add_base_valid_ref(source);
     }
 
     //--------------------------------------------------------------------------
@@ -6866,10 +6873,29 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(view != NULL);
+      assert((view != NULL) || (manager != NULL));
 #endif
-      if (view->remove_base_valid_ref(source))
-        LogicalView::delete_logical_view(view);
+      if (view != NULL)
+      {
+        if (view->remove_base_valid_ref(source))
+          LogicalView::delete_logical_view(view);
+      }
+      else
+      {
+        if (manager->remove_base_valid_ref(source))
+        {
+          if (manager->is_reduction_manager())
+          {
+            ReductionManager *reduc_manager = manager->as_reduction_manager();
+            if (reduc_manager->is_list_manager())
+              legion_delete(reduc_manager->as_list_manager());
+            else
+              legion_delete(reduc_manager->as_fold_manager());
+          }
+          else
+            legion_delete(manager->as_instance_manager());
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
