@@ -126,7 +126,7 @@ ifeq ($(strip $(USE_HWLOC)),1)
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
-USE_LIBDL = 1
+USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
 ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
@@ -136,7 +136,7 @@ LEGION_LD_FLAGS += -ldl
 endif
 endif
 
-# Falgs for running in the general low-level runtime
+# Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
 # general low-level uses CUDA by default
