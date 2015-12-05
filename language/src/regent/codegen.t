@@ -3215,8 +3215,9 @@ function codegen.expr_preimage(cx, node)
       [cx.runtime], [cx.context], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_preimage(
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
-      [parent.value].impl, [region_parent].impl, field_id,
-      domain, c.COMPUTE_KIND, -1, false)
+      [parent.value].impl, [region_parent].impl, field_id, domain,
+      [(result_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+      -1, false)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
   end

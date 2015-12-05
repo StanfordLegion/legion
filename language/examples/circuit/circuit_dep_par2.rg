@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- []
+-- [["-hl:no_dyn"]]
 
 import "regent"
 
