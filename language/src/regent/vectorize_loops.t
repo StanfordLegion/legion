@@ -813,6 +813,10 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a function reference")
 
+    elseif node:is(ast.typed.expr.RawValue) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a raw operator")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
