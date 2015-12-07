@@ -1600,13 +1600,13 @@ function std.index_type(base_type, displayname)
     if std.is_index_type(to) then
       if to:is_opaque() and std.validate_implicit_cast(from, int) then
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
-      elseif not to:is_opaque() and std.type_eq(from, to.base_type) then
+      elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
       end
     elseif std.is_index_type(from) then
       if from:is_opaque() and std.validate_implicit_cast(int, to) then
         return `([to]([expr].__ptr.value))
-      elseif not from:is_opaque() and std.type_eq(from.base_type, to) then
+      elseif not from:is_opaque() and std.validate_implicit_cast(from.base_type, to) then
         return `([to]([expr].__ptr))
       end
     end

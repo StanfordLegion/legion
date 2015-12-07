@@ -57,23 +57,23 @@ namespace LegionRuntime {
     }                                                                \
 
     //--------------------------------------------------------------------------
-		BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
+    BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
                                const std::vector<bishop_region_rule_t>& rrules,
                                Machine machine, HighLevelRuntime *runtime,
                                Processor local_proc)
-			: DefaultMapper(machine, runtime, local_proc),
+      : DefaultMapper(machine, runtime, local_proc),
         task_rules(trules), region_rules(rrules)
     //--------------------------------------------------------------------------
-		{
+    {
       log_bishop.info("bishop mapper created");
-		}
+    }
 
     //--------------------------------------------------------------------------
-		BishopMapper::~BishopMapper()
+    BishopMapper::~BishopMapper()
     //--------------------------------------------------------------------------
-		{
+    {
       log_bishop.info("bishop mapper destroyed");
-		}
+    }
 
     //--------------------------------------------------------------------------
     void BishopMapper::select_task_options(Task *task)
@@ -161,5 +161,5 @@ namespace LegionRuntime {
     {
       DefaultMapper::notify_mapping_failed(mappable);
     }
-	};
+  };
 };

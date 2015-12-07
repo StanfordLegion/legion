@@ -103,13 +103,13 @@ do
   for w in rw do
     w.in_ptr = dynamic_cast(ptr(Node, rpn, rsn), w.in_ptr)
     if isnull(w.in_ptr) then
-      c.printf("validation error: wire %d does not originate from the piece it belongs",
+      c.printf("validation error: wire %d does not originate from the piece it belongs\n",
         __raw(w))
       regentlib.assert(false, "pointer validation failed")
     end
     w.out_ptr = dynamic_cast(ptr(Node, rpn, rsn, rgn), w.out_ptr)
     if isnull(w.out_ptr) then
-      c.printf("validation error: wire %d points to an invalid node",
+      c.printf("validation error: wire %d points to an invalid nod\n",
         __raw(w))
       regentlib.assert(false, "pointer validation failed")
     end
