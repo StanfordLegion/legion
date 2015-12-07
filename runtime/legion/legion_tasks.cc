@@ -6658,24 +6658,29 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!premapped);
 #endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      // If we're remote then we don't need to do anything because
+      // we were premapped on the owner node before being sent remotely
+      if (!is_remote())
       {
-        // Do the premapping if it is not already premapped or early mapped
-        if (!regions[idx].premapped && 
-            (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+        for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       enclosing_contexts[idx],
-                                       privilege_paths[idx], regions[idx], 
-                                       version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+          // Do the premapping if it is not already premapped or early mapped
+          if (!regions[idx].premapped && 
+              (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+          {
+            regions[idx].premapped = runtime->forest->premap_physical_region(
+                                         enclosing_contexts[idx],
+                                         privilege_paths[idx], regions[idx], 
+                                         version_infos[idx], this, parent_ctx,
+                                         parent_ctx->get_executing_processor()
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                         , idx, get_logging_name(), unique_op_id
 #endif
-                                       );
+                                         );
 #ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
+            assert(regions[idx].premapped);
 #endif
+          }
         }
       }
       premapped = true;
