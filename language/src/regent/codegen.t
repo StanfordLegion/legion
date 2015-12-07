@@ -20,7 +20,7 @@ local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local traverse_symbols = require("regent/traverse_symbols")
-local cudahelper
+local cudahelper = {}
 
 -- Configuration Variables
 
@@ -4838,8 +4838,6 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    std.assert(std.config["cuda"],
-      "cuda should be enabled to generate cuda kernels")
     std.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
       "multi-dimensional index spaces are not supported yet")
 
@@ -6175,7 +6173,16 @@ end
 
 function codegen.stat_top(cx, node)
   if node:is(ast.typed.stat.Task) then
-    if not node.options.cuda:is(ast.options.Demand) then
+    if not node.options.cuda:is(ast.options.Demand) or
+      cudahelper.jit_compile_kernels_and_register == nil
+    then
+      if node.options.cuda:is(ast.options.Demand) then
+
+        log.warn(node,
+          "ignoring demand pragma at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) ..
+          " since the CUDA compiler is unavailable")
+      end
       local cpu_task = codegen.stat_task(cx, node)
       std.register_task(cpu_task)
       return cpu_task

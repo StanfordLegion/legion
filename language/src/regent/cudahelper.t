@@ -14,6 +14,8 @@
 
 local cudahelper = {}
 
+local log = require("regent/log")
+
 if not terralib.cudacompile then return cudahelper end
 
 -- copied and modified from cudalib.lua in Terra interpreter
