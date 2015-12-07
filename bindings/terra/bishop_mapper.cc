@@ -100,7 +100,8 @@ namespace LegionRuntime {
           // TODO: only supports 1D indexspace launch at the moment
           if (rule.matches(task_) && domain.get_dim() == 1)
           {
-            slices.clear();
+            bool success = true;
+            std::vector<DomainSplit> new_slices;
             Arrays::Rect<1> r = domain.get_rect<1>();
             for(Arrays::GenericPointInRectIterator<1> pir(r); pir; pir++)
             {
@@ -109,10 +110,22 @@ namespace LegionRuntime {
               Processor target =
                 CObjectWrapper::unwrap(
                     rule.select_target_for_point(task_, dp_));
+              success = success && target != Processor::NO_PROC;
               Arrays::Rect<1> subrect(pir.p, pir.p);
               Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,
                   false, false);
-              slices.push_back(ds);
+              new_slices.push_back(ds);
+            }
+            if (success)
+            {
+              slices.clear();
+              slices = new_slices;
+            }
+            else
+            {
+              log_bishop.warning("[slice_domain] launch domain is not covered "
+                  "entirely for task %s. mapping rule would not apply.",
+                  task->variants->name);
             }
           }
         }
