@@ -6173,11 +6173,10 @@ end
 
 function codegen.stat_top(cx, node)
   if node:is(ast.typed.stat.Task) then
-    if not node.options.cuda:is(ast.options.Demand) or
-      cudahelper.jit_compile_kernels_and_register == nil
+    if not (node.options.cuda:is(ast.options.Demand) and
+            cudahelper.check_cuda_available())
     then
       if node.options.cuda:is(ast.options.Demand) then
-
         log.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..

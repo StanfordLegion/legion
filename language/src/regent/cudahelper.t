@@ -16,7 +16,10 @@ local cudahelper = {}
 
 local log = require("regent/log")
 
-if not terralib.cudacompile then return cudahelper end
+if not terralib.cudacompile then
+  cudahelper.check_cuda_available = function() return false end
+  return cudahelper
+end
 
 -- copied and modified from cudalib.lua in Terra interpreter
 
@@ -85,6 +88,11 @@ local DriverAPI = {
 }
 
 -- copied and modified from cudalib.lua in Terra interpreter
+
+terra cudahelper.check_cuda_available()
+  var r = DriverAPI.cuInit(0)
+  return r == 0
+end
 
 local terra init_cuda() : int32
   var r = DriverAPI.cuInit(0)

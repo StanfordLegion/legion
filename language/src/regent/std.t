@@ -3012,7 +3012,7 @@ function std.start(main_task)
         [task:getdefinition()])
       end
     end)
-  if std.config["cuda"] then
+  if std.config["cuda"] and cudahelper.check_cuda_available() then
     cudahelper.link_driver_library()
     local all_kernels = {}
     tasks:map(function(task)
