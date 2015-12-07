@@ -132,7 +132,7 @@ ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 LEGION_LD_FLAGS += -ldl -rdynamic
 else
-LEGION_LD_FLAGS += -ldl
+LEGION_LD_FLAGS += -ldl -Wl,-export_dynamic
 endif
 endif
 
