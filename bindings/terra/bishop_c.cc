@@ -94,6 +94,20 @@ bishop_all_processors()
   return procs_;
 }
 
+bishop_memory_list_t
+bishop_all_memories()
+{
+  Machine m = Machine::get_machine();
+  set<Memory> mems;
+  m.get_all_memories(mems);
+
+  bishop_memory_list_t mems_ = bishop_create_memory_list(mems.size());
+  int idx = 0;
+  for (set<Memory>::iterator it = mems.begin(); it != mems.end(); ++it)
+    mems_.list[idx++] = CObjectWrapper::wrap(*it);
+  return mems_;
+}
+
 legion_processor_t
 bishop_get_no_processor()
 {

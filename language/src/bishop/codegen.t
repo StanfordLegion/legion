@@ -117,6 +117,12 @@ function codegen.expr(binders, node)
         [actions];
         [value] = c.bishop_all_processors()
       end
+      elseif keyword == "memories" then
+      assert(std.is_memory_list_type(node.expr_type))
+      actions = quote
+        [actions];
+        [value] = c.bishop_all_memories()
+      end
     elseif std.is_isa_type(node.expr_type) then
       actions = quote
         [actions];

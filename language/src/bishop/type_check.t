@@ -68,6 +68,7 @@ keyword_type_assignment:assign_type({ "global", "sysmem", "regmem", "fbmem",
 keyword_type_assignment:assign_type({ "forbid", "allow", "demand" },
                                     std.compile_option_type)
 keyword_type_assignment:assign_type({ "processors" }, std.processor_list_type)
+keyword_type_assignment:assign_type({ "memories" }, std.memory_list_type)
 
 function type_check.filter_constraint(value_type, type_env, constraint)
   assert(constraint:is(ast.specialized.FilterConstraint))

@@ -79,6 +79,8 @@ bool bishop_task_set_target_processor(legion_task_t, legion_processor_t);
 bool bishop_task_set_target_processor_list(legion_task_t,
                                            bishop_processor_list_t);
 
+bishop_memory_list_t bishop_all_memories();
+
 bool bishop_region_set_target_memory(legion_region_requirement_t,
                                      legion_memory_t);
 bool bishop_region_set_target_memory_list(legion_region_requirement_t,
