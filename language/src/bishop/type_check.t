@@ -111,7 +111,13 @@ function type_check.expr(type_env, expr)
   if expr:is(ast.specialized.expr.Unary) then
     local rhs = type_check.expr(type_env, expr.rhs)
     if expr.op == "-" then
-      if rhs.expr_type ~= int then
+      if std.is_point_type(rhs.expr_type) then
+        rhs = ast.typed.expr.Coerce {
+          value = rhs,
+          expr_type = int,
+          position = expr.position,
+        }
+      elseif rhs.expr_type ~= int then
         log.error(expr.rhs, "unary op " .. expr.op ..
           " expects the rhs to be of integer type")
       end
@@ -132,9 +138,24 @@ function type_check.expr(type_env, expr)
             expr.op == "*" or expr.op == "/" or expr.op == "%") then
       log.error(expr, "unexpected binary operation")
     end
-    if lhs.expr_type ~= int then
+
+    if std.is_point_type(lhs.expr_type) then
+      lhs = ast.typed.expr.Coerce {
+        value = lhs,
+        expr_type = int,
+        position = expr.position,
+      }
+    elseif lhs.expr_type ~= int then
       log.error(expr.lhs, "binary op " .. expr.op ..
         " expects the lhs to be of integer type")
+    end
+
+    if std.is_point_type(rhs.expr_type) then
+      rhs = ast.typed.expr.Coerce {
+        value = rhs,
+        expr_type = int,
+        position = expr.position,
+      }
     elseif rhs.expr_type ~= int then
       log.error(expr.rhs, "binary op " .. expr.op ..
         " expects the rhs to be of integer type")
@@ -151,7 +172,14 @@ function type_check.expr(type_env, expr)
   elseif expr:is(ast.specialized.expr.Index) then
     local value = type_check.expr(type_env, expr.value)
     local index = type_check.expr(type_env, expr.index)
-    if index.expr_type ~= int then
+
+    if std.is_point_type(value.expr_type) then
+      index = ast.typed.expr.Coerce {
+        value = index,
+        expr_type = int,
+        position = expr.position,
+      }
+    elseif index.expr_type ~= int then
       log.error(expr.index, "invalid type '" .. tostring(index.expr_type) ..
         "' for index expression")
     end
