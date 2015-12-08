@@ -16,16 +16,12 @@ import "regent"
 
 local c = regentlib.c
 
-function raw(t)
-  return terra(x : t) return x.__ptr end
-end
-
 task main()
   var r = region(ispace(ptr, 5), int)
   var x = new(ptr(int, r))
 
   var rc = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, [raw(ptr(int, r))](x))
+  c.legion_coloring_add_point(rc, 0, __raw(x))
   c.legion_coloring_ensure_color(rc, 1)
 
   var p = partition(disjoint, r, rc)
@@ -40,7 +36,7 @@ task main()
   var rc1 = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc1, 0)
   c.legion_coloring_ensure_color(rc1, 1)
-  var p1 = partition(disjoint, r1, rc)
+  var p1 = partition(disjoint, r1, rc1)
   var r10 = p1[0]
   var r11 = p1[1]
   c.legion_coloring_destroy(rc1)

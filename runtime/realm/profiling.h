@@ -103,6 +103,7 @@ namespace Realm {
       static const ProfilingMeasurementID ID = PMID_OP_MEM_USAGE;
       Memory source;
       Memory target;
+      size_t size;
     };
 
     // Track the timeline of an instance
@@ -152,7 +153,7 @@ namespace Realm {
   protected:
     friend class ProfilingMeasurementCollection;
 
-    template <typename S> friend bool operator<<(S &s, const ProfilingRequest &pr);
+    template <typename S> friend bool serialize(S &s, const ProfilingRequest &pr);
 
     Processor response_proc;
     Processor::TaskFuncID response_task_id;
@@ -182,8 +183,8 @@ namespace Realm {
   protected:
     friend class ProfilingMeasurementCollection;
 
-    template <typename S> friend bool operator<<(S &s, const ProfilingRequestSet &prs);
-    template <typename S> friend bool operator>>(S &s, ProfilingRequestSet &prs);
+    template <typename S> friend bool serialize(S &s, const ProfilingRequestSet &prs);
+    template <typename S> friend bool deserialize(S &s, ProfilingRequestSet &prs);
 
     std::vector<ProfilingRequest *> requests;
   };

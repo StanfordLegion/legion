@@ -553,7 +553,139 @@ namespace Realm {
 #endif
     }
 
-  
+    RegionInstance Domain::create_file_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                legion_lowlevel_file_mode_t file_mode) const
+    {
+      ProfilingRequestSet requests;
+
+      Memory memory = Memory::NO_MEMORY;
+      Machine machine = Machine::get_machine();
+      std::set<Memory> mem;
+      machine.get_all_memories(mem);
+      FileMemory *file_mem = NULL;
+      for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++) {
+        if (it->kind() == Memory::FILE_MEM) {
+          memory = *it;
+          file_mem = (FileMemory*) get_runtime()->get_memory_impl(memory);
+          if(file_mem->kind == MemoryImpl::MKIND_FILE)
+            break; /* this is usable, take it */
+        }
+      }
+      assert(file_mem != NULL);
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      ID id(memory);
+      size_t block_size;
+
+      size_t elem_size = 0;
+      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
+	  it != field_sizes.end();
+	  it++)
+	elem_size += *it;
+
+      size_t num_elements;
+      int linearization_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+      if(get_dim() > 0) {
+	// we have a rectangle - figure out its volume and create based on that
+	LegionRuntime::Arrays::Rect<1> inst_extent;
+	switch(get_dim()) {
+	case 1:
+	  {
+	    LegionRuntime::Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+	    DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
+	    inst_extent = cl.image_convex(get_rect<1>());
+	    dl.serialize(linearization_bits);
+	    break;
+	  }
+
+	case 2:
+	  {
+	    LegionRuntime::Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
+	    DomainLinearization dl = DomainLinearization::from_mapping<2>(LegionRuntime::Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
+	    inst_extent = cl.image_convex(get_rect<2>());
+	    dl.serialize(linearization_bits);
+	    break;
+	  }
+
+	case 3:
+	  {
+	    LegionRuntime::Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
+	    DomainLinearization dl = DomainLinearization::from_mapping<3>(LegionRuntime::Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
+	    inst_extent = cl.image_convex(get_rect<3>());
+	    dl.serialize(linearization_bits);
+	    break;
+	  }
+
+	default: assert(0);
+	}
+
+	num_elements = inst_extent.volume();
+	block_size = num_elements;
+	//printf("num_elements = %zd\n", num_elements);
+      } else {
+	IndexSpaceImpl *r = get_runtime()->get_index_space_impl(get_index_space());
+
+	StaticAccess<IndexSpaceImpl> data(r);
+	assert(data->num_elmts > 0);
+
+#ifdef FULL_SIZE_INSTANCES
+	num_elements = data->last_elmt + 1;
+	// linearization is an identity translation
+	Translation<1> inst_offset(0);
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	dl.serialize(linearization_bits);
+#else
+	num_elements = data->last_elmt - data->first_elmt + 1;
+	block_size = num_elements;
+        // round num_elements up to a multiple of 4 to line things up better with vectors, cache lines, etc.
+        if(num_elements & 3) {
+          if (block_size == num_elements)
+            block_size = (block_size + 3) & ~(size_t)3;
+          num_elements = (num_elements + 3) & ~(size_t)3;
+        }
+	if(block_size > num_elements)
+	  block_size = num_elements;
+
+	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
+
+	Translation<1> inst_offset(-(int)(data->first_elmt));
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	dl.serialize(linearization_bits);
+#endif
+      }
+
+      // for instances with a single element, there's no real difference between AOS and
+      //  SOA - force the block size to indicate "full SOA" as it makes the DMA code
+      //  use a faster path
+      if(field_sizes.size() == 1)
+	block_size = num_elements;
+
+#ifdef FORCE_SOA_INSTANCE_LAYOUT
+      // the big hammer
+      if(block_size != num_elements) {
+        log_inst.info("block size changed from %zd to %zd (SOA)",
+                      block_size, num_elements);
+        block_size = num_elements;
+      }
+#endif
+
+      if(block_size > 1) {
+	size_t leftover = num_elements % block_size;
+	if(leftover > 0)
+	  num_elements += (block_size - leftover);
+      }
+
+      size_t inst_bytes = elem_size * num_elements;
+
+      RegionInstance i = file_mem->create_instance(get_index_space(), linearization_bits, inst_bytes,
+						 block_size, elem_size, field_sizes,
+						 0 /*reduction op*/, -1 /*list size*/, requests,
+						 RegionInstance::NO_INST, file_name, *this, file_mode);
+      log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
+	       this->is_id, memory.id, i.id, inst_bytes);
+      return i;
+    }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndexSpaceAllocator

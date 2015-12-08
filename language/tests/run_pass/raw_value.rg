@@ -19,12 +19,14 @@ local c = regentlib.c
 terra test(is : c.legion_index_space_t,
            r : c.legion_logical_region_t,
            p : c.legion_logical_partition_t,
-           cp : c.legion_terra_index_cross_product_t)
+           cp : c.legion_terra_index_cross_product_t,
+           x : c.legion_ptr_t)
 end
 
 task main()
   var is = ispace(ptr, 5)
   var r = region(is, int)
+  var x = new(ptr(int, r))
 
   var colors = c.legion_coloring_create()
   c.legion_coloring_ensure_color(colors, 0)
@@ -34,6 +36,6 @@ task main()
 
   var prod = cross_product(part0, part1)
 
-  test(__raw(is), __raw(r), __raw(part0), __raw(prod))
+  test(__raw(is), __raw(r), __raw(part0), __raw(prod), __raw(x))
 end
 regentlib.start(main)

@@ -975,19 +975,19 @@ public:
   virtual bool map_task(Task *task);
   virtual bool map_inline(Inline *inline_operation);
   virtual void notify_mapping_failed(const Mappable *mappable);
-  virtual bool rank_copy_targets(const Mappable *mappable,
-                                 LogicalRegion rebuild_region,
-                                 const std::set<Memory> &current_instances,
-                                 bool complete,
-                                 size_t max_blocking_factor,
-                                 std::set<Memory> &to_reuse,
-                                 std::vector<Memory> &to_create,
-                                 bool &create_one,
-                                 size_t &blocking_factor);
-  virtual void rank_copy_sources(const Mappable *mappable,
-                                 const std::set<Memory> &current_instances,
-                                 Memory dst_mem,
-                                 std::vector<Memory> &chosen_order);
+  //virtual bool rank_copy_targets(const Mappable *mappable,
+  //                               LogicalRegion rebuild_region,
+  //                               const std::set<Memory> &current_instances,
+  //                               bool complete,
+  //                               size_t max_blocking_factor,
+  //                               std::set<Memory> &to_reuse,
+  //                               std::vector<Memory> &to_create,
+  //                               bool &create_one,
+  //                               size_t &blocking_factor);
+  //virtual void rank_copy_sources(const Mappable *mappable,
+  //                               const std::set<Memory> &current_instances,
+  //                               Memory dst_mem,
+  //                               std::vector<Memory> &chosen_order);
 private:
   Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
   LogicalRegion get_root_region(LogicalRegion handle);
@@ -1203,56 +1203,56 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
   assert(0 && "mapping failed");
 }
 
-bool PennantMapper::rank_copy_targets(const Mappable *mappable,
-                                      LogicalRegion rebuild_region,
-                                      const std::set<Memory> &current_instances,
-                                      bool complete,
-                                      size_t max_blocking_factor,
-                                      std::set<Memory> &to_reuse,
-                                      std::vector<Memory> &to_create,
-                                      bool &create_one,
-                                      size_t &blocking_factor)
-{
-  DefaultMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
-                                   complete, max_blocking_factor, to_reuse,
-                                   to_create, create_one, blocking_factor);
-  if (create_one) {
-    blocking_factor = max_blocking_factor;
-  }
-  return true;
-}
+//bool PennantMapper::rank_copy_targets(const Mappable *mappable,
+//                                      LogicalRegion rebuild_region,
+//                                      const std::set<Memory> &current_instances,
+//                                      bool complete,
+//                                      size_t max_blocking_factor,
+//                                      std::set<Memory> &to_reuse,
+//                                      std::vector<Memory> &to_create,
+//                                      bool &create_one,
+//                                      size_t &blocking_factor)
+//{
+//  // DefaultMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
+//  //                                  complete, max_blocking_factor, to_reuse,
+//  //                                  to_create, create_one, blocking_factor);
+//  // if (create_one) {
+//  //   blocking_factor = max_blocking_factor;
+//  // }
+//  return true;
+//}
 
-void PennantMapper::rank_copy_sources(const Mappable *mappable,
-                                      const std::set<Memory> &current_instances,
-                                      Memory dst_mem,
-                                      std::vector<Memory> &chosen_order)
-{
-  // Elliott: This is to fix a bug in the default mapper which throws
-  // an error with composite instances.
-
-  // Handle the simple case of having the destination
-  // memory in the set of instances
-  if (current_instances.find(dst_mem) != current_instances.end())
-  {
-    chosen_order.push_back(dst_mem);
-    return;
-  }
-
-  machine_interface.find_memory_stack(dst_mem,
-                                      chosen_order, true/*latency*/);
-  if (chosen_order.empty())
-  {
-    // This is the multi-hop copy because none
-    // of the memories had an affinity
-    // SJT: just send the first one
-    if(current_instances.size() > 0) {
-      chosen_order.push_back(*(current_instances.begin()));
-    } else {
-      // Elliott: This is a composite instance.
-      //assert(false);
-    }
-  }
-}
+//void PennantMapper::rank_copy_sources(const Mappable *mappable,
+//                                      const std::set<Memory> &current_instances,
+//                                      Memory dst_mem,
+//                                      std::vector<Memory> &chosen_order)
+//{
+//  // Elliott: This is to fix a bug in the default mapper which throws
+//  // an error with composite instances.
+//
+//  // Handle the simple case of having the destination
+//  // memory in the set of instances
+//  if (current_instances.find(dst_mem) != current_instances.end())
+//  {
+//    chosen_order.push_back(dst_mem);
+//    return;
+//  }
+//
+//  machine_interface.find_memory_stack(dst_mem,
+//                                      chosen_order, true/*latency*/);
+//  if (chosen_order.empty())
+//  {
+//    // This is the multi-hop copy because none
+//    // of the memories had an affinity
+//    // SJT: just send the first one
+//    if(current_instances.size() > 0) {
+//      chosen_order.push_back(*(current_instances.begin()));
+//    } else {
+//      // Elliott: This is a composite instance.
+//      //assert(false);
+//    }
+//  }
+//}
 
 Color PennantMapper::get_task_color_by_region(Task *task, const RegionRequirement &requirement)
 {

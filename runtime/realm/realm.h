@@ -18,6 +18,8 @@
 #ifndef REALM_H
 #define REALM_H
 
+#include "realm/realm_config.h"
+
 #include "realm/profiling.h"
 #include "realm/redop.h"
 #include "realm/event.h"
@@ -28,5 +30,6 @@
 #include "realm/machine.h"
 #include "realm/runtime.h"
 #include "realm/indexspace.h"
+#include "realm/codedesc.h"
 
 #endif // ifndef REALM_H

@@ -15,6 +15,8 @@
 
 // Realm modules
 
+#include "realm_config.h"
+
 #define REALM_MODULE_REGISTRATION_STATIC
 #include "module.h"
 
@@ -24,7 +26,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-//define REALM_USE_DLFCN
 #ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
 #endif

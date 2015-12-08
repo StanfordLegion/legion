@@ -248,6 +248,8 @@ namespace LegionRuntime {
 
       void record_bytes(size_t bytes);
 
+      size_t get_total_bytes() { return total_bytes; }
+
     protected:
       size_t total_reqs, total_bytes;
     };

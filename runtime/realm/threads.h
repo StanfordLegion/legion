@@ -18,7 +18,7 @@
 #ifndef REALM_THREADS_H
 #define REALM_THREADS_H
 
-#define REALM_USE_USER_THREADS
+#include "realm_config.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__

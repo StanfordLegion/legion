@@ -39,21 +39,27 @@ namespace LegionRuntime {
 
       TaskResult(const void *v, size_t v_size)
         : value(NULL), value_size(v_size) {
+        if (!v) return;
         value = malloc(value_size);
         assert(value);
         memcpy(value, v, value_size);
       }
 
       TaskResult(const TaskResult &r) : value(NULL), value_size(r.value_size) {
+        if (!r.value) return;
         value = malloc(value_size);
         assert(value);
         memcpy(value, r.value, value_size);
       }
 
       const TaskResult &operator=(const TaskResult &r) {
-        free(value);
+        if (value) free(value);
 
         value_size = r.value_size;
+        if (!r.value) {
+          value = NULL;
+          return r;
+        }
         value = malloc(value_size);
         assert(value);
         memcpy(value, r.value, value_size);
@@ -61,7 +67,7 @@ namespace LegionRuntime {
       }
 
       ~TaskResult(void) {
-        free(value);
+        if (value) free(value);
       }
 
       size_t legion_buffer_size(void) const {
@@ -69,7 +75,9 @@ namespace LegionRuntime {
       }
       size_t legion_serialize(void *buffer) const {
         *(size_t *)buffer = value_size;
-        memcpy((void *)(((size_t *)buffer)+1), value, value_size);
+        if (value) {
+          memcpy((void *)(((size_t *)buffer)+1), value, value_size);
+        }
         return sizeof(size_t) + value_size;
       }
       size_t legion_deserialize(const void *buffer) {
@@ -111,19 +119,21 @@ namespace LegionRuntime {
         return static_cast<const T>(t_.impl);                           \
       }
 
-      NEW_OPAQUE_WRAPPER(legion_runtime_t, HighLevelRuntime *);
+      NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, Context);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
+      NEW_OPAQUE_WRAPPER(legion_phase_barrier_t, PhaseBarrier *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);

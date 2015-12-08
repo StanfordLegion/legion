@@ -25,6 +25,14 @@
 
 #include "cmdline.h"
 
+#include "codedesc.h"
+
+#include "utils.h"
+
+// For doing backtraces
+#include <execinfo.h> // symbols
+#include <cxxabi.h>   // demangling
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -118,15 +126,32 @@ namespace Realm {
       return ((RuntimeImpl *)impl)->init(argc, argv);
     }
     
+    // this is now just a wrapper around Processor::register_task - consider switching to
+    //  that
     bool Runtime::register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr)
     {
       assert(impl != 0);
 
+      CodeDescriptor codedesc(taskptr);
+      ProfilingRequestSet prs;
+      std::set<Event> events;
+      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[gasnet_mynode()].processors;
+      for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
+	  it != procs.end();
+	  it++) {
+	Event e = (*it)->me.register_task(taskid, codedesc, prs);
+	events.insert(e);
+      }
+
+      Event::merge_events(events).wait();
+      return true;
+#if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
 	return false;
 
       ((RuntimeImpl *)impl)->task_table[taskid] = taskptr;
       return true;
+#endif
     }
 
     bool Runtime::register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
@@ -429,6 +454,35 @@ namespace Realm {
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
 	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+
+      // and one more... disable GASNet's probing of pinnable memory - it's
+      //  painfully slow on most systems (the gemini conduit doesn't probe
+      //  at all, so it's ok)
+      // we can do this because in gasnet_attach() we will ask for exactly as
+      //  much as we need, and we can detect failure there if that much memory
+      //  doesn't actually exist
+      // inconveniently, we have to set a PHYSMEM_MAX before we call
+      //  gasnet_init and we don't have our argc/argv until after, so we can't
+      //  set PHYSMEM_MAX correctly, but setting it to something really big to
+      //  prevent all the early checks from failing gets us to that final actual
+      //  alloc/pin in gasnet_attach ok
+      {
+	// the only way to control this is with environment variables, so set
+	//  them unless the user has already set them (in which case, we assume
+	//  they know what they're doing)
+	// do handle the case where NOPROBE is set to 1, but PHYSMEM_MAX isn't
+	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
+	if(!e || (atoi(e) > 0)) {
+	  if(!e)
+	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	  if(!getenv("GASNET_PHYSMEM_MAX")) {
+	    // just because it's fun to read things like this 20 years later:
+	    // "nobody will ever build a system with more than 1 TB of RAM..."
+	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	  }
+	}
+      }
+
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
         char s[80];
@@ -564,18 +618,18 @@ namespace Realm {
                        "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
-      if (gasnet_nodes() > (1 << ID::NODE_BITS))
+      if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
 #ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
-                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS));
+                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
 #else
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes.  Update the allocation "
                        "of bits in ID or switch to 64-bit IDs with the "
                        "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS));
+                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
 #endif
         gasnet_exit(1);
       }
@@ -662,21 +716,20 @@ namespace Realm {
       signal(SIGTERM, deadlock_catch);
       signal(SIGINT, deadlock_catch);
 #endif
-#if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE)
-      signal(SIGSEGV, realm_backtrace);
-      signal(SIGABRT, realm_backtrace);
-      signal(SIGFPE,  realm_backtrace);
-      signal(SIGILL,  realm_backtrace);
-      signal(SIGBUS,  realm_backtrace);
-#endif
       if ((getenv("LEGION_FREEZE_ON_ERROR") != NULL) ||
-          (getenv("REALM_FREEZE_ON_ERROR") != NULL))
-      {
+          (getenv("REALM_FREEZE_ON_ERROR") != NULL)) {
         signal(SIGSEGV, realm_freeze);
         signal(SIGABRT, realm_freeze);
         signal(SIGFPE,  realm_freeze);
         signal(SIGILL,  realm_freeze);
         signal(SIGBUS,  realm_freeze);
+      } else if ((getenv("REALM_BACKTRACE") != NULL) ||
+                 (getenv("LEGION_BACKTRACE") != NULL)) {
+        signal(SIGSEGV, realm_backtrace);
+        signal(SIGABRT, realm_backtrace);
+        signal(SIGFPE,  realm_backtrace);
+        signal(SIGILL,  realm_backtrace);
+        signal(SIGBUS,  realm_backtrace);
       }
       
       start_polling_threads(active_msg_worker_threads);
@@ -758,6 +811,12 @@ namespace Realm {
         n->memories.push_back(diskmem);
       } else
         diskmem = 0;
+
+      FileMemory *filemem;
+      filemem = new FileMemory(ID(ID::ID_MEMORY,
+                                 gasnet_mynode(),
+                                 n->memories.size(), 0).convert<Memory>());
+      n->memories.push_back(filemem);
 
 #ifdef USE_HDF
       // create HDF memory
@@ -855,13 +914,20 @@ namespace Realm {
 				  5,   // "low" bandwidth
 				  100 // "high" latency
 				  );
-	  
+
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::HDF_MEM],
 				  5,   // "low" bandwidth
 				  100 // "high" latency
 				  );
+
+	  add_proc_mem_affinities(machine,
+                  procs_by_kind[k],
+                  mems_by_kind[Memory::FILE_MEM],
+                  5,    // low bandwidth
+                  100   // high latency)
+                  );
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
@@ -881,6 +947,13 @@ namespace Realm {
 	add_mem_mem_affinities(machine,
 			       mems_by_kind[Memory::SYSTEM_MEM],
 			       mems_by_kind[Memory::DISK_MEM],
+			       15,  // "low" bandwidth
+			       50  // "high" latency
+			       );
+
+	add_mem_mem_affinities(machine,
+			       mems_by_kind[Memory::SYSTEM_MEM],
+			       mems_by_kind[Memory::FILE_MEM],
 			       15,  // "low" bandwidth
 			       50  // "high" latency
 			       );
@@ -1027,18 +1100,6 @@ namespace Realm {
       return 0;
     }
 
-    template <typename T>
-    void delete_vector_contents(std::vector<T *>& v, bool clear_vector = true)
-    {
-      for(typename std::vector<T *>::iterator it = v.begin();
-	  it != v.end();
-	  it++)
-	delete (*it);
-
-      if(clear_vector)
-	v.clear();
-    }
-
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -1071,7 +1132,7 @@ namespace Realm {
       // now that we've got the machine description all set up, we can start
       //  the worker threads for local processors, which'll probably ask the
       //  high-level runtime to set itself up
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
 	log_task.info("spawning processor init task on local cpus");
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
@@ -1156,8 +1217,8 @@ namespace Realm {
 	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
 	  Node& n = nodes[i];
 
-	  delete_vector_contents(n.memories);
-	  delete_vector_contents(n.processors);
+	  delete_container_contents(n.memories);
+	  delete_container_contents(n.processors);
 	}
 	
 	delete[] nodes;
@@ -1169,7 +1230,7 @@ namespace Realm {
 	delete local_proc_group_free_list;
 
 	// delete all the DMA channels that we were given
-	delete_vector_contents(dma_channels);
+	delete_container_contents(dma_channels);
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
@@ -1211,7 +1272,7 @@ namespace Realm {
 
       log_runtime.info("shutdown request - cleaning up local processors\n");
 
-      if(task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
 	log_task.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
@@ -1416,6 +1477,79 @@ namespace Realm {
       }
 	  
       return mem->instances[id.index_l()];
+    }
+
+    /*static*/
+    void RuntimeImpl::realm_backtrace(int signal)
+    {
+      assert((signal == SIGILL) || (signal == SIGFPE) || 
+             (signal == SIGABRT) || (signal == SIGSEGV) ||
+             (signal == SIGBUS));
+      void *bt[256];
+      int bt_size = backtrace(bt, 256);
+      char **bt_syms = backtrace_symbols(bt, bt_size);
+      size_t buffer_size = 2048; // default buffer size
+      char *buffer = (char*)malloc(buffer_size);
+      size_t offset = 0;
+      size_t funcnamesize = 256;
+      char *funcname = (char*)malloc(funcnamesize);
+      for (int i = 0; i < bt_size; i++) {
+        // Modified from https://panthema.net/2008/0901-stacktrace-demangled/ 
+        // under WTFPL 2.0
+        char *begin_name = 0, *begin_offset = 0, *end_offset = 0;
+        // find parentheses and +address offset surrounding the mangled name:
+        // ./module(function+0x15c) [0x8048a6d]
+        for (char *p = bt_syms[i]; *p; ++p) {
+          if (*p == '(')
+            begin_name = p;
+          else if (*p == '+')
+            begin_offset = p;
+          else if (*p == ')' && begin_offset) {
+            end_offset = p;
+            break;
+          }
+        }
+        // If offset is within half of the buffer size, double the buffer
+        if (offset >= (buffer_size / 2)) {
+          buffer_size *= 2;
+          buffer = (char*)realloc(buffer, buffer_size);
+        }
+        if (begin_name && begin_offset && end_offset &&
+            (begin_name < begin_offset)) {
+          *begin_name++ = '\0';
+          *begin_offset++ = '\0';
+          *end_offset = '\0';
+          // mangled name is now in [begin_name, begin_offset) and caller
+          // offset in [begin_offset, end_offset). now apply __cxa_demangle():
+          int status;
+          char* demangled_name = 
+            abi::__cxa_demangle(begin_name, funcname, &funcnamesize, &status);
+          if (status == 0) {
+            funcname = demangled_name; // use possibly realloc()-ed string
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                         "  %s : %s+%s\n", bt_syms[i], funcname, begin_offset);
+          } else {
+            // demangling failed. Output function name as a C function 
+            // with no arguments.
+            offset += snprintf(buffer+offset,buffer_size-offset,
+                     "  %s : %s()+%s\n", bt_syms[i], begin_name, begin_offset);
+          }
+        } else {
+          // Who knows just print the whole line
+          offset += snprintf(buffer+offset,buffer_size-offset,
+                             "%s\n",bt_syms[i]);
+        }
+      }
+      fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
+              gasnet_mynode(), (unsigned long)pthread_self(), buffer);
+      fflush(stderr);
+      free(buffer);
+      free(funcname);
+      // returning would almost certainly cause this signal to be raised again,
+      //  so sleep for a second in case other threads also want to chronicle
+      //  their own deaths, and then exit
+      sleep(1);
+      exit(1);
     }
 
   

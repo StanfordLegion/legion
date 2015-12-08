@@ -306,7 +306,7 @@ class IndexSpaceNode(object):
                         break
                 assert color != None
                 label = 'subspace '+hex(self.uid)+\
-                        ' (color: ' + str(color) +')'
+                        ' (color: ' + color.to_simple_string() +')'
 
         printer.println(self.node_name+' [label="'+label+\
                 '",shape=plaintext,fontsize=14,'+\
@@ -714,13 +714,13 @@ class SingleTask(object):
                 op.get_reachable(reachable, False)
 
     def add_mdep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.mdeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_adep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.adeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_instance_requirement(self, idx, index):
@@ -928,6 +928,9 @@ class SingleTask(object):
                 # LegionSpy how to properly compute them yet
                 if mdep.op2.get_op_kind() == DELETION_OP:
                     continue
+                # Skip fences too
+                if mdep.op1.get_op_kind() == FENCE_OP or mdep.op2.get_op_kind() == FENCE_OP:
+                    continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
                       mdep.op1.get_name()+" (ID "+str(mdep.op1.uid)+\
@@ -990,7 +993,7 @@ class SingleTask(object):
                 if diff:
                     src.logical_outgoing = actual_out
                 for dst in actual_out:
-                    printer.println(src.node_name+' -> '+dst.node_name+
+                    printer.println(dst.node_name+' -> '+src.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
                 count+=1
         else:
@@ -1679,21 +1682,22 @@ class CopyOp(object):
 
     def print_base_node(self, printer, logical):
         label = 'Copy Across '+str(self.uid)+'\\n '+\
-                ('' if logical else 'Inst:\ '+hex(self.instances[0].iid)+'@'+\
-                hex(self.instances[0].memory.uid)+'\ '+\
-                '\ \=\=\>\ '+hex(self.instances[1].iid)+'@'+\
-                hex(self.instances[1].memory.uid)+'\\n')+\
+                ('' if logical else 'Inst:\ '+\
+                self.instances[0].dot_instance()+\
+                '\ \=\=\>\ '+self.instances[1].dot_instance()+'\\n'+\
                 'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
-                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n'+\
+                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n')+\
                 'Src Req:\ '+self.reqs[0].to_summary_string()+\
                 ('\\n' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')\\n')+\
                 'Dst Req:\ '+self.reqs[1].to_summary_string()+\
                 ('' if self.reqs[1].region_node.name == None
                         else '\\n('+self.reqs[1].region_node.name+')')
+        color = 'darkgoldenrod3'
+        size = 14
 
         printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=darkgoldenrod3,fontsize=14,fontcolor=black,'+\
+                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
@@ -2770,23 +2774,27 @@ class Copy(object):
     def print_physical_node(self, printer):
         self.mask = self.field_mask_string()
         label = 'Copy '+str(self.uid)+'\\n'+\
-                'Inst:\ '+hex(self.src_inst.iid)+'@'+\
-                hex(self.src_inst.memory.uid)+'\ '+\
-                '\ \=\=\>\ '+hex(self.dst_inst.iid)+'@'+\
-                hex(self.dst_inst.memory.uid)+'\\n'+\
+                'Inst:\ '+self.src_inst.dot_instance()+\
+                '\ \=\=\>\ '+self.dst_inst.dot_instance()+'\\n'+\
                 'Field: \{'+self.mask+'\}\ '+'\ \=\=\>\ \{'+self.mask+'\}\\n'+\
                 'Req:\ \{index:'+hex(self.region.index_node.uid)+\
                 ',field:'+hex(self.region.field_node.uid)+',tree:'+\
                 str(self.region.tid)+'\}'+\
                 ('' if self.region.name == None else '\\n('+self.region.name+')')
         color = 'darkgoldenrod1'
-
+        size = 14
         if self.redop <> 0:
             label += '\\nReduction\ Op:\ '+str(self.redop)
-            color = 'crimson'
+            color = 'tomato'
+        else:
+            max_blocking = max(self.src_inst.blocking, self.dst_inst.blocking)
+            min_blocking = min(self.src_inst.blocking, self.dst_inst.blocking)
+            if max_blocking > 1 and min_blocking == 1:
+                color = 'red'
+                size = 16
 
         printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor='+color+',fontsize=14,fontcolor=black,'+\
+                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
@@ -2806,11 +2814,12 @@ class Copy(object):
                 edge_label='copy '+hex(self.uid)+' (fields: '+self.mask+')')
 
 class PhysicalInstance(object):
-    def __init__(self, state, iid, ver, memory, region):
+    def __init__(self, state, iid, ver, memory, region, blocking):
         self.state = state
         self.iid = iid
         self.memory = memory
         self.region = region
+        self.blocking = blocking
         self.op_users = dict()
         memory.add_physical_instance(self)
         self.node_name = "physical_inst_"+str(iid)+"_"+str(ver)
@@ -2833,12 +2842,16 @@ class PhysicalInstance(object):
     def add_field(self, fid):
         self.fields.append(fid)
 
+    def dot_instance(self):
+        return hex(self.iid)+'@'+hex(self.memory.uid)+'\ ('+str(self.blocking)+')'
+
     def print_igraph_node(self, printer):
         if self.region.name <> None:
             label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
         else:
             label = hex(self.iid)+'@'+hex(self.memory.uid)
         label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
+        label = label+'\\nblocking factor: '+str(self.blocking)
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
                 'shape=oval,penwidth=0,margin=0];')
@@ -2885,6 +2898,9 @@ class ReductionInstance(object):
 
     def add_field(self, fid):
         self.fields.append(fid)
+
+    def dot_instance(self):
+        return hex(self.iid)+'@'+hex(self.memory.uid)
 
     def print_igraph_node(self, printer):
         if self.region.name <> None:
@@ -3574,6 +3590,18 @@ class ConnectedComponent(object):
                 key=lambda op: op.iid, reverse=True)
 
     def generate_igraph(self, idx, path):
+        def print_igraph_edges_for_multiple_copies(printer, copies):
+            copy = copies[0]
+            edge_label = 'copy '+hex(copy.uid)+' (fields: '+copy.field_mask_string()+')'
+            for i in range(1, len(copies)):
+                copy = copies[i]
+                edge_label = edge_label + ', copy '+hex(copy.uid)+\
+                        ' (fields: '+copy.field_mask_string()+')'
+            copy.dst_inst.print_incoming_edge(printer,
+                    copy.src_inst.node_name,
+                    edge_type='dashed',
+                    edge_label=edge_label)
+
         self.collect_physical_instances()
         name = 'instance_graph_'+str(idx)
         printer = GraphPrinter(path,name)
@@ -3591,8 +3619,21 @@ class ConnectedComponent(object):
             t.print_igraph_edges(printer)
         for m in self.maps.itervalues():
             m.print_igraph_edges(printer)
+        copy_groups = {}
         for c in self.copies.itervalues():
-            c.print_igraph_edges(printer)
+            if isinstance(c, Copy):
+                inst_pair = (c.src_inst.node_name, c.dst_inst.node_name)
+            else:
+                inst_pair = (c.instances[0].node_name, c.instances[1].node_name)
+            if not inst_pair in copy_groups:
+                copy_groups[inst_pair] = []
+            copy_groups[inst_pair].append(c)
+        for inst_pair in copy_groups:
+            copies = copy_groups[inst_pair]
+            if len(copies) == 1:
+                copies[0].print_igraph_edges(printer)
+            else:
+                print_igraph_edges_for_multiple_copies(printer, copies)
 
         printer.print_pdf_after_close(True)
 
@@ -4085,7 +4126,7 @@ class State(object):
                 return True
         return False
 
-    def add_physical_instance(self, iid, mem, index, field, tree):
+    def add_physical_instance(self, iid, mem, index, field, tree, blocking):
         #if iid in self.instances:
         #    return True
         if mem not in self.memories:
@@ -4098,7 +4139,7 @@ class State(object):
             return False
         region = self.get_index_node(True, index).get_instance(tree)
         ver = 0 if iid not in self.instances else len(self.instances[iid])
-        inst = PhysicalInstance(self, iid, ver, self.memories[mem], region)
+        inst = PhysicalInstance(self, iid, ver, self.memories[mem], region, blocking)
         if iid in self.instances:
             self.instances[iid].append(inst)
         else:
@@ -4247,9 +4288,10 @@ class State(object):
         # Least common ancestor is a region, so they came from different
         # partitions and are therefore not disjoint
         # TODO: handle when partitions are computed to be disjoint
-        if inode1.is_region():
+        if inode1.is_region() or not inode1.disjoint:
             return not inode1.is_independent(inode1_prev.uid, inode2_prev.uid)
-        return not inode1.disjoint
+        else:
+            return False
 
     def get_next_logical_mark(self):
         result = self.next_logical_mark

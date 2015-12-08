@@ -434,6 +434,8 @@ namespace LegionRuntime {
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
+      // Fields that have already undergone at least a partial close
+      FieldMask partially_closed;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask restricted_fields;
@@ -483,9 +485,9 @@ namespace LegionRuntime {
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
       inline bool has_closed_fields(void) const { return !!closed_mask; }
-      const FieldMask& get_closed_mask(void) const { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
-                               bool leave_open);
+                               bool leave_open, bool read_only_close);
+      void record_partial_fields(const FieldMask &skipped_fields);
       void record_flush_only_fields(const FieldMask &flush_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
@@ -497,6 +499,7 @@ namespace LegionRuntime {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+      void update_state(CurrentState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
       void record_version_numbers(RegionTreeNode *node, CurrentState &state,
@@ -512,11 +515,13 @@ namespace LegionRuntime {
                           const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
-                          const LegionList<ClosingSet>::aligned &close_sets,
-                      LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops);
+                          const LegionList<ClosingSet>::aligned &close_sets);
+      void create_read_only_close_operations(RegionTreeNode *target, 
+                          Operation *creator, const TraceInfo &trace_info,
+                          const LegionList<ClosingSet>::aligned &close_sets);
       void register_dependences(const LogicalUser &current, 
                                 const FieldMask &open_below,
-             LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
+             LegionMap<TraceCloseOp*,LogicalUser>::aligned &closes,
              LegionMap<ColorPoint,ClosingInfo>::aligned &children,
              LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -528,12 +533,16 @@ namespace LegionRuntime {
       const bool capture_users;
       LegionDeque<LogicalUser>::aligned closed_users;
     protected:
-      FieldMask closed_mask, leave_open_mask;
+      FieldMask closed_mask, leave_open_mask, partial_mask;
       LegionMap<ColorPoint,ClosingInfo>::aligned leave_open_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned force_close_children;
+      LegionMap<ColorPoint,ClosingInfo>::aligned read_only_children;
     protected:
-      LegionMap<InterCloseOp*,LogicalUser>::aligned leave_open_closes;
-      LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
+      // Use the base TraceCloseOp class so we can call the same
+      // register_dependences method on all of them
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned leave_open_closes;
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned force_close_closes;
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned read_only_closes;
     protected:
       VersionInfo leave_open_versions;
       VersionInfo force_close_versions;
@@ -676,6 +685,7 @@ namespace LegionRuntime {
             AddressSpaceID target, std::set<Event> &applied_conditions);
       void reset(void);
       void record_created_instance(InstanceView *view);
+      void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
       PhysicalState* clone(const FieldMask &clone_mask, 
@@ -747,7 +757,7 @@ namespace LegionRuntime {
         UserEvent to_trigger;
       };
     public:
-      VersionState(VersionID vid, Runtime *rt, DistributedID did,
+      VersionState(VersionID vid, Internal *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
                    CurrentState *manager); 
       VersionState(const VersionState &rhs);
@@ -823,13 +833,13 @@ namespace LegionRuntime {
       void handle_version_state_response(AddressSpaceID source,
             UserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
-      static void process_version_state_path_only(Runtime *rt,
+      static void process_version_state_path_only(Internal *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_initialization(Runtime *rt,
+      static void process_version_state_initialization(Internal *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_request(Runtime *rt, 
+      static void process_version_state_request(Internal *rt, 
                                                 Deserializer &derez);
-      static void process_version_state_response(Runtime *rt,
+      static void process_version_state_response(Internal *rt,
                               Deserializer &derez, AddressSpaceID source);
     public:
       const VersionID version_number;
@@ -1142,11 +1152,16 @@ namespace LegionRuntime {
       inline PhysicalManager* get_manager(void) const { return manager; }
       inline InstanceView* get_instance_view(void) const { return view; }
     public:
+      // These methods are used by PhysicalRegion::Impl to hold
+      // valid references to avoid premature collection
+      void add_valid_reference(ReferenceSource source);
+      void remove_valid_reference(ReferenceSource source);
+    public:
       MaterializedView* get_materialized_view(void) const;
       ReductionView* get_reduction_view(void) const;
     public:
       void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
-                               bool exclusive) const;
+                               bool exclusive);
       Memory get_memory(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_accessor(void) const;
@@ -1154,7 +1169,7 @@ namespace LegionRuntime {
         get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez);
+      void unpack_reference(Internal *rt, Deserializer &derez);
     private:
       Event ready_event;
       InstanceView *view; // only valid on creation node
@@ -1176,7 +1191,7 @@ namespace LegionRuntime {
       CompositeView* get_view(void) const { return view; }
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez);
+      void unpack_reference(Internal *rt, Deserializer &derez);
     private:
       CompositeView *view;
       bool local;

@@ -57,7 +57,7 @@ namespace LegionRuntime {
         UserEvent ready;
       };  
     public:
-      RegionTreeForest(Runtime *rt);
+      RegionTreeForest(Internal *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
       ~RegionTreeForest(void);
     public:
@@ -205,6 +205,7 @@ namespace LegionRuntime {
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle);
       bool destroy_logical_region(LogicalRegion handle, 
@@ -434,9 +435,8 @@ namespace LegionRuntime {
                               AttachOp *attach_op,
                               VersionInfo &version_info);
       Event detach_file(RegionTreeContext ctx, 
-                        const RegionRequirement &req,
-                        DetachOp *detach_op,
-                        const InstanceRef &ref);
+                        const RegionRequirement &req, DetachOp *detach_op, 
+                        VersionInfo &version_info, const InstanceRef &ref);
     public:
       void send_back_logical_state(RegionTreeContext local_context,
                                    RegionTreeContext remote_context,
@@ -602,7 +602,7 @@ namespace LegionRuntime {
       void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
                                          const void *&result, size_t &size);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
     protected:
       Reservation lookup_lock;
     private:
@@ -900,12 +900,12 @@ namespace LegionRuntime {
       };
       struct ChildRequestFunctor {
       public:
-        ChildRequestFunctor(Runtime *rt, Serializer &r, AddressSpaceID t)
+        ChildRequestFunctor(Internal *rt, Serializer &r, AddressSpaceID t)
           : runtime(rt), rez(r), target(t) { }
       public:
         void apply(AddressSpaceID next);
       private:
-        Runtime *const runtime;
+        Internal *const runtime;
         Serializer &rez;
         AddressSpaceID target;
       };
@@ -933,7 +933,7 @@ namespace LegionRuntime {
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(IndexSpace handle, Internal *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -1088,7 +1088,7 @@ namespace LegionRuntime {
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(IndexPartition handle, Internal *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
       virtual size_t get_num_elmts(void);
@@ -1206,7 +1206,7 @@ namespace LegionRuntime {
       struct SendFieldAllocationFunctor {
       public:
         SendFieldAllocationFunctor(FieldSpace h, FieldID f, size_t s,
-                                   unsigned i, Runtime *rt)
+                                   unsigned i, Internal *rt)
           : handle(h), field(f), size(s), index(i), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
@@ -1215,18 +1215,18 @@ namespace LegionRuntime {
         FieldID field;
         size_t size;
         unsigned index;
-        Runtime *runtime;
+        Internal *runtime;
       };
       struct SendFieldDestructionFunctor {
       public:
-        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Runtime *rt)
+        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Internal *rt)
           : handle(h), field(f), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
         FieldSpace handle;
         FieldID field;
-        Runtime *runtime;
+        Internal *runtime;
       };
       struct UpgradeFunctor {
       public:
@@ -1262,7 +1262,7 @@ namespace LegionRuntime {
       void* operator new(size_t count);
       void operator delete(void *ptr);
       AddressSpaceID get_owner_space(void) const; 
-      static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(FieldSpace handle, Internal *rt);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                                        const void *buffer, size_t size);
@@ -1422,7 +1422,7 @@ namespace LegionRuntime {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
-      static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
+      static AddressSpaceID get_owner_space(RegionTreeID tid, Internal *rt);
     public:
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
@@ -1504,6 +1504,7 @@ namespace LegionRuntime {
                                     bool allow_next_child,
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
+                                    bool read_only_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
@@ -1532,9 +1533,11 @@ namespace LegionRuntime {
       void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
                                    const FieldMask &send_mask, 
                                    AddressSpaceID target);
-      void process_logical_state_return(Deserializer &derez);
+      void process_logical_state_return(Deserializer &derez,
+                                        AddressSpaceID source);
       static void handle_logical_state_return(RegionTreeForest *forest,
-                                              Deserializer &derez);
+                                              Deserializer &derez,
+                                              AddressSpaceID source);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
@@ -1663,6 +1666,8 @@ namespace LegionRuntime {
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
+      // Look for a view to remove from the set of valid views
+      void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               bool dirty, LogicalView *new_view);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
@@ -1730,6 +1735,10 @@ namespace LegionRuntime {
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info) = 0;
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
                                             const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
@@ -1847,7 +1856,7 @@ namespace LegionRuntime {
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
       virtual AddressSpaceID get_owner_space(void) const;
-      static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
+      static AddressSpaceID get_owner_space(LogicalRegion handle, Internal *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
@@ -1870,6 +1879,10 @@ namespace LegionRuntime {
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
@@ -1964,6 +1977,8 @@ namespace LegionRuntime {
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
+      Event detach_file(ContextID ctx, DetachOp *detach_op, 
+                        VersionInfo &version_info, const InstanceRef &ref);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -2019,7 +2034,7 @@ namespace LegionRuntime {
       virtual PartitionNode* as_partition_node(void) const;
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalPartition handle, 
-                                            Runtime *runtime);
+                                            Internal *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
@@ -2042,6 +2057,10 @@ namespace LegionRuntime {
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                                            const std::set<ColorPoint> &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,

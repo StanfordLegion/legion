@@ -44,6 +44,7 @@ namespace LegionRuntime {
         FRAME_OP_KIND,
         DELETION_OP_KIND,
         INTER_CLOSE_OP_KIND,
+        READ_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         ACQUIRE_OP_KIND,
@@ -59,6 +60,7 @@ namespace LegionRuntime {
         FILL_OP_KIND,
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
+        TIMING_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
@@ -72,6 +74,7 @@ namespace LegionRuntime {
         "Frame",                    \
         "Deletion",                 \
         "Inter Close",              \
+        "Read Close",               \
         "Post Close",               \
         "Virtual Close",            \
         "Acquire",                  \
@@ -87,6 +90,7 @@ namespace LegionRuntime {
         "Fill",                     \
         "Attach",                   \
         "Detach",                   \
+        "Timing",                   \
         "Trace Capture",            \
         "Trace Complete",           \
         "Task",                     \
@@ -129,7 +133,7 @@ namespace LegionRuntime {
           { mapping_dependences.insert(dependence); }
         inline void add_resolution_dependence(Event dependence)
           { resolution_dependences.insert(dependence); }
-        void issue_stage_triggers(Operation *op, Runtime *runtime, 
+        void issue_stage_triggers(Operation *op, Internal *runtime, 
                                   MustEpochOp *must_epoch);
       private:
         std::set<Event> mapping_dependences;
@@ -139,18 +143,21 @@ namespace LegionRuntime {
       public:
         inline void add_commit_dependence(Event dependence)
           { commit_dependences.insert(dependence); }
-        bool issue_commit_trigger(Operation *op, Runtime *runtime);
+        bool issue_commit_trigger(Operation *op, Internal *runtime);
       private:
         std::set<Event> commit_dependences;
       };
     public:
-      Operation(Runtime *rt);
+      Operation(Internal *rt);
       virtual ~Operation(void);
+    public:
+      static const char* get_string_rep(OpKind kind);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
       // Base call
@@ -185,7 +192,7 @@ namespace LegionRuntime {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
-      void set_trace(LegionTrace *trace);
+      void set_trace(LegionTrace *trace, bool is_tracing);
       void set_must_epoch(MustEpochOp *epoch, unsigned index);
     public:
       // Localize a region requirement to its parent context
@@ -345,7 +352,7 @@ namespace LegionRuntime {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
     protected:
       Reservation op_lock;
       GenerationID gen;
@@ -444,7 +451,7 @@ namespace LegionRuntime {
      */
     class Predicate::Impl : public Operation {
     public:
-      Impl(Runtime *rt);
+      Impl(Internal *rt);
     public:
       void activate_predicate(void);
       void deactivate_predicate(void);
@@ -484,7 +491,7 @@ namespace LegionRuntime {
         RESOLVE_FALSE_STATE,
       };
     public:
-      SpeculativeOp(Runtime *rt);
+      SpeculativeOp(Internal *rt);
     public:
       void activate_speculative(void);
       void deactivate_speculative(void);
@@ -539,7 +546,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
-      MapOp(Runtime *rt);
+      MapOp(Internal *rt);
       MapOp(const MapOp &rhs);
       virtual ~MapOp(void);
     public:
@@ -560,6 +567,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -600,7 +608,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
-      CopyOp(Runtime *rt);
+      CopyOp(Internal *rt);
       CopyOp(const CopyOp &rhs);
       virtual ~CopyOp(void);
     public:
@@ -614,6 +622,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -669,7 +678,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
-      FenceOp(Runtime *rt);
+      FenceOp(Internal *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
     public:
@@ -701,7 +710,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
-      FrameOp(Runtime *rt);
+      FrameOp(Internal *rt);
       FrameOp(const FrameOp &rhs);
       virtual ~FrameOp(void);
     public:
@@ -742,7 +751,7 @@ namespace LegionRuntime {
         LOGICAL_PARTITION_DELETION,
       };
     public:
-      DeletionOp(Runtime *rt);
+      DeletionOp(Internal *rt);
       DeletionOp(const DeletionOp &rhs);
       virtual ~DeletionOp(void);
     public:
@@ -791,7 +800,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
-      CloseOp(Runtime *rt);
+      CloseOp(Internal *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
     public:
@@ -801,7 +810,7 @@ namespace LegionRuntime {
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void perform_logging(unsigned is_inter_close_op = 0);
+      void perform_logging(bool is_intermediate_close_op);
     public:
       // For recording trace dependences
     public:
@@ -809,6 +818,7 @@ namespace LegionRuntime {
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual bool is_close_op(void) const { return true; }
     public:
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
@@ -821,50 +831,43 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class InterCloseOp
-     * Intermediate close operations are issued by the runtime
-     * for closing up region trees as part of the normal execution
-     * of an application.
+     * \class TraceCloseOp
+     * This is a pure virtual class for handling the common
+     * operations associated with tracing for close operations.
      */
-    class InterCloseOp : public CloseOp {
+    class TraceCloseOp : public CloseOp {
     public:
-      InterCloseOp(Runtime *runtime);
-      InterCloseOp(const InterCloseOp &rhs);
-      virtual ~InterCloseOp(void);
+      TraceCloseOp(Internal *runtime);
+      virtual ~TraceCloseOp(void);
     public:
-      InterCloseOp& operator=(const InterCloseOp &rhs);
+      virtual void activate(void) = 0;
+      virtual void deactivate(void) = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
     public:
-      void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets, bool leave_open, 
-                      LegionTrace *trace, int close_idx, 
-                      const VersionInfo &close_info,
-                      const VersionInfo &version_info,
-                      const RestrictInfo &restrict_info,
-                      const FieldMask &close_mask, Operation *create_op);
-      void add_next_child(const ColorPoint &next_child);
-    public:
-      const RegionRequirement& get_region_requirement(void) const;
-      const std::set<ColorPoint>& get_target_children(void) const;
+      void initialize_trace_close_op(SingleTask *ctx, 
+                                     const RegionRequirement &req,
+                                     const std::set<ColorPoint> &targets,
+                                     LegionTrace *trace, int close_idx,
+                                     const FieldMask &close_mask,
+                                     Operation *create_op);
+      void activate_trace_close(void);
+      void deactivate_trace_close(void);
     public:
       void record_trace_dependence(Operation *target, GenerationID target_gen,
                                    int target_idx, int source_idx, 
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
+      void add_next_child(const ColorPoint &next_child);
     public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
-    public:
-      virtual bool trigger_execution(void);
-      virtual unsigned find_parent_index(unsigned idx);
-    public:
+      inline const RegionRequirement& get_region_requirement(void) const
+        { return requirement; }
+      inline const std::set<ColorPoint>& get_target_children(void) const
+        { return target_children; }
       inline int get_close_index(void) const { return close_idx; }
     protected:
       std::set<ColorPoint> target_children;
-      bool leave_open;
       std::set<ColorPoint> next_children;
-      unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing
       // The source index from the original 
@@ -879,6 +882,75 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class InterCloseOp
+     * Intermediate close operations are issued by the runtime
+     * for closing up region trees as part of the normal execution
+     * of an application.
+     */
+    class InterCloseOp : public TraceCloseOp {
+    public:
+      InterCloseOp(Internal *runtime);
+      InterCloseOp(const InterCloseOp &rhs);
+      virtual ~InterCloseOp(void);
+    public:
+      InterCloseOp& operator=(const InterCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const RegionRequirement &req,
+                      const std::set<ColorPoint> &targets, bool leave_open, 
+                      LegionTrace *trace, int close_idx, 
+                      const VersionInfo &close_info,
+                      const VersionInfo &version_info,
+                      const RestrictInfo &restrict_info,
+                      const FieldMask &close_mask, Operation *create_op);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      bool leave_open;
+      unsigned parent_req_index;
+    
+    };
+    
+    /**
+     * \class ReadCloseOp
+     * Read close operations are close ops that act as 
+     * place holders for closing up read-only partitions.
+     * Closing a read-only partition doesn't actually involve
+     * any work, but we do need something to ensure that all
+     * the mapping dependences are satisfied for later operations
+     * that traverse different subtrees. Read close operations
+     * are summaries for all those dependences to reduce the
+     * overhead of testing against everything in a subtree.
+     */
+    class ReadCloseOp : public TraceCloseOp {
+    public:
+      ReadCloseOp(Internal *runtime);
+      ReadCloseOp(const ReadCloseOp &rhs);
+      virtual ~ReadCloseOp(void);
+    public:
+      ReadCloseOp& operator=(const ReadCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const RegionRequirement &req,
+                      const std::set<ColorPoint> &targets,
+                      LegionTrace *trace, int close_idx,
+                      const FieldMask &close_mask, Operation *create_op);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      unsigned parent_req_index; 
+    };
+
+    /**
      * \class PostCloseOp
      * Post close operations are issued by the runtime after a
      * task has finished executing and the region tree contexts
@@ -887,7 +959,7 @@ namespace LegionRuntime {
      */
     class PostCloseOp : public CloseOp {
     public:
-      PostCloseOp(Runtime *runtime);
+      PostCloseOp(Internal *runtime);
       PostCloseOp(const PostCloseOp &rhs);
       virtual ~PostCloseOp(void);
     public:
@@ -918,7 +990,7 @@ namespace LegionRuntime {
      */
     class VirtualCloseOp : public CloseOp {
     public:
-      VirtualCloseOp(Runtime *runtime);
+      VirtualCloseOp(Internal *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
       virtual ~VirtualCloseOp(void);
     public:
@@ -948,7 +1020,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
-      AcquireOp(Runtime *rt);
+      AcquireOp(Internal *rt);
       AcquireOp(const AcquireOp &rhs);
       virtual ~AcquireOp(void);
     public:
@@ -961,6 +1033,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void); 
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1002,7 +1075,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
-      ReleaseOp(Runtime *rt);
+      ReleaseOp(Internal *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
     public:
@@ -1015,6 +1088,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1057,7 +1131,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
-      DynamicCollectiveOp(Runtime *rt);
+      DynamicCollectiveOp(Internal *rt);
       DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
       virtual ~DynamicCollectiveOp(void);
     public:
@@ -1091,7 +1165,7 @@ namespace LegionRuntime {
         FuturePredOp *future_pred_op;
       };
     public:
-      FuturePredOp(Runtime *rt);
+      FuturePredOp(Internal *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
@@ -1119,7 +1193,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
-      NotPredOp(Runtime *rt);
+      NotPredOp(Internal *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
     public:
@@ -1147,7 +1221,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
-      AndPredOp(Runtime *rt);
+      AndPredOp(Internal *rt);
       AndPredOp(const AndPredOp &rhs);
       virtual ~AndPredOp(void);
     public:
@@ -1182,7 +1256,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
-      OrPredOp(Runtime *rt);
+      OrPredOp(Internal *rt);
       OrPredOp(const OrPredOp &rhs);
       virtual ~OrPredOp(void);
     public:
@@ -1238,7 +1312,7 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      MustEpochOp(Runtime *rt);
+      MustEpochOp(Internal *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
     public:
@@ -1253,6 +1327,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1404,7 +1479,7 @@ namespace LegionRuntime {
     public:
       MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
     public:
-      void distribute_tasks(Runtime *runtime,
+      void distribute_tasks(Internal *runtime,
                             const std::vector<IndividualTask*> &indiv_tasks,
                             const std::set<SliceTask*> &slice_tasks);
     public:
@@ -1579,7 +1654,7 @@ namespace LegionRuntime {
         std::vector<IndexSpace> handles;
       };
     public:
-      PendingPartitionOp(Runtime *rt);
+      PendingPartitionOp(Internal *rt);
       PendingPartitionOp(const PendingPartitionOp &rhs);
       virtual ~PendingPartitionOp(void);
     public:
@@ -1650,7 +1725,7 @@ namespace LegionRuntime {
         BY_PREIMAGE,
       };
     public:
-      DependentPartitionOp(Runtime *rt);
+      DependentPartitionOp(Internal *rt);
       DependentPartitionOp(const DependentPartitionOp &rhs);
       virtual ~DependentPartitionOp(void);
     public:
@@ -1682,6 +1757,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
@@ -1707,7 +1783,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
-      FillOp(Runtime *rt);
+      FillOp(Internal *rt);
       FillOp(const FillOp &rhs);
       virtual ~FillOp(void);
     public:
@@ -1736,6 +1812,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1768,8 +1845,13 @@ namespace LegionRuntime {
     class AttachOp : public Operation {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+      enum ExternalType {
+        HDF5_FILE,
+        NORMAL_FILE,
+        IN_MEMORY_DATA
+      };
     public:
-      AttachOp(Runtime *rt);
+      AttachOp(Internal *rt);
       AttachOp(const AttachOp &rhs);
       virtual ~AttachOp(void);
     public:
@@ -1779,12 +1861,17 @@ namespace LegionRuntime {
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
+      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
+                                     LogicalRegion handle, LogicalRegion parent,
+                                     const std::vector<FieldID> &field_vec,
+                                     LegionFileMode mode, bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1793,7 +1880,7 @@ namespace LegionRuntime {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     public:
-      PhysicalInstance create_instance(const Domain &dom, 
+      PhysicalInstance create_instance(const Domain &dom,
                                        const std::vector<size_t> &field_sizes);
     protected:
       void check_privilege(void);
@@ -1806,6 +1893,7 @@ namespace LegionRuntime {
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       LegionFileMode file_mode;
+      ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
     };
@@ -1818,7 +1906,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
-      DetachOp(Runtime *rt);
+      DetachOp(Internal *rt);
       DetachOp(const DetachOp &rhs);
       virtual ~DetachOp(void);
     public:
@@ -1829,6 +1917,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1839,12 +1928,49 @@ namespace LegionRuntime {
     protected:
       void compute_parent_index(void);
     public:
-      InstanceRef reference;
+      PhysicalRegion region;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+    };
+
+    /**
+     * \class TimingOp
+     * Operation for performing timing measurements
+     */
+    class TimingOp : public Operation {
+    public:
+      enum MeasurementKind {
+        ABSOLUTE_MEASUREMENT,
+        MICROSECOND_MEASUREMENT,
+        NANOSECOND_MEASUREMENT,
+      };
+    public:
+      TimingOp(Internal *rt);
+      TimingOp(const TimingOp &rhs);
+      virtual ~TimingOp(void);
+    public:
+      TimingOp& operator=(const TimingOp &rhs);
+    public:
+      Future initialize(SingleTask *ctx, const Future &pre);
+      Future initialize_microseconds(SingleTask *ctx, const Future &pre);
+      Future initialize_nanoseconds(SingleTask *ctx, const Future &pre);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void deferred_execute(void);
+      virtual void trigger_complete(void);
+    protected:
+      MeasurementKind kind;
+      Future precondition;
+      Future result;
     };
 
   }; //namespace HighLevel

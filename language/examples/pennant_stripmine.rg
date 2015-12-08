@@ -37,9 +37,9 @@ import "regent"
 local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime"
-  local legion_dir = root_dir .. "../../runtime/legion"
-  local mapper_dir = root_dir .. "../../runtime/mappers"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -316,8 +316,7 @@ task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs_spans_p : partition(disjoint, rs),
                    nspans_zones : int64)
 where
-  reads(rs.{mapsp1, mapsp2}),
-  writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2})
 do
   for span = 0, nspans_zones do
     var rs_span = rs_spans_p[span]
@@ -594,8 +593,8 @@ where
   reads(rz.{zvolp, zm}),
   writes(rz.zrp),
 
-  reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
-  writes(rpp.pmaswt),
+  reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
+  reads writes(rpp.pmaswt),
   reduces+(rpg.pmaswt),
 
   reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate}),
@@ -622,8 +621,8 @@ where
         rs.{mapsp1, mapsp2, mapsz, elen}),
   writes(rz.{zdu, z0tmp}),
 
-  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
-  writes(rpp.pf),
+  reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
+  reads writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
   if not enable then return end
@@ -1010,8 +1009,8 @@ task adv_pos_full(rp : region(point),
                   nspans_points : int64,
                   enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx, has_bcy}),
-  writes(rp.{pu0, pf}),
+  reads(rp.{has_bcx, has_bcy}),
+  reads writes(rp.{pu0, pf}),
 
   reads(rp.{px0, pu0, pf, pmaswt}),
   writes(rp.{px, pu})
@@ -1310,8 +1309,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rs_spans : cross_product(rs_all_p, rs_spans_p),
               conf : config) : double
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var alfa = conf.alfa
@@ -1470,8 +1468,7 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rs_spans : cross_product(rs_all_p, rs_spans_p),
                 conf : config) : double
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var einit = conf.einit
@@ -1979,28 +1976,6 @@ terra read_input(runtime : c.legion_runtime_t,
     &nspans_zones,
     &nspans_points)
 
-  -- Allocate all the mesh data in regions
-  do
-    var rz_ispace = c.legion_physical_region_get_logical_region(rz_physical[0]).index_space
-    var rz_alloc = c.legion_index_allocator_create(runtime, ctx, rz_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0, "rz_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rz_alloc)
-  end
-
-  do
-    var rp_ispace = c.legion_physical_region_get_logical_region(rp_physical[0]).index_space
-    var rp_alloc = c.legion_index_allocator_create(runtime, ctx, rp_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0, "rp_alloc returned non-zero pointere")
-    c.legion_index_allocator_destroy(rp_alloc)
-  end
-
-  do
-    var rs_ispace = c.legion_physical_region_get_logical_region(rs_physical[0]).index_space
-    var rs_alloc = c.legion_index_allocator_create(runtime, ctx, rs_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0, "rs_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rs_alloc)
-  end
-
   -- Write mesh data into regions
   do
     var rz_znump = c.legion_physical_region_get_field_accessor_array(
@@ -2369,6 +2344,10 @@ task test()
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
+
+  new(ptr(zone, rz_all), conf.nz)
+  new(ptr(point, rp_all), conf.np)
+  new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
 
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 

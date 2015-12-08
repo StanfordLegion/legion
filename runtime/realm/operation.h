@@ -63,7 +63,6 @@ namespace Realm {
     void clear_profiling(void);
     void reconstruct_measurements();
 
-  private: // for now to eliminate old references
     void trigger_finish_event(void);
 
     Event finish_event;

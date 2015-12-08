@@ -26,6 +26,32 @@ namespace LegionRuntime {
     extern Logger::Category log_prof;
 
     //--------------------------------------------------------------------------
+    LegionProfMarker::LegionProfMarker(const char* _name)
+      : name(_name), stopped(false)
+    //--------------------------------------------------------------------------
+    {
+      proc = Realm::Processor::get_executing_processor();
+      start = Realm::Clock::current_time_in_nanoseconds();
+    }
+
+    //--------------------------------------------------------------------------
+    LegionProfMarker::~LegionProfMarker()
+    //--------------------------------------------------------------------------
+    {
+      if (!stopped) mark_stop();
+      log_prof.info("Prof User Info " IDFMT " %llu %llu %s", proc.id,
+          start, stop, name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfMarker::mark_stop()
+    //--------------------------------------------------------------------------
+    {
+      stop = Realm::Clock::current_time_in_nanoseconds();
+      stopped = true;
+    }
+
+    //--------------------------------------------------------------------------
     LegionProfInstance::LegionProfInstance(LegionProfiler *own)
       : owner(own)
     //--------------------------------------------------------------------------
@@ -156,6 +182,7 @@ namespace LegionRuntime {
       info.op_id = op_id;
       info.source = usage->source;
       info.target = usage->target;
+      info.size = usage->size;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -198,6 +225,22 @@ namespace LegionRuntime {
       info.create = timeline->create_time;
       info.destroy = timeline->delete_time;
     }
+
+#ifdef LEGION_PROF_MESSAGES
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
+                                            unsigned long long start,
+                                            unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      message_infos.push_back(MessageInfo());
+      MessageInfo &info = message_infos.back();
+      info.kind = kind;
+      info.start = start;
+      info.stop = stop;
+      info.proc = proc;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::dump_state(void)
@@ -242,9 +285,10 @@ namespace LegionRuntime {
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
       {
-        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT 
+        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
                       " %llu %llu %llu %llu", it->op_id, it->source.id,
-                    it->target.id, it->create, it->ready, it->start, it->stop);
+                    it->target.id, it->size, it->create, it->ready, it->start,
+                    it->stop);
       }
       for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
             it != fill_infos.end(); it++)
@@ -260,6 +304,14 @@ namespace LegionRuntime {
                       it->op_id, it->inst.id, it->mem.id, it->total_bytes,
                       it->create, it->destroy);
       }
+#ifdef LEGION_PROF_MESSAGES
+      for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
+            it != message_infos.end(); it++)
+      {
+        log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
+                      it->kind, it->proc.id, it->start, it->stop);
+      }
+#endif
       task_kinds.clear();
       task_variants.clear();
       operation_instances.clear();
@@ -268,6 +320,9 @@ namespace LegionRuntime {
       meta_infos.clear();
       copy_infos.clear();
       inst_infos.clear();
+#ifdef LEGION_PROF_MESSAGES
+      message_infos.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -703,6 +758,35 @@ namespace LegionRuntime {
           instances[idx]->dump_state();
       }
     }
+
+#ifdef LEGION_PROF_MESSAGES
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_message_kinds(const char *const *const
+                                  message_names, unsigned int num_message_kinds)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < num_message_kinds; idx++)
+      {
+        log_prof.info("Prof Message Desc %u %s", idx, message_names[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_message(MessageKind kind, 
+                                        unsigned long long start,
+                                        unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->record_message(current, kind, start, stop);
+    }
+#endif
 
   };
 };

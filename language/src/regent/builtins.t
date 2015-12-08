@@ -24,10 +24,14 @@ local builtins = {}
 
 builtins.index_type = std.index_type
 builtins.ispace = std.ispace
+builtins.int1d = std.int1d
+builtins.int2d = std.int2d
+builtins.int3d = std.int3d
 builtins.region = std.region
 builtins.disjoint = std.disjoint
 builtins.aliased = std.aliased
 builtins.partition = std.partition
+builtins.phase_barrier = std.phase_barrier
 builtins.cross_product = std.cross_product
 builtins.ptr = std.ptr
 builtins.wild = std.wild

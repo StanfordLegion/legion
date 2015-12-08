@@ -126,15 +126,15 @@ namespace Realm {
       //  don't build up continuation
       if(wait_on.has_triggered()) {
 	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive);
-        log_reservation.info("immediate acquire of " IDFMT " - event = " IDFMT "/%d", id, e.id, e.gen);
+	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e;
 	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
 	GenEventImpl *after_lock = GenEventImpl::create_genevent();
 	Event e = after_lock->current_event();
+	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
 	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
-        log_reservation.info("deferred acquire of " IDFMT " - event = " IDFMT "/%d", id, e.id, e.gen);
 	return e;
       }
     }
@@ -146,8 +146,10 @@ namespace Realm {
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
+	log_reservation.info() << "reservation release: rsrv=" << *this;
 	get_runtime()->get_lock_impl(*this)->release();
       } else {
+	log_reservation.info() << "reservation release: rsrv=" << *this << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredUnlockRequest(*this));
       }
     }
@@ -174,7 +176,7 @@ namespace Realm {
 
 	impl->in_use = true;
 
-	log_reservation.info("reservation reused: reservation=" IDFMT "", impl->me.id);
+	log_reservation.info() << "reservation created: rsrv=" << impl->me;
 	return impl->me;
       }
       assert(false);
@@ -222,6 +224,8 @@ namespace Realm {
 
     void Reservation::destroy_reservation()
     {
+      log_reservation.info() << "reservation destroyed: rsrv=" << *this;
+
       // a lock has to be destroyed on the node that created it
       if(ID(*this).node() != gasnet_mynode()) {
 	DestroyLockMessage::send_request(ID(*this).node(), *this);
@@ -447,7 +451,10 @@ namespace Realm {
 	impl->mode = args.mode;
 	impl->requested = false;
 
-	bool any_local = impl->select_local_waiters(to_wake);
+#ifndef NDEBUG
+	bool any_local =
+#endif
+	  impl->select_local_waiters(to_wake);
 	assert(any_local);
       }
 
