@@ -495,7 +495,6 @@ ast.typed.expr:leaf("Field", { "value", "field" })
 function ast.typed.expr.Field:unparse()
   return self.value:unparse() .. "." .. self.field
 end
-ast.typed.expr:leaf("Coerce", { "value" })
 ast.typed.expr:leaf("Constant", { "value" })
 ast.typed.expr.Constant.unparse = ast.specialized.expr.Constant.unparse
 ast.typed.expr:leaf("Variable", { "value" })
