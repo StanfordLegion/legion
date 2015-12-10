@@ -2146,8 +2146,7 @@ namespace LegionRuntime {
                                                    RegionRequirement &req,
                                                    SingleTask *parent_ctx,
                                                    Processor local_proc,
-                                    const std::set<ColorPoint> &target_children,
-                                                   bool leave_open,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                       const std::set<ColorPoint> &next_children,
                                                    Event &closed,
                                                    const MappingRef &target,
@@ -2186,7 +2185,6 @@ namespace LegionRuntime {
                                                      target_children,
                                                      target,
                                                      version_info,
-                                                     leave_open, 
                                                      next_children,
                                                      closed,
                                                      create_composite);
@@ -2196,8 +2194,8 @@ namespace LegionRuntime {
       if (!result && create_composite)
       {
         close_node->create_composite_instance(info.ctx, target_children,
-                        leave_open, next_children, closing_mask, 
-                        version_info, true/*register instance*/);
+                                              next_children, closing_mask, 
+                                  version_info, true/*register instance*/);
         // Making a composite always succeeds
         result = true;
         closed = Event::NO_EVENT;
@@ -11974,13 +11972,22 @@ namespace LegionRuntime {
       // If we are leaving this state open, we have to do some clean-up
       // so that it can remain valid, otherwise, if we're not leaving it
       // open then it doesn't matter anyway.
-      if (closer.permit_leave_open)
+      const FieldMask &leave_open_mask = closer.get_leave_open_mask();
+      if (!!leave_open_mask)
       {
         if (!!dirty_below)
-          invalidate_instance_views(state, dirty_below);
-        state->dirty_mask -= closing_mask;
+        {
+          FieldMask leave_open_dirty = dirty_below & leave_open_mask;
+          if (!!leave_open_dirty)
+            invalidate_instance_views(state, leave_open_dirty);
+        }
+        state->dirty_mask -= (closing_mask & leave_open_mask);
         if (!!reduc_fields)
-          invalidate_reduction_views(state, reduc_fields); 
+        {
+          FieldMask leave_open_reduc = reduc_fields & leave_open_mask;
+          if (!!leave_open_reduc)
+            invalidate_reduction_views(state, leave_open_reduc); 
+        }
       }
     } 
 
@@ -12299,8 +12306,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     CompositeRef RegionTreeNode::create_composite_instance(ContextID ctx_id,
-                                            const std::set<ColorPoint> &targets,
-                                               bool leave_open, 
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                       const std::set<ColorPoint> &next_children,
                                                const FieldMask &closing_mask,
                                                VersionInfo &version_info,
@@ -12316,23 +12322,24 @@ namespace LegionRuntime {
       FieldMask dirty_mask, complete_mask; 
       const bool capture_children = !is_region();
       LegionMap<ColorPoint,FieldMask>::aligned complete_children;
-      CompositeCloser closer(ctx_id, version_info, leave_open);
+      CompositeCloser closer(ctx_id, version_info);
       CompositeNode *root = closer.get_composite_node(this, NULL/*parent*/);
-      for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
-            it != targets.end(); it++)
+      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
       {
+        closer.set_leave_open_mask(it->second);
         FieldMask child_complete;
         close_physical_child(closer, root, state, 
-                             closing_mask, (*it), 
+                             closing_mask, it->first, 
                              next_children, dirty_mask, child_complete);
         if (!child_complete)
           continue;
         if (capture_children)
         {
           LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-            complete_children.find(*it);
+            complete_children.find(it->first);
           if (finder == complete_children.end())
-            complete_children[(*it)] = child_complete;
+            complete_children[it->first] = child_complete;
           else
             finder->second |= child_complete;
         }
@@ -12406,12 +12413,16 @@ namespace LegionRuntime {
       // If we are leaving this state open, we have to do some clean-up
       // so that it can remain valid, otherwise, if we're not leaving it
       // open then it doesn't matter anyway.
-      if (closer.permit_leave_open)
+      if (!!closer.leave_open_mask)
       {
         if (!!dirty_below)
-          invalidate_instance_views(state, dirty_below);
-        state->dirty_mask -= closing_mask;
-        FieldMask reduc_fields = state->reduction_mask & closing_mask;
+        {
+          FieldMask leave_open_dirty = dirty_below & closer.leave_open_mask;
+          if (!!leave_open_dirty)
+            invalidate_instance_views(state, leave_open_dirty);
+        }
+        state->dirty_mask -= (closing_mask & closer.leave_open_mask);
+        FieldMask reduc_fields = state->reduction_mask & closer.leave_open_mask;
         if (!!reduc_fields)
           invalidate_reduction_views(state, reduc_fields); 
       }
@@ -13997,13 +14008,13 @@ namespace LegionRuntime {
         // because close operations have READ_WRITE EXCLUSIVE
         const FieldMask close_op_mask = op_it->second.field_mask;
         // Get the set of children being closed
-        const std::set<ColorPoint> &colors = 
+        const LegionMap<ColorPoint,FieldMask>::aligned &colors = 
                                         op_it->first->get_target_children();
-        for (std::set<ColorPoint>::const_iterator 
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
               cit = colors.begin(); cit != colors.end(); cit++)
         {
           LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
-                                                        children.find(*cit);
+                                                  children.find(cit->first);
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != children.end());
 #endif
@@ -14588,8 +14599,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     InterCloseOp* RegionNode::create_close_op(Operation *creator,
                                               const FieldMask &closing_mask,
-                                              bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                               const VersionInfo &close_info,
                                               const VersionInfo &version_info,
                                               const RestrictInfo &restrict_info,
@@ -14606,7 +14616,7 @@ namespace LegionRuntime {
                                    trace_info.req.privilege_fields,
                                    req.privilege_fields);
       // Now initialize the operation
-      op->initialize(creator->get_parent(), req, targets, leave_open, 
+      op->initialize(creator->get_parent(), req, targets, 
                      trace_info.trace, trace_info.req_idx, 
                      close_info, version_info, restrict_info, 
                      closing_mask, creator);
@@ -14616,7 +14626,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReadCloseOp* RegionNode::create_read_only_close_op(Operation *creator,
                                             const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -14638,10 +14648,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     bool RegionNode::perform_close_operation(const MappableInfo &info,
                                              const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                              const MappingRef &target_region,
                                              VersionInfo &version_info,
-                                             bool leave_open, 
                                       const std::set<ColorPoint> &next_children,
                                              Event &closed,
                                              bool &create_composite)
@@ -14650,7 +14659,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!create_composite); // should always start off like this
 #endif
-      PhysicalCloser closer(info, leave_open, handle);
+      PhysicalCloser closer(info, handle);
       if (target_region.has_ref())
       {
         LogicalView *view = target_region.get_view();
@@ -14667,15 +14676,17 @@ namespace LegionRuntime {
       bool success = true;
       bool changed = false;
       PhysicalState *state = get_physical_state(info.ctx, version_info);
-      for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
-            it != targets.end(); it++)
+      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
       {
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-          state->children.open_children.find(*it);
+          state->children.open_children.find(it->first);
         if (finder == state->children.open_children.end())
           continue;
+        // If we're going to do the close, set the leave open fields
+        closer.set_leave_open_mask(it->second);
         bool result = close_physical_child(closer, state, closing_mask,
-                                           (*it), finder->second,
+                                           it->first, finder->second,
                                            next_children, 
                                            create_composite, changed);
         if (!result || create_composite)
@@ -14939,7 +14950,8 @@ namespace LegionRuntime {
 #endif
       PhysicalState *state = get_physical_state(ctx_id, version_info);
       // Figure out which children we need to close
-      std::set<ColorPoint> targets, next;
+      LegionMap<ColorPoint,FieldMask>::aligned targets;
+      std::set<ColorPoint> next;
       if (!(virtual_mask * state->children.valid_fields))
       {
         LegionMap<ColorPoint,FieldMask>::aligned &open_children = 
@@ -14949,10 +14961,10 @@ namespace LegionRuntime {
         {
           if (it->second * virtual_mask)
             continue;
-          targets.insert(it->first);
+          targets[it->first] = FieldMask();
         }
       }
-      return create_composite_instance(ctx_id, targets, false/*leave open*/,
+      return create_composite_instance(ctx_id, targets, 
                                        next, virtual_mask, version_info,
                                        false/*register*/);
     }
@@ -15004,7 +15016,7 @@ namespace LegionRuntime {
         {
           if (!IS_WRITE_ONLY(info.req))
           {
-            PhysicalCloser closer(info, false/*leave open*/, handle);
+            PhysicalCloser closer(info, handle);
             closer.add_target(new_view);
             // Mark the dirty mask with our bits since we're 
             closer.update_dirty_mask(user_mask);
@@ -16153,8 +16165,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     InterCloseOp* PartitionNode::create_close_op(Operation *creator,
                                                  const FieldMask &closing_mask,
-                                                 bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                                  const VersionInfo &close_info,
                                                  const VersionInfo &ver_info,
                                                  const RestrictInfo &res_info,
@@ -16171,7 +16182,7 @@ namespace LegionRuntime {
                                    trace_info.req.privilege_fields,
                                    req.privilege_fields);
       // Now initialize the operation
-      op->initialize(creator->get_parent(), req, targets, leave_open, 
+      op->initialize(creator->get_parent(), req, targets,
                      trace_info.trace, trace_info.req_idx, 
                      close_info, ver_info, res_info, closing_mask, creator);
       return op;
@@ -16180,7 +16191,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReadCloseOp* PartitionNode::create_read_only_close_op(Operation *creator,
                                             const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -16202,10 +16213,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     bool PartitionNode::perform_close_operation(const MappableInfo &info,
                                                 const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                                 const MappingRef &target_reg,
                                                 VersionInfo &version_info,
-                                                bool leave_open, 
                                       const std::set<ColorPoint> &next_children,
                                                 Event &closed,
                                                 bool &create_composite)
@@ -16234,16 +16244,26 @@ namespace LegionRuntime {
       // many children in a read-only partition open. Only safe to do
       // this if all the children are disjoint.
       bool success = true;
-      if (leave_open && !targets.empty() && row_source->is_disjoint())
+      FieldMask leave_open_all = closing_mask;
+      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
       {
-        for (std::set<ColorPoint>::const_iterator it = targets.begin();   
-              it != targets.end(); it++)
+        leave_open_all &= it->second;
+        if (!leave_open_all)
+          break;
+      }
+      if (!!leave_open_all && !targets.empty() && row_source->is_disjoint())
+      {
+        std::set<Event> closed_event_set;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
         {
-          RegionNode *child_node = get_child(*it);
-          PhysicalCloser child_closer(info, true/*leave open*/, 
-                                      child_node->handle);
+          RegionNode *child_node = get_child(it->first); 
+          PhysicalCloser child_closer(info, child_node->handle);
+          child_closer.set_leave_open_mask(leave_open_all);
           if (target_view != NULL)
-            child_closer.add_target(target_view->get_materialized_subview(*it));
+            child_closer.add_target(
+                target_view->get_materialized_subview(it->first));
           PhysicalState *child_state = 
             child_node->get_physical_state(info.ctx, version_info);
           std::set<ColorPoint> empty_next_children;
@@ -16260,7 +16280,67 @@ namespace LegionRuntime {
           else
           {
             child_closer.update_node_views(child_node, child_state);
-            closed = child_closer.get_termination_event();
+            closed_event_set.insert(child_closer.get_termination_event());
+          }
+        }
+        if (success)
+        {
+          // See if we have any fields we haven't closed yet
+          FieldMask unclosed = closing_mask - leave_open_all; 
+          if (!!unclosed)
+          {
+            // Closed up this whole partition for the remaining fields
+            PhysicalCloser closer(info, parent->handle);
+            if (target_view != NULL)
+              closer.add_target(target_view);
+            bool changed = false;
+            PhysicalState *state = get_physical_state(info.ctx, version_info); 
+            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                  targets.begin(); it != targets.end(); it++)
+            {
+              LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+                state->children.open_children.find(it->first);
+              if (finder == state->children.open_children.end())
+                continue;
+              // If we're actually doing the close, record the leave open fields
+              closer.set_leave_open_mask(it->second & unclosed);
+              bool result = close_physical_child(closer, state, unclosed,
+                                                 it->first, finder->second, 
+                                                 next_children,
+                                                 create_composite, changed);
+              if (!result || create_composite)
+              {
+                success = false;
+                break;
+              }
+              if (!finder->second)
+                state->children.open_children.erase(finder);
+            }
+            // If anything changed, rebuild the field mask
+            if (changed)
+            {
+              FieldMask next_valid;
+              for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                    state->children.open_children.begin(); it !=
+                    state->children.open_children.end(); it++)
+              {
+                next_valid |= it->second;
+              }
+              state->children.valid_fields = next_valid;
+            }   
+            if (success)
+            {
+              closer.update_node_views(this, state);
+              closed_event_set.insert(closer.get_termination_event());
+            }
+          }
+          if (success)
+          {
+            // Finally merge our closed events
+            closed = Event::merge_events(closed_event_set);
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependences(closed_event_set, closed);
+#endif
           }
         }
       }
@@ -16268,20 +16348,22 @@ namespace LegionRuntime {
       {
         // Otherwise we are trying to close up this whole partition
         // Close it up to our parent region
-        PhysicalCloser closer(info, leave_open, parent->handle);
+        PhysicalCloser closer(info, parent->handle);
         if (target_view != NULL)
           closer.add_target(target_view);
         bool changed = false;
         PhysicalState *state = get_physical_state(info.ctx, version_info); 
-        for (std::set<ColorPoint>::const_iterator it = targets.begin(); 
-              it != targets.end(); it++)
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
         {
           LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-            state->children.open_children.find(*it);
+            state->children.open_children.find(it->first);
           if (finder == state->children.open_children.end())
             continue;
+          // If we're actually doing the close, record the leave open fields
+          closer.set_leave_open_mask(it->second);
           bool result = close_physical_child(closer, state, closing_mask,
-                                             (*it), finder->second, 
+                                             it->first, finder->second, 
                                              next_children,
                                              create_composite, changed);
           if (!result || create_composite)
@@ -16293,6 +16375,7 @@ namespace LegionRuntime {
             state->children.open_children.erase(finder);
         }
         // If anything changed, rebuild the field mask
+        if (changed)
         {
           FieldMask next_valid;
           for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 

@@ -847,7 +847,7 @@ namespace LegionRuntime {
     public:
       void initialize_trace_close_op(SingleTask *ctx, 
                                      const RegionRequirement &req,
-                                     const std::set<ColorPoint> &targets,
+                 const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      LegionTrace *trace, int close_idx,
                                      const FieldMask &close_mask,
                                      Operation *create_op);
@@ -862,11 +862,12 @@ namespace LegionRuntime {
     public:
       inline const RegionRequirement& get_region_requirement(void) const
         { return requirement; }
-      inline const std::set<ColorPoint>& get_target_children(void) const
-        { return target_children; }
+      inline const LegionMap<ColorPoint,FieldMask>::aligned& 
+        get_target_children(void) const { return target_children; }
       inline int get_close_index(void) const { return close_idx; }
     protected:
-      std::set<ColorPoint> target_children;
+      // Points to close, and the fields to leave open
+      LegionMap<ColorPoint,FieldMask/*leave open*/>::aligned target_children;
       std::set<ColorPoint> next_children;
     protected:
       // These things are really only needed for tracing
@@ -896,7 +897,7 @@ namespace LegionRuntime {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets, bool leave_open, 
+                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
@@ -911,7 +912,6 @@ namespace LegionRuntime {
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
-      bool leave_open;
       unsigned parent_req_index;
     };
     
@@ -935,7 +935,7 @@ namespace LegionRuntime {
       ReadCloseOp& operator=(const ReadCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets,
+                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                       LegionTrace *trace, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:
