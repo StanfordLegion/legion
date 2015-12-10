@@ -87,12 +87,25 @@ local DriverAPI = {
   cuLinkDestroy = ef("cuLinkDestroy", {&CUlinkState_st} -> uint32);
 }
 
--- copied and modified from cudalib.lua in Terra interpreter
-
-terra cudahelper.check_cuda_available()
-  var r = DriverAPI.cuInit(0)
-  return r == 0
+do
+  -- handles the case that the binding library does not have support support
+  binding_library_path =
+    os.getenv("LG_RT_DIR") .. "/../bindings/terra/liblegion_terra.so"
+  has_cuInit_symbol =
+    os.execute("nm " .. binding_library_path .. " | grep cuInit") == 0
+  if has_cuInit_symbol then
+    terra cudahelper.check_cuda_available()
+      var r = DriverAPI.cuInit(0)
+      return r == 0
+    end
+  else
+    terra cudahelper.check_cuda_available()
+      return false
+    end
+  end
 end
+
+-- copied and modified from cudalib.lua in Terra interpreter
 
 local terra init_cuda() : int32
   var r = DriverAPI.cuInit(0)
