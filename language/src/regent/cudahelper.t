@@ -92,7 +92,7 @@ do
   binding_library_path =
     os.getenv("LG_RT_DIR") .. "/../bindings/terra/liblegion_terra.so"
   has_cuInit_symbol =
-    os.execute("nm " .. binding_library_path .. " | grep cuInit") == 0
+    os.execute("nm " .. binding_library_path .. " | grep cuInit > /dev/null") == 0
   if has_cuInit_symbol then
     terra cudahelper.check_cuda_available()
       var r = DriverAPI.cuInit(0)
