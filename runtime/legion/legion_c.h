@@ -840,6 +840,40 @@ extern "C" {
                              legion_context_t ctx,
                              legion_field_space_t handle);
 
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_field_space_attach_name(legion_runtime_t runtime,
+                                 legion_field_space_t handle,
+                                 const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_field_space_retrieve_name(legion_runtime_t runtime,
+                                   legion_field_space_t handle,
+                                   const char **result);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_field_id_attach_name(legion_runtime_t runtime,
+                              legion_field_space_t handle,
+                              legion_field_id_t id,
+                              const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_field_id_retrieve_name(legion_runtime_t runtime,
+                                legion_field_space_t handle,
+                                legion_field_id_t id,
+                                const char **result);
+
   // -----------------------------------------------------------------------
   // Logical Region Operations
   // -----------------------------------------------------------------------

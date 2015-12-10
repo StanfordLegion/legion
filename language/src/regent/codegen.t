@@ -2967,12 +2967,20 @@ function codegen.expr_region(cx, node)
     var capacity = [ispace.value]
     var [is] = [ispace.value].impl
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
+    c.legion_field_space_attach_name([cx.runtime], fs, [fspace_type.name])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
     [data.zip(field_types, field_ids):map(
        function(field)
          local field_type, field_id = unpack(field)
          return `(c.legion_field_allocator_allocate_field(
                     [fsa], terralib.sizeof([field_type]), [field_id]))
+       end)]
+    [data.zip(field_paths, field_ids):map(
+       function(field)
+         local field_path, field_id = unpack(field)
+         local field_name = field_path:mkstring("", ".", "")
+         return `(c.legion_field_id_attach_name(
+                    [cx.runtime], fs, field_id, field_name))
        end)]
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], fs)
     var il = c.legion_inline_launcher_create_logical_region(

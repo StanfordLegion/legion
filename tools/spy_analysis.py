@@ -430,6 +430,16 @@ class FieldSpaceNode(object):
         else:
             return None
 
+    def field_mask_string(self, fields):
+        field_names = list()
+        for f in fields:
+            field_name = self.get_field_name(f)
+            if field_name != None:
+                field_names.append(field_name)
+            else:
+                field_names.append(str(f))
+        return ', '.join(field_names)
+
     def print_graph(self, printer):
         if self.name != None:
             label = self.name+' (ID: '+str(self.uid)+')'
@@ -812,30 +822,7 @@ class SingleTask(object):
             self.prev_event_deps.add(later_name)
 
     def print_igraph_node(self, printer):
-        inst_string = ''
-        if self.state.verbose:
-            for idx,inst in self.instances.iteritems():
-                assert idx in self.reqs
-                req = self.reqs[idx]
-                if req.region_node.name != None:
-                    to_add = req.region_node.name+' '
-                else:
-                    to_add = ''
-                to_add = to_add+'('+hex(inst.iid)+') '+req.dot_requirement()
-                inst_string = inst_string+'\\n'+to_add
-        if self.enclosing <> None:
-            # Index Space Point
-            index_string = 'Point\ '+self.point.to_string()
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')\\n'+index_string+inst_string+\
-                    '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
-        else:
-            # Individual Task
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')'+inst_string+'",'+\
-                    'fillcolor=lightskyblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
+        self.print_base_node(printer, False)
 
     def print_igraph_edges(self, printer):
         for idx, inst in self.instances.iteritems():
@@ -1230,7 +1217,7 @@ class IndexTask(object):
         assert idx in self.reqs
         r = self.reqs[idx]
         result = Requirement(idx, True, index, r.fspace, r.tid, r.region_node,
-                r.priv, r.coher, r.redop)
+                r.priv, r.coher, r.redop, self.state)
         for f in r.fields:
             result.add_field(f)
         return result
@@ -1685,8 +1672,8 @@ class CopyOp(object):
                 ('' if logical else 'Inst:\ '+\
                 self.instances[0].dot_instance()+\
                 '\ \=\=\>\ '+self.instances[1].dot_instance()+'\\n'+\
-                'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
-                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n')+\
+                'Field: \{'+self.reqs[0].field_mask_string()+'\}\ '+\
+                '\ \=\=\>\ \{'+self.reqs[1].field_mask_string()+'\}\\n')+\
                 'Src Req:\ '+self.reqs[0].to_summary_string()+\
                 ('\\n' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')\\n')+\
@@ -1712,9 +1699,9 @@ class CopyOp(object):
         self.start_event.print_prev_event_dependences(printer, later_name)
 
     def print_igraph_edges(self, printer):
-        fields = self.reqs[0].to_field_mask_string()+\
+        fields = self.reqs[0].field_mask_string()+\
                 ' \-\> '+\
-                self.reqs[1].to_field_mask_string()
+                self.reqs[1].field_mask_string()
         self.instances[1].print_incoming_edge(printer,
                 self.instances[0].node_name,
                 edge_type='dashed',
@@ -1965,7 +1952,7 @@ class AcquireOp(object):
         printer.println(self.node_name+\
                 ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
                 ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
+                'Fields: '+self.reqs[0].field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')')+\
@@ -2116,7 +2103,7 @@ class ReleaseOp(object):
         printer.println(self.node_name+\
                 ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
                 ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
+                'Fields: '+self.reqs[0].field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')')+\
@@ -2768,8 +2755,16 @@ class Copy(object):
         self.physical_marked = False
 
     def field_mask_string(self):
-        ranges = list_to_ranges(self.fields)
-        return ','.join([r for r in ranges])
+        fspace = self.region.field_node
+        field_names = list()
+        for f in self.fields:
+            field_name = fspace.get_field_name(f)
+            if field_name != None:
+                field_names.append(field_name)
+            else:
+                field_names.append(str(f))
+
+        return ','.join(field_names)
 
     def print_physical_node(self, printer):
         self.mask = self.field_mask_string()
@@ -2974,7 +2969,7 @@ class PhaseBarrier(object):
             self.prev_event_deps.add(later_name)
 
 class Requirement(object):
-    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop):
+    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop, state):
         self.index = index
         self.is_reg = is_reg
         self.ispace = ispace
@@ -2985,6 +2980,7 @@ class Requirement(object):
         self.coher = coher
         self.redop = redop
         self.fields = list()
+        self.state = state
 
     def find_field_index(self, field):
         return self.fields.index(field)
@@ -3109,16 +3105,15 @@ class Requirement(object):
 
     def dot_requirement(self):
         result = self.get_privilege_and_coherence()
-        result = result + '\ Fields:' +\
-                ','.join([r for r in list_to_ranges(self.fields)])
+        result = result + '\ Fields:' + self.field_mask_string()
         return result
 
     def to_summary_string(self):
         return '\{index:'+hex(self.ispace)+',field:'+hex(self.fspace)+\
                 ',tree:'+str(self.tid)+'\}'
 
-    def to_field_mask_string(self):
-        return ','.join([str(f) for f in self.fields])
+    def field_mask_string(self):
+        return self.state.field_space_nodes[self.fspace].field_mask_string(self.fields)
 
 
 class MappingDependence(object):
@@ -4037,7 +4032,7 @@ class State(object):
                     self.field_space_nodes[fspace])
 
         self.ops[uid].add_requirement(index, Requirement(index, is_reg, ispace, 
-                                                  fspace, tid, node, priv, coher, redop))
+                                                  fspace, tid, node, priv, coher, redop, self))
         return True
 
     def add_req_field(self, uid, idx, fid):

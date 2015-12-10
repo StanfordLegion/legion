@@ -1508,6 +1508,52 @@ legion_field_space_destroy(legion_runtime_t runtime_,
   runtime->destroy_field_space(ctx, handle);
 }
 
+void
+legion_field_space_attach_name(legion_runtime_t runtime_,
+                               legion_field_space_t handle_,
+                               const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_field_space_retrieve_name(legion_runtime_t runtime_,
+                                 legion_field_space_t handle_,
+                                 const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
+}
+
+void
+legion_field_id_attach_name(legion_runtime_t runtime_,
+                            legion_field_space_t handle_,
+                            legion_field_id_t id,
+                            const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, id, name);
+}
+
+void
+legion_field_id_retrieve_name(legion_runtime_t runtime_,
+                              legion_field_space_t handle_,
+                              legion_field_id_t id,
+                              const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, id, *result);
+}
+
 // -------------------------------------------------------
 // Logical Region Operations
 // -------------------------------------------------------
