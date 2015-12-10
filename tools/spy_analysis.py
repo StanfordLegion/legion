@@ -2845,7 +2845,8 @@ class PhysicalInstance(object):
             label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
         else:
             label = hex(self.iid)+'@'+hex(self.memory.uid)
-        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
+        label = label+'\\nfields: '+\
+                self.region.field_node.field_mask_string(self.fields)
         label = label+'\\nblocking factor: '+str(self.blocking)
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
