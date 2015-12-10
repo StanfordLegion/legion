@@ -4452,6 +4452,7 @@ namespace LegionRuntime {
       }
       std::set<Event> applied_conditions;
       version_info.apply_close(physical_ctx.get_id(), leave_open,
+                               target_children,
                                runtime->address_space, applied_conditions);
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),

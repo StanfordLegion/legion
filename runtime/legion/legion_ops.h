@@ -913,7 +913,6 @@ namespace LegionRuntime {
     protected:
       bool leave_open;
       unsigned parent_req_index;
-    
     };
     
     /**

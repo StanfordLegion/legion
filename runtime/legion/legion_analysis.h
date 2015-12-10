@@ -141,6 +141,7 @@ namespace LegionRuntime {
       void apply_mapping(ContextID ctx, AddressSpaceID target,
                          std::set<Event> &applied_conditions);
       void apply_close(ContextID ctx, bool permit_leave_open, 
+                       const std::set<ColorPoint> &closed_children,
                        AddressSpaceID target,
                        std::set<Event> &applied_conditions); 
       void reset(void);
@@ -681,8 +682,9 @@ namespace LegionRuntime {
             AddressSpaceID target, std::set<Event> &applied_conditions) const;
       void apply_state(const FieldMask &advance_mask, 
             AddressSpaceID target, std::set<Event> &applied_conditions);
-      void filter_and_apply(bool top, bool filter_children,
-            AddressSpaceID target, std::set<Event> &applied_conditions);
+      void filter_and_apply(bool top, AddressSpaceID target,
+                            const std::set<ColorPoint> &closed_children,
+                            std::set<Event> &applied_conditions);
       void reset(void);
       void record_created_instance(InstanceView *view);
       void filter_open_children(const FieldMask &filter_mask);
@@ -790,8 +792,10 @@ namespace LegionRuntime {
                                 std::set<Event> &applied_conditions,
                                 bool need_lock = true);
       void filter_and_merge_physical_state(const PhysicalState *state,
-         const FieldMask &merge_mask, bool top, bool filter_children,
-         AddressSpaceID target, std::set<Event> &applied_conditions);
+                                const FieldMask &merge_mask, bool top,
+                                AddressSpaceID target,
+                                const std::set<ColorPoint> &closed_children,
+                                std::set<Event> &applied_conditions);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);

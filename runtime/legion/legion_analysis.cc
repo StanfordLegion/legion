@@ -461,6 +461,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open,
+                                  const std::set<ColorPoint> &closed_children,
                      AddressSpaceID target, std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
@@ -475,11 +476,18 @@ namespace LegionRuntime {
           if (it->second.physical_state == NULL)
             continue;
           if (it->second.path_only())
+          {
             it->second.physical_state->apply_path_only_state(
                         it->second.advance_mask, target, applied_conditions);
+          }
           else
+          {
+            // We don't need to filter any children because this
+            // close op was permitted to leave fields open
+            std::set<ColorPoint> empty_children;
             it->second.physical_state->filter_and_apply(it->second.close_top(),
-                        false/*filter children*/, target, applied_conditions);
+                                    target, empty_children, applied_conditions);
+          }
         }
       }
       else
@@ -494,11 +502,14 @@ namespace LegionRuntime {
             it->second.physical_state->apply_path_only_state(
                         it->second.advance_mask, target, applied_conditions);
           }
-          // We can also skip anything that isn't the top node
-          if (!it->second.close_top())
-            continue;
-          it->second.physical_state->filter_and_apply(true/*top*/,
-                         true/*filter children*/, target, applied_conditions);
+          else
+          {
+            // We can also skip anything that isn't the top node
+            if (!it->second.close_top())
+              continue;
+            it->second.physical_state->filter_and_apply(true/*top*/,
+                                 target, closed_children, applied_conditions);
+          }
         }
       }
     }
@@ -4424,25 +4435,47 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::filter_and_apply(bool top, bool filter_children,
-                     AddressSpaceID target, std::set<Event> &applied_conditions)
+    void PhysicalState::filter_and_apply(bool top, AddressSpaceID target, 
+                                   const std::set<ColorPoint> &closed_children, 
+                                   std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       if (top)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!advance_states.empty());
+        assert(!advance_states.empty() || !version_states.empty());
 #endif
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-              vit = advance_states.begin(); vit != 
-              advance_states.end(); vit++)
+        // Advance states are fields that are being closed for the first
+        // time while version states are the ones that have already undergone
+        // at least one close.
+        if (!version_states.empty())
         {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = version_states.begin(); vit !=
+                version_states.end(); vit++)
           {
-            it->first->filter_and_merge_physical_state(this, it->second, 
-                         true, filter_children, target, applied_conditions);
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->filter_and_merge_physical_state(this, it->second,
+                     true/*top*/, target, closed_children, applied_conditions);
+            }
+          }
+        }
+        if (!advance_states.empty())
+        {
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+                vit = advance_states.begin(); vit != 
+                advance_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->filter_and_merge_physical_state(this, it->second, 
+                     true/*top*/, target, closed_children, applied_conditions);
+            }
           }
         }
       }
@@ -4460,7 +4493,7 @@ namespace LegionRuntime {
                 it = info.states.begin(); it != info.states.end(); it++)
           {
             it->first->filter_and_merge_physical_state(this, it->second, 
-                         false, filter_children, target, applied_conditions);
+                         false, target, closed_children, applied_conditions);
           }
         }
       }
@@ -5319,7 +5352,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::filter_and_merge_physical_state(
                         const PhysicalState *state, const FieldMask &merge_mask,
-                        bool top, bool filter_children, AddressSpaceID target,
+                        bool top, AddressSpaceID target,
+                        const std::set<ColorPoint> &closed_children,
                         std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
@@ -5385,30 +5419,37 @@ namespace LegionRuntime {
           }
         }
       }
-      if (filter_children)
+      if (!closed_children.empty() && !children.open_children.empty())
       {
-        children.valid_fields -= merge_mask;  
-        if (!children.valid_fields)
-          children.open_children.clear();
-        else
+        bool changed = false;
+        for (std::set<ColorPoint>::const_iterator it = 
+              closed_children.begin(); it != closed_children.end(); it++)
         {
-          std::vector<ColorPoint> to_delete;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-                children.open_children.begin(); it != 
-                children.open_children.end(); it++)
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            children.open_children.find(*it);
+          if (finder == children.open_children.end())
+            continue;
+          changed = true;
+          finder->second -= merge_mask;
+          if (!finder->second)
+            children.open_children.erase(finder);
+        }
+        // See if we need to rebuild the open children mask
+        if (changed)
+        {
+          if (!children.open_children.empty())
           {
-            it->second -= merge_mask;
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<ColorPoint>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
+            FieldMask new_open_child_mask;
+            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                  children.open_children.begin(); it != 
+                  children.open_children.end(); it++)
             {
-              children.open_children.erase(*it);
+              new_open_child_mask |= it->second;
             }
+            children.valid_fields = new_open_child_mask;
           }
+          else
+            children.valid_fields.clear();
         }
       }
       // Now we can do the merge
