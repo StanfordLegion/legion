@@ -274,10 +274,10 @@ function parser.rules(p)
 end
 
 function parser.top(p)
-  if not p:matches("bishop") then
+  if not p:matches("mapper") then
     p:error("unexpected token in top-level statement")
   end
-  p:expect("bishop")
+  p:expect("mapper")
   local pos = ast.save(p)
 
   local rules = p:rules()

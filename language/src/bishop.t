@@ -30,9 +30,9 @@ end
 add_builtin("bishoplib", std)
 
 local language = {
-  name = "bishop",
+  name = "mapper",
   entrypoints = {
-    "bishop",
+    "mapper",
   },
   keywords = {
     -- elements
@@ -49,7 +49,7 @@ local language = {
     "trigger",
     "when",
 
-    "bishop",
+    "mapper",
     "end",
   },
 }
