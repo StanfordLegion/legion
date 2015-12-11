@@ -822,10 +822,10 @@ class SingleTask(object):
                 for idx,inst in self.instances.iteritems():
                     assert idx in self.reqs
                     req = self.reqs[idx]
-                    if req.region_node.name != None:
-                        to_add = req.region_node.name+' '
-                    else:
-                        to_add = ''
+                    to_add = ''
+                    name = inst.region.get_name()
+                    if name <> None:
+                        to_add = name + ' '
                     to_add = to_add+'Inst\ '+hex(inst.iid)+'\ '+req.dot_requirement()
                     inst_string = inst_string+'\\n'+to_add
         if self.enclosing <> None:
